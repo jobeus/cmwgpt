@@ -61,10 +61,11 @@ async def reset(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False, thinking=True)
     await interaction.followup.send('Conversation reset.', ephemeral=True)
 
-@bot.tree.command(name='model', description='Change or set OpenAI model')
+
+@bot.tree.command(name='model', description='View or set OpenAI model')
 @app_commands.describe(model='Model name to use')
 @app_commands.choices(model=[
-    # Choice(name='gpt-4.1', value='gpt-4.1'),
+    # Choice(name='gpt-4.1', value='gpt-4.1'), # expensive
     Choice(name='gpt-4.1-mini', value='gpt-4.1-mini'),
     Choice(name='gpt-4.1-nano', value='gpt-4.1-nano'),
     Choice(name='gpt-4o-mini', value='gpt-4o-mini')
@@ -82,6 +83,7 @@ async def set_model(interaction: discord.Interaction, model: str | None = None):
         else:
             model = DEFAULT_MODEL
         await interaction.followup.send(f'Model is `{model}`.', ephemeral=True)
+
 
 @bot.tree.command(name='chat', description='Send a message to the chatbot')
 @app_commands.describe(
@@ -137,6 +139,7 @@ async def chat(
         else:
             combined = f"> {message}\n{reply}"
         await interaction.followup.send(content=combined)
+
 
 @bot.tree.command(name='draw', description='Generate an image from a prompt')
 @app_commands.describe(
