@@ -23,6 +23,7 @@ DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 SYSTEM_PROMPT = os.getenv('SYSTEM_PROMPT', 'You are a helpful assistant.')
 DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'gpt-4.1')
 DEFAULT_IMAGE_MODEL = os.getenv('DEFAULT_IMAGE_MODEL', 'gpt-image-1')
+INCLUDE_USERNAMES = os.getenv('INCLUDE_USERNAMES','True').lower() in ('true', '1')
 
 # Instantiate OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -93,6 +94,8 @@ async def chat(
     attachment: discord.Attachment | None = None
 ):
     channel_id = interaction.channel.id
+    if INCLUDE_USERNAMES:
+        message = interaction.user.display_name + " says: " + message
     # Initialize if missing
     if channel_id not in conversations:
         conversations[channel_id] = [{'role': 'system', 'content': SYSTEM_PROMPT}]
