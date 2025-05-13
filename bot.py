@@ -8,6 +8,7 @@ from discord.ext import commands
 from discord import app_commands
 from discord.app_commands import Choice
 from openai import OpenAI
+from utils.pasters import upload_to_pasters
 
 # Configure root logger to stdout
 logging.basicConfig(
@@ -135,10 +136,18 @@ async def chat(
 
         # Edit original message to include reply
         if attachment:
-            combined = f"{attachment.url}\n> {message}\n{reply}"
+            combined = f"{attachment.url}\n> {message}"
         else:
-            combined = f"> {message}\n{reply}"
-        await interaction.followup.send(content=combined)
+            combined = f"> {message}"
+        if len(combined + f"\n{reply}") > 2000:
+            try:
+                combined += "\n\n" + upload_to_pasters(markdown_text=reply)
+            except Exception:
+                combined += "\nThe content was over 2000 characters and there was a problem uploading to paste.rs, sorry try again later"
+            await interaction.followup.send(content=combined, suppress_embeds=True)
+        else:
+            combined += f"\n{reply}"
+            await interaction.followup.send(content=combined)
 
 
 @bot.tree.command(name='draw', description='Generate an image from a prompt')
