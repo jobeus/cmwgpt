@@ -2,6 +2,8 @@ import os
 import io
 import base64
 import logging
+import asyncio
+
 from dotenv import load_dotenv
 import discord
 from discord.ext import commands
@@ -25,6 +27,8 @@ SYSTEM_PROMPT = os.getenv('SYSTEM_PROMPT', 'You are a helpful assistant.')
 DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'gpt-4.1')
 DEFAULT_IMAGE_MODEL = os.getenv('DEFAULT_IMAGE_MODEL', 'gpt-image-1')
 INCLUDE_USERNAMES = os.getenv('INCLUDE_USERNAMES','True').lower() in ('true', '1')
+REPLY_TO_MENTIONS = os.getenv('REPLY_TO_MENTIONS','True').lower() in ('true', '1')
+INCLUDE_NUM_CHATLINES = int(os.getenv('INCLUDE_NUM_CHATLINES', 100))
 
 # Instantiate OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -53,6 +57,48 @@ async def on_ready():
 async def on_disconnect():
     logger.warning('Disconnected from Discord, attempting to reconnect')
 
+@bot.event
+async def on_message(message: discord.Message):
+    # Ignore bots and DMs
+    if message.author.bot or not isinstance(message.channel, discord.TextChannel):
+        return
+
+    # If bot is mentioned, gather last INCLUDE_NUM_CHATLINES messages and send to OpenAI
+    if bot.user in message.mentions and REPLY_TO_MENTIONS:
+        logger.info(f'Mention by {message.author} in #{message.channel}: {message.content}')
+        # Fetch history
+        history_msgs = []
+        async for msg in message.channel.history(limit=INCLUDE_NUM_CHATLINES):
+            history_msgs.append(msg)
+        history_msgs = list(reversed(history_msgs))
+
+        # Build OpenAI messages
+        chat_msgs = [{'role': 'system', 'content': SYSTEM_PROMPT + '\n\n' + f'In the channel your name is: {bot.user.display_name} and included are the last {INCLUDE_NUM_CHATLINES} messages from the channel'}]
+        for msg in history_msgs:
+            chat_msgs.append({
+                'role': 'user',
+                'content': f"{msg.author.display_name}: {msg.content}"
+            })
+
+        # Indicate typing
+        async with message.channel.typing():
+            response = client.chat.completions.create(
+                model=models.get(message.channel.id, DEFAULT_MODEL),
+                messages=chat_msgs
+            )
+            reply = response.choices[0].message.content
+            logger.info(f'Reply to mention: {reply}')
+            if len(reply) > 2000:
+                try:
+                    logger.info(f'')
+                    reply = upload_to_pasters(markdown_text=reply)
+                except Exception:
+                    reply = "The content of my response was over 2000 characters and there was a problem uploading to paste.rs, sorry try again later"
+            await message.channel.send(reply)
+
+    # ensure other commands still processed
+    await bot.process_commands(message)
+
 @bot.tree.command(name='reset', description='Reset the conversation history')
 async def reset(interaction: discord.Interaction):
     channel_id = interaction.channel.id
@@ -79,10 +125,7 @@ async def set_model(interaction: discord.Interaction, model: str | None = None):
         logger.info(f'[/model] Channel {channel_id}: model set to {model}')
         await interaction.followup.send(f'Model set to `{model}`.', ephemeral=True)
     else:
-        if channel_id in models:
-            model = models[channel_id]
-        else:
-            model = DEFAULT_MODEL
+        model = models.get(channel_id, DEFAULT_MODEL)
         await interaction.followup.send(f'Model is `{model}`.', ephemeral=True)
 
 
@@ -121,8 +164,8 @@ async def chat(
 
     # Acknowledge and send prompt-only message
     await interaction.response.defer(ephemeral=False, thinking=True)
-    # Typing indicator while waiting for OpenAI
 
+    # Typing indicator while waiting for OpenAI
     async with interaction.channel.typing():
         response = client.chat.completions.create(
             model=models[channel_id],
