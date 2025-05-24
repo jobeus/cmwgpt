@@ -41,6 +41,7 @@ bot = commands.Bot(command_prefix='/', intents=intents)
 # In-memory storage for conversation and model per channel
 conversations: dict[int, list[dict[str, any]]] = {}
 models: dict[int, str] = {}
+channel_system_prompts: dict[int, str] = {}
 
 @bot.event
 async def on_connect():
@@ -71,7 +72,9 @@ async def on_message(message: discord.Message):
         history_msgs = list(reversed(history_msgs))
 
         # Build OpenAI messages
-        chat_msgs = [{'role': 'system', 'content': SYSTEM_PROMPT + '\n\n' + f'In the channel your name is: {bot.user.display_name} and included are the last {INCLUDE_NUM_CHATLINES} messages from the channel, the last line is obviously mentioning you and thats what you should respond to now.'}]
+        current_system_prompt = channel_system_prompts.get(message.channel.id, SYSTEM_PROMPT)
+        chat_msgs = [{'role': 'system', 'content': current_system_prompt + '\n\n' + f'In the channel your name is: {bot.user.display_name} and included are the last {INCLUDE_NUM_CHATLINES} messages from the channel, the last line is obviously mentioning you and thats what you should respond to now.'}]
+        current_system_prompt = channel_system_prompts.get(message.channel.id, SYSTEM_PROMPT)
         for msg in history_msgs:
             chat_msgs.append({
                 'role': 'user',
@@ -100,7 +103,7 @@ async def on_message(message: discord.Message):
 @bot.tree.command(name='reset', description='Reset the conversation history')
 async def reset(interaction: discord.Interaction):
     channel_id = interaction.channel.id
-    conversations[channel_id] = [{'role': 'system', 'content': SYSTEM_PROMPT}]
+    conversations[channel_id] = [{'role': 'system', 'content': channel_system_prompts.get(channel_id, SYSTEM_PROMPT)}]
     models[channel_id] = DEFAULT_MODEL
     logger.info(f'[/reset] Channel {channel_id}: conversation reset')
     await interaction.response.defer(ephemeral=False, thinking=True)
@@ -126,6 +129,63 @@ async def set_model(interaction: discord.Interaction, model: str | None = None):
         model = models.get(channel_id, DEFAULT_MODEL)
         await interaction.followup.send(f'Model is `{model}`.', ephemeral=True)
 
+# Define the systemprompt command group
+systemprompt_group = app_commands.Group(name='systemprompt', description='Manage channel-specific system prompt')
+
+@systemprompt_group.command(name='set', description='View or set the system prompt for this channel')
+@app_commands.describe(prompt_text='The new system prompt. Omit to view current prompt.')
+async def systemprompt_set(interaction: discord.Interaction, prompt_text: str | None = None):
+    channel_id = interaction.channel.id
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    if prompt_text:
+        channel_system_prompts[channel_id] = prompt_text
+        if channel_id in conversations and conversations[channel_id]:
+            if conversations[channel_id][0]['role'] == 'system':
+                conversations[channel_id][0]['content'] = prompt_text
+            else:
+                conversations[channel_id].insert(0, {'role': 'system', 'content': prompt_text})
+        else:
+            conversations.setdefault(channel_id, []).insert(0, {'role': 'system', 'content': prompt_text})
+        
+        logger.info(f'[/systemprompt set] Channel {channel_id}: system prompt updated.')
+        await interaction.followup.send(f'System prompt updated for this channel. The new prompt will be used for future messages and context.', ephemeral=True)
+    else:
+        current_prompt = channel_system_prompts.get(channel_id, SYSTEM_PROMPT)
+        logger.info(f'[/systemprompt set] Channel {channel_id}: displayed current system prompt.')
+        await interaction.followup.send(f'Current system prompt for this channel:\n```\n{current_prompt}\n```', ephemeral=True)
+
+@systemprompt_group.command(name='reset', description='Reset the system prompt for this channel to the default')
+async def systemprompt_reset(interaction: discord.Interaction):
+    channel_id = interaction.channel.id
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    if channel_id in channel_system_prompts:
+        del channel_system_prompts[channel_id]
+        logger.info(f'[/systemprompt reset] Channel {channel_id}: custom prompt removed, reverting to default.')
+
+    if channel_id in conversations and conversations[channel_id] and conversations[channel_id][0]['role'] == 'system':
+        conversations[channel_id][0]['content'] = SYSTEM_PROMPT
+    else:
+        # Ensure conversation list exists and prepend system prompt
+        conversations.setdefault(channel_id, []).insert(0, {'role': 'system', 'content': SYSTEM_PROMPT})
+        # If the conversation existed but didn't start with a system prompt, this ensures the new system prompt is first.
+        # If it was already first, this path isn't taken. If it was empty or didn't exist, it's created with the system prompt.
+        # To avoid duplicate system prompts if one was already there but not at index 0 (which is an unlikely state):
+        # We can filter out any other system prompts after ensuring the first one is correct.
+        if len(conversations[channel_id]) > 1: # if more than just our newly inserted prompt
+             # Keep the first (our new/updated one) and any non-system messages
+            new_convo = [conversations[channel_id][0]] 
+            for msg in conversations[channel_id][1:]:
+                if msg['role'] != 'system':
+                    new_convo.append(msg)
+            conversations[channel_id] = new_convo
+
+
+    logger.info(f'[/systemprompt reset] Channel {channel_id}: system prompt reset to default.')
+    await interaction.followup.send('System prompt for this channel has been reset to the default.', ephemeral=True)
+
+bot.tree.add_command(systemprompt_group)
 
 @bot.tree.command(name='chat', description='Send a message to the chatbot')
 @app_commands.describe(
@@ -142,7 +202,7 @@ async def chat(
         message = interaction.user.display_name + " says: " + message
     # Initialize if missing
     if channel_id not in conversations:
-        conversations[channel_id] = [{'role': 'system', 'content': SYSTEM_PROMPT}]
+        conversations[channel_id] = [{'role': 'system', 'content': channel_system_prompts.get(channel_id, SYSTEM_PROMPT)}]
         models[channel_id] = DEFAULT_MODEL
         logger.info(f'[/chat] Channel {channel_id}: initialized conversation and model')
 
