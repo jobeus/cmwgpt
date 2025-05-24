@@ -71,7 +71,7 @@ async def on_message(message: discord.Message):
         history_msgs = list(reversed(history_msgs))
 
         # Build OpenAI messages
-        chat_msgs = [{'role': 'system', 'content': SYSTEM_PROMPT + '\n\n' + f'In the channel your name is: {bot.user.display_name} and included are the last {INCLUDE_NUM_CHATLINES} messages from the channel'}]
+        chat_msgs = [{'role': 'system', 'content': SYSTEM_PROMPT + '\n\n' + f'In the channel your name is: {bot.user.display_name} and included are the last {INCLUDE_NUM_CHATLINES} messages from the channel, the last line is obviously mentioning you and thats what you should respond to now.'}]
         for msg in history_msgs:
             chat_msgs.append({
                 'role': 'user',
