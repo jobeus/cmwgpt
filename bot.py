@@ -1,6 +1,8 @@
 import logging
 import asyncio
 import io # Keep for discord.File
+import pprint
+import json
 
 import discord
 from discord.ext import commands
@@ -8,6 +10,7 @@ from discord import app_commands
 from discord.app_commands import Choice
 from openai import BadRequestError # Keep for error handling in /draw
 from utils.pasters import upload_to_pasters
+from utils.discord_helper import get_mention_legend
 from openai_handler import get_chat_completion, generate_image
 
 # Configure root logger to stdout
@@ -31,6 +34,7 @@ from config import (
 # Configure Discord bot with intents
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
 # Import in-memory storage from bot_state.py
@@ -74,20 +78,32 @@ async def _prepare_mention_context(message: discord.Message, bot_user: discord.U
     history_msgs = []
     async for msg in message.channel.history(limit=INCLUDE_NUM_CHATLINES):
         history_msgs.append(msg)
-    history_msgs.reverse() # Oldest first
+    history_msgs.reverse() # oldest first
+
+    legend_section = await get_mention_legend(message.channel)
 
     current_channel_system_prompt = channel_system_prompts.get(message.channel.id, SYSTEM_PROMPT)
-    system_message_text = (
-        f"{current_channel_system_prompt}\n\n"
-        f"In the channel your name is: {bot_user.display_name} and included are the last "
-        f"{INCLUDE_NUM_CHATLINES} messages from the channel. The last message in this list is the one "
-        f"directly mentioning you, which you should respond to now."
+    current_channel_system_prompt += (
+        f"In the channel your ID is: <@{bot_user.id}> and included are the last "
+        f"{INCLUDE_NUM_CHATLINES} messages from the channel in JSON format. You can read all of these messages. You've been mentioned in the vert last messabe in the JSON array (but you may have been asked things before, and answered things before, that's ok! just respond to the LAST thing asked or @mentioned to you though please.  "
+        f"You are   expected to reply, but less metaphysics and more straight up answers like a user on a 30 year old IRC board and not a talkative robot. Respond with only your the content of your reply.\n\n"
+        f"{legend_section}\n\n"
+    )
+    ask_amble = (
+        "Conversation lines are below and represent the last "
+        f"{INCLUDE_NUM_CHATLINES} chat lines in the chat. The last one mentions you but feel free to read all the context, then answer the very last line in the following array ONLY. "
+        "History is provided in this json array format with { 'user':'<id>', 'says': '<content of message>'}:"
     )
     
-    chat_context = [{'role': 'system', 'content': system_message_text}]
+    chat_context = [{'role': 'system', 'content': current_channel_system_prompt}]
+
+    chat_history = []
     for msg in history_msgs:
-        chat_context.append({'role': 'user', 'content': f"{msg.author.display_name}: {msg.content}"})
-    
+        chat_history.append({'user': f'<@{msg.author.id}>', 'says': msg.content})
+    chat_context.append({'role': 'user', 'content': ask_amble + "\n\n" + json.dumps(chat_history)})
+
+    with open("debug.txt", "w") as f:
+        json.dump(chat_context, f, indent=2)
     return chat_context
 
 async def _send_channel_reply(channel: discord.TextChannel, reply_text: str):
@@ -100,13 +116,14 @@ async def _send_channel_reply(channel: discord.TextChannel, reply_text: str):
             final_reply = f"My response was too long to post here, so I've uploaded it to: {pasted_url}"
         except Exception as e:
             logger.error(f"Error uploading to pasters.rs: {e}")
-            final_reply = "The content of my response was over 2000 characters, and there was a problem uploading it. Sorry, try again later."
+            final_reply = "The content of my response was over 2000 characters (discord limit), and there was a problem uploading it to paste.rs. Sorry, try again later."
     await channel.send(final_reply)
 
 @bot.tree.command(name='reset', description='Reset the conversation history')
 async def reset(interaction: discord.Interaction):
     channel_id = interaction.channel.id
-    conversations[channel_id] = [{'role': 'system', 'content': channel_system_prompts.get(channel_id, SYSTEM_PROMPT)}]
+    legend_section = await get_mention_legend(interaction.channel)
+    conversations[channel_id] = [{'role': 'system', 'content': channel_system_prompts.get(channel_id, SYSTEM_PROMPT) + "\n" + legend_section}]
     models[channel_id] = DEFAULT_MODEL
     logger.info(f'[/reset] Channel {channel_id}: conversation reset')
     await interaction.response.defer(ephemeral=False, thinking=True)
@@ -140,6 +157,7 @@ systemprompt_group = app_commands.Group(name='systemprompt', description='Manage
 async def systemprompt_set(interaction: discord.Interaction, prompt_text: str | None = None):
     channel_id = interaction.channel.id
     await interaction.response.defer(ephemeral=True, thinking=True)
+    legend_section = await get_mention_legend(interaction.channel)
 
     if prompt_text:
         channel_system_prompts[channel_id] = prompt_text
@@ -154,7 +172,7 @@ async def systemprompt_set(interaction: discord.Interaction, prompt_text: str | 
         logger.info(f'[/systemprompt set] Channel {channel_id}: system prompt updated.')
         await interaction.followup.send(f'System prompt updated for this channel. The new prompt will be used for future messages and context.', ephemeral=True)
     else:
-        current_prompt = channel_system_prompts.get(channel_id, SYSTEM_PROMPT)
+        current_prompt = channel_system_prompts.get(channel_id, SYSTEM_PROMPT + "\n" + legend_section)
         logger.info(f'[/systemprompt set] Channel {channel_id}: displayed current system prompt.')
         await interaction.followup.send(f'Current system prompt for this channel:\n```\n{current_prompt}\n```', ephemeral=True)
 
@@ -184,7 +202,6 @@ async def systemprompt_reset(interaction: discord.Interaction):
                     new_convo.append(msg)
             conversations[channel_id] = new_convo
 
-
     logger.info(f'[/systemprompt reset] Channel {channel_id}: system prompt reset to default.')
     await interaction.followup.send('System prompt for this channel has been reset to the default.', ephemeral=True)
 
@@ -201,11 +218,13 @@ async def chat(
     attachment: discord.Attachment | None = None
 ):
     channel_id = interaction.channel.id
+    legend_section = await get_mention_legend(interaction.channel)
+
     if INCLUDE_USERNAMES:
         message = interaction.user.display_name + " says: " + message
     # Initialize if missing
     if channel_id not in conversations:
-        conversations[channel_id] = [{'role': 'system', 'content': channel_system_prompts.get(channel_id, SYSTEM_PROMPT)}]
+        conversations[channel_id] = [{'role': 'system', 'content': channel_system_prompts.get(channel_id, SYSTEM_PROMPT + "\n" + legend_section)}]
         models[channel_id] = DEFAULT_MODEL
         logger.info(f'[/chat] Channel {channel_id}: initialized conversation and model')
 
@@ -221,7 +240,7 @@ async def chat(
 
     # Log user input
     logger.info(f'[/chat] Channel {channel_id} User: {message}')
-    conversations[channel_id].append({'role': 'user', 'content': content_payload})
+    conversations[channel_id].append({'role': 'user', 'content': json.dumps(content_payload)})
 
     # Acknowledge and send prompt-only message
     await interaction.response.defer(ephemeral=False, thinking=True)
@@ -235,7 +254,7 @@ async def chat(
 
         # Log and store assistant reply
         logger.info(f'[/chat] Channel {channel_id} Assistant: {reply}')
-        conversations[channel_id].append({'role': 'assistant', 'content': reply})
+        conversations[channel_id].append({'role': 'assistant', 'content': json.dumps(reply)})
 
         # Prepare base message content (original prompt + attachment if any)
         base_interaction_message = ""
@@ -272,19 +291,14 @@ async def draw(
         # Acknowledge and send prompt-only message
         await interaction.response.defer(ephemeral=False, thinking=True)
         try:
-            img_bytes_to_edit = None
-            edit_filename = None
             if edit_image:
-                img_bytes_to_edit = await edit_image.read()
-                edit_filename = edit_image.filename
                 logger.info(f'[/draw] Channel {channel_id}: editing image {edit_image.filename}')
 
             # Call the helper function from openai_handler.py
             img_bytes = generate_image(
                 prompt=prompt,
                 model=model,
-                edit_image_bytes=img_bytes_to_edit,
-                edit_image_filename=edit_filename
+                edit_image=edit_image
             )
 
             # Log image generation
