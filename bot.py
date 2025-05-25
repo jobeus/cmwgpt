@@ -1,16 +1,14 @@
-import os
-import io
-import base64
 import logging
 import asyncio
+import io # Keep for discord.File
 
-from dotenv import load_dotenv
 import discord
 from discord.ext import commands
 from discord import app_commands
 from discord.app_commands import Choice
-from openai import OpenAI, BadRequestError
+from openai import BadRequestError # Keep for error handling in /draw
 from utils.pasters import upload_to_pasters
+from openai_handler import get_chat_completion, generate_image
 
 # Configure root logger to stdout
 logging.basicConfig(
@@ -19,29 +17,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger('discord_bot')
 
-# Load environment variables
-load_dotenv()
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
-SYSTEM_PROMPT = os.getenv('SYSTEM_PROMPT', 'You are a helpful assistant.')
-DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'gpt-4.1-nano')
-DEFAULT_IMAGE_MODEL = os.getenv('DEFAULT_IMAGE_MODEL', 'gpt-image-1')
-INCLUDE_USERNAMES = os.getenv('INCLUDE_USERNAMES','True').lower() in ('true', '1')
-REPLY_TO_MENTIONS = os.getenv('REPLY_TO_MENTIONS','True').lower() in ('true', '1')
-INCLUDE_NUM_CHATLINES = int(os.getenv('INCLUDE_NUM_CHATLINES', 100))
-
-# Instantiate OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY)
+# Load environment variables and constants from config.py
+from config import (
+    DISCORD_BOT_TOKEN,
+    SYSTEM_PROMPT,
+    DEFAULT_MODEL,
+    DEFAULT_IMAGE_MODEL,
+    INCLUDE_USERNAMES,
+    REPLY_TO_MENTIONS,
+    INCLUDE_NUM_CHATLINES
+)
 
 # Configure Discord bot with intents
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
-# In-memory storage for conversation and model per channel
-conversations: dict[int, list[dict[str, any]]] = {}
-models: dict[int, str] = {}
-channel_system_prompts: dict[int, str] = {}
+# Import in-memory storage from bot_state.py
+from bot_state import conversations, models, channel_system_prompts
 
 @bot.event
 async def on_connect():
@@ -63,42 +56,52 @@ async def on_message(message: discord.Message):
         return
 
     # If bot is mentioned, gather last INCLUDE_NUM_CHATLINES messages and send to OpenAI
-    if bot.user in message.mentions and REPLY_TO_MENTIONS:
-        logger.info(f'Mention by {message.author} in #{message.channel}: {message.content}')
-        # Fetch history
-        history_msgs = []
-        async for msg in message.channel.history(limit=INCLUDE_NUM_CHATLINES):
-            history_msgs.append(msg)
-        history_msgs = list(reversed(history_msgs))
-
-        # Build OpenAI messages
-        current_system_prompt = channel_system_prompts.get(message.channel.id, SYSTEM_PROMPT)
-        chat_msgs = [{'role': 'system', 'content': current_system_prompt + '\n\n' + f'In the channel your name is: {bot.user.display_name} and included are the last {INCLUDE_NUM_CHATLINES} messages from the channel, the last line is obviously mentioning you and thats what you should respond to now.'}]
-        current_system_prompt = channel_system_prompts.get(message.channel.id, SYSTEM_PROMPT)
-        for msg in history_msgs:
-            chat_msgs.append({
-                'role': 'user',
-                'content': f"{msg.author.display_name}: {msg.content}"
-            })
-
-        # Indicate typing
+    if bot.user and bot.user in message.mentions and REPLY_TO_MENTIONS:
         async with message.channel.typing():
-            response = client.chat.completions.create(
+            chat_msgs = await _prepare_mention_context(message, bot.user)
+            reply_content = get_chat_completion(
                 model=models.get(message.channel.id, DEFAULT_MODEL),
                 messages=chat_msgs
             )
-            reply = response.choices[0].message.content
-            logger.info(f'Reply to mention: {reply}')
-            if len(reply) > 2000:
-                try:
-                    logger.info(f'')
-                    reply = upload_to_pasters(markdown_text=reply)
-                except Exception:
-                    reply = "The content of my response was over 2000 characters and there was a problem uploading to paste.rs, sorry try again later"
-            await message.channel.send(reply)
+            await _send_channel_reply(message.channel, reply_content)
 
     # ensure other commands still processed
     await bot.process_commands(message)
+
+async def _prepare_mention_context(message: discord.Message, bot_user: discord.User) -> list[dict[str, str]]:
+    """Prepares the message list for OpenAI context in case of a mention."""
+    logger.info(f'Mention by {message.author} in #{message.channel}: {message.content}')
+    history_msgs = []
+    async for msg in message.channel.history(limit=INCLUDE_NUM_CHATLINES):
+        history_msgs.append(msg)
+    history_msgs.reverse() # Oldest first
+
+    current_channel_system_prompt = channel_system_prompts.get(message.channel.id, SYSTEM_PROMPT)
+    system_message_text = (
+        f"{current_channel_system_prompt}\n\n"
+        f"In the channel your name is: {bot_user.display_name} and included are the last "
+        f"{INCLUDE_NUM_CHATLINES} messages from the channel. The last message in this list is the one "
+        f"directly mentioning you, which you should respond to now."
+    )
+    
+    chat_context = [{'role': 'system', 'content': system_message_text}]
+    for msg in history_msgs:
+        chat_context.append({'role': 'user', 'content': f"{msg.author.display_name}: {msg.content}"})
+    
+    return chat_context
+
+async def _send_channel_reply(channel: discord.TextChannel, reply_text: str):
+    """Sends a reply to a channel, handling potential pasters.rs upload."""
+    final_reply = reply_text
+    if len(reply_text) > 2000:
+        try:
+            logger.info("Reply for channel message exceeded 2000 characters, attempting to upload to pasters.rs")
+            pasted_url = upload_to_pasters(markdown_text=reply_text)
+            final_reply = f"My response was too long to post here, so I've uploaded it to: {pasted_url}"
+        except Exception as e:
+            logger.error(f"Error uploading to pasters.rs: {e}")
+            final_reply = "The content of my response was over 2000 characters, and there was a problem uploading it. Sorry, try again later."
+    await channel.send(final_reply)
 
 @bot.tree.command(name='reset', description='Reset the conversation history')
 async def reset(interaction: discord.Interaction):
@@ -225,30 +228,23 @@ async def chat(
 
     # Typing indicator while waiting for OpenAI
     async with interaction.channel.typing():
-        response = client.chat.completions.create(
+        reply = get_chat_completion(
             model=models.get(channel_id, DEFAULT_MODEL),
             messages=conversations[channel_id]
         )
-        reply = response.choices[0].message.content
 
         # Log and store assistant reply
         logger.info(f'[/chat] Channel {channel_id} Assistant: {reply}')
         conversations[channel_id].append({'role': 'assistant', 'content': reply})
 
-        # Edit original message to include reply
+        # Prepare base message content (original prompt + attachment if any)
+        base_interaction_message = ""
         if attachment:
-            combined = f"{attachment.url}\n> {message}"
+            base_interaction_message = f"{attachment.url}\n> {message}"
         else:
-            combined = f"> {message}"
-        if len(combined + f"\n{reply}") > 2000:
-            try:
-                combined += "\n\n" + upload_to_pasters(markdown_text=reply)
-            except Exception:
-                combined += "\nThe content was over 2000 characters and there was a problem uploading to paste.rs, sorry try again later"
-            await interaction.followup.send(content=combined, suppress_embeds=True)
-        else:
-            combined += f"\n{reply}"
-            await interaction.followup.send(content=combined)
+            base_interaction_message = f"> {message}"
+        
+        await _send_interaction_followup(interaction, base_interaction_message, reply)
 
 
 @bot.tree.command(name='draw', description='Generate an image from a prompt')
@@ -266,9 +262,9 @@ async def draw(
     interaction: discord.Interaction,
     prompt: str,
     edit_image: discord.Attachment | None = None,
-    model: str = DEFAULT_IMAGE_MODEL
+    model: str = DEFAULT_IMAGE_MODEL # This is a parameter, not from config directly here
 ):
-    channel_id = interaction.channel.id
+    channel_id = interaction.channel.id # Used for logging
     logger.info(f'[/draw] Channel {channel_id} Prompt: {prompt} Model: {model} Edit? {bool(edit_image)}')
 
     # Typing indicator while generating image
@@ -276,46 +272,54 @@ async def draw(
         # Acknowledge and send prompt-only message
         await interaction.response.defer(ephemeral=False, thinking=True)
         try:
-            if model == 'dall-e-2' or model == 'dall-e-3':
-                result = client.images.generate(
-                    model=model,
-                    prompt=prompt,
-                    n=1,
-                    response_format='b64_json'
-                )
-            else:
-                if edit_image:
-                    img_bytes = await edit_image.read()
-                    file_obj = io.BytesIO(img_bytes)
-                    file_obj.name = edit_image.filename
-                    logger.info(f'[/draw] Channel {channel_id}: editing image {edit_image.filename}')
-                    result = client.images.edit(
-                        model=model,
-                        image=[file_obj],
-                        prompt=prompt
-                    )
-                else:
-                    result = client.images.generate(
-                        model=model,
-                        prompt=prompt,
-                        n=1
-                    )
-            b64 = result.data[0].b64_json
-            img_bytes = base64.b64decode(b64)
+            img_bytes_to_edit = None
+            edit_filename = None
+            if edit_image:
+                img_bytes_to_edit = await edit_image.read()
+                edit_filename = edit_image.filename
+                logger.info(f'[/draw] Channel {channel_id}: editing image {edit_image.filename}')
+
+            # Call the helper function from openai_handler.py
+            img_bytes = generate_image(
+                prompt=prompt,
+                model=model,
+                edit_image_bytes=img_bytes_to_edit,
+                edit_image_filename=edit_filename
+            )
 
             # Log image generation
             logger.info(f'[/draw] Channel {channel_id}: image generated')
             file = discord.File(io.BytesIO(img_bytes), filename='image.png')
 
             if edit_image:
-                await interaction.followup.send(content=f"{edit_image.url}\n> {prompt} ", file=file)
+                await interaction.followup.send(content=f"{edit_image.url}\n> {prompt}", file=file)
             else:
-                await interaction.followup.send(content=f"> {prompt} ", file=file)
+                await interaction.followup.send(content=f"> {prompt}", file=file)
         except BadRequestError as e:
             logger.error(f"OpenAI API BadRequestError in draw command: {e}")
-            error_message = f"> {prompt}\n\nSorry, your request was rejected by the safety system: {e.error.message}"
+            error_message = f"> {prompt}\n\nSorry, your request was rejected by the safety system. Details: {e.error.message if e.error else 'No specific error message provided by API.'}"
             await interaction.followup.send(content=error_message)
 
+async def _send_interaction_followup(interaction: discord.Interaction, base_content: str, reply_text: str):
+    """Sends a followup to an interaction, handling potential pasters.rs upload for the reply_text part."""
+    final_content = base_content
+    
+    # Check if adding the reply_text makes the whole message too long
+    if len(base_content + f"\n{reply_text}") > 2000:
+        try:
+            logger.info("Reply for interaction followup exceeded 2000 characters with base_content, attempting to upload to pasters.rs")
+            pasted_url = upload_to_pasters(markdown_text=reply_text)
+            # Add the pasters link for the reply part
+            final_content += f"\n\nMy detailed response was too long, so I've uploaded it here: {pasted_url}"
+            suppress_embeds = True # Often good when sending links explicitly
+        except Exception as e:
+            logger.error(f"Error uploading to pasters.rs for interaction: {e}")
+            final_content += "\n\nThe content of my response was over 2000 characters, and there was a problem uploading it. Sorry, try again later."
+            suppress_embeds = False 
+        await interaction.followup.send(content=final_content, suppress_embeds=suppress_embeds)
+    else:
+        final_content += f"\n{reply_text}"
+        await interaction.followup.send(content=final_content)
 
 if __name__ == '__main__':
     logger.info('Starting bot...')
