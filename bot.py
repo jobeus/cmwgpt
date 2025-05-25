@@ -9,7 +9,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from discord.app_commands import Choice
-from openai import OpenAI
+from openai import OpenAI, BadRequestError
 from utils.pasters import upload_to_pasters
 
 # Configure root logger to stdout
@@ -275,41 +275,46 @@ async def draw(
     async with interaction.channel.typing():
         # Acknowledge and send prompt-only message
         await interaction.response.defer(ephemeral=False, thinking=True)
-        if model == 'dall-e-2' or model == 'dall-e-3':
-            result = client.images.generate(
-                model=model,
-                prompt=prompt,
-                n=1,
-                response_format='b64_json'
-            )
-        else:
-            if edit_image:
-                img_bytes = await edit_image.read()
-                file_obj = io.BytesIO(img_bytes)
-                file_obj.name = edit_image.filename
-                logger.info(f'[/draw] Channel {channel_id}: editing image {edit_image.filename}')
-                result = client.images.edit(
-                    model=model,
-                    image=[file_obj],
-                    prompt=prompt
-                )
-            else:
+        try:
+            if model == 'dall-e-2' or model == 'dall-e-3':
                 result = client.images.generate(
                     model=model,
                     prompt=prompt,
-                    n=1
+                    n=1,
+                    response_format='b64_json'
                 )
-        b64 = result.data[0].b64_json
-        img_bytes = base64.b64decode(b64)
+            else:
+                if edit_image:
+                    img_bytes = await edit_image.read()
+                    file_obj = io.BytesIO(img_bytes)
+                    file_obj.name = edit_image.filename
+                    logger.info(f'[/draw] Channel {channel_id}: editing image {edit_image.filename}')
+                    result = client.images.edit(
+                        model=model,
+                        image=[file_obj],
+                        prompt=prompt
+                    )
+                else:
+                    result = client.images.generate(
+                        model=model,
+                        prompt=prompt,
+                        n=1
+                    )
+            b64 = result.data[0].b64_json
+            img_bytes = base64.b64decode(b64)
 
-        # Log image generation
-        logger.info(f'[/draw] Channel {channel_id}: image generated')
-        file = discord.File(io.BytesIO(img_bytes), filename='image.png')
+            # Log image generation
+            logger.info(f'[/draw] Channel {channel_id}: image generated')
+            file = discord.File(io.BytesIO(img_bytes), filename='image.png')
 
-        if edit_image:
-            await interaction.followup.send(content=f"{edit_image.url}\n> {prompt} ", file=file)
-        else:
-            await interaction.followup.send(content=f"> {prompt} ", file=file)
+            if edit_image:
+                await interaction.followup.send(content=f"{edit_image.url}\n> {prompt} ", file=file)
+            else:
+                await interaction.followup.send(content=f"> {prompt} ", file=file)
+        except BadRequestError as e:
+            logger.error(f"OpenAI API BadRequestError in draw command: {e}")
+            error_message = f"> {prompt}\n\nSorry, your request was rejected by the safety system: {e.error.message}"
+            await interaction.followup.send(content=error_message)
 
 
 if __name__ == '__main__':
