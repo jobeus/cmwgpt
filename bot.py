@@ -226,7 +226,7 @@ async def chat(
     # Typing indicator while waiting for OpenAI
     async with interaction.channel.typing():
         response = client.chat.completions.create(
-            model=models[channel_id],
+            model=models.get(channel_id, DEFAULT_MODEL),
             messages=conversations[channel_id]
         )
         reply = response.choices[0].message.content
