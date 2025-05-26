@@ -16,7 +16,6 @@ from src.services.message_service import message_service
 from src.services.queue_service import queue_service
 from src.services.state_service import state_service
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -34,9 +33,12 @@ class ChatCommands:
     def _create_chat_command(self) -> app_commands.Command:
         """Create the /chat command."""
 
-        @app_commands.command(name="chat", description="Send a message to the chatbot")
-        @app_commands.describe(message="Your message", attachment="Optional image to attach to the prompt")
-        async def chat(interaction: discord.Interaction, message: str, attachment: Optional[discord.Attachment] = None):
+        @app_commands.command(name="chat",
+                              description="Send a message to the chatbot")
+        @app_commands.describe(message="Your message",
+                               attachment="Optional image to attach to the prompt")
+        async def chat(interaction: discord.Interaction, message: str,
+                       attachment: Optional[discord.Attachment] = None):
             # Immediately defer the interaction to avoid Discord's 3-second
             # timeout
             await interaction.response.defer(ephemeral=False, thinking=True)
@@ -45,9 +47,9 @@ class ChatCommands:
             queued = await queue_service.queue_command(interaction, self._handle_chat_command, message, attachment)
 
             if not queued:
-                logger.warning(
-                    f"Failed to queue chat command from {interaction.user} in #{interaction.channel} - queue may be full"
-                )
+                logger.warning(f"""Failed to queue chat command from {
+                    interaction.user} in #{
+                    interaction.channel} - queue may be full""")
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
@@ -57,7 +59,8 @@ class ChatCommands:
     def _create_reset_command(self) -> app_commands.Command:
         """Create the /reset command."""
 
-        @app_commands.command(name="reset", description="Reset the conversation history")
+        @app_commands.command(name="reset",
+                              description="Reset the conversation history")
         async def reset(interaction: discord.Interaction):
             # Immediately defer the interaction to avoid Discord's 3-second
             # timeout
@@ -67,18 +70,19 @@ class ChatCommands:
             queued = await queue_service.queue_command(interaction, self._handle_reset_command)
 
             if not queued:
-                logger.warning(
-                    f"Failed to queue reset command from {interaction.user} in #{interaction.channel} - queue may be full"
-                )
+                logger.warning(f"""Failed to queue reset command from {
+                    interaction.user} in #{
+                    interaction.channel} - queue may be full""")
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
 
         return reset
 
-    async def _handle_chat_command(
-        self, interaction: discord.Interaction, message: str, attachment: Optional[discord.Attachment] = None
-    ) -> None:
+    async def _handle_chat_command(self,
+                                   interaction: discord.Interaction,
+                                   message: str,
+                                   attachment: Optional[discord.Attachment] = None) -> None:
         """
         Handle the /chat command.
 
@@ -105,11 +109,13 @@ class ChatCommands:
             conversation = []  # Empty conversation - system prompt will be added dynamically
             state_service.set_conversation(channel_id, conversation)
             state_service.set_model(channel_id, DEFAULT_MODEL)
-            logger.info(f"[/chat] Channel {channel_id}: initialized conversation and model")
+            logger.info(
+                f"[/chat] Channel {channel_id}: initialized conversation and model")
 
         # Construct content payload for OpenAI
         if attachment:
-            logger.info(f"[/chat] Channel {channel_id}: including image URL {attachment.url}")
+            logger.info(
+                f"[/chat] Channel {channel_id}: including image URL {attachment.url}")
             content_payload = [
                 {"type": "text", "text": message},
                 {"type": "image_url", "image_url": {"url": attachment.url}},
@@ -119,17 +125,21 @@ class ChatCommands:
 
         # Log user input and add to conversation
         logger.info(f"[/chat] Channel {channel_id} User: {message}")
-        state_service.add_message_to_conversation(channel_id, {"role": "user", "content": json.dumps(content_payload)})
+        state_service.add_message_to_conversation(
+            channel_id, {"role": "user", "content": json.dumps(content_payload)})
 
         # Get response from OpenAI (interaction already deferred in slash
         # command handler)
         async with interaction.channel.typing():
             try:
-                current_conversation = state_service.get_conversation(channel_id)
-                current_model = state_service.get_model(channel_id) or DEFAULT_MODEL
+                current_conversation = state_service.get_conversation(
+                    channel_id)
+                current_model = state_service.get_model(
+                    channel_id) or DEFAULT_MODEL
 
                 # Get system prompt (channel-specific or default with legend)
-                channel_system_prompt = state_service.get_system_prompt(channel_id)
+                channel_system_prompt = state_service.get_system_prompt(
+                    channel_id)
                 if channel_system_prompt:
                     system_prompt = channel_system_prompt + "\n" + legend_section
                 else:
@@ -147,9 +157,11 @@ class ChatCommands:
 
                 # Prepare base message content
                 if attachment:
-                    base_content = message_service.format_attachment_message(attachment, message)
+                    base_content = message_service.format_attachment_message(
+                        attachment, message)
                 else:
-                    base_content = message_service.format_prompt_message(message)
+                    base_content = message_service.format_prompt_message(
+                        message)
 
                 await message_service.send_interaction_followup(interaction, base_content, reply)
 
@@ -157,18 +169,20 @@ class ChatCommands:
                 logger.error(f"OpenAI API error in chat command: {e}")
                 # Prepare base message content for error response
                 if attachment:
-                    base_content = message_service.format_attachment_message(attachment, message)
+                    base_content = message_service.format_attachment_message(
+                        attachment, message)
                 else:
-                    base_content = message_service.format_prompt_message(message)
+                    base_content = message_service.format_prompt_message(
+                        message)
 
-                error_message = (
-                    f"{base_content}\n\nSorry, I encountered an error while processing your request: {str(e)}"
-                )
+                error_message = f"{base_content}\n\nSorry, I encountered an error while processing your request: {
+                    str(e)}"
 
                 try:
                     await interaction.followup.send(content=error_message)
                 except Exception as discord_error:
-                    logger.error(f"Failed to send error message to Discord: {discord_error}")
+                    logger.error(
+                        f"Failed to send error message to Discord: {discord_error}")
                     # Try to send a simpler error message
                     try:
                         await interaction.followup.send(
@@ -181,16 +195,19 @@ class ChatCommands:
                 logger.error(f"Unexpected error in chat command: {e}")
                 # Prepare base message content for error response
                 if attachment:
-                    base_content = message_service.format_attachment_message(attachment, message)
+                    base_content = message_service.format_attachment_message(
+                        attachment, message)
                 else:
-                    base_content = message_service.format_prompt_message(message)
+                    base_content = message_service.format_prompt_message(
+                        message)
 
                 error_message = f"{base_content}\n\nSorry, I encountered an unexpected error. Please try again later."
 
                 try:
                     await interaction.followup.send(content=error_message)
                 except Exception as discord_error:
-                    logger.error(f"Failed to send error message to Discord: {discord_error}")
+                    logger.error(
+                        f"Failed to send error message to Discord: {discord_error}")
                     # Try to send a simpler error message
                     try:
                         await interaction.followup.send(
@@ -199,7 +216,8 @@ class ChatCommands:
                     except Exception:
                         logger.error("Failed to send fallback error message")
 
-    async def _handle_reset_command(self, interaction: discord.Interaction) -> None:
+    async def _handle_reset_command(
+            self, interaction: discord.Interaction) -> None:
         """
         Handle the /reset command.
 

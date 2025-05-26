@@ -9,7 +9,7 @@ import discord
 from discord import HTTPException, Forbidden, NotFound
 
 from src.utils.pasters import paste_service
-
+from src.utils.message_utils import format_attachment_message, format_prompt_message
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,10 @@ class MessageService:
 
     DISCORD_MESSAGE_LIMIT = 2000
 
-    async def send_channel_reply(self, channel: discord.TextChannel, reply_text: str) -> None:
+    async def send_channel_reply(
+            self,
+            channel: discord.TextChannel,
+            reply_text: str) -> None:
         """
         Sends a reply to a channel, handling potential paste upload for long messages.
 
@@ -58,10 +61,12 @@ class MessageService:
 
             except HTTPException as e:
                 if e.status == 429:  # Rate limited
-                    logger.warning(f"Rate limited on attempt {attempt + 1}: {e}")
+                    logger.warning(f"""Rate limited on attempt {
+                        attempt + 1}: {e}""")
                     if attempt < max_retries - 1:
                         # Extract retry-after from headers if available
-                        retry_after = getattr(e.response, "headers", {}).get("Retry-After")
+                        retry_after = getattr(
+                            e.response, "headers", {}).get("Retry-After")
                         if retry_after:
                             delay = float(retry_after)
                         else:
@@ -81,11 +86,13 @@ class MessageService:
                 raise
 
             except NotFound as e:
-                logger.error(f"Discord NotFound error (channel/message not found): {e}")
+                logger.error(
+                    f"Discord NotFound error (channel/message not found): {e}")
                 raise
 
             except Exception as e:
-                logger.error(f"Unexpected error sending message on attempt {attempt + 1}: {e}")
+                logger.error(f"""Unexpected error sending message on attempt {
+                    attempt + 1}: {e}""")
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
                     logger.info(f"Retrying in {delay} seconds...")
@@ -95,8 +102,10 @@ class MessageService:
                 raise
 
     async def send_interaction_followup(
-        self, interaction: discord.Interaction, base_content: str, reply_text: str
-    ) -> None:
+            self,
+            interaction: discord.Interaction,
+            base_content: str,
+            reply_text: str) -> None:
         """
         Sends a followup to an interaction, handling potential paste upload for long replies.
 
@@ -121,9 +130,7 @@ class MessageService:
                 try:
                     logger.info(
                         "Reply for interaction followup exceeded %d characters with base_content, "
-                        "attempting to upload to paste service",
-                        self.DISCORD_MESSAGE_LIMIT,
-                    )
+                        "attempting to upload to paste service", self.DISCORD_MESSAGE_LIMIT, )
                     pasted_url = paste_service.upload_markdown(reply_text)
                     final_content = (
                         f"{base_content}\n\n"
@@ -132,7 +139,8 @@ class MessageService:
                     await interaction.followup.send(content=final_content, suppress_embeds=True)
                     return
                 except Exception as e:
-                    logger.error(f"Error uploading to paste service for interaction: {e}")
+                    logger.error(
+                        f"Error uploading to paste service for interaction: {e}")
                     error_content = (
                         f"{base_content}\n\n"
                         f"The content of my response was over {self.DISCORD_MESSAGE_LIMIT} characters, "
@@ -143,10 +151,13 @@ class MessageService:
 
             except HTTPException as e:
                 if e.status == 429:  # Rate limited
-                    logger.warning(f"Rate limited on interaction followup attempt {attempt + 1}: {e}")
+                    logger.warning(
+                        f"""Rate limited on interaction followup attempt {
+                            attempt + 1}: {e}""")
                     if attempt < max_retries - 1:
                         # Extract retry-after from headers if available
-                        retry_after = getattr(e.response, "headers", {}).get("Retry-After")
+                        retry_after = getattr(
+                            e.response, "headers", {}).get("Retry-After")
                         if retry_after:
                             delay = float(retry_after)
                         else:
@@ -158,19 +169,24 @@ class MessageService:
                     logger.error("Max retries exceeded for rate limit")
                     raise
                 else:
-                    logger.error(f"Discord HTTP error on interaction followup: {e}")
+                    logger.error(
+                        f"Discord HTTP error on interaction followup: {e}")
                     raise
 
             except Forbidden as e:
-                logger.error(f"Discord Forbidden error on interaction followup (no permission): {e}")
+                logger.error(
+                    f"Discord Forbidden error on interaction followup (no permission): {e}")
                 raise
 
             except NotFound as e:
-                logger.error(f"Discord NotFound error on interaction followup (interaction not found): {e}")
+                logger.error(
+                    f"Discord NotFound error on interaction followup (interaction not found): {e}")
                 raise
 
             except Exception as e:
-                logger.error(f"Unexpected error sending interaction followup on attempt {attempt + 1}: {e}")
+                logger.error(
+                    f"""Unexpected error sending interaction followup on attempt {
+                        attempt + 1}: {e}""")
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
                     logger.info(f"Retrying in {delay} seconds...")
@@ -179,30 +195,17 @@ class MessageService:
                 logger.error("Max retries exceeded for unexpected error")
                 raise
 
-    def format_attachment_message(self, attachment: discord.Attachment, message: str) -> str:
-        """
-        Format a message with an attachment URL.
-
-        Args:
-            attachment: The Discord attachment
-            message: The message text
-
-        Returns:
-            Formatted message string
-        """
-        return f"{attachment.url}\n> {message}"
+    # Delegate to utility functions for message formatting
+    def format_attachment_message(
+            self,
+            attachment: discord.Attachment,
+            message: str) -> str:
+        """Format a message with an attachment URL."""
+        return format_attachment_message(attachment, message)
 
     def format_prompt_message(self, message: str) -> str:
-        """
-        Format a prompt message.
-
-        Args:
-            message: The message text
-
-        Returns:
-            Formatted message string
-        """
-        return f"> {message}"
+        """Format a prompt message."""
+        return format_prompt_message(message)
 
 
 # Global service instance

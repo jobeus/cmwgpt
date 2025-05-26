@@ -13,7 +13,7 @@ from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError, Au
 from discord import Attachment
 
 from src.config import OPENAI_API_KEY, IS_TESTING, USER_CONTEXT_URL
-
+from src.utils.message_utils import clean_openai_response
 
 logger = logging.getLogger(__name__)
 
@@ -29,54 +29,6 @@ class OpenAIService:
 
     def __init__(self):
         self._client: Optional[AsyncOpenAI] = None
-
-    def _clean_response(self, response: str) -> str:
-        """
-        Clean OpenAI response by removing unwanted quote wrapping and fixing escaped characters.
-
-        Args:
-            response: Raw response from OpenAI
-
-        Returns:
-            Cleaned response string
-        """
-        if not response:
-            return response
-
-        # Strip leading/trailing whitespace
-        cleaned = response.strip()
-
-        # Check if the entire response is wrapped in quotes
-        # We need to be more careful about counting quotes to handle escaped quotes
-        if (len(cleaned) >= 2 and
-            cleaned.startswith('"') and
-            cleaned.endswith('"')):
-
-            # Count unescaped quotes to see if it's just outer wrapping
-            quote_count = 0
-            i = 0
-            while i < len(cleaned):
-                if cleaned[i] == '"':
-                    # Check if this quote is escaped
-                    if i == 0 or cleaned[i-1] != '\\':
-                        quote_count += 1
-                    # Handle the case where the backslash itself is escaped
-                    elif i >= 2 and cleaned[i-2:i] == '\\\\':
-                        quote_count += 1
-                i += 1
-
-            # If there are only 2 unescaped quotes (start and end), remove them
-            if quote_count == 2:
-                cleaned = cleaned[1:-1]
-
-        # Handle escaped characters that should be unescaped
-        # Only unescape common cases that OpenAI might escape unnecessarily
-        cleaned = cleaned.replace('\\n', '\n')
-        cleaned = cleaned.replace('\\t', '\t')
-        cleaned = cleaned.replace('\\"', '"')
-        cleaned = cleaned.replace('\\\\', '\\')
-
-        return cleaned
 
     def set_client(self, client) -> None:
         """Set a custom client (useful for testing)."""
@@ -113,19 +65,26 @@ class OpenAIService:
                 response = await client.get(USER_CONTEXT_URL)
                 response.raise_for_status()
                 context_data = response.text
-                logger.debug(f"Successfully fetched user context ({len(context_data)} characters)")
+                logger.debug(f"""Successfully fetched user context ({
+                    len(context_data)} characters)""")
                 return context_data
         except httpx.TimeoutException:
             logger.warning("Timeout while fetching user context")
             return "User context fetch timed out."
         except httpx.HTTPStatusError as e:
-            logger.warning(f"HTTP error while fetching user context: {e.response.status_code}")
-            return f"User context fetch failed with HTTP {e.response.status_code}."
-        except Exception as e:
+            logger.warning(f"""HTTP error while fetching user context: {
+                e.response.status_code}""")
+            return f"""User context fetch failed with HTTP {
+                e.response.status_code}."""
+        except (httpx.ConnectError, httpx.ReadError, OSError) as e:
             logger.error(f"Error fetching user context: {e}")
             return f"User context fetch failed: {str(e)}"
 
-    async def get_chat_completion(self, model: str, messages: List[Dict[str, Any]], system_prompt: str = None) -> str:
+    async def get_chat_completion(self,
+                                  model: str,
+                                  messages: List[Dict[str,
+                                                      Any]],
+                                  system_prompt: str = None) -> str:
         """
         Gets a chat completion from the OpenAI API with function calling support.
 
@@ -158,12 +117,15 @@ class OpenAIService:
         api_messages = messages.copy()
 
         # Remove any existing system messages from the conversation
-        api_messages = [msg for msg in api_messages if msg.get("role") != "system"]
+        api_messages = [
+            msg for msg in api_messages if msg.get("role") != "system"]
 
         # Parse JSON content if needed (for complex payloads like attachments)
         for msg in api_messages:
             content = msg.get("content", "")
-            if isinstance(content, str) and content.strip().startswith(("[", "{")):
+            if isinstance(
+                    content, str) and content.strip().startswith(
+                    ("[", "{")):
                 try:
                     # Try to parse as JSON - if successful, use parsed content
                     parsed_content = json.loads(content)
@@ -174,16 +136,19 @@ class OpenAIService:
 
         # Add system prompt at the beginning if provided
         if system_prompt:
-            api_messages.insert(0, {"role": "system", "content": system_prompt})
+            api_messages.insert(
+                0, {"role": "system", "content": system_prompt})
 
         # Define the get_user_context function
         functions = [
             {
                 "name": "get_user_context",
                 "description": "Fetch historical IRC quotes and context about the user for personalized responses",
-                "parameters": {"type": "object", "properties": {}, "required": []},
-            }
-        ]
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []},
+            }]
 
         max_retries = 3
         base_delay = 1.0
@@ -191,10 +156,11 @@ class OpenAIService:
         for attempt in range(max_retries):
             try:
                 logger.debug(
-                    f"Attempting chat completion with functions for model {model} (attempt {attempt + 1}/{max_retries})"
-                )
+                    f"""Attempting chat completion with functions for model {model} (attempt {
+                        attempt + 1}/{max_retries})""")
 
-                # Use standard OpenAI chat completions API with function calling
+                # Use standard OpenAI chat completions API with function
+                # calling
                 response = await client.chat.completions.create(
                     model=model, messages=api_messages, functions=functions, function_call="auto"
                 )
@@ -204,40 +170,42 @@ class OpenAIService:
                 # Check if the model wants to call a function
                 if message.function_call:
                     function_name = message.function_call.name
-                    logger.info(f"OpenAI requested function call: {function_name}")
+                    logger.info(
+                        f"OpenAI requested function call: {function_name}")
 
                     if function_name == "get_user_context":
                         # Fetch user context
                         context_data = await self._fetch_user_context()
 
-                        # Add the assistant's function call message to conversation
-                        api_messages.append(
-                            {
-                                "role": "assistant",
-                                "content": None,
-                                "function_call": {"name": function_name, "arguments": message.function_call.arguments},
-                            }
-                        )
+                        # Add the assistant's function call message to
+                        # conversation
+                        api_messages.append({"role": "assistant", "content": None, "function_call": {
+                            "name": function_name, "arguments": message.function_call.arguments}, })
 
                         # Add the function response
-                        api_messages.append({"role": "function", "name": function_name, "content": context_data})
+                        api_messages.append(
+                            {"role": "function", "name": function_name, "content": context_data})
 
                         # Make another request with the function result
-                        logger.debug("Making follow-up request with function result")
+                        logger.debug(
+                            "Making follow-up request with function result")
                         follow_up_response = await client.chat.completions.create(
                             model=model, messages=api_messages, functions=functions, function_call="auto"
                         )
 
                         final_message = follow_up_response.choices[0].message
-                        logger.debug("Chat completion with function calling successful")
-                        return self._clean_response(final_message.content)
+                        logger.debug(
+                            "Chat completion with function calling successful")
+                        return clean_openai_response(final_message.content)
                     else:
-                        logger.warning(f"Unknown function call requested: {function_name}")
+                        logger.warning(
+                            f"Unknown function call requested: {function_name}")
                         return f"I tried to call an unknown function: {function_name}"
                 else:
                     # No function call, return the response directly
-                    logger.debug("Chat completion successful (no function call)")
-                    return self._clean_response(message.content)
+                    logger.debug(
+                        "Chat completion successful (no function call)")
+                    return clean_openai_response(message.content)
 
             except RateLimitError as e:
                 logger.warning(f"Rate limit hit on attempt {attempt + 1}: {e}")
@@ -253,10 +221,12 @@ class OpenAIService:
 
             except AuthenticationError as e:
                 logger.error(f"Authentication error: {e}")
-                raise OpenAIServiceError("Authentication failed. Please check API key configuration.") from e
+                raise OpenAIServiceError(
+                    "Authentication failed. Please check API key configuration.") from e
 
             except APIConnectionError as e:
-                logger.warning(f"Connection error on attempt {attempt + 1}: {e}")
+                logger.warning(f"""Connection error on attempt {
+                    attempt + 1}: {e}""")
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
                     logger.info(f"Retrying in {delay} seconds...")
@@ -269,7 +239,9 @@ class OpenAIService:
 
             except BadRequestError as e:
                 logger.error(f"Bad request error: {e}")
-                raise OpenAIServiceError(f"Invalid request: {e.message if hasattr(e, 'message') else str(e)}") from e
+                raise OpenAIServiceError(f"""Invalid request: {
+                    e.message if hasattr(
+                        e, 'message') else str(e)}""") from e
 
             except APIError as e:
                 logger.error(f"OpenAI API error on attempt {attempt + 1}: {e}")
@@ -279,18 +251,22 @@ class OpenAIService:
                     await asyncio.sleep(delay)
                     continue
                 logger.error("Max retries exceeded for API error")
-                raise OpenAIServiceError(f"OpenAI API error after {max_retries} attempts: {str(e)}") from e
+                raise OpenAIServiceError(
+                    f"""OpenAI API error after {max_retries} attempts: {
+                        str(e)}""") from e
 
             except OpenAIServiceError:
                 # Re-raise our own exceptions without modification
                 raise
 
-            except Exception as e:
-                logger.error(f"Unexpected error during chat completion with functions: {e}")
+            except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
+                logger.error(
+                    f"Unexpected error during chat completion with functions: {e}")
                 raise OpenAIServiceError(f"Unexpected error: {str(e)}") from e
 
         # This should never be reached, but just in case
-        raise OpenAIServiceError("Failed to get chat completion with functions after all retry attempts")
+        raise OpenAIServiceError(
+            "Failed to get chat completion with functions after all retry attempts")
 
     async def _get_chat_completion_legacy(
         self, model: str, messages: List[Dict[str, Any]], system_prompt: str = None
@@ -304,12 +280,15 @@ class OpenAIService:
         api_messages = messages.copy()
 
         # Remove any existing system messages from the conversation
-        api_messages = [msg for msg in api_messages if msg.get("role") != "system"]
+        api_messages = [
+            msg for msg in api_messages if msg.get("role") != "system"]
 
         # Parse JSON content if needed (for complex payloads like attachments)
         for msg in api_messages:
             content = msg.get("content", "")
-            if isinstance(content, str) and content.strip().startswith(("[", "{")):
+            if isinstance(
+                    content, str) and content.strip().startswith(
+                    ("[", "{")):
                 try:
                     # Try to parse as JSON - if successful, use parsed content
                     parsed_content = json.loads(content)
@@ -320,7 +299,8 @@ class OpenAIService:
 
         # Add system prompt at the beginning if provided
         if system_prompt:
-            api_messages.insert(0, {"role": "system", "content": system_prompt})
+            api_messages.insert(
+                0, {"role": "system", "content": system_prompt})
 
         max_retries = 3
         base_delay = 1.0
@@ -328,15 +308,15 @@ class OpenAIService:
         for attempt in range(max_retries):
             try:
                 logger.debug(
-                    f"Attempting legacy chat completion with model {model} (attempt {attempt + 1}/{max_retries})"
-                )
+                    f"""Attempting legacy chat completion with model {model} (attempt {
+                        attempt + 1}/{max_retries})""")
                 response = await client.responses.create(
                     model=model,
                     input=api_messages,
                     tools=[{"type": "web_search_preview"}],
                 )
                 logger.debug("Legacy chat completion successful")
-                return self._clean_response(response.output_text)
+                return clean_openai_response(response.output_text)
 
             except RateLimitError as e:
                 logger.warning(f"Rate limit hit on attempt {attempt + 1}: {e}")
@@ -352,10 +332,12 @@ class OpenAIService:
 
             except AuthenticationError as e:
                 logger.error(f"Authentication error: {e}")
-                raise OpenAIServiceError("Authentication failed. Please check API key configuration.") from e
+                raise OpenAIServiceError(
+                    "Authentication failed. Please check API key configuration.") from e
 
             except APIConnectionError as e:
-                logger.warning(f"Connection error on attempt {attempt + 1}: {e}")
+                logger.warning(f"""Connection error on attempt {
+                    attempt + 1}: {e}""")
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
                     logger.info(f"Retrying in {delay} seconds...")
@@ -368,7 +350,9 @@ class OpenAIService:
 
             except BadRequestError as e:
                 logger.error(f"Bad request error: {e}")
-                raise OpenAIServiceError(f"Invalid request: {e.message if hasattr(e, 'message') else str(e)}") from e
+                raise OpenAIServiceError(f"""Invalid request: {
+                    e.message if hasattr(
+                        e, 'message') else str(e)}""") from e
 
             except APIError as e:
                 logger.error(f"OpenAI API error on attempt {attempt + 1}: {e}")
@@ -378,20 +362,28 @@ class OpenAIService:
                     await asyncio.sleep(delay)
                     continue
                 logger.error("Max retries exceeded for API error")
-                raise OpenAIServiceError(f"OpenAI API error after {max_retries} attempts: {str(e)}") from e
+                raise OpenAIServiceError(
+                    f"""OpenAI API error after {max_retries} attempts: {
+                        str(e)}""") from e
 
             except OpenAIServiceError:
                 # Re-raise our own exceptions without modification
                 raise
 
-            except Exception as e:
-                logger.error(f"Unexpected error during legacy chat completion: {e}")
+            except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
+                logger.error(
+                    f"Unexpected error during legacy chat completion: {e}")
                 raise OpenAIServiceError(f"Unexpected error: {str(e)}") from e
 
         # This should never be reached, but just in case
-        raise OpenAIServiceError("Failed to get legacy chat completion after all retry attempts")
+        raise OpenAIServiceError(
+            "Failed to get legacy chat completion after all retry attempts")
 
-    async def generate_image(self, prompt: str, model: str, edit_image: Optional[Attachment] = None) -> bytes:
+    async def generate_image(
+            self,
+            prompt: str,
+            model: str,
+            edit_image: Optional[Attachment] = None) -> bytes:
         """
         Generates an image using the OpenAI API.
 
@@ -413,7 +405,9 @@ class OpenAIService:
 
         for attempt in range(max_retries):
             try:
-                logger.debug(f"Attempting image generation with model {model} (attempt {attempt + 1}/{max_retries})")
+                logger.debug(
+                    f"""Attempting image generation with model {model} (attempt {
+                        attempt + 1}/{max_retries})""")
                 b64_json_data = None
                 result = None
 
@@ -440,7 +434,8 @@ class OpenAIService:
                     b64_json_data = result.data[0].b64_json
 
                 if not b64_json_data:
-                    raise OpenAIServiceError("Image generation failed, no image data returned.")
+                    raise OpenAIServiceError(
+                        "Image generation failed, no image data returned.")
 
                 img_bytes = base64.b64decode(b64_json_data)
                 logger.debug("Image generation successful")
@@ -460,10 +455,12 @@ class OpenAIService:
 
             except AuthenticationError as e:
                 logger.error(f"Authentication error: {e}")
-                raise OpenAIServiceError("Authentication failed. Please check API key configuration.") from e
+                raise OpenAIServiceError(
+                    "Authentication failed. Please check API key configuration.") from e
 
             except APIConnectionError as e:
-                logger.warning(f"Connection error on attempt {attempt + 1}: {e}")
+                logger.warning(f"""Connection error on attempt {
+                    attempt + 1}: {e}""")
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
                     logger.info(f"Retrying in {delay} seconds...")
@@ -478,7 +475,9 @@ class OpenAIService:
                 logger.error(f"Bad request error: {e}")
                 # BadRequestError is often due to content policy violations,
                 # don't retry
-                raise OpenAIServiceError(f"Request rejected: {e.message if hasattr(e, 'message') else str(e)}") from e
+                raise OpenAIServiceError(f"""Request rejected: {
+                    e.message if hasattr(
+                        e, 'message') else str(e)}""") from e
 
             except APIError as e:
                 logger.error(f"OpenAI API error on attempt {attempt + 1}: {e}")
@@ -488,18 +487,21 @@ class OpenAIService:
                     await asyncio.sleep(delay)
                     continue
                 logger.error("Max retries exceeded for API error")
-                raise OpenAIServiceError(f"OpenAI API error after {max_retries} attempts: {str(e)}") from e
+                raise OpenAIServiceError(
+                    f"""OpenAI API error after {max_retries} attempts: {
+                        str(e)}""") from e
 
             except OpenAIServiceError:
                 # Re-raise our own exceptions without modification
                 raise
 
-            except Exception as e:
+            except (httpx.HTTPError, ValueError, TypeError) as e:
                 logger.error(f"Unexpected error during image generation: {e}")
                 raise OpenAIServiceError(f"Unexpected error: {str(e)}") from e
 
         # This should never be reached, but just in case
-        raise OpenAIServiceError("Failed to generate image after all retry attempts")
+        raise OpenAIServiceError(
+            "Failed to generate image after all retry attempts")
 
 
 # Global service instance

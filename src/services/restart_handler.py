@@ -10,11 +10,10 @@ This module provides the restart functionality that:
 
 import asyncio
 import logging
-import subprocess
 import sys
-from typing import Optional
 
 from src.services.state_service import state_service
+from src.utils.git_utils import perform_git_pull, get_current_commit_hash
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +40,8 @@ class RestartHandler:
         4. Exiting with restart code
         """
         if self._restart_in_progress:
-            logger.warning("Restart already in progress, ignoring duplicate request")
+            logger.warning(
+                "Restart already in progress, ignoring duplicate request")
             return
 
         self._restart_in_progress = True
@@ -70,7 +70,7 @@ class RestartHandler:
 
             # Step 3: Perform git pull
             print("📥 Updating code...")
-            if self._perform_git_pull():
+            if perform_git_pull():
                 print("✅ Code updated")
             else:
                 print("⚠️  Git pull failed, continuing anyway")
@@ -84,54 +84,10 @@ class RestartHandler:
             # The process manager (systemd, pm2, etc.) should restart the bot
             sys.exit(42)
 
-        except Exception as e:
+        except (OSError, RuntimeError, asyncio.TimeoutError) as e:
             logger.error(f"Error during restart process: {e}")
             self._restart_in_progress = False
             raise
-
-    def _perform_git_pull(self) -> bool:
-        """
-        Perform git pull to update the code.
-
-        Returns:
-            True if git pull succeeded, False otherwise
-        """
-        try:
-            # First, check if we're in a git repository
-            result = subprocess.run(["git", "rev-parse", "--git-dir"], capture_output=True, text=True, timeout=10)
-
-            if result.returncode != 0:
-                logger.warning("Not in a git repository, skipping git pull")
-                return False
-
-            # Check if there are any uncommitted changes
-            result = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, timeout=10)
-
-            if result.returncode == 0 and result.stdout.strip():
-                logger.warning("Uncommitted changes detected, git pull may fail")
-
-            # Perform the git pull
-            result = subprocess.run(["git", "pull", "origin"], capture_output=True, text=True, timeout=60)
-
-            if result.returncode == 0:
-                output = result.stdout.strip()
-                if "Already up to date" in output:
-                    logger.debug("Git pull: Already up to date")
-                elif output:
-                    logger.info(f"Git pull: {output}")
-                return True
-            else:
-                logger.error(f"Git pull failed with return code {result.returncode}")
-                if result.stderr.strip():
-                    logger.error(f"Git pull error: {result.stderr.strip()}")
-                return False
-
-        except subprocess.TimeoutExpired:
-            logger.error("Git pull timed out")
-            return False
-        except Exception as e:
-            logger.error(f"Error during git pull: {e}")
-            return False
 
     def is_restart_in_progress(self) -> bool:
         """Check if a restart is currently in progress."""
@@ -140,24 +96,6 @@ class RestartHandler:
     def should_skip_cleanup(self) -> bool:
         """Check if cleanup should be skipped (during restart)."""
         return self._skip_cleanup
-
-    def _get_current_git_sha(self) -> Optional[str]:
-        """
-        Get the current git commit SHA.
-
-        Returns:
-            Git commit SHA or None if unable to determine
-        """
-        try:
-            result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
-            if result.returncode == 0:
-                return result.stdout.strip()
-            else:
-                logger.error(f"Failed to get git SHA: {result.stderr}")
-                return None
-        except Exception as e:
-            logger.error(f"Error getting git SHA: {e}")
-            return None
 
     async def perform_graceful_shutdown(self) -> None:
         """
@@ -168,7 +106,8 @@ class RestartHandler:
         Used when the bot is killed with Ctrl-C or kill signal.
         """
         if self._restart_in_progress:
-            logger.warning("Restart already in progress, graceful shutdown will proceed anyway")
+            logger.warning(
+                "Restart already in progress, graceful shutdown will proceed anyway")
 
         # Set skip cleanup flag to prevent temp file cleanup during shutdown
         self._skip_cleanup = True
@@ -178,7 +117,7 @@ class RestartHandler:
         try:
             # Step 1: Save current git SHA to state
             print("📝 Recording current git SHA...")
-            current_sha = self._get_current_git_sha()
+            current_sha = get_current_commit_hash()
             if current_sha:
                 state_service.set_last_git_sha(current_sha)
                 print(f"✅ Recorded git SHA: {current_sha}")
@@ -187,7 +126,9 @@ class RestartHandler:
 
             # Step 2: Save current state with shutdown info
             print("💾 Saving bot state...")
-            shutdown_info = {"manual_restart": False, "graceful_shutdown": True}
+            shutdown_info = {
+                "manual_restart": False,
+                "graceful_shutdown": True}
             temp_file = state_service.save_state_to_temp_file(shutdown_info)
             if temp_file:
                 print("✅ State saved")
@@ -199,7 +140,7 @@ class RestartHandler:
 
             print("✅ Graceful shutdown preparation complete")
 
-        except Exception as e:
+        except (OSError, RuntimeError, asyncio.TimeoutError) as e:
             logger.error(f"Error during graceful shutdown: {e}")
             print(f"⚠️  Error during graceful shutdown: {e}")
             raise

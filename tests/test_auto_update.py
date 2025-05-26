@@ -19,7 +19,8 @@ class TestAutoUpdateService(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
-        self.service = AutoUpdateService(check_interval=1)  # Short interval for testing
+        self.service = AutoUpdateService(
+            check_interval=1)  # Short interval for testing
 
     def tearDown(self):
         """Clean up after tests."""
@@ -41,8 +42,9 @@ class TestAutoUpdateService(unittest.TestCase):
         self.assertEqual(self.service._restart_callback, dummy_callback)
 
     @patch("src.services.auto_update_service.KEEP_UP_TO_DATE_WITH_GIT", True)
-    @patch.object(AutoUpdateService, "_is_git_repository", return_value=True)
-    @patch.object(AutoUpdateService, "_get_current_commit_hash", return_value="abc123")
+    @patch("src.services.auto_update_service.is_git_repository", return_value=True)
+    @patch("src.services.auto_update_service.get_current_commit_hash",
+           return_value="abc123")
     def test_start_with_git_enabled(self, mock_commit, mock_git_repo):
         """Test starting service when git is enabled and available."""
         self.service.start()
@@ -56,7 +58,7 @@ class TestAutoUpdateService(unittest.TestCase):
         self.assertFalse(self.service._is_running)
 
     @patch("src.services.auto_update_service.KEEP_UP_TO_DATE_WITH_GIT", True)
-    @patch.object(AutoUpdateService, "_is_git_repository", return_value=False)
+    @patch("src.services.auto_update_service.is_git_repository", return_value=False)
     def test_start_without_git_repo(self, mock_git_repo):
         """Test starting service when not in a git repository."""
         self.service.start()
@@ -92,7 +94,8 @@ class TestStateServicePersistence(unittest.TestCase):
         channel_id = 12345
         self.state_service.set_model(channel_id, "gpt-4o-mini")
         self.state_service.set_system_prompt(channel_id, "Test prompt")
-        self.state_service.add_message_to_conversation(channel_id, {"role": "user", "content": "Hello"})
+        self.state_service.add_message_to_conversation(
+            channel_id, {"role": "user", "content": "Hello"})
 
         # Save state
         temp_file = self.state_service.save_state_to_temp_file()
@@ -113,8 +116,12 @@ class TestStateServicePersistence(unittest.TestCase):
         self.assertTrue(success)
 
         # Verify state was restored
-        self.assertEqual(self.state_service.get_model(channel_id), "gpt-4o-mini")
-        self.assertEqual(self.state_service.get_system_prompt(channel_id), "Test prompt")
+        self.assertEqual(
+            self.state_service.get_model(channel_id),
+            "gpt-4o-mini")
+        self.assertEqual(
+            self.state_service.get_system_prompt(channel_id),
+            "Test prompt")
         conversation = self.state_service.get_conversation(channel_id)
         self.assertEqual(len(conversation), 1)
         self.assertEqual(conversation[0]["content"], "Hello")
@@ -174,28 +181,26 @@ class TestRestartHandler(unittest.TestCase):
         self.handler._restart_in_progress = True
         self.assertTrue(self.handler.is_restart_in_progress())
 
-    @patch("subprocess.run")
-    def test_git_repository_check(self, mock_run):
+    @patch("src.utils.git_utils.perform_git_pull")
+    def test_git_repository_check(self, mock_git_pull):
         """Test git repository detection."""
-        # Mock successful git command
-        mock_run.return_value.returncode = 0
-        self.handler._perform_git_pull()
+        # Mock successful git pull
+        mock_git_pull.return_value = True
 
-        # Should attempt git status and git pull
-        # git rev-parse, git status, git pull
-        self.assertEqual(mock_run.call_count, 3)
+        from src.utils.git_utils import perform_git_pull
 
-    @patch("subprocess.run")
-    def test_git_pull_failure(self, mock_run):
+        result = perform_git_pull()
+        self.assertTrue(result)
+
+    @patch("src.utils.git_utils.perform_git_pull")
+    def test_git_pull_failure(self, mock_git_pull):
         """Test handling of git pull failure."""
-        # Mock git rev-parse success, git status success, git pull failure
-        mock_run.side_effect = [
-            MagicMock(returncode=0),  # git rev-parse
-            MagicMock(returncode=0, stdout=""),  # git status
-            MagicMock(returncode=1, stderr="Pull failed"),  # git pull
-        ]
+        # Mock git pull failure
+        mock_git_pull.return_value = False
 
-        result = self.handler._perform_git_pull()
+        from src.utils.git_utils import perform_git_pull
+
+        result = perform_git_pull()
         self.assertFalse(result)
 
 
@@ -276,7 +281,9 @@ class TestAnnouncementService(unittest.TestCase):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(self.service.announce_update(was_manual=True))
+            loop.run_until_complete(
+                self.service.announce_update(
+                    was_manual=True))
         finally:
             loop.close()
 

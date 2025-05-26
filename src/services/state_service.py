@@ -29,7 +29,8 @@ class StateService:
         self._conversations: Dict[int, List[Dict[str, Any]]] = {}
         self._models: Dict[int, str] = {}
         self._channel_system_prompts: Dict[int, str] = {}
-        self._active_channels: set[int] = set()  # Track channels where bot has been used
+        # Track channels where bot has been used
+        self._active_channels: set[int] = set()
         self._last_git_sha: Optional[str] = None  # Track last known git SHA
 
         # Thread locks for each data structure
@@ -42,7 +43,8 @@ class StateService:
         logger.info("StateService initialized with thread-safe storage")
 
     # Conversation management
-    def get_conversation(self, channel_id: int) -> Optional[List[Dict[str, Any]]]:
+    def get_conversation(
+            self, channel_id: int) -> Optional[List[Dict[str, Any]]]:
         """
         Get conversation history for a channel.
 
@@ -55,7 +57,8 @@ class StateService:
         with self._conversations_lock:
             return self._conversations.get(channel_id)
 
-    def set_conversation(self, channel_id: int, conversation: List[Dict[str, Any]]) -> None:
+    def set_conversation(self, channel_id: int,
+                         conversation: List[Dict[str, Any]]) -> None:
         """
         Set conversation history for a channel.
 
@@ -65,9 +68,11 @@ class StateService:
         """
         with self._conversations_lock:
             self._conversations[channel_id] = conversation.copy()
-            logger.debug(f"Set conversation for channel {channel_id} with {len(conversation)} messages")
+            logger.debug(f"""Set conversation for channel {channel_id} with {
+                len(conversation)} messages""")
 
-    def add_message_to_conversation(self, channel_id: int, message: Dict[str, Any]) -> None:
+    def add_message_to_conversation(
+            self, channel_id: int, message: Dict[str, Any]) -> None:
         """
         Add a message to the conversation history for a channel.
 
@@ -79,7 +84,8 @@ class StateService:
             if channel_id not in self._conversations:
                 self._conversations[channel_id] = []
             self._conversations[channel_id].append(message)
-            logger.debug(f"Added message to conversation for channel {channel_id}")
+            logger.debug(
+                f"Added message to conversation for channel {channel_id}")
 
     def clear_conversation(self, channel_id: int) -> None:
         """
@@ -105,85 +111,42 @@ class StateService:
 
     # Model management
     def get_model(self, channel_id: int) -> Optional[str]:
-        """
-        Get the model setting for a channel.
-
-        Args:
-            channel_id: Discord channel ID
-
-        Returns:
-            Model name or None if not set
-        """
+        """Get the model setting for a channel."""
         with self._models_lock:
             return self._models.get(channel_id)
 
     def set_model(self, channel_id: int, model: str) -> None:
-        """
-        Set the model for a channel.
-
-        Args:
-            channel_id: Discord channel ID
-            model: Model name to set
-        """
+        """Set the model for a channel."""
         with self._models_lock:
             self._models[channel_id] = model
             logger.debug(f"Set model for channel {channel_id} to {model}")
 
     def get_all_models(self) -> Dict[int, str]:
-        """
-        Get all model settings (for debugging/admin purposes).
-
-        Returns:
-            Dictionary mapping channel IDs to model names
-        """
+        """Get all model settings."""
         with self._models_lock:
             return self._models.copy()
 
     # System prompt management
     def get_system_prompt(self, channel_id: int) -> Optional[str]:
-        """
-        Get the system prompt for a channel.
-
-        Args:
-            channel_id: Discord channel ID
-
-        Returns:
-            System prompt or None if not set
-        """
+        """Get the system prompt for a channel."""
         with self._prompts_lock:
             return self._channel_system_prompts.get(channel_id)
 
     def set_system_prompt(self, channel_id: int, prompt: str) -> None:
-        """
-        Set the system prompt for a channel.
-
-        Args:
-            channel_id: Discord channel ID
-            prompt: System prompt to set
-        """
+        """Set the system prompt for a channel."""
         with self._prompts_lock:
             self._channel_system_prompts[channel_id] = prompt
             logger.debug(f"Set system prompt for channel {channel_id}")
 
     def clear_system_prompt(self, channel_id: int) -> None:
-        """
-        Clear the system prompt for a channel.
-
-        Args:
-            channel_id: Discord channel ID
-        """
+        """Clear the system prompt for a channel."""
         with self._prompts_lock:
             if channel_id in self._channel_system_prompts:
                 del self._channel_system_prompts[channel_id]
                 logger.debug(f"Cleared system prompt for channel {channel_id}")
 
     def get_all_system_prompts(self) -> Dict[int, str]:
-        """
-        Get all system prompts (for debugging/admin purposes).
-
-        Returns:
-            Dictionary mapping channel IDs to system prompts
-        """
+        """Get all system prompts."""
         with self._prompts_lock:
             return self._channel_system_prompts.copy()
 
@@ -262,7 +225,9 @@ class StateService:
             self._last_git_sha = sha
             logger.debug(f"Updated last git SHA to: {sha}")
 
-    def save_state_to_temp_file(self, restart_info: Optional[dict] = None) -> Optional[str]:
+    def save_state_to_temp_file(
+            self,
+            restart_info: Optional[dict] = None) -> Optional[str]:
         """
         Save current state to a secure temporary file.
 
@@ -304,7 +269,7 @@ class StateService:
             logger.debug(f"State saved to temporary file: {temp_filename}")
             return temp_filename
 
-        except Exception as e:
+        except (OSError, PermissionError, json.JSONEncodeError) as e:
             logger.error(f"Failed to save state to temporary file: {e}")
             return None
 
@@ -321,7 +286,8 @@ class StateService:
             all_temp_files = glob.glob(pattern)
 
             # Filter out restart info files - we only want the main state files
-            temp_files = [f for f in all_temp_files if not f.endswith("_restart_info.json")]
+            temp_files = [
+                f for f in all_temp_files if not f.endswith("_restart_info.json")]
 
             if not temp_files:
                 logger.info("No temporary state files found")
@@ -338,53 +304,78 @@ class StateService:
                         state_data = json.load(f)
 
                     # Validate the data structure
-                    if not all(key in state_data for key in ["conversations", "models", "system_prompts"]):
-                        logger.warning(f"Invalid state file format: {temp_file}")
+                    if not all(
+                        key in state_data for key in [
+                            "conversations",
+                            "models",
+                            "system_prompts"]):
+                        logger.warning(
+                            f"Invalid state file format: {temp_file}")
                         continue
 
                     # Load the state under locks
                     with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock, self._git_sha_lock:
                         # Convert string keys back to integers for channel IDs
-                        self._conversations = {int(k): v for k, v in state_data["conversations"].items()}
-                        self._models = {int(k): v for k, v in state_data["models"].items()}
-                        self._channel_system_prompts = {int(k): v for k, v in state_data["system_prompts"].items()}
-                        # Load active channels (may not exist in older state files)
+                        self._conversations = {
+                            int(k): v for k, v in state_data["conversations"].items()}
+                        self._models = {
+                            int(k): v for k, v in state_data["models"].items()}
+                        self._channel_system_prompts = {
+                            int(k): v for k, v in state_data["system_prompts"].items()}
+                        # Load active channels (may not exist in older state
+                        # files)
                         if "active_channels" in state_data:
-                            self._active_channels = set(state_data["active_channels"])
+                            self._active_channels = set(
+                                state_data["active_channels"])
                         else:
-                            # If not present, derive from existing conversations and models
-                            self._active_channels = set(self._conversations.keys()) | set(self._models.keys())
+                            # If not present, derive from existing
+                            # conversations and models
+                            self._active_channels = set(
+                                self._conversations.keys()) | set(
+                                self._models.keys())
 
-                        # Load last git SHA (may not exist in older state files)
+                        # Load last git SHA (may not exist in older state
+                        # files)
                         self._last_git_sha = state_data.get("last_git_sha")
 
-                    logger.debug(f"Successfully loaded state from: {temp_file}")
-                    sha_info = f", last git SHA: {self._last_git_sha}" if self._last_git_sha else ""
-                    logger.info(
-                        f"Restored {len(self._conversations)} conversations, {len(self._models)} models, {len(self._channel_system_prompts)} system prompts, {len(self._active_channels)} active channels{sha_info}"
-                    )
+                    logger.debug(
+                        f"Successfully loaded state from: {temp_file}")
+                    sha_info = f", last git SHA: {
+                        self._last_git_sha}" if self._last_git_sha else ""
+                    logger.info(f"""Restored {
+                        len(
+                                self._conversations)} conversations, {
+                        len(
+                                self._models)} models, {
+                        len(
+                                self._channel_system_prompts)} system prompts, {
+                        len(
+                                self._active_channels)} active channels{sha_info}""")
 
                     # Successfully loaded, break out of loop
                     break
 
-                except Exception as e:
+                except (OSError, json.JSONDecodeError, KeyError, ValueError) as e:
                     logger.error(f"Failed to load state from {temp_file}: {e}")
                     continue
 
-            # Clean up all temporary files (both main state files and restart info files)
+            # Clean up all temporary files (both main state files and restart
+            # info files)
             for temp_file in all_temp_files:
                 try:
                     os.remove(temp_file)
                     if temp_file.endswith("_restart_info.json"):
-                        logger.debug(f"Cleaned up restart info file: {temp_file}")
+                        logger.debug(
+                            f"Cleaned up restart info file: {temp_file}")
                     else:
                         logger.debug(f"Cleaned up temporary file: {temp_file}")
-                except Exception as e:
-                    logger.error(f"Failed to clean up temporary file {temp_file}: {e}")
+                except OSError as e:
+                    logger.error(
+                        f"Failed to clean up temporary file {temp_file}: {e}")
 
             return True
 
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.error(f"Error during state loading: {e}")
             return False
 
@@ -393,7 +384,8 @@ class StateService:
         Clean up any leftover temporary state files.
         """
         try:
-            # Clean up all state backup files (including any old restart info files)
+            # Clean up all state backup files (including any old restart info
+            # files)
             pattern = "/tmp/cmwgpt_state_backup_*.json"
             temp_files = glob.glob(pattern)
 
@@ -401,13 +393,16 @@ class StateService:
                 try:
                     os.remove(temp_file)
                     if temp_file.endswith("_restart_info.json"):
-                        logger.info(f"Cleaned up leftover restart info file: {temp_file}")
+                        logger.info(
+                            f"Cleaned up leftover restart info file: {temp_file}")
                     else:
-                        logger.info(f"Cleaned up leftover temporary file: {temp_file}")
-                except Exception as e:
-                    logger.error(f"Failed to clean up temporary file {temp_file}: {e}")
+                        logger.info(
+                            f"Cleaned up leftover temporary file: {temp_file}")
+                except OSError as e:
+                    logger.error(
+                        f"Failed to clean up temporary file {temp_file}: {e}")
 
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.error(f"Error during temp file cleanup: {e}")
 
 

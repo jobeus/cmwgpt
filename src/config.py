@@ -29,12 +29,14 @@ def load_system_prompt() -> str:
             content = f.read().strip()
             if content:
                 # Replace [[CURRENT_DATE_AND_TIME]] with current date and time
-                current_datetime = datetime.now(ZoneInfo("America/Denver")).strftime("%Y-%m-%d %H:%M:%S %Z").strip()
-                content = content.replace("[[CURRENT_DATE_AND_TIME]]", current_datetime)
+                current_datetime = datetime.now(
+                    ZoneInfo("America/Denver")).strftime("%Y-%m-%d %H:%M:%S %Z").strip()
+                content = content.replace(
+                    "[[CURRENT_DATE_AND_TIME]]", current_datetime)
                 return content
     except FileNotFoundError:
         pass
-    except Exception as e:
+    except (OSError, UnicodeDecodeError, PermissionError) as e:
         # Log error but don't crash - fall back to default
         print(f"Warning: Error loading system_prompt.txt: {e}")
 
@@ -52,9 +54,21 @@ def get_system_prompt() -> str:
 
 
 # Boolean Configuration
-INCLUDE_USERNAMES = os.getenv("INCLUDE_USERNAMES", "True").lower() in ("true", "1")
-REPLY_TO_MENTIONS = os.getenv("REPLY_TO_MENTIONS", "True").lower() in ("true", "1")
-KEEP_UP_TO_DATE_WITH_GIT = os.getenv("KEEP_UP_TO_DATE_WITH_GIT", "False").lower() in ("true", "1")
+INCLUDE_USERNAMES = os.getenv(
+    "INCLUDE_USERNAMES",
+    "True").lower() in (
+        "true",
+    "1")
+REPLY_TO_MENTIONS = os.getenv(
+    "REPLY_TO_MENTIONS",
+    "True").lower() in (
+        "true",
+    "1")
+KEEP_UP_TO_DATE_WITH_GIT = os.getenv(
+    "KEEP_UP_TO_DATE_WITH_GIT",
+    "False").lower() in (
+        "true",
+    "1")
 QUIET_UPDATES = os.getenv("QUIET_UPDATES", "False").lower() in ("true", "1")
 
 # Numeric Configuration

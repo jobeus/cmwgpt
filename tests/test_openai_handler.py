@@ -13,7 +13,13 @@ import os
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Add src directory for new architecture
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(
+            os.path.dirname(
+                os.path.abspath(__file__))),
+        "src"))
 
 
 class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
@@ -43,7 +49,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "Hello! How can I help you today?")
 
         # Verify API call - should include system prompt at the beginning
-        expected_messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": "Hello"}]
+        expected_messages = [{"role": "system", "content": system_prompt}, {
+            "role": "user", "content": "Hello"}]
         self.mock_client.responses.create.assert_called_once_with(
             model=model, input=expected_messages, tools=[{"type": "web_search_preview"}]
         )
@@ -131,7 +138,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, b"custom_image_data")
 
         # Verify API call
-        self.mock_client.images.generate.assert_called_once_with(model=model, prompt=prompt, n=1, moderation="low")
+        self.mock_client.images.generate.assert_called_once_with(
+            model=model, prompt=prompt, n=1, moderation="low")
 
     async def test_generate_image_with_edit(self):
         """Test image editing functionality."""
@@ -158,7 +166,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, b"edited_image_data")
 
         # Verify API call
-        self.mock_client.images.edit.assert_called_once_with(model=model, image=[mock_file], prompt=prompt)
+        self.mock_client.images.edit.assert_called_once_with(
+            model=model, image=[mock_file], prompt=prompt)
 
         # Verify attachment was processed
         mock_attachment.to_file.assert_called_once()
@@ -180,7 +189,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(OpenAIServiceError) as context:
             await openai_service.generate_image(prompt, model)
 
-        self.assertEqual(str(context.exception), "Image generation failed, no image data returned.")
+        self.assertEqual(str(context.exception),
+                         "Image generation failed, no image data returned.")
 
     async def test_generate_image_no_result_error(self):
         """Test error handling when no result is returned."""
@@ -195,7 +205,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(OpenAIServiceError) as context:
             await openai_service.generate_image(prompt, model)
 
-        self.assertEqual(str(context.exception), "Image generation failed, no image data returned.")
+        self.assertEqual(str(context.exception),
+                         "Image generation failed, no image data returned.")
 
     async def test_generate_image_base64_decoding(self):
         """Test that base64 decoding works correctly."""
@@ -245,7 +256,9 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         messages = [
             {
                 "role": "user",
-                "content": '[{"type": "text", "text": "Hello"}, {"type": "image_url", "image_url": {"url": "http://example.com/image.jpg"}}]',
+                "content": (
+                    '[{"type": "text", "text": "Hello"}, {"type": "image_url", "image_url": {"url": "http://example.com/image.jpg"}}]'
+                ),
             },
             {"role": "assistant", "content": "I can see your image!"},
             {"role": "user", "content": "What do you think?"},
@@ -257,7 +270,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         # Verify it handles complex structure
         self.assertEqual(result, "Complex response")
 
-        # Expected messages should have system prompt prepended and JSON content parsed
+        # Expected messages should have system prompt prepended and JSON
+        # content parsed
         expected_messages = [
             {"role": "system", "content": system_prompt},
             {
