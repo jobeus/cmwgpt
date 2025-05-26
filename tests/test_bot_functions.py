@@ -287,8 +287,7 @@ class TestBotFunctions(unittest.TestCase):
 
         # Test message formatting
         original_message = "Hello, how are you?"
-        formatted_message = f"{
-            mock_user.display_name} says: {original_message}"
+        formatted_message = f"{mock_user.display_name} says: {original_message}"
 
         expected = "TestUser says: Hello, how are you?"
         self.assertEqual(formatted_message, expected)

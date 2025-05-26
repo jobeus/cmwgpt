@@ -53,9 +53,7 @@ class SystemCommands:
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue model command from {
-                        interaction.user} in #{
-                        interaction.channel} - queue may be full"
+                    f"Failed to queue model command from {interaction.user} in #{interaction.channel} - queue may be full"
                 )
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
@@ -81,9 +79,7 @@ class SystemCommands:
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue systemprompt set command from {
-                        interaction.user} in #{
-                        interaction.channel} - queue may be full"
+                    f"Failed to queue systemprompt set command from {interaction.user} in #{interaction.channel} - queue may be full"
                 )
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
@@ -100,9 +96,7 @@ class SystemCommands:
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue systemprompt reset command from {
-                        interaction.user} in #{
-                        interaction.channel} - queue may be full"
+                    f"Failed to queue systemprompt reset command from {interaction.user} in #{interaction.channel} - queue may be full"
                 )
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
@@ -211,9 +205,7 @@ class SystemCommands:
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue restart command from {
-                        interaction.user} in #{
-                        interaction.channel} - queue may be full"
+                    f"Failed to queue restart command from {interaction.user} in #{interaction.channel} - queue may be full"
                 )
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
@@ -228,11 +220,7 @@ class SystemCommands:
         Args:
             interaction: The Discord interaction
         """
-        logger.info(
-            f"[/restart] Manual restart requested by {
-                interaction.user} in #{
-                interaction.channel}"
-        )
+        logger.info(f"[/restart] Manual restart requested by {interaction.user} in #{interaction.channel}")
 
         # Send confirmation message
         await interaction.followup.send(

@@ -137,10 +137,7 @@ class AutoUpdateService:
             if result.returncode == 0:
                 return result.stdout.strip()
             else:
-                logger.error(
-                    f"Failed to get current commit hash: {
-                        result.stderr}"
-                )
+                logger.error(f"Failed to get current commit hash: {result.stderr}")
                 return None
         except Exception as e:
             logger.error(f"Error getting current commit hash: {e}")
@@ -194,10 +191,7 @@ class AutoUpdateService:
                     logger.debug(f"No new commits on origin/{branch}")
                     return False
             else:
-                logger.error(
-                    f"Failed to check for new commits: {
-                        result.stderr}"
-                )
+                logger.error(f"Failed to check for new commits: {result.stderr}")
                 return False
 
         except Exception as e:

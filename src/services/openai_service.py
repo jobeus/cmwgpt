@@ -143,8 +143,7 @@ class OpenAIService:
         for attempt in range(max_retries):
             try:
                 logger.debug(
-                    f"Attempting chat completion with functions for model {model} (attempt {
-                        attempt + 1}/{max_retries})"
+                    f"Attempting chat completion with functions for model {model} (attempt {attempt + 1}/{max_retries})"
                 )
 
                 # Use standard OpenAI chat completions API with function calling
@@ -209,10 +208,7 @@ class OpenAIService:
                 raise OpenAIServiceError("Authentication failed. Please check API key configuration.") from e
 
             except APIConnectionError as e:
-                logger.warning(
-                    f"Connection error on attempt {
-                        attempt + 1}: {e}"
-                )
+                logger.warning(f"Connection error on attempt {attempt + 1}: {e}")
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
                     logger.info(f"Retrying in {delay} seconds...")
@@ -225,11 +221,7 @@ class OpenAIService:
 
             except BadRequestError as e:
                 logger.error(f"Bad request error: {e}")
-                raise OpenAIServiceError(
-                    f"Invalid request: {
-                        e.message if hasattr(
-                            e, 'message') else str(e)}"
-                ) from e
+                raise OpenAIServiceError(f"Invalid request: {e.message if hasattr(e, 'message') else str(e)}") from e
 
             except APIError as e:
                 logger.error(f"OpenAI API error on attempt {attempt + 1}: {e}")
@@ -239,10 +231,7 @@ class OpenAIService:
                     await asyncio.sleep(delay)
                     continue
                 logger.error("Max retries exceeded for API error")
-                raise OpenAIServiceError(
-                    f"OpenAI API error after {max_retries} attempts: {
-                        str(e)}"
-                ) from e
+                raise OpenAIServiceError(f"OpenAI API error after {max_retries} attempts: {str(e)}") from e
 
             except OpenAIServiceError:
                 # Re-raise our own exceptions without modification
@@ -291,8 +280,7 @@ class OpenAIService:
         for attempt in range(max_retries):
             try:
                 logger.debug(
-                    f"Attempting legacy chat completion with model {model} (attempt {
-                        attempt + 1}/{max_retries})"
+                    f"Attempting legacy chat completion with model {model} (attempt {attempt + 1}/{max_retries})"
                 )
                 response = await client.responses.create(
                     model=model,
@@ -319,10 +307,7 @@ class OpenAIService:
                 raise OpenAIServiceError("Authentication failed. Please check API key configuration.") from e
 
             except APIConnectionError as e:
-                logger.warning(
-                    f"Connection error on attempt {
-                        attempt + 1}: {e}"
-                )
+                logger.warning(f"Connection error on attempt {attempt + 1}: {e}")
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
                     logger.info(f"Retrying in {delay} seconds...")
@@ -335,11 +320,7 @@ class OpenAIService:
 
             except BadRequestError as e:
                 logger.error(f"Bad request error: {e}")
-                raise OpenAIServiceError(
-                    f"Invalid request: {
-                        e.message if hasattr(
-                            e, 'message') else str(e)}"
-                ) from e
+                raise OpenAIServiceError(f"Invalid request: {e.message if hasattr(e, 'message') else str(e)}") from e
 
             except APIError as e:
                 logger.error(f"OpenAI API error on attempt {attempt + 1}: {e}")
@@ -349,10 +330,7 @@ class OpenAIService:
                     await asyncio.sleep(delay)
                     continue
                 logger.error("Max retries exceeded for API error")
-                raise OpenAIServiceError(
-                    f"OpenAI API error after {max_retries} attempts: {
-                        str(e)}"
-                ) from e
+                raise OpenAIServiceError(f"OpenAI API error after {max_retries} attempts: {str(e)}") from e
 
             except OpenAIServiceError:
                 # Re-raise our own exceptions without modification
@@ -387,10 +365,7 @@ class OpenAIService:
 
         for attempt in range(max_retries):
             try:
-                logger.debug(
-                    f"Attempting image generation with model {model} (attempt {
-                        attempt + 1}/{max_retries})"
-                )
+                logger.debug(f"Attempting image generation with model {model} (attempt {attempt + 1}/{max_retries})")
                 b64_json_data = None
                 result = None
 
@@ -440,10 +415,7 @@ class OpenAIService:
                 raise OpenAIServiceError("Authentication failed. Please check API key configuration.") from e
 
             except APIConnectionError as e:
-                logger.warning(
-                    f"Connection error on attempt {
-                        attempt + 1}: {e}"
-                )
+                logger.warning(f"Connection error on attempt {attempt + 1}: {e}")
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
                     logger.info(f"Retrying in {delay} seconds...")
@@ -458,11 +430,7 @@ class OpenAIService:
                 logger.error(f"Bad request error: {e}")
                 # BadRequestError is often due to content policy violations,
                 # don't retry
-                raise OpenAIServiceError(
-                    f"Request rejected: {
-                        e.message if hasattr(
-                            e, 'message') else str(e)}"
-                ) from e
+                raise OpenAIServiceError(f"Request rejected: {e.message if hasattr(e, 'message') else str(e)}") from e
 
             except APIError as e:
                 logger.error(f"OpenAI API error on attempt {attempt + 1}: {e}")
@@ -472,10 +440,7 @@ class OpenAIService:
                     await asyncio.sleep(delay)
                     continue
                 logger.error("Max retries exceeded for API error")
-                raise OpenAIServiceError(
-                    f"OpenAI API error after {max_retries} attempts: {
-                        str(e)}"
-                ) from e
+                raise OpenAIServiceError(f"OpenAI API error after {max_retries} attempts: {str(e)}") from e
 
             except OpenAIServiceError:
                 # Re-raise our own exceptions without modification
