@@ -14,10 +14,10 @@ jobs:
         # Fetch full history for better diff analysis
         fetch-depth: 0
 
-    - name: Set up Python 3.13
+    - name: Set up Python 3.11
       uses: actions/setup-python@v4
       with:
-        python-version: 3.13
+        python-version: 3.11
 
     - name: Install dependencies
       run: |
@@ -36,43 +36,41 @@ jobs:
         echo "✅ PR title looks good"
 
     - name: Analyze changed files
+      id: changed-files
       run: |
         # Get list of changed Python files
         CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.py$' || true)
-        
+
         if [ -z "$CHANGED_FILES" ]; then
           echo "No Python files changed in this PR"
-          echo "CHANGED_FILES=" >> $GITHUB_ENV
+          echo "files=" >> $GITHUB_OUTPUT
+          echo "has_python_files=false" >> $GITHUB_OUTPUT
         else
           echo "Changed Python files:"
           echo "$CHANGED_FILES"
-          echo "CHANGED_FILES=$CHANGED_FILES" >> $GITHUB_ENV
+          # Convert newlines to spaces for easier handling
+          FILES_SPACE_SEPARATED=$(echo "$CHANGED_FILES" | tr '\n' ' ')
+          echo "files=$FILES_SPACE_SEPARATED" >> $GITHUB_OUTPUT
+          echo "has_python_files=true" >> $GITHUB_OUTPUT
         fi
 
     - name: Lint changed files only
-      if: env.CHANGED_FILES != ''
+      if: steps.changed-files.outputs.has_python_files == 'true'
       run: |
-        echo "Running lint on changed files: $CHANGED_FILES"
-        flake8 $CHANGED_FILES --max-line-length=120 --ignore=E501,W503
+        echo "Running lint on changed files: ${{ steps.changed-files.outputs.files }}"
+        flake8 ${{ steps.changed-files.outputs.files }} --max-line-length=120 --ignore=E501,W503
 
     - name: Security scan with bandit
-      if: env.CHANGED_FILES != ''
+      if: steps.changed-files.outputs.has_python_files == 'true'
       run: |
         echo "Running security scan on changed files..."
-        bandit -r $CHANGED_FILES -f json -o bandit-report.json || true
-        
+        bandit -r ${{ steps.changed-files.outputs.files }} -f json -o bandit-report.json || true
+
         # Check if any high severity issues were found
         if [ -f bandit-report.json ]; then
-          HIGH_ISSUES=$(cat bandit-report.json | python -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    high_issues = [r for r in data.get('results', []) if r.get('issue_severity') == 'HIGH']
-    print(len(high_issues))
-except:
-    print(0)
-")
-          if [ "$HIGH_ISSUES" -gt 0 ]; then
+          # Simple check for HIGH severity issues using grep
+          HIGH_COUNT=$(grep -c '"issue_severity": "HIGH"' bandit-report.json || echo "0")
+          if [ "$HIGH_COUNT" -gt 0 ]; then
             echo "❌ High severity security issues found!"
             cat bandit-report.json
             exit 1
@@ -85,17 +83,10 @@ except:
       run: |
         echo "Checking for known security vulnerabilities in dependencies..."
         safety check --json --output safety-report.json || true
-        
+
         if [ -f safety-report.json ]; then
-          VULNS=$(cat safety-report.json | python -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    print(len(data))
-except:
-    print(0)
-")
-          if [ "$VULNS" -gt 0 ]; then
+          # Check if the file contains any vulnerabilities (simple check)
+          if [ -s safety-report.json ] && [ "$(cat safety-report.json)" != "[]" ]; then
             echo "⚠️ Security vulnerabilities found in dependencies:"
             cat safety-report.json
             echo "Please update vulnerable dependencies"
@@ -110,16 +101,16 @@ except:
         make test
 
     - name: Check test coverage for new code
-      if: env.CHANGED_FILES != ''
+      if: steps.changed-files.outputs.has_python_files == 'true'
       run: |
         echo "Analyzing test coverage for changed files..."
         pip install coverage
-        
+
         # Run tests with coverage
         python -m coverage run --source=. -m pytest tests/ || python tests/run_tests.py
-        
+
         # Generate coverage report for changed files
-        python -m coverage report --include="$CHANGED_FILES" --show-missing
+        python -m coverage report --include="${{ steps.changed-files.outputs.files }}" --show-missing
 
     - name: Validate commit messages
       run: |
@@ -127,7 +118,7 @@ except:
         COMMITS=$(git log --oneline origin/${{ github.base_ref }}..HEAD)
         echo "Commits in this PR:"
         echo "$COMMITS"
-        
+
         # Check for conventional commit format (optional)
         while IFS= read -r commit; do
           if [ -n "$commit" ]; then
@@ -149,11 +140,11 @@ except:
         ADDED=$(git diff --numstat origin/${{ github.base_ref }}...HEAD | awk '{sum += $1} END {print sum}')
         DELETED=$(git diff --numstat origin/${{ github.base_ref }}...HEAD | awk '{sum += $2} END {print sum}')
         TOTAL=$((ADDED + DELETED))
-        
+
         echo "Lines added: $ADDED"
         echo "Lines deleted: $DELETED"
         echo "Total changes: $TOTAL"
-        
+
         if [ "$TOTAL" -gt 1000 ]; then
           echo "⚠️ Large PR detected ($TOTAL lines changed)"
           echo "Consider breaking this into smaller PRs for easier review"
