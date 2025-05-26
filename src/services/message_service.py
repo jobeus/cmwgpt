@@ -94,7 +94,8 @@ class MessageService:
             except Exception as e:
                 logger.error(
                     f"Unexpected error sending message on attempt {
-                        attempt + 1}: {e}")
+                        attempt + 1}: {e}"
+                )
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
                     logger.info(f"Retrying in {delay} seconds...")
@@ -155,7 +156,8 @@ class MessageService:
                 if e.status == 429:  # Rate limited
                     logger.warning(
                         f"Rate limited on interaction followup attempt {
-                            attempt + 1}: {e}")
+                            attempt + 1}: {e}"
+                    )
                     if attempt < max_retries - 1:
                         # Extract retry-after from headers if available
                         retry_after = getattr(

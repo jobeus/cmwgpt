@@ -13,8 +13,16 @@ DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-4.1-nano")
 DEFAULT_IMAGE_MODEL = os.getenv("DEFAULT_IMAGE_MODEL", "gpt-image-1")
 
 # Boolean Configuration
-INCLUDE_USERNAMES = os.getenv("INCLUDE_USERNAMES", "True").lower() in ("true", "1")
-REPLY_TO_MENTIONS = os.getenv("REPLY_TO_MENTIONS", "True").lower() in ("true", "1")
+INCLUDE_USERNAMES = os.getenv(
+    "INCLUDE_USERNAMES",
+    "True").lower() in (
+        "true",
+    "1")
+REPLY_TO_MENTIONS = os.getenv(
+    "REPLY_TO_MENTIONS",
+    "True").lower() in (
+        "true",
+    "1")
 
 # Numeric Configuration
 INCLUDE_NUM_CHATLINES = int(os.getenv("INCLUDE_NUM_CHATLINES", 100))

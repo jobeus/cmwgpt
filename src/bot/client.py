@@ -55,8 +55,7 @@ class DiscordBotClient:
             logger.info(
                 f"Logged in as {
                     self.bot.user} (ID: {
-                    self.bot.user.id})"
-            )
+                    self.bot.user.id})")
             logger.info("Message queue service started")
 
         @self.bot.event
@@ -103,8 +102,7 @@ class DiscordBotClient:
                 logger.warning(
                     f"Failed to queue mention from {
                         message.author} in #{
-                        message.channel} - queue may be full"
-                )
+                        message.channel} - queue may be full")
                 # Optionally, you could fall back to immediate processing:
                 # await mention_handler.handle_mention(message, self.bot.user,
                 # model)
