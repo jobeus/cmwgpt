@@ -338,10 +338,10 @@ class StateService:
                         # files)
                         self._last_git_sha = state_data.get("last_git_sha")
 
-                    logger.debug(
-                        f"Successfully loaded state from: {temp_file}")
-                    sha_info = f", last git SHA: {
-                        self._last_git_sha}"if self._last_git_sha else ""
+                    logger.debug(f"Successfully loaded state from: {temp_file}")
+                    sha_info = ""
+                    if self._last_git_sha:
+                        sha_info = f", last git SHA: {self._last_git_sha}"
                     logger.info(f"""Restored {
                         len(self._conversations)} conversations, {
                         len(self._models)} models, {
