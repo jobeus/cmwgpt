@@ -229,7 +229,7 @@ class TestAnnouncementService(unittest.TestCase):
         mock_run.return_value.stdout = "abcdef1234567890\n"
 
         sha = self.service._get_current_git_sha()
-        self.assertEqual(sha, "abcdef12")
+        self.assertEqual(sha, "abcdef1")
 
     @patch('subprocess.run')
     def test_get_current_git_sha_failure(self, mock_run):

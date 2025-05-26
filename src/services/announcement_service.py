@@ -49,7 +49,7 @@ class AnnouncementService:
                 timeout=10
             )
             if result.returncode == 0:
-                return result.stdout.strip()[:8]  # Short SHA
+                return result.stdout.strip()[:7]  # Short SHA
             else:
                 logger.error(f"Failed to get git SHA: {result.stderr}")
                 return None
