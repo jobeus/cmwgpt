@@ -52,12 +52,17 @@ class QueueService:
         Args:
             max_queue_size: Maximum number of messages to queue
         """
-        self._queue: asyncio.Queue[QueuedMessage] = asyncio.Queue(maxsize=max_queue_size)
+        self._queue: asyncio.Queue[QueuedMessage] = asyncio.Queue(
+            maxsize=max_queue_size)
         self._processing_task: Optional[asyncio.Task] = None
         self._is_running = False
-        self._stats = {"messages_processed": 0, "messages_failed": 0, "queue_overflows": 0}
+        self._stats = {
+            "messages_processed": 0,
+            "messages_failed": 0,
+            "queue_overflows": 0}
 
-        logger.info(f"QueueService initialized with max queue size: {max_queue_size}")
+        logger.info(
+            f"QueueService initialized with max queue size: {max_queue_size}")
 
     async def start(self) -> None:
         """Start the message processing loop."""
@@ -96,7 +101,8 @@ class QueueService:
             try:
                 await asyncio.wait_for(self._processing_task, timeout=10.0)
             except asyncio.TimeoutError:
-                logger.warning("Processing task did not complete within timeout, cancelling")
+                logger.warning(
+                    "Processing task did not complete within timeout, cancelling")
                 self._processing_task.cancel()
                 try:
                     await self._processing_task
@@ -156,9 +162,12 @@ class QueueService:
             )
             return False
 
-    async def queue_command(
-        self, interaction: discord.Interaction, handler: Callable[..., Awaitable[None]], *args, **kwargs
-    ) -> bool:
+    async def queue_command(self,
+                            interaction: discord.Interaction,
+                            handler: Callable[...,
+                                              Awaitable[None]],
+                            *args,
+                            **kwargs) -> bool:
         """
         Queue a command for processing.
 
@@ -226,7 +235,9 @@ class QueueService:
                 logger.info("Message processing loop cancelled")
                 break
             except Exception as e:
-                logger.error(f"Error in message processing loop: {e}", exc_info=True)
+                logger.error(
+                    f"Error in message processing loop: {e}",
+                    exc_info=True)
                 self._stats["messages_failed"] += 1
 
         logger.info("Message processing loop ended")

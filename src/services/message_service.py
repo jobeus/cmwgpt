@@ -17,7 +17,10 @@ class MessageService:
 
     DISCORD_MESSAGE_LIMIT = 2000
 
-    async def send_channel_reply(self, channel: discord.TextChannel, reply_text: str) -> None:
+    async def send_channel_reply(
+            self,
+            channel: discord.TextChannel,
+            reply_text: str) -> None:
         """
         Sends a reply to a channel, handling potential paste upload for long messages.
 
@@ -48,8 +51,10 @@ class MessageService:
             await channel.send(error_reply)
 
     async def send_interaction_followup(
-        self, interaction: discord.Interaction, base_content: str, reply_text: str
-    ) -> None:
+            self,
+            interaction: discord.Interaction,
+            base_content: str,
+            reply_text: str) -> None:
         """
         Sends a followup to an interaction, handling potential paste upload for long replies.
 
@@ -69,16 +74,14 @@ class MessageService:
         try:
             logger.info(
                 "Reply for interaction followup exceeded %d characters with base_content, "
-                "attempting to upload to paste service",
-                self.DISCORD_MESSAGE_LIMIT,
-            )
+                "attempting to upload to paste service", self.DISCORD_MESSAGE_LIMIT, )
             pasted_url = paste_service.upload_markdown(reply_text)
             final_content = (
-                f"{base_content}\n\n" f"My detailed response was too long, so I've uploaded it here: {pasted_url}"
-            )
+                f"{base_content}\n\n" f"My detailed response was too long, so I've uploaded it here: {pasted_url}")
             await interaction.followup.send(content=final_content, suppress_embeds=True)
         except Exception as e:
-            logger.error(f"Error uploading to paste service for interaction: {e}")
+            logger.error(
+                f"Error uploading to paste service for interaction: {e}")
             error_content = (
                 f"{base_content}\n\n"
                 f"The content of my response was over {self.DISCORD_MESSAGE_LIMIT} characters, "
@@ -86,7 +89,10 @@ class MessageService:
             )
             await interaction.followup.send(content=error_content)
 
-    def format_attachment_message(self, attachment: discord.Attachment, message: str) -> str:
+    def format_attachment_message(
+            self,
+            attachment: discord.Attachment,
+            message: str) -> str:
         """
         Format a message with an attachment URL.
 

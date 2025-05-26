@@ -8,16 +8,17 @@ import discord
 from discord.ext import commands
 
 from src.config import DISCORD_BOT_TOKEN, DEFAULT_MODEL, REPLY_TO_MENTIONS
-from src.bot_state import state_service
 from src.bot.handlers.mention import mention_handler
 from src.bot.commands.chat import ChatCommands
 from src.bot.commands.image import ImageCommands
 from src.bot.commands.system import SystemCommands
 from src.services.queue_service import queue_service
-
+from src.services.state_service import state_service
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
 logger = logging.getLogger("discord_bot")
 
 
@@ -60,7 +61,8 @@ class DiscordBotClient:
 
         @self.bot.event
         async def on_disconnect():
-            logger.warning("Disconnected from Discord, attempting to reconnect")
+            logger.warning(
+                "Disconnected from Discord, attempting to reconnect")
 
         @self.bot.event
         async def on_message(message: discord.Message):
@@ -85,12 +87,14 @@ class DiscordBotClient:
             message: The Discord message to handle
         """
         # Ignore bots and DMs
-        if message.author.bot or not isinstance(message.channel, discord.TextChannel):
+        if message.author.bot or not isinstance(
+                message.channel, discord.TextChannel):
             return
 
         # Handle bot mentions
         if self.bot.user and self.bot.user in message.mentions and REPLY_TO_MENTIONS:
-            model = state_service.get_model(message.channel.id) or DEFAULT_MODEL
+            model = state_service.get_model(
+                message.channel.id) or DEFAULT_MODEL
 
             # Queue the mention for FIFO processing
             queued = await mention_handler.queue_mention(message, self.bot.user, model)

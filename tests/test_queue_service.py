@@ -104,9 +104,11 @@ class TestQueueService(unittest.TestCase):
                 mock_message = MagicMock()
                 mock_message.content = f"Message {i}"
                 mock_message.author = MagicMock()
-                mock_message.author.__str__ = MagicMock(return_value=f"User{i}")
+                mock_message.author.__str__ = MagicMock(
+                    return_value=f"User{i}")
                 mock_message.channel = MagicMock()
-                mock_message.channel.__str__ = MagicMock(return_value=f"Channel{i}")
+                mock_message.channel.__str__ = MagicMock(
+                    return_value=f"Channel{i}")
                 messages.append(mock_message)
 
             mock_bot_user = MagicMock()
@@ -124,7 +126,9 @@ class TestQueueService(unittest.TestCase):
 
             # Verify FIFO order
             self.assertEqual(len(processed_messages), 3)
-            self.assertEqual(processed_messages, ["Message 0", "Message 1", "Message 2"])
+            self.assertEqual(
+                processed_messages, [
+                    "Message 0", "Message 1", "Message 2"])
 
         self.loop.run_until_complete(run_test())
 
@@ -150,9 +154,11 @@ class TestQueueService(unittest.TestCase):
                 mock_message = MagicMock()
                 mock_message.content = f"Message {i}"
                 mock_message.author = MagicMock()
-                mock_message.author.__str__ = MagicMock(return_value=f"User{i}")
+                mock_message.author.__str__ = MagicMock(
+                    return_value=f"User{i}")
                 mock_message.channel = MagicMock()
-                mock_message.channel.__str__ = MagicMock(return_value=f"Channel{i}")
+                mock_message.channel.__str__ = MagicMock(
+                    return_value=f"Channel{i}")
 
                 result = await self.queue_service.queue_mention(mock_message, mock_bot_user, f"model-{i}", slow_handler)
                 results.append(result)
@@ -192,7 +198,8 @@ class TestQueueService(unittest.TestCase):
             mock_message.author = MagicMock()
             mock_message.author.__str__ = MagicMock(return_value="TestUser")
             mock_message.channel = MagicMock()
-            mock_message.channel.__str__ = MagicMock(return_value="TestChannel")
+            mock_message.channel.__str__ = MagicMock(
+                return_value="TestChannel")
             mock_bot_user = MagicMock()
 
             # Queue a message that will fail
@@ -234,9 +241,11 @@ class TestQueueService(unittest.TestCase):
                 mock_message = MagicMock()
                 mock_message.content = f"Concurrent message {i}"
                 mock_message.author = MagicMock()
-                mock_message.author.__str__ = MagicMock(return_value=f"User{i}")
+                mock_message.author.__str__ = MagicMock(
+                    return_value=f"User{i}")
                 mock_message.channel = MagicMock()
-                mock_message.channel.__str__ = MagicMock(return_value=f"Channel{i}")
+                mock_message.channel.__str__ = MagicMock(
+                    return_value=f"Channel{i}")
 
                 return await self.queue_service.queue_mention(
                     mock_message, mock_bot_user, f"model-{i}", tracking_handler
@@ -282,9 +291,11 @@ class TestQueueService(unittest.TestCase):
             # Queue successful message
             mock_message1 = MagicMock()
             mock_message1.author = MagicMock()
-            mock_message1.author.__str__ = MagicMock(return_value="SuccessUser")
+            mock_message1.author.__str__ = MagicMock(
+                return_value="SuccessUser")
             mock_message1.channel = MagicMock()
-            mock_message1.channel.__str__ = MagicMock(return_value="SuccessChannel")
+            mock_message1.channel.__str__ = MagicMock(
+                return_value="SuccessChannel")
             await self.queue_service.queue_mention(mock_message1, mock_bot_user, "model1", success_handler)
 
             # Queue failing message
@@ -292,7 +303,8 @@ class TestQueueService(unittest.TestCase):
             mock_message2.author = MagicMock()
             mock_message2.author.__str__ = MagicMock(return_value="FailUser")
             mock_message2.channel = MagicMock()
-            mock_message2.channel.__str__ = MagicMock(return_value="FailChannel")
+            mock_message2.channel.__str__ = MagicMock(
+                return_value="FailChannel")
             await self.queue_service.queue_mention(mock_message2, mock_bot_user, "model2", fail_handler)
 
             # Wait for processing
@@ -321,7 +333,8 @@ class TestQueueService(unittest.TestCase):
             processed_commands = []
 
             async def mock_command_handler(interaction, *args, **kwargs):
-                processed_commands.append((interaction.user.name, args, kwargs))
+                processed_commands.append(
+                    (interaction.user.name, args, kwargs))
                 await asyncio.sleep(0.01)
 
             # Create mock interaction
@@ -330,7 +343,8 @@ class TestQueueService(unittest.TestCase):
             mock_interaction.user.name = "TestUser"
             mock_interaction.user.__str__ = MagicMock(return_value="TestUser")
             mock_interaction.channel = MagicMock()
-            mock_interaction.channel.__str__ = MagicMock(return_value="TestChannel")
+            mock_interaction.channel.__str__ = MagicMock(
+                return_value="TestChannel")
 
             # Queue a command
             result = await self.queue_service.queue_command(
@@ -386,7 +400,8 @@ class TestQueueService(unittest.TestCase):
             mock_interaction.user = MagicMock()
             mock_interaction.user.__str__ = MagicMock(return_value="User2")
             mock_interaction.channel = MagicMock()
-            mock_interaction.channel.__str__ = MagicMock(return_value="Channel2")
+            mock_interaction.channel.__str__ = MagicMock(
+                return_value="Channel2")
 
             mock_bot_user = MagicMock()
 

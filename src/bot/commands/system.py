@@ -10,9 +10,9 @@ from discord import app_commands
 from discord.app_commands import Choice
 
 from src.config import SYSTEM_PROMPT, DEFAULT_MODEL
-from src.bot_state import state_service
 from src.utils.discord_helper import get_mention_legend
 from src.services.queue_service import queue_service
+from src.services.state_service import state_service
 
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,10 @@ class SystemCommands:
             ]
         )
         async def model_command(interaction: discord.Interaction, model: Optional[str] = None):
+            # Immediately defer the interaction to avoid Discord's 3-second
+            # timeout
+            await interaction.response.defer(ephemeral=False, thinking=True)
+
             # Queue the command for FIFO processing
             queued = await queue_service.queue_command(interaction, self._handle_model_command, model)
 
@@ -51,7 +55,7 @@ class SystemCommands:
                         interaction.user} in #{
                         interaction.channel} - queue may be full"
                 )
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
 
@@ -66,6 +70,10 @@ class SystemCommands:
         @systemprompt_group.command(name="set", description="View or set the system prompt for this channel")
         @app_commands.describe(prompt_text="The new system prompt. Omit to view current prompt.")
         async def systemprompt_set(interaction: discord.Interaction, prompt_text: Optional[str] = None):
+            # Immediately defer the interaction to avoid Discord's 3-second
+            # timeout
+            await interaction.response.defer(ephemeral=True, thinking=True)
+
             # Queue the command for FIFO processing
             queued = await queue_service.queue_command(interaction, self._handle_systemprompt_set, prompt_text)
 
@@ -75,12 +83,16 @@ class SystemCommands:
                         interaction.user} in #{
                         interaction.channel} - queue may be full"
                 )
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
 
         @systemprompt_group.command(name="reset", description="Reset the system prompt for this channel to the default")
         async def systemprompt_reset(interaction: discord.Interaction):
+            # Immediately defer the interaction to avoid Discord's 3-second
+            # timeout
+            await interaction.response.defer(ephemeral=True, thinking=True)
+
             # Queue the command for FIFO processing
             queued = await queue_service.queue_command(interaction, self._handle_systemprompt_reset)
 
@@ -90,7 +102,7 @@ class SystemCommands:
                         interaction.user} in #{
                         interaction.channel} - queue may be full"
                 )
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
 
@@ -105,7 +117,7 @@ class SystemCommands:
             model: Optional model name to set
         """
         channel_id = interaction.channel.id
-        await interaction.response.defer(ephemeral=False, thinking=True)
+        # Interaction already deferred in slash command handler
 
         if model:
             state_service.set_model(channel_id, model)
@@ -126,7 +138,7 @@ class SystemCommands:
             prompt_text: Optional new system prompt text
         """
         channel_id = interaction.channel.id
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        # Interaction already deferred in slash command handler
         legend_section = await get_mention_legend(interaction.channel)
 
         if prompt_text:
@@ -167,7 +179,7 @@ class SystemCommands:
             interaction: The Discord interaction
         """
         channel_id = interaction.channel.id
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        # Interaction already deferred in slash command handler
 
         # Remove custom prompt
         state_service.clear_system_prompt(channel_id)

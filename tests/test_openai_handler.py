@@ -13,7 +13,13 @@ import os
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Add src directory for new architecture
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(
+            os.path.dirname(
+                os.path.abspath(__file__))),
+        "src"))
 
 
 class TestOpenAIHandler(unittest.TestCase):
@@ -33,7 +39,8 @@ class TestOpenAIHandler(unittest.TestCase):
 
         # Test parameters
         model = "gpt-4.1-nano"
-        messages = [{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": "Hello"}]
+        messages = [{"role": "system", "content": "You are a helpful assistant."}, {
+            "role": "user", "content": "Hello"}]
 
         # Call function
         result = openai_service.get_chat_completion(model, messages)
@@ -42,7 +49,8 @@ class TestOpenAIHandler(unittest.TestCase):
         self.assertEqual(result, "Hello! How can I help you today?")
 
         # Verify API call
-        self.mock_client.responses.create.assert_called_once_with(model=model, input=messages)
+        self.mock_client.responses.create.assert_called_once_with(
+            model=model, input=messages)
 
     def test_get_chat_completion_different_models(self):
         """Test chat completion with different models."""
@@ -127,7 +135,8 @@ class TestOpenAIHandler(unittest.TestCase):
         self.assertEqual(result, b"custom_image_data")
 
         # Verify API call
-        self.mock_client.images.generate.assert_called_once_with(model=model, prompt=prompt, n=1)
+        self.mock_client.images.generate.assert_called_once_with(
+            model=model, prompt=prompt, n=1)
 
     def test_generate_image_with_edit(self):
         """Test image editing functionality."""
@@ -148,13 +157,15 @@ class TestOpenAIHandler(unittest.TestCase):
         model = "gpt-image-1"
 
         # Call function
-        result = openai_service.generate_image(prompt, model, edit_image=mock_attachment)
+        result = openai_service.generate_image(
+            prompt, model, edit_image=mock_attachment)
 
         # Verify result
         self.assertEqual(result, b"edited_image_data")
 
         # Verify API call
-        self.mock_client.images.edit.assert_called_once_with(model=model, image=[mock_file], prompt=prompt)
+        self.mock_client.images.edit.assert_called_once_with(
+            model=model, image=[mock_file], prompt=prompt)
 
         # Verify attachment was processed
         mock_attachment.to_file.assert_called_once()
@@ -176,7 +187,8 @@ class TestOpenAIHandler(unittest.TestCase):
         with self.assertRaises(ValueError) as context:
             openai_service.generate_image(prompt, model)
 
-        self.assertEqual(str(context.exception), "Image generation failed, no b64_json data returned.")
+        self.assertEqual(str(context.exception),
+                         "Image generation failed, no b64_json data returned.")
 
     def test_generate_image_no_result_error(self):
         """Test error handling when no result is returned."""
@@ -191,7 +203,8 @@ class TestOpenAIHandler(unittest.TestCase):
         with self.assertRaises(ValueError) as context:
             openai_service.generate_image(prompt, model)
 
-        self.assertEqual(str(context.exception), "Image generation failed, no b64_json data returned.")
+        self.assertEqual(str(context.exception),
+                         "Image generation failed, no b64_json data returned.")
 
     def test_generate_image_base64_decoding(self):
         """Test that base64 decoding works correctly."""
@@ -251,7 +264,8 @@ class TestOpenAIHandler(unittest.TestCase):
 
         # Verify it handles complex structure
         self.assertEqual(result, "Complex response")
-        self.mock_client.responses.create.assert_called_once_with(model="gpt-4.1-mini", input=messages)
+        self.mock_client.responses.create.assert_called_once_with(
+            model="gpt-4.1-mini", input=messages)
 
 
 if __name__ == "__main__":

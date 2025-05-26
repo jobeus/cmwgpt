@@ -36,7 +36,8 @@ class OpenAIService:
                 self._client = OpenAI(api_key=OPENAI_API_KEY)
         return self._client
 
-    def get_chat_completion(self, model: str, messages: List[Dict[str, Any]]) -> str:
+    def get_chat_completion(
+            self, model: str, messages: List[Dict[str, Any]]) -> str:
         """
         Gets a chat completion from the OpenAI API.
 
@@ -51,7 +52,11 @@ class OpenAIService:
         response = client.responses.create(model=model, input=messages)
         return response.output_text
 
-    def generate_image(self, prompt: str, model: str, edit_image: Optional[Attachment] = None) -> bytes:
+    def generate_image(
+            self,
+            prompt: str,
+            model: str,
+            edit_image: Optional[Attachment] = None) -> bytes:
         """
         Generates an image using the OpenAI API.
 
@@ -71,7 +76,8 @@ class OpenAIService:
         result = None
 
         if model == "dall-e-2" or model == "dall-e-3":
-            result = client.images.generate(model=model, prompt=prompt, n=1, response_format="b64_json")
+            result = client.images.generate(
+                model=model, prompt=prompt, n=1, response_format="b64_json")
         else:  # assume gpt-image-1 or similar custom model
             if edit_image:
                 file_obj = edit_image.to_file()
@@ -92,7 +98,8 @@ class OpenAIService:
             b64_json_data = result.data[0].b64_json
 
         if not b64_json_data:
-            raise ValueError("Image generation failed, no b64_json data returned.")
+            raise ValueError(
+                "Image generation failed, no b64_json data returned.")
 
         img_bytes = base64.b64decode(b64_json_data)
         return img_bytes

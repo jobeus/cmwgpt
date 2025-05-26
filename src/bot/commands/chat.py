@@ -10,11 +10,11 @@ import discord
 from discord import app_commands
 
 from src.config import SYSTEM_PROMPT, DEFAULT_MODEL, INCLUDE_USERNAMES
-from src.bot_state import state_service
 from src.utils.discord_helper import get_mention_legend
 from src.services.openai_service import openai_service
 from src.services.message_service import message_service
 from src.services.queue_service import queue_service
+from src.services.state_service import state_service
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,10 @@ class ChatCommands:
         @app_commands.command(name="chat", description="Send a message to the chatbot")
         @app_commands.describe(message="Your message", attachment="Optional image to attach to the prompt")
         async def chat(interaction: discord.Interaction, message: str, attachment: Optional[discord.Attachment] = None):
+            # Immediately defer the interaction to avoid Discord's 3-second
+            # timeout
+            await interaction.response.defer(ephemeral=False, thinking=True)
+
             # Queue the command for FIFO processing
             queued = await queue_service.queue_command(interaction, self._handle_chat_command, message, attachment)
 
@@ -46,7 +50,7 @@ class ChatCommands:
                         interaction.user} in #{
                         interaction.channel} - queue may be full"
                 )
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
 
@@ -57,6 +61,10 @@ class ChatCommands:
 
         @app_commands.command(name="reset", description="Reset the conversation history")
         async def reset(interaction: discord.Interaction):
+            # Immediately defer the interaction to avoid Discord's 3-second
+            # timeout
+            await interaction.response.defer(ephemeral=False, thinking=True)
+
             # Queue the command for FIFO processing
             queued = await queue_service.queue_command(interaction, self._handle_reset_command)
 
@@ -66,7 +74,7 @@ class ChatCommands:
                         interaction.user} in #{
                         interaction.channel} - queue may be full"
                 )
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
 
@@ -118,10 +126,8 @@ class ChatCommands:
         logger.info(f"[/chat] Channel {channel_id} User: {message}")
         state_service.add_message_to_conversation(channel_id, {"role": "user", "content": json.dumps(content_payload)})
 
-        # Acknowledge the interaction
-        await interaction.response.defer(ephemeral=False, thinking=True)
-
-        # Get response from OpenAI
+        # Get response from OpenAI (interaction already deferred in slash
+        # command handler)
         async with interaction.channel.typing():
             current_conversation = state_service.get_conversation(channel_id)
             current_model = state_service.get_model(channel_id) or DEFAULT_MODEL
@@ -157,5 +163,5 @@ class ChatCommands:
         state_service.set_model(channel_id, DEFAULT_MODEL)
 
         logger.info(f"[/reset] Channel {channel_id}: conversation reset")
-        await interaction.response.defer(ephemeral=False, thinking=True)
+        # Interaction already deferred in slash command handler
         await interaction.followup.send("Conversation reset.", ephemeral=True)

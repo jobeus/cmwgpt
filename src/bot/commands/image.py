@@ -9,6 +9,7 @@ from typing import Optional
 import discord
 from discord import app_commands
 from discord.app_commands import Choice
+from discord.ext import commands
 from openai import BadRequestError
 
 from src.config import DEFAULT_IMAGE_MODEL
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 class ImageCommands:
     """Handles image-related Discord commands."""
 
-    def __init__(self, bot: discord.ext.commands.Bot):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     def setup_commands(self) -> None:
@@ -52,6 +53,10 @@ class ImageCommands:
             edit_image: Optional[discord.Attachment] = None,
             model: str = DEFAULT_IMAGE_MODEL,
         ):
+            # Immediately defer the interaction to avoid Discord's 3-second
+            # timeout
+            await interaction.response.defer(ephemeral=False, thinking=True)
+
             # Queue the command for FIFO processing
             queued = await queue_service.queue_command(
                 interaction, self._handle_draw_command, prompt, edit_image, model
@@ -63,7 +68,7 @@ class ImageCommands:
                         interaction.user} in #{
                         interaction.channel} - queue may be full"
                 )
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
 
@@ -88,9 +93,7 @@ class ImageCommands:
         channel_id = interaction.channel.id
         logger.info(f"[/draw] Channel {channel_id} Prompt: {prompt} Model: {model} Edit? {bool(edit_image)}")
 
-        # Acknowledge the interaction and show typing
-        await interaction.response.defer(ephemeral=False, thinking=True)
-
+        # Interaction already deferred in slash command handler
         async with interaction.channel.typing():
             try:
                 if edit_image:
