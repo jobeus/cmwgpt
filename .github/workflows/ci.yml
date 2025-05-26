@@ -2,16 +2,16 @@ name: Continuous Integration
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.9, 3.10, 3.11, 3.12]
+        python-version: [3.13]
 
     steps:
     - uses: actions/checkout@v4
@@ -71,10 +71,10 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python 3.11
+    - name: Set up Python 3.13
       uses: actions/setup-python@v4
       with:
-        python-version: 3.11
+        python-version: 3.13
 
     - name: Install linting dependencies
       run: |

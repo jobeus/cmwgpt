@@ -50,8 +50,8 @@ def run_all_tests():
             print(f"  - {test}")
 
     if result.testsRun > 0:
-        success_rate = (result.testsRun - len(result.failures) -
-                        len(result.errors)) / result.testsRun * 100
+        success_rate = (result.testsRun - len(result.failures)
+                        - len(result.errors)) / result.testsRun * 100
     else:
         success_rate = 0
     print(f"\nSuccess rate: {success_rate:.1f}%")
