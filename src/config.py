@@ -60,5 +60,8 @@ QUIET_UPDATES = os.getenv("QUIET_UPDATES", "False").lower() in ("true", "1")
 # Numeric Configuration
 INCLUDE_NUM_CHATLINES = int(os.getenv("INCLUDE_NUM_CHATLINES", 100))
 
+# User Context Configuration
+USER_CONTEXT_URL = os.getenv("USER_CONTEXT_URL", "")
+
 # Check if we're in a testing environment
 IS_TESTING = os.getenv("CI") == "true" or os.getenv("TESTING") == "true"

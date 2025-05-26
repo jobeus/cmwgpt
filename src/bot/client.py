@@ -282,7 +282,9 @@ class DiscordBotClient:
 
             # Never clean up temporary files during shutdown - they should only be
             # cleaned up after successful loading on startup
-            logger.debug("Skipping temp file cleanup during shutdown - files will be cleaned up on next startup after loading")
+            logger.debug(
+                "Skipping temp file cleanup during shutdown - files will be cleaned up on next startup after loading"
+            )
 
             logger.info("Bot shutdown.")
 
