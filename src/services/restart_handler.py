@@ -12,6 +12,7 @@ import asyncio
 import logging
 import subprocess
 import sys
+from typing import Optional
 
 from src.services.state_service import state_service
 
@@ -49,7 +50,16 @@ class RestartHandler:
         print("🔄 Restarting bot...")
 
         try:
-            # Step 1: Save current state
+            # Step 1: Save current git SHA to state
+            print("📝 Recording current git SHA...")
+            current_sha = self._get_current_git_sha()
+            if current_sha:
+                state_service.set_last_git_sha(current_sha)
+                print(f"✅ Recorded git SHA: {current_sha}")
+            else:
+                print("⚠️  Could not determine git SHA")
+
+            # Step 2: Save current state
             print("💾 Saving bot state...")
             temp_file = state_service.save_state_to_temp_file()
             if temp_file:
@@ -69,17 +79,17 @@ class RestartHandler:
             else:
                 print("⚠️  Failed to save state, continuing anyway")
 
-            # Step 2: Perform git pull
+            # Step 3: Perform git pull
             print("📥 Updating code...")
             if self._perform_git_pull():
                 print("✅ Code updated")
             else:
                 print("⚠️  Git pull failed, continuing anyway")
 
-            # Step 3: Give a moment for any final operations
+            # Step 4: Give a moment for any final operations
             await asyncio.sleep(0.5)
 
-            # Step 4: Exit with restart code
+            # Step 5: Exit with restart code
             print("🚀 Restarting...")
             # Use exit code 42 to signal that this is an intentional restart
             # The process manager (systemd, pm2, etc.) should restart the bot
@@ -156,6 +166,29 @@ class RestartHandler:
     def should_skip_cleanup(self) -> bool:
         """Check if cleanup should be skipped (during restart)."""
         return self._skip_cleanup
+
+    def _get_current_git_sha(self) -> Optional[str]:
+        """
+        Get the current git commit SHA.
+
+        Returns:
+            Git commit SHA or None if unable to determine
+        """
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+            else:
+                logger.error(f"Failed to get git SHA: {result.stderr}")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting git SHA: {e}")
+            return None
 
 
 # Global restart handler instance

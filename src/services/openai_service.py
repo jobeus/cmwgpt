@@ -101,7 +101,11 @@ class OpenAIService:
                 logger.debug(
                     f"Attempting chat completion with model {model} (attempt {
                         attempt + 1}/{max_retries})")
-                response = await client.responses.create(model=model, input=api_messages)
+                response = await client.responses.create(
+                    model=model, 
+                    input=api_messages,
+                    tools=[{"type": "web_search_preview"}],
+                )
                 logger.debug("Chat completion successful")
                 return response.output_text
 

@@ -15,6 +15,7 @@ from discord.ext import commands
 
 from src.config import QUIET_UPDATES
 from src.services.state_service import state_service
+from src.utils.pasters import upload_to_pasters
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class AnnouncementService:
         Get the current git commit SHA.
 
         Returns:
-            Git commit SHA or None if unable to determine
+            Full git commit SHA or None if unable to determine
         """
         try:
             result = subprocess.run(
@@ -50,7 +51,7 @@ class AnnouncementService:
                 timeout=10
             )
             if result.returncode == 0:
-                return result.stdout.strip()[:7]  # Short SHA
+                return result.stdout.strip()  # Full SHA
             else:
                 logger.error(f"Failed to get git SHA: {result.stderr}")
                 return None
@@ -58,62 +59,36 @@ class AnnouncementService:
             logger.error(f"Error getting git SHA: {e}")
             return None
 
-    def _get_previous_git_sha(self) -> Optional[str]:
+    def _get_complete_changelog(self, from_sha: str, to_sha: str) -> Optional[str]:
         """
-        Get the previous git commit SHA (one commit before current).
-
-        Returns:
-            Previous git commit SHA or None if unable to determine
-        """
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD~1"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            if result.returncode == 0:
-                return result.stdout.strip()[:7]  # Short SHA
-            else:
-                logger.debug(f"Could not get previous SHA: {result.stderr}")
-                return None
-        except Exception as e:
-            logger.debug(f"Error getting previous git SHA: {e}")
-            return None
-
-    def _get_commit_summary(self, sha: str) -> Optional[str]:
-        """
-        Get a brief summary of commits since the given SHA.
+        Get complete changelog between two git SHAs.
 
         Args:
-            sha: Git commit SHA to compare from
+            from_sha: Starting git commit SHA
+            to_sha: Ending git commit SHA
 
         Returns:
-            Brief commit summary or None if unable to determine
+            Complete changelog or None if unable to determine
         """
         try:
             result = subprocess.run(
-                ["git", "log", f"{sha}..HEAD", "--oneline", "--max-count=3"],
+                ["git", "log", f"{from_sha}..{to_sha}", "--oneline"],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=30
             )
             if result.returncode == 0 and result.stdout.strip():
                 lines = result.stdout.strip().split('\n')
-                if len(lines) == 1:
-                    return f"• {lines[0]}"
-                elif len(lines) <= 3:
-                    return "\n".join(f"• {line}" for line in lines)
-                else:
-                    return "\n".join(f"• {line}" for line in lines[:2]) + f"\n• ... and {len(lines) - 2} more commits"
+                return "\n".join(f"• {line}" for line in lines)
             return None
         except Exception as e:
-            logger.debug(f"Error getting commit summary: {e}")
+            logger.debug(f"Error getting changelog: {e}")
             return None
 
     async def announce_update(self, was_manual: bool = False) -> None:
         """
         Announce bot update to all active channels.
+        Only announces if the git SHA has actually changed since last shutdown.
 
         Args:
             was_manual: Whether this was a manual restart
@@ -133,31 +108,53 @@ class AnnouncementService:
             logger.warning("Could not determine git SHA, skipping update announcement")
             return
 
+        # Get previous SHA from state
+        previous_sha = state_service.get_last_git_sha()
+
+        # If we have a previous SHA and it's the same as current, skip announcement
+        if previous_sha and previous_sha == current_sha:
+            logger.info(f"Git SHA unchanged ({current_sha[:7]}), skipping duplicate update announcement")
+            return
+
         # Get active channels
         active_channels = state_service.get_active_channels()
         if not active_channels:
             logger.info("No active channels to announce to")
             return
 
-        # Get previous SHA and commit summary for context
-        previous_sha = self._get_previous_git_sha()
-        commit_summary = None
+        # Get complete changelog if we have a previous SHA
+        changelog = None
         if previous_sha:
-            commit_summary = self._get_commit_summary(previous_sha)
+            changelog = self._get_complete_changelog(previous_sha, current_sha)
 
         # Prepare announcement message
         restart_type = "manual restart" if was_manual else "auto-update"
-        base_message = f"🤖 **Bot Updated** ({restart_type})\n📝 Now running commit `{current_sha}`"
+        current_sha_short = current_sha[:7]
+        base_message = f"🤖 **Bot Updated** ({restart_type})\n📝 Now running commit `{current_sha_short}`"
 
-        if commit_summary:
-            message = f"{base_message}\n\n**Recent changes:**\n{commit_summary}"
+        if changelog:
+            # Check if message would be too long for Discord
+            full_message = f"{base_message}\n\n**Changes:**\n{changelog}\n\n*Ready to assist! Use `/chat` or mention me to continue.*"
+
+            if len(full_message) <= 2000:
+                message = full_message
+            else:
+                # Message too long, upload to paste service
+                try:
+                    paste_url = upload_to_pasters(changelog)
+                    message = f"{base_message}\n\n**Changes:** [View complete changelog]({paste_url})\n\n*Ready to assist! Use `/chat` or mention me to continue.*"
+                except Exception as e:
+                    logger.error(f"Failed to upload changelog to paste service: {e}")
+                    # Fallback to truncated message
+                    lines = changelog.split('\n')
+                    truncated_changelog = '\n'.join(lines[:5])
+                    if len(lines) > 5:
+                        truncated_changelog += f"\n• ... and {len(lines) - 5} more commits"
+                    message = f"{base_message}\n\n**Recent changes:**\n{truncated_changelog}\n\n*Ready to assist! Use `/chat` or mention me to continue.*"
         else:
-            message = base_message
+            message = f"{base_message}\n\n*Ready to assist! Use `/chat` or mention me to continue.*"
 
-        # Add footer
-        message += "\n\n*Ready to assist! Use `/chat` or mention me to continue.*"
-
-        logger.info(f"Announcing update to {len(active_channels)} channels: {current_sha}")
+        logger.info(f"Announcing update to {len(active_channels)} channels: {current_sha_short}")
 
         # Send announcements to all active channels
         successful_announcements = 0

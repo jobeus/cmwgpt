@@ -30,12 +30,14 @@ class StateService:
         self._models: Dict[int, str] = {}
         self._channel_system_prompts: Dict[int, str] = {}
         self._active_channels: set[int] = set()  # Track channels where bot has been used
+        self._last_git_sha: Optional[str] = None  # Track last known git SHA
 
         # Thread locks for each data structure
         self._conversations_lock = threading.RLock()
         self._models_lock = threading.RLock()
         self._prompts_lock = threading.RLock()
         self._active_channels_lock = threading.RLock()
+        self._git_sha_lock = threading.RLock()
 
         logger.info("StateService initialized with thread-safe storage")
 
@@ -244,6 +246,28 @@ class StateService:
             self._active_channels.clear()
             logger.info("Cleared active channels list")
 
+    # Git SHA management
+    def get_last_git_sha(self) -> Optional[str]:
+        """
+        Get the last known git SHA from the previous session.
+
+        Returns:
+            Last known git SHA or None if not available
+        """
+        with self._git_sha_lock:
+            return self._last_git_sha
+
+    def set_last_git_sha(self, sha: str) -> None:
+        """
+        Set the last known git SHA.
+
+        Args:
+            sha: Git commit SHA
+        """
+        with self._git_sha_lock:
+            self._last_git_sha = sha
+            logger.debug(f"Updated last git SHA to: {sha}")
+
     def save_state_to_temp_file(self) -> Optional[str]:
         """
         Save current state to a secure temporary file.
@@ -258,12 +282,13 @@ class StateService:
             temp_filename = f"/tmp/cmwgpt_state_backup_{timestamp}_{pid}.json"
 
             # Gather all state data under locks
-            with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock:
+            with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock, self._git_sha_lock:
                 state_data = {
                     "conversations": self._conversations.copy(),
                     "models": self._models.copy(),
                     "system_prompts": self._channel_system_prompts.copy(),
                     "active_channels": list(self._active_channels),
+                    "last_git_sha": self._last_git_sha,
                     "timestamp": timestamp,
                     "pid": pid,
                 }
@@ -319,7 +344,7 @@ class StateService:
                         continue
 
                     # Load the state under locks
-                    with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock:
+                    with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock, self._git_sha_lock:
                         # Convert string keys back to integers for channel IDs
                         self._conversations = {
                             int(k): v for k, v in state_data["conversations"].items()
@@ -337,11 +362,15 @@ class StateService:
                             # If not present, derive from existing conversations and models
                             self._active_channels = set(self._conversations.keys()) | set(self._models.keys())
 
+                        # Load last git SHA (may not exist in older state files)
+                        self._last_git_sha = state_data.get("last_git_sha")
+
                     logger.debug(f"Successfully loaded state from: {temp_file}")
+                    sha_info = f", last git SHA: {self._last_git_sha}" if self._last_git_sha else ""
                     logger.info(f"Restored {len(self._conversations)} conversations, "
                                 f"{len(self._models)} models, "
                                 f"{len(self._channel_system_prompts)} system prompts, "
-                                f"{len(self._active_channels)} active channels")
+                                f"{len(self._active_channels)} active channels{sha_info}")
 
                     # Successfully loaded, break out of loop
                     break

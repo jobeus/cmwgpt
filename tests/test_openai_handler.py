@@ -52,7 +52,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         expected_messages = [{"role": "system", "content": system_prompt}, {
             "role": "user", "content": "Hello"}]
         self.mock_client.responses.create.assert_called_once_with(
-            model=model, input=expected_messages)
+            model=model, input=expected_messages, tools=[{"type": "web_search_preview"}])
 
     async def test_get_chat_completion_different_models(self):
         """Test chat completion with different models."""
@@ -278,7 +278,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
             {"role": "user", "content": "What do you think?"},
         ]
         self.mock_client.responses.create.assert_called_once_with(
-            model="gpt-4.1-mini", input=expected_messages)
+            model="gpt-4.1-mini", input=expected_messages, tools=[{"type": "web_search_preview"}])
 
 
 if __name__ == "__main__":

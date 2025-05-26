@@ -4,6 +4,8 @@ Discord Bot Client - Main bot setup and event handling
 
 import asyncio
 import logging
+import subprocess
+from typing import Optional
 
 import discord
 from discord.ext import commands
@@ -39,6 +41,9 @@ class DiscordBotClient:
         # Load any saved state from previous restart
         self._load_saved_state()
 
+        # Set current git SHA for comparison on next restart
+        self._set_current_git_sha()
+
         # Set up auto-update service
         self._setup_auto_update()
 
@@ -62,6 +67,46 @@ class DiscordBotClient:
             logger.error(f"Error loading saved state: {e}")
             print("⚠️  Failed to restore state, starting fresh")
             # Continue with fresh state if loading fails
+
+    def _set_current_git_sha(self) -> None:
+        """Set the current git SHA in state for future comparison."""
+        try:
+            current_sha = self._get_current_git_sha()
+            if current_sha:
+                # Only update if we don't already have a SHA (from loaded state)
+                # This preserves the previous SHA for comparison
+                if not state_service.get_last_git_sha():
+                    state_service.set_last_git_sha(current_sha)
+                    logger.info(f"Set initial git SHA: {current_sha[:7]}")
+                else:
+                    logger.debug(f"Current git SHA: {current_sha[:7]}")
+            else:
+                logger.warning("Could not determine current git SHA")
+        except Exception as e:
+            logger.error(f"Error setting current git SHA: {e}")
+
+    def _get_current_git_sha(self) -> Optional[str]:
+        """
+        Get the current git commit SHA.
+
+        Returns:
+            Git commit SHA or None if unable to determine
+        """
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+            else:
+                logger.error(f"Failed to get git SHA: {result.stderr}")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting git SHA: {e}")
+            return None
 
     def _setup_auto_update(self) -> None:
         """Set up the auto-update service."""
