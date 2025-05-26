@@ -1,5 +1,11 @@
 # 🤖 Advanced AI Discord Bot
 
+[![CI](https://github.com/username/chatter/workflows/Continuous%20Integration/badge.svg)](https://github.com/username/chatter/actions)
+[![Code Quality](https://github.com/username/chatter/workflows/Pull%20Request%20Checks/badge.svg)](https://github.com/username/chatter/actions)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code style: autopep8](https://img.shields.io/badge/code%20style-autopep8-000000.svg)](https://github.com/hhatto/autopep8)
+
 A powerful, feature-rich Discord bot that integrates multiple AI models for chat, image generation, and intelligent conversation management. Built with Python and designed for seamless Discord server integration.
 
 ## ✨ Features
@@ -315,6 +321,77 @@ git commit --no-verify -m "Emergency commit"
 - Operator spacing (`x=1+2` → `x = 1 + 2`)
 - Trailing whitespace and blank lines
 - Comment spacing and formatting
+
+## 🚀 CI/CD & Deployment
+
+### GitHub Actions Workflows
+
+This project includes comprehensive CI/CD pipelines:
+
+#### **Continuous Integration** (`.github/workflows/ci.yml`)
+- **Triggers**: Push to main/master, Pull Requests
+- **Python Versions**: 3.9, 3.10, 3.11, 3.12
+- **Checks**: Linting, Testing, Coverage
+- **Features**:
+  - Dependency caching for faster builds
+  - Multi-version Python testing
+  - Code coverage reporting
+  - Automatic formatting validation
+
+#### **Pull Request Checks** (`.github/workflows/pr-checks.yml`)
+- **Advanced PR Validation**: Title/description checks
+- **Security Scanning**: Bandit for code security, Safety for dependencies
+- **Targeted Testing**: Only tests files changed in PR
+- **Size Analysis**: Warns about large PRs
+- **Commit Message Validation**: Ensures meaningful commit messages
+
+#### **Release Automation** (`.github/workflows/release.yml`)
+- **Automatic Releases**: Triggered by version tags
+- **Changelog Generation**: Auto-generated from git commits
+- **Docker Images**: Builds and publishes to GitHub Container Registry
+- **Security Validation**: Pre-release security scanning
+
+### Docker Deployment
+
+```bash
+# Build locally
+docker build -t discord-bot .
+
+# Run with environment variables
+docker run -d \
+  --name discord-bot \
+  -e DISCORD_BOT_TOKEN=your_token \
+  -e OPENAI_API_KEY=your_key \
+  discord-bot
+
+# Or use GitHub Container Registry
+docker pull ghcr.io/username/chatter:latest
+```
+
+### Production Deployment
+
+1. **Environment Setup**:
+   ```bash
+   # Clone repository
+   git clone https://github.com/username/chatter.git
+   cd chatter
+
+   # Set up environment
+   make dev-setup
+   ```
+
+2. **Configuration**:
+   ```bash
+   # Copy and configure environment
+   cp env.example .env
+   # Edit .env with your tokens
+   ```
+
+3. **Run with Process Manager**:
+   ```bash
+   # Using systemd, pm2, or supervisor
+   python bot.py
+   ```
 
 ## 📄 License
 

@@ -1,20 +1,27 @@
 # Makefile for Discord Bot project
 
-.PHONY: help install test test-verbose test-coverage test-specific clean lint format run
+.PHONY: help install install-test install-hooks test test-verbose test-coverage test-specific lint autofix format security ci-test docker-build docker-run clean run dev-setup
 
 # Default target
 help:
 	@echo "Available commands:"
 	@echo "  install       - Install dependencies"
 	@echo "  install-test  - Install test dependencies"
+	@echo "  install-hooks - Install git pre-commit hooks"
 	@echo "  test          - Run all tests"
 	@echo "  test-verbose  - Run tests with verbose output"
 	@echo "  test-coverage - Run tests with coverage report"
 	@echo "  test-specific - Run specific test (usage: make test-specific TEST=config)"
 	@echo "  lint          - Run code linting"
+	@echo "  autofix       - Auto-fix linting issues"
 	@echo "  format        - Format code"
+	@echo "  security      - Run security scans"
+	@echo "  ci-test       - Run CI-style tests locally"
+	@echo "  docker-build  - Build Docker image"
+	@echo "  docker-run    - Run Docker container"
 	@echo "  clean         - Clean up generated files"
 	@echo "  run           - Run the Discord bot"
+	@echo "  dev-setup     - Complete development environment setup"
 
 # Install dependencies
 install:
@@ -73,6 +80,39 @@ clean:
 	rm -rf .coverage
 	rm -rf .pytest_cache/
 	rm -f debug.txt
+
+# Run security scans
+security:
+	@echo "Running security scans..."
+	@pip install bandit safety
+	@echo "🔍 Running bandit security scan..."
+	@bandit -r . -f json -o bandit-report.json || true
+	@echo "🔍 Checking for dependency vulnerabilities..."
+	@safety check || true
+	@echo "✅ Security scan complete. Check bandit-report.json for details."
+
+# Run CI-style tests locally
+ci-test:
+	@echo "Running CI-style tests locally..."
+	@make lint
+	@make test
+	@make security
+	@echo "✅ All CI checks passed!"
+
+# Build Docker image
+docker-build:
+	@echo "Building Docker image..."
+	@docker build -t discord-bot:latest .
+	@echo "✅ Docker image built successfully!"
+
+# Run Docker container
+docker-run:
+	@echo "Running Docker container..."
+	@docker run -d \
+		--name discord-bot \
+		--env-file .env \
+		discord-bot:latest
+	@echo "✅ Docker container started!"
 
 # Run the Discord bot
 run:

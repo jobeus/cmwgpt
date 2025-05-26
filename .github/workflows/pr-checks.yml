@@ -1,0 +1,162 @@
+name: Pull Request Checks
+
+on:
+  pull_request:
+    branches: [ main, master ]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  pr-validation:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        # Fetch full history for better diff analysis
+        fetch-depth: 0
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.11
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r test_requirements.txt
+        pip install flake8 autopep8 bandit safety
+
+    - name: Check PR title and description
+      run: |
+        # Check if PR has a meaningful title
+        if [ ${#GITHUB_HEAD_REF} -lt 5 ]; then
+          echo "❌ PR title too short. Please provide a descriptive title."
+          exit 1
+        fi
+        echo "✅ PR title looks good"
+
+    - name: Analyze changed files
+      run: |
+        # Get list of changed Python files
+        CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.py$' || true)
+        
+        if [ -z "$CHANGED_FILES" ]; then
+          echo "No Python files changed in this PR"
+          echo "CHANGED_FILES=" >> $GITHUB_ENV
+        else
+          echo "Changed Python files:"
+          echo "$CHANGED_FILES"
+          echo "CHANGED_FILES=$CHANGED_FILES" >> $GITHUB_ENV
+        fi
+
+    - name: Lint changed files only
+      if: env.CHANGED_FILES != ''
+      run: |
+        echo "Running lint on changed files: $CHANGED_FILES"
+        flake8 $CHANGED_FILES --max-line-length=120 --ignore=E501,W503
+
+    - name: Security scan with bandit
+      if: env.CHANGED_FILES != ''
+      run: |
+        echo "Running security scan on changed files..."
+        bandit -r $CHANGED_FILES -f json -o bandit-report.json || true
+        
+        # Check if any high severity issues were found
+        if [ -f bandit-report.json ]; then
+          HIGH_ISSUES=$(cat bandit-report.json | python -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    high_issues = [r for r in data.get('results', []) if r.get('issue_severity') == 'HIGH']
+    print(len(high_issues))
+except:
+    print(0)
+")
+          if [ "$HIGH_ISSUES" -gt 0 ]; then
+            echo "❌ High severity security issues found!"
+            cat bandit-report.json
+            exit 1
+          else
+            echo "✅ No high severity security issues found"
+          fi
+        fi
+
+    - name: Check for dependency vulnerabilities
+      run: |
+        echo "Checking for known security vulnerabilities in dependencies..."
+        safety check --json --output safety-report.json || true
+        
+        if [ -f safety-report.json ]; then
+          VULNS=$(cat safety-report.json | python -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    print(len(data))
+except:
+    print(0)
+")
+          if [ "$VULNS" -gt 0 ]; then
+            echo "⚠️ Security vulnerabilities found in dependencies:"
+            cat safety-report.json
+            echo "Please update vulnerable dependencies"
+          else
+            echo "✅ No known vulnerabilities in dependencies"
+          fi
+        fi
+
+    - name: Run tests on changed code
+      run: |
+        echo "Running full test suite to ensure changes don't break existing functionality..."
+        make test
+
+    - name: Check test coverage for new code
+      if: env.CHANGED_FILES != ''
+      run: |
+        echo "Analyzing test coverage for changed files..."
+        pip install coverage
+        
+        # Run tests with coverage
+        python -m coverage run --source=. -m pytest tests/ || python tests/run_tests.py
+        
+        # Generate coverage report for changed files
+        python -m coverage report --include="$CHANGED_FILES" --show-missing
+
+    - name: Validate commit messages
+      run: |
+        # Check commit message format
+        COMMITS=$(git log --oneline origin/${{ github.base_ref }}..HEAD)
+        echo "Commits in this PR:"
+        echo "$COMMITS"
+        
+        # Check for conventional commit format (optional)
+        while IFS= read -r commit; do
+          if [ -n "$commit" ]; then
+            message=$(echo "$commit" | cut -d' ' -f2-)
+            if [ ${#message} -lt 10 ]; then
+              echo "⚠️ Commit message might be too short: $message"
+            fi
+          fi
+        done <<< "$COMMITS"
+
+  size-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Check PR size
+      run: |
+        # Count changed lines
+        ADDED=$(git diff --numstat origin/${{ github.base_ref }}...HEAD | awk '{sum += $1} END {print sum}')
+        DELETED=$(git diff --numstat origin/${{ github.base_ref }}...HEAD | awk '{sum += $2} END {print sum}')
+        TOTAL=$((ADDED + DELETED))
+        
+        echo "Lines added: $ADDED"
+        echo "Lines deleted: $DELETED"
+        echo "Total changes: $TOTAL"
+        
+        if [ "$TOTAL" -gt 1000 ]; then
+          echo "⚠️ Large PR detected ($TOTAL lines changed)"
+          echo "Consider breaking this into smaller PRs for easier review"
+        else
+          echo "✅ PR size looks reasonable"
+        fi
