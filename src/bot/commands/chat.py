@@ -10,10 +10,11 @@ import discord
 from discord import app_commands
 
 from src.config import SYSTEM_PROMPT, DEFAULT_MODEL, INCLUDE_USERNAMES
-from src.bot_state import conversations, models, channel_system_prompts
+from src.bot_state import state_service
 from src.utils.discord_helper import get_mention_legend
 from src.services.openai_service import openai_service
 from src.services.message_service import message_service
+from src.services.queue_service import queue_service
 
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,18 @@ class ChatCommands:
         @app_commands.command(name="chat", description="Send a message to the chatbot")
         @app_commands.describe(message="Your message", attachment="Optional image to attach to the prompt")
         async def chat(interaction: discord.Interaction, message: str, attachment: Optional[discord.Attachment] = None):
-            await self._handle_chat_command(interaction, message, attachment)
+            # Queue the command for FIFO processing
+            queued = await queue_service.queue_command(interaction, self._handle_chat_command, message, attachment)
+
+            if not queued:
+                logger.warning(
+                    f"Failed to queue chat command from {
+                        interaction.user} in #{
+                        interaction.channel} - queue may be full"
+                )
+                await interaction.response.send_message(
+                    "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
+                )
 
         return chat
 
@@ -45,7 +57,18 @@ class ChatCommands:
 
         @app_commands.command(name="reset", description="Reset the conversation history")
         async def reset(interaction: discord.Interaction):
-            await self._handle_reset_command(interaction)
+            # Queue the command for FIFO processing
+            queued = await queue_service.queue_command(interaction, self._handle_reset_command)
+
+            if not queued:
+                logger.warning(
+                    f"Failed to queue reset command from {
+                        interaction.user} in #{
+                        interaction.channel} - queue may be full"
+                )
+                await interaction.response.send_message(
+                    "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
+                )
 
         return reset
 
@@ -65,17 +88,20 @@ class ChatCommands:
 
         # Add username if configured
         if INCLUDE_USERNAMES:
-            message = f"{interaction.user.display_name} says: {message}"
+            message = f"<@{interaction.user.id}> says: {message}"
 
         # Initialize conversation if missing
-        if channel_id not in conversations:
-            conversations[channel_id] = [
+        conversation = state_service.get_conversation(channel_id)
+        if conversation is None:
+            system_prompt = state_service.get_system_prompt(channel_id) or SYSTEM_PROMPT
+            conversation = [
                 {
                     "role": "system",
-                    "content": channel_system_prompts.get(channel_id, SYSTEM_PROMPT + "\n" + legend_section),
+                    "content": system_prompt + "\n" + legend_section,
                 }
             ]
-            models[channel_id] = DEFAULT_MODEL
+            state_service.set_conversation(channel_id, conversation)
+            state_service.set_model(channel_id, DEFAULT_MODEL)
             logger.info(f"[/chat] Channel {channel_id}: initialized conversation and model")
 
         # Construct content payload for OpenAI
@@ -90,20 +116,21 @@ class ChatCommands:
 
         # Log user input and add to conversation
         logger.info(f"[/chat] Channel {channel_id} User: {message}")
-        conversations[channel_id].append({"role": "user", "content": json.dumps(content_payload)})
+        state_service.add_message_to_conversation(channel_id, {"role": "user", "content": json.dumps(content_payload)})
 
         # Acknowledge the interaction
         await interaction.response.defer(ephemeral=False, thinking=True)
 
         # Get response from OpenAI
         async with interaction.channel.typing():
-            reply = openai_service.get_chat_completion(
-                model=models.get(channel_id, DEFAULT_MODEL), messages=conversations[channel_id]
-            )
+            current_conversation = state_service.get_conversation(channel_id)
+            current_model = state_service.get_model(channel_id) or DEFAULT_MODEL
+
+            reply = openai_service.get_chat_completion(model=current_model, messages=current_conversation)
 
             # Log and store assistant reply
             logger.info(f"[/chat] Channel {channel_id} Assistant: {reply}")
-            conversations[channel_id].append({"role": "assistant", "content": json.dumps(reply)})
+            state_service.add_message_to_conversation(channel_id, {"role": "assistant", "content": json.dumps(reply)})
 
             # Prepare base message content
             if attachment:
@@ -124,10 +151,10 @@ class ChatCommands:
         legend_section = await get_mention_legend(interaction.channel)
 
         # Reset conversation and model
-        conversations[channel_id] = [
-            {"role": "system", "content": channel_system_prompts.get(channel_id, SYSTEM_PROMPT) + "\n" + legend_section}
-        ]
-        models[channel_id] = DEFAULT_MODEL
+        system_prompt = state_service.get_system_prompt(channel_id) or SYSTEM_PROMPT
+        conversation = [{"role": "system", "content": system_prompt + "\n" + legend_section}]
+        state_service.set_conversation(channel_id, conversation)
+        state_service.set_model(channel_id, DEFAULT_MODEL)
 
         logger.info(f"[/reset] Channel {channel_id}: conversation reset")
         await interaction.response.defer(ephemeral=False, thinking=True)

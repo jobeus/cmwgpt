@@ -10,8 +10,9 @@ from discord import app_commands
 from discord.app_commands import Choice
 
 from src.config import SYSTEM_PROMPT, DEFAULT_MODEL
-from src.bot_state import conversations, models, channel_system_prompts
+from src.bot_state import state_service
 from src.utils.discord_helper import get_mention_legend
+from src.services.queue_service import queue_service
 
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,18 @@ class SystemCommands:
             ]
         )
         async def model_command(interaction: discord.Interaction, model: Optional[str] = None):
-            await self._handle_model_command(interaction, model)
+            # Queue the command for FIFO processing
+            queued = await queue_service.queue_command(interaction, self._handle_model_command, model)
+
+            if not queued:
+                logger.warning(
+                    f"Failed to queue model command from {
+                        interaction.user} in #{
+                        interaction.channel} - queue may be full"
+                )
+                await interaction.response.send_message(
+                    "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
+                )
 
         return model_command
 
@@ -54,11 +66,33 @@ class SystemCommands:
         @systemprompt_group.command(name="set", description="View or set the system prompt for this channel")
         @app_commands.describe(prompt_text="The new system prompt. Omit to view current prompt.")
         async def systemprompt_set(interaction: discord.Interaction, prompt_text: Optional[str] = None):
-            await self._handle_systemprompt_set(interaction, prompt_text)
+            # Queue the command for FIFO processing
+            queued = await queue_service.queue_command(interaction, self._handle_systemprompt_set, prompt_text)
+
+            if not queued:
+                logger.warning(
+                    f"Failed to queue systemprompt set command from {
+                        interaction.user} in #{
+                        interaction.channel} - queue may be full"
+                )
+                await interaction.response.send_message(
+                    "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
+                )
 
         @systemprompt_group.command(name="reset", description="Reset the system prompt for this channel to the default")
         async def systemprompt_reset(interaction: discord.Interaction):
-            await self._handle_systemprompt_reset(interaction)
+            # Queue the command for FIFO processing
+            queued = await queue_service.queue_command(interaction, self._handle_systemprompt_reset)
+
+            if not queued:
+                logger.warning(
+                    f"Failed to queue systemprompt reset command from {
+                        interaction.user} in #{
+                        interaction.channel} - queue may be full"
+                )
+                await interaction.response.send_message(
+                    "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
+                )
 
         return systemprompt_group
 
@@ -74,11 +108,11 @@ class SystemCommands:
         await interaction.response.defer(ephemeral=False, thinking=True)
 
         if model:
-            models[channel_id] = model
+            state_service.set_model(channel_id, model)
             logger.info(f"[/model] Channel {channel_id}: model set to {model}")
             await interaction.followup.send(f"Model set to `{model}`.", ephemeral=True)
         else:
-            current_model = models.get(channel_id, DEFAULT_MODEL)
+            current_model = state_service.get_model(channel_id) or DEFAULT_MODEL
             await interaction.followup.send(f"Model is `{current_model}`.", ephemeral=True)
 
     async def _handle_systemprompt_set(
@@ -97,16 +131,20 @@ class SystemCommands:
 
         if prompt_text:
             # Set new system prompt
-            channel_system_prompts[channel_id] = prompt_text
+            state_service.set_system_prompt(channel_id, prompt_text)
 
             # Update existing conversation if it exists
-            if channel_id in conversations and conversations[channel_id]:
-                if conversations[channel_id][0]["role"] == "system":
-                    conversations[channel_id][0]["content"] = prompt_text
+            conversation = state_service.get_conversation(channel_id)
+            if conversation:
+                if conversation[0]["role"] == "system":
+                    conversation[0]["content"] = prompt_text
                 else:
-                    conversations[channel_id].insert(0, {"role": "system", "content": prompt_text})
+                    conversation.insert(0, {"role": "system", "content": prompt_text})
+                state_service.set_conversation(channel_id, conversation)
             else:
-                conversations.setdefault(channel_id, []).insert(0, {"role": "system", "content": prompt_text})
+                # Create new conversation with system prompt
+                new_conversation = [{"role": "system", "content": prompt_text}]
+                state_service.set_conversation(channel_id, new_conversation)
 
             logger.info(f"[/systemprompt set] Channel {channel_id}: system prompt updated.")
             await interaction.followup.send(
@@ -115,7 +153,7 @@ class SystemCommands:
             )
         else:
             # Show current system prompt
-            current_prompt = channel_system_prompts.get(channel_id, SYSTEM_PROMPT + "\n" + legend_section)
+            current_prompt = state_service.get_system_prompt(channel_id) or (SYSTEM_PROMPT + "\n" + legend_section)
             logger.info(f"[/systemprompt set] Channel {channel_id}: displayed current system prompt.")
             await interaction.followup.send(
                 f"Current system prompt for this channel:\n```\n{current_prompt}\n```", ephemeral=True
@@ -132,28 +170,29 @@ class SystemCommands:
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         # Remove custom prompt
-        if channel_id in channel_system_prompts:
-            del channel_system_prompts[channel_id]
-            logger.info(f"[/systemprompt reset] Channel {channel_id}: custom prompt removed, reverting to default.")
+        state_service.clear_system_prompt(channel_id)
+        logger.info(f"[/systemprompt reset] Channel {channel_id}: custom prompt removed, reverting to default.")
 
         # Reset conversation system prompt
-        if (
-            channel_id in conversations
-            and conversations[channel_id]
-            and conversations[channel_id][0]["role"] == "system"
-        ):
-            conversations[channel_id][0]["content"] = SYSTEM_PROMPT
+        conversation = state_service.get_conversation(channel_id)
+        if conversation and conversation[0]["role"] == "system":
+            conversation[0]["content"] = SYSTEM_PROMPT
+            state_service.set_conversation(channel_id, conversation)
         else:
             # Ensure conversation list exists and prepend system prompt
-            conversations.setdefault(channel_id, []).insert(0, {"role": "system", "content": SYSTEM_PROMPT})
+            if conversation is None:
+                conversation = []
+            conversation.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
 
             # Clean up any duplicate system prompts
-            if len(conversations[channel_id]) > 1:
-                new_convo = [conversations[channel_id][0]]
-                for msg in conversations[channel_id][1:]:
+            if len(conversation) > 1:
+                new_convo = [conversation[0]]
+                for msg in conversation[1:]:
                     if msg["role"] != "system":
                         new_convo.append(msg)
-                conversations[channel_id] = new_convo
+                conversation = new_convo
+
+            state_service.set_conversation(channel_id, conversation)
 
         logger.info(f"[/systemprompt reset] Channel {channel_id}: system prompt reset to default.")
         await interaction.followup.send("System prompt for this channel has been reset to the default.", ephemeral=True)

@@ -10,7 +10,6 @@ tests/
 ├── README.md                      # This file
 ├── run_tests.py                   # Test runner script
 ├── test_config.py                 # Configuration module tests
-├── test_bot_state.py              # Bot state management tests
 ├── test_openai_handler.py         # OpenAI API integration tests
 ├── test_utils_discord_helper.py   # Discord utility function tests
 ├── test_utils_pasters.py          # Paste service integration tests
@@ -25,14 +24,6 @@ tests/
 - ✅ Boolean parsing (`true`/`false`, `1`/`0`)
 - ✅ Integer parsing and validation
 - ✅ Configuration validation
-
-### `test_bot_state.py`
-- ✅ In-memory storage initialization
-- ✅ Conversation storage and retrieval
-- ✅ Model storage per channel
-- ✅ System prompt storage per channel
-- ✅ Multi-channel isolation
-- ✅ Data structure integrity
 
 ### `test_openai_handler.py`
 - ✅ Chat completion API calls
@@ -79,7 +70,6 @@ python tests/run_tests.py
 
 # Run specific test module
 python tests/run_tests.py config
-python tests/run_tests.py bot_state
 python tests/run_tests.py openai_handler
 ```
 
@@ -91,7 +81,7 @@ python -m unittest discover tests
 
 # Run specific test file
 python -m unittest tests.test_config
-python -m unittest tests.test_bot_state
+python -m unittest tests.test_openai_handler
 
 # Run specific test class
 python -m unittest tests.test_config.TestConfig
@@ -182,18 +172,18 @@ class TestNewFeature(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures before each test method."""
         pass
-    
+
     def tearDown(self):
         """Clean up after each test method."""
         pass
-    
+
     def test_basic_functionality(self):
         """Test basic functionality with valid input."""
         # Arrange
         # Act
         # Assert
         pass
-    
+
     def test_error_handling(self):
         """Test error handling with invalid input."""
         with self.assertRaises(ExpectedException):
@@ -211,15 +201,15 @@ class TestAsyncFeature(unittest.TestCase):
     def setUp(self):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
-    
+
     def tearDown(self):
         self.loop.close()
-    
+
     def test_async_function(self):
         async def run_test():
             # Your async test code here
             pass
-        
+
         self.loop.run_until_complete(run_test())
 ```
 

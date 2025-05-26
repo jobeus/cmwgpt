@@ -69,8 +69,9 @@ class TestBotFunctions(unittest.TestCase):
             # Mock get_mention_legend
             mock_get_legend.return_value = "Legend: @user1 = <@11111>"
 
-            # Mock channel system prompts
-            with patch("src.bot_state.channel_system_prompts", {}):
+            # Mock state service
+            with patch("src.services.state_service.state_service") as mock_state_service:
+                mock_state_service.get_system_prompt.return_value = None
                 with patch("src.config.SYSTEM_PROMPT", "Default system prompt"):
                     with patch("src.config.INCLUDE_NUM_CHATLINES", 3):
                         # Call the function

@@ -193,8 +193,7 @@ src/
 ├── utils/
 │   ├── discord_helper.py     # Discord utilities
 │   └── pasters.py           # Legacy compatibility
-├── config.py                 # Configuration management
-└── bot_state.py             # State management
+└── config.py                 # Configuration management
 main.py                       # Entry point
 ```
 

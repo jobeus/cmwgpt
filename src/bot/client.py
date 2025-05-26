@@ -8,11 +8,12 @@ import discord
 from discord.ext import commands
 
 from src.config import DISCORD_BOT_TOKEN, DEFAULT_MODEL, REPLY_TO_MENTIONS
-from src.bot_state import models
+from src.bot_state import state_service
 from src.bot.handlers.mention import mention_handler
 from src.bot.commands.chat import ChatCommands
 from src.bot.commands.image import ImageCommands
 from src.bot.commands.system import SystemCommands
+from src.services.queue_service import queue_service
 
 
 # Configure logging
@@ -46,11 +47,16 @@ class DiscordBotClient:
         @self.bot.event
         async def on_ready():
             await self.bot.tree.sync()
+
+            # Start the message queue service
+            await queue_service.start()
+
             logger.info(
                 f"Logged in as {
                     self.bot.user} (ID: {
                     self.bot.user.id})"
             )
+            logger.info("Message queue service started")
 
         @self.bot.event
         async def on_disconnect():
@@ -84,9 +90,20 @@ class DiscordBotClient:
 
         # Handle bot mentions
         if self.bot.user and self.bot.user in message.mentions and REPLY_TO_MENTIONS:
+            model = state_service.get_model(message.channel.id) or DEFAULT_MODEL
 
-            model = models.get(message.channel.id, DEFAULT_MODEL)
-            await mention_handler.handle_mention(message, self.bot.user, model)
+            # Queue the mention for FIFO processing
+            queued = await mention_handler.queue_mention(message, self.bot.user, model)
+
+            if not queued:
+                logger.warning(
+                    f"Failed to queue mention from {
+                        message.author} in #{
+                        message.channel} - queue may be full"
+                )
+                # Optionally, you could fall back to immediate processing:
+                # await mention_handler.handle_mention(message, self.bot.user,
+                # model)
 
         # Ensure other commands are still processed
         await self.bot.process_commands(message)
@@ -100,6 +117,20 @@ class DiscordBotClient:
             logger.error(f"Bot failed to start: {e}")
             raise
         finally:
+            # Ensure queue service is properly shut down
+            import asyncio
+
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If we're in an async context, schedule the shutdown
+                    asyncio.create_task(queue_service.stop())
+                else:
+                    # If we're not in an async context, run it
+                    loop.run_until_complete(queue_service.stop())
+            except Exception as e:
+                logger.error(f"Error shutting down queue service: {e}")
+
             logger.info("Bot shutdown.")
 
 

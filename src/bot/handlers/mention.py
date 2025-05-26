@@ -9,10 +9,11 @@ from typing import List, Dict, Any
 import discord
 
 from src.config import SYSTEM_PROMPT, INCLUDE_NUM_CHATLINES
-from src.bot_state import channel_system_prompts
+from src.services.state_service import state_service
 from src.utils.discord_helper import get_mention_legend
 from src.services.openai_service import openai_service
 from src.services.message_service import message_service
+from src.services.queue_service import queue_service
 
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,9 @@ class MentionHandler:
         """
         Handle a bot mention by preparing context and sending a reply.
 
+        This method processes the mention immediately without queuing.
+        For queued processing, use queue_mention() instead.
+
         Args:
             message: The Discord message containing the mention
             bot_user: The bot user object
@@ -34,6 +38,25 @@ class MentionHandler:
             chat_msgs = await self._prepare_mention_context(message, bot_user)
             reply_content = openai_service.get_chat_completion(model=model, messages=chat_msgs)
             await message_service.send_channel_reply(message.channel, reply_content)
+
+    async def queue_mention(self, message: discord.Message, bot_user: discord.User, model: str) -> bool:
+        """
+        Queue a bot mention for FIFO processing.
+
+        This method adds the mention to a queue for sequential processing,
+        ensuring no race conditions between concurrent mentions.
+
+        Args:
+            message: The Discord message containing the mention
+            bot_user: The bot user object
+            model: The model to use for the response
+
+        Returns:
+            True if the mention was successfully queued, False if queue is full
+        """
+        return await queue_service.queue_mention(
+            message=message, bot_user=bot_user, model=model, handler=self.handle_mention
+        )
 
     async def _prepare_mention_context(self, message: discord.Message, bot_user: discord.User) -> List[Dict[str, Any]]:
         """
@@ -63,7 +86,7 @@ class MentionHandler:
         legend_section = await get_mention_legend(message.channel)
 
         # Prepare system prompt
-        current_channel_system_prompt = channel_system_prompts.get(message.channel.id, SYSTEM_PROMPT)
+        current_channel_system_prompt = state_service.get_system_prompt(message.channel.id) or SYSTEM_PROMPT
         current_channel_system_prompt += (
             f"In the channel your ID is: <@{bot_user.id}> and included are the last "
             f"{INCLUDE_NUM_CHATLINES} messages from the channel in JSON format. "

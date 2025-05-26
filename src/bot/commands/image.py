@@ -14,6 +14,7 @@ from openai import BadRequestError
 from src.config import DEFAULT_IMAGE_MODEL
 from src.services.openai_service import openai_service
 from src.services.message_service import message_service
+from src.services.queue_service import queue_service
 
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,20 @@ class ImageCommands:
             edit_image: Optional[discord.Attachment] = None,
             model: str = DEFAULT_IMAGE_MODEL,
         ):
-            await self._handle_draw_command(interaction, prompt, edit_image, model)
+            # Queue the command for FIFO processing
+            queued = await queue_service.queue_command(
+                interaction, self._handle_draw_command, prompt, edit_image, model
+            )
+
+            if not queued:
+                logger.warning(
+                    f"Failed to queue draw command from {
+                        interaction.user} in #{
+                        interaction.channel} - queue may be full"
+                )
+                await interaction.response.send_message(
+                    "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
+                )
 
         return draw
 
