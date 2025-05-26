@@ -42,8 +42,7 @@ class StateService:
         logger.info("StateService initialized with thread-safe storage")
 
     # Conversation management
-    def get_conversation(
-            self, channel_id: int) -> Optional[List[Dict[str, Any]]]:
+    def get_conversation(self, channel_id: int) -> Optional[List[Dict[str, Any]]]:
         """
         Get conversation history for a channel.
 
@@ -56,8 +55,7 @@ class StateService:
         with self._conversations_lock:
             return self._conversations.get(channel_id)
 
-    def set_conversation(self, channel_id: int,
-                         conversation: List[Dict[str, Any]]) -> None:
+    def set_conversation(self, channel_id: int, conversation: List[Dict[str, Any]]) -> None:
         """
         Set conversation history for a channel.
 
@@ -69,10 +67,10 @@ class StateService:
             self._conversations[channel_id] = conversation.copy()
             logger.debug(
                 f"Set conversation for channel {channel_id} with {
-                    len(conversation)} messages")
+                    len(conversation)} messages"
+            )
 
-    def add_message_to_conversation(
-            self, channel_id: int, message: Dict[str, Any]) -> None:
+    def add_message_to_conversation(self, channel_id: int, message: Dict[str, Any]) -> None:
         """
         Add a message to the conversation history for a channel.
 
@@ -84,8 +82,7 @@ class StateService:
             if channel_id not in self._conversations:
                 self._conversations[channel_id] = []
             self._conversations[channel_id].append(message)
-            logger.debug(
-                f"Added message to conversation for channel {channel_id}")
+            logger.debug(f"Added message to conversation for channel {channel_id}")
 
     def clear_conversation(self, channel_id: int) -> None:
         """
@@ -334,27 +331,16 @@ class StateService:
                         state_data = json.load(f)
 
                     # Validate the data structure
-                    if not all(
-                        key in state_data for key in [
-                            "conversations",
-                            "models",
-                            "system_prompts"]):
-                        logger.warning(
-                            f"Invalid state file format: {temp_file}")
+                    if not all(key in state_data for key in ["conversations", "models", "system_prompts"]):
+                        logger.warning(f"Invalid state file format: {temp_file}")
                         continue
 
                     # Load the state under locks
                     with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock, self._git_sha_lock:
                         # Convert string keys back to integers for channel IDs
-                        self._conversations = {
-                            int(k): v for k, v in state_data["conversations"].items()
-                        }
-                        self._models = {
-                            int(k): v for k, v in state_data["models"].items()
-                        }
-                        self._channel_system_prompts = {
-                            int(k): v for k, v in state_data["system_prompts"].items()
-                        }
+                        self._conversations = {int(k): v for k, v in state_data["conversations"].items()}
+                        self._models = {int(k): v for k, v in state_data["models"].items()}
+                        self._channel_system_prompts = {int(k): v for k, v in state_data["system_prompts"].items()}
                         # Load active channels (may not exist in older state files)
                         if "active_channels" in state_data:
                             self._active_channels = set(state_data["active_channels"])
@@ -367,10 +353,12 @@ class StateService:
 
                     logger.debug(f"Successfully loaded state from: {temp_file}")
                     sha_info = f", last git SHA: {self._last_git_sha}" if self._last_git_sha else ""
-                    logger.info(f"Restored {len(self._conversations)} conversations, "
-                                f"{len(self._models)} models, "
-                                f"{len(self._channel_system_prompts)} system prompts, "
-                                f"{len(self._active_channels)} active channels{sha_info}")
+                    logger.info(
+                        f"Restored {len(self._conversations)} conversations, "
+                        f"{len(self._models)} models, "
+                        f"{len(self._channel_system_prompts)} system prompts, "
+                        f"{len(self._active_channels)} active channels{sha_info}"
+                    )
 
                     # Successfully loaded, break out of loop
                     break
@@ -385,8 +373,7 @@ class StateService:
                     os.remove(temp_file)
                     logger.debug(f"Cleaned up temporary file: {temp_file}")
                 except Exception as e:
-                    logger.error(
-                        f"Failed to clean up temporary file {temp_file}: {e}")
+                    logger.error(f"Failed to clean up temporary file {temp_file}: {e}")
 
             return True
 
@@ -406,11 +393,9 @@ class StateService:
             for temp_file in temp_files:
                 try:
                     os.remove(temp_file)
-                    logger.info(
-                        f"Cleaned up leftover temporary file: {temp_file}")
+                    logger.info(f"Cleaned up leftover temporary file: {temp_file}")
                 except Exception as e:
-                    logger.error(
-                        f"Failed to clean up temporary file {temp_file}: {e}")
+                    logger.error(f"Failed to clean up temporary file {temp_file}: {e}")
 
             # Clean up restart info files
             restart_info_pattern = "/tmp/cmwgpt_state_backup_*_restart_info.json"
@@ -419,11 +404,9 @@ class StateService:
             for info_file in restart_info_files:
                 try:
                     os.remove(info_file)
-                    logger.info(
-                        f"Cleaned up leftover restart info file: {info_file}")
+                    logger.info(f"Cleaned up leftover restart info file: {info_file}")
                 except Exception as e:
-                    logger.error(
-                        f"Failed to clean up restart info file {info_file}: {e}")
+                    logger.error(f"Failed to clean up restart info file {info_file}: {e}")
 
         except Exception as e:
             logger.error(f"Error during temp file cleanup: {e}")

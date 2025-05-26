@@ -44,12 +44,7 @@ class AnnouncementService:
             Full git commit SHA or None if unable to determine
         """
         try:
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 return result.stdout.strip()  # Full SHA
             else:
@@ -72,13 +67,10 @@ class AnnouncementService:
         """
         try:
             result = subprocess.run(
-                ["git", "log", f"{from_sha}..{to_sha}", "--oneline"],
-                capture_output=True,
-                text=True,
-                timeout=30
+                ["git", "log", f"{from_sha}..{to_sha}", "--oneline"], capture_output=True, text=True, timeout=30
             )
             if result.returncode == 0 and result.stdout.strip():
-                lines = result.stdout.strip().split('\n')
+                lines = result.stdout.strip().split("\n")
                 return "\n".join(f"• {line}" for line in lines)
             return None
         except Exception as e:
@@ -146,8 +138,8 @@ class AnnouncementService:
                 except Exception as e:
                     logger.error(f"Failed to upload changelog to paste service: {e}")
                     # Fallback to truncated message
-                    lines = changelog.split('\n')
-                    truncated_changelog = '\n'.join(lines[:5])
+                    lines = changelog.split("\n")
+                    truncated_changelog = "\n".join(lines[:5])
                     if len(lines) > 5:
                         truncated_changelog += f"\n• ... and {len(lines) - 5} more commits"
                     message = f"{base_message}\n\n**Recent changes:**\n{truncated_changelog}\n\n*Ready to assist! Use `/chat` or mention me to continue.*"

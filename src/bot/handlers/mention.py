@@ -22,11 +22,7 @@ logger = logging.getLogger(__name__)
 class MentionHandler:
     """Handles bot mentions and context preparation."""
 
-    async def handle_mention(
-            self,
-            message: discord.Message,
-            bot_user: discord.User,
-            model: str) -> None:
+    async def handle_mention(self, message: discord.Message, bot_user: discord.User, model: str) -> None:
         """
         Handle a bot mention by preparing context and sending a reply.
 
@@ -57,8 +53,7 @@ class MentionHandler:
                 try:
                     await message_service.send_channel_reply(message.channel, error_message)
                 except Exception as discord_error:
-                    logger.error(
-                        f"Failed to send error message to Discord: {discord_error}")
+                    logger.error(f"Failed to send error message to Discord: {discord_error}")
                     # Try to send a simpler error message
                     try:
                         await message.channel.send(
@@ -76,8 +71,7 @@ class MentionHandler:
                 try:
                     await message_service.send_channel_reply(message.channel, error_message)
                 except Exception as discord_error:
-                    logger.error(
-                        f"Failed to send error message to Discord: {discord_error}")
+                    logger.error(f"Failed to send error message to Discord: {discord_error}")
                     # Try to send a simpler error message
                     try:
                         await message.channel.send(
@@ -86,11 +80,7 @@ class MentionHandler:
                     except Exception:
                         logger.error("Failed to send fallback error message")
 
-    async def queue_mention(
-            self,
-            message: discord.Message,
-            bot_user: discord.User,
-            model: str) -> bool:
+    async def queue_mention(self, message: discord.Message, bot_user: discord.User, model: str) -> bool:
         """
         Queue a bot mention for FIFO processing.
 
@@ -126,7 +116,8 @@ class MentionHandler:
             f"Mention by {
                 message.author} in #{
                 message.channel}: {
-                message.content}")
+                message.content}"
+        )
 
         # Gather message history
         history_msgs = []
@@ -135,23 +126,23 @@ class MentionHandler:
         history_msgs.reverse()  # oldest first
 
         # Get user legend for the channel
-        legend_section = await get_mention_legend(message.channel)
+        legend_section = await get_mention_legend(message.channel, bot_user)
 
         # Prepare system prompt
-        channel_system_prompt = state_service.get_system_prompt(
-            message.channel.id)
+        channel_system_prompt = state_service.get_system_prompt(message.channel.id)
         if channel_system_prompt:
             current_channel_system_prompt = channel_system_prompt
         else:
             current_channel_system_prompt = get_system_prompt()
 
         current_channel_system_prompt += (
-            f"In the channel your ID is: <@{bot_user.id}> and included are the last "
-            f"{INCLUDE_NUM_CHATLINES} messages from the channel in JSON format. "
+            f"In the channel you are <@{bot_user.id}>!\n\n"
+            f"Here are the last {INCLUDE_NUM_CHATLINES} messages from the channel in JSON format. "
             f"You can read all of these messages. You've been mentioned in the very last "
             f"message in the JSON array (but you may have been asked things before, and "
             f"answered things before, that's ok! just respond to the very last element in the JSON array "
-            f"please, you'll notice you were @mentioned. You are expected to reply, but less "
+            f"please, you'll notice you were @mentioned by someone saying  <@{bot_user.id}>. "
+            f"You are expected to reply, but less "
             f"metaphysics and more straight up answers like a user on a 30 year old IRC "
             f"board and not a talkative robot. Respond with only your the content of your reply.\n\n"
             f"{legend_section}\n\n"
@@ -172,11 +163,9 @@ class MentionHandler:
         # Build chat history
         chat_history = []
         for msg in history_msgs:
-            chat_history.append(
-                {"user": f"<@{msg.author.id}>", "says": msg.content})
+            chat_history.append({"user": f"<@{msg.author.id}>", "says": msg.content})
 
-        chat_context.append(
-            {"role": "user", "content": ask_preamble + "\n\n" + json.dumps(chat_history)})
+        chat_context.append({"role": "user", "content": ask_preamble + "\n\n" + json.dumps(chat_history)})
 
         return chat_context, current_channel_system_prompt
 

@@ -66,13 +66,15 @@ class RestartHandler:
                 print("✅ State saved")
 
                 # Also save restart type information
-                restart_info_file = temp_file.replace('.json', '_restart_info.json')
+                restart_info_file = temp_file.replace(".json", "_restart_info.json")
                 try:
                     import json
-                    with open(restart_info_file, 'w') as f:
+
+                    with open(restart_info_file, "w") as f:
                         json.dump({"manual_restart": manual}, f)
                     import os
                     import stat
+
                     os.chmod(restart_info_file, stat.S_IRUSR | stat.S_IWUSR)
                 except Exception as e:
                     logger.warning(f"Failed to save restart info: {e}")
@@ -109,35 +111,20 @@ class RestartHandler:
         """
         try:
             # First, check if we're in a git repository
-            result = subprocess.run(
-                ["git", "rev-parse", "--git-dir"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            result = subprocess.run(["git", "rev-parse", "--git-dir"], capture_output=True, text=True, timeout=10)
 
             if result.returncode != 0:
                 logger.warning("Not in a git repository, skipping git pull")
                 return False
 
             # Check if there are any uncommitted changes
-            result = subprocess.run(
-                ["git", "status", "--porcelain"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            result = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, timeout=10)
 
             if result.returncode == 0 and result.stdout.strip():
                 logger.warning("Uncommitted changes detected, git pull may fail")
 
             # Perform the git pull
-            result = subprocess.run(
-                ["git", "pull", "origin"],
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
+            result = subprocess.run(["git", "pull", "origin"], capture_output=True, text=True, timeout=60)
 
             if result.returncode == 0:
                 output = result.stdout.strip()
@@ -175,12 +162,7 @@ class RestartHandler:
             Git commit SHA or None if unable to determine
         """
         try:
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 return result.stdout.strip()
             else:

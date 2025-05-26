@@ -22,9 +22,7 @@ from src.services.restart_handler import restart_handler
 from src.services.announcement_service import announcement_service
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
 logger = logging.getLogger("discord_bot")
 
 
@@ -93,12 +91,7 @@ class DiscordBotClient:
             Git commit SHA or None if unable to determine
         """
         try:
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 return result.stdout.strip()
             else:
@@ -112,8 +105,7 @@ class DiscordBotClient:
         """Set up the auto-update service."""
         try:
             # Set the restart callback
-            auto_update_service.set_restart_callback(
-                restart_handler.perform_restart)
+            auto_update_service.set_restart_callback(restart_handler.perform_restart)
             logger.info("Auto-update service configured")
         except Exception as e:
             logger.error(f"Error setting up auto-update service: {e}")
@@ -159,7 +151,7 @@ class DiscordBotClient:
             was_manual = False
             for info_file in restart_info_files:
                 try:
-                    with open(info_file, 'r') as f:
+                    with open(info_file, "r") as f:
                         restart_info = json.load(f)
                     was_manual = restart_info.get("manual_restart", False)
                     logger.info(f"Found restart info: manual={was_manual}")
@@ -210,8 +202,7 @@ class DiscordBotClient:
 
         @self.bot.event
         async def on_disconnect():
-            logger.warning(
-                "Disconnected from Discord, attempting to reconnect")
+            logger.warning("Disconnected from Discord, attempting to reconnect")
 
         @self.bot.event
         async def on_message(message: discord.Message):
@@ -236,14 +227,12 @@ class DiscordBotClient:
             message: The Discord message to handle
         """
         # Ignore bots and DMs
-        if message.author.bot or not isinstance(
-                message.channel, discord.TextChannel):
+        if message.author.bot or not isinstance(message.channel, discord.TextChannel):
             return
 
         # Handle bot mentions
         if self.bot.user and self.bot.user in message.mentions and REPLY_TO_MENTIONS:
-            model = state_service.get_model(
-                message.channel.id) or DEFAULT_MODEL
+            model = state_service.get_model(message.channel.id) or DEFAULT_MODEL
 
             # Queue the mention for FIFO processing
             queued = await mention_handler.queue_mention(message, self.bot.user, model)
@@ -252,7 +241,8 @@ class DiscordBotClient:
                 logger.warning(
                     f"Failed to queue mention from {
                         message.author} in #{
-                        message.channel} - queue may be full")
+                        message.channel} - queue may be full"
+                )
                 # Optionally, you could fall back to immediate processing:
                 # await mention_handler.handle_mention(message, self.bot.user,
                 # model)

@@ -40,13 +40,9 @@ class AutoUpdateService:
         self._max_consecutive_failures = 5
         self._last_known_commit: Optional[str] = None
 
-        logger.info(
-            f"AutoUpdateService initialized with {check_interval}s check interval")
+        logger.info(f"AutoUpdateService initialized with {check_interval}s check interval")
 
-    def set_restart_callback(
-        self,
-        callback: Callable[[],
-                           Awaitable[None]]) -> None:
+    def set_restart_callback(self, callback: Callable[[], Awaitable[None]]) -> None:
         """
         Set the callback function to call when a restart is needed.
 
@@ -75,14 +71,12 @@ class AutoUpdateService:
         # Get initial commit hash
         self._last_known_commit = self._get_current_commit_hash()
         if self._last_known_commit:
-            logger.info(
-                f"Starting auto-update monitoring from commit: {self._last_known_commit[:7]}")
+            logger.info(f"Starting auto-update monitoring from commit: {self._last_known_commit[:7]}")
         else:
             logger.warning("Could not determine current commit hash")
 
         # Start monitoring thread
-        self._monitoring_thread = threading.Thread(
-            target=self._monitor_git_updates, daemon=True)
+        self._monitoring_thread = threading.Thread(target=self._monitor_git_updates, daemon=True)
         self._monitoring_thread.start()
 
         logger.info("AutoUpdateService started")
@@ -130,12 +124,7 @@ class AutoUpdateService:
     def _is_git_repository(self) -> bool:
         """Check if the current directory is a git repository."""
         try:
-            result = subprocess.run(
-                ["git", "rev-parse", "--git-dir"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            result = subprocess.run(["git", "rev-parse", "--git-dir"], capture_output=True, text=True, timeout=10)
             return result.returncode == 0
         except Exception as e:
             logger.error(f"Error checking git repository status: {e}")
@@ -144,18 +133,14 @@ class AutoUpdateService:
     def _get_current_commit_hash(self) -> Optional[str]:
         """Get the current commit hash."""
         try:
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 return result.stdout.strip()
             else:
                 logger.error(
                     f"Failed to get current commit hash: {
-                        result.stderr}")
+                        result.stderr}"
+                )
                 return None
         except Exception as e:
             logger.error(f"Error getting current commit hash: {e}")
@@ -164,12 +149,7 @@ class AutoUpdateService:
     def _get_current_branch(self) -> Optional[str]:
         """Get the current branch name."""
         try:
-            result = subprocess.run(
-                ["git", "branch", "--show-current"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            result = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 return result.stdout.strip()
             else:
@@ -182,12 +162,7 @@ class AutoUpdateService:
     def _fetch_updates(self) -> bool:
         """Fetch updates from origin."""
         try:
-            result = subprocess.run(
-                ["git", "fetch", "origin"],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
+            result = subprocess.run(["git", "fetch", "origin"], capture_output=True, text=True, timeout=30)
             if result.returncode == 0:
                 logger.debug("Successfully fetched updates from origin")
                 return True
@@ -207,17 +182,13 @@ class AutoUpdateService:
 
             # Count commits between HEAD and origin/branch
             result = subprocess.run(
-                ["git", "rev-list", f"HEAD..origin/{branch}", "--count"],
-                capture_output=True,
-                text=True,
-                timeout=10
+                ["git", "rev-list", f"HEAD..origin/{branch}", "--count"], capture_output=True, text=True, timeout=10
             )
 
             if result.returncode == 0:
                 commit_count = int(result.stdout.strip())
                 if commit_count > 0:
-                    logger.info(
-                        f"Found {commit_count} new commits on origin/{branch}")
+                    logger.info(f"Found {commit_count} new commits on origin/{branch}")
                     return True
                 else:
                     logger.debug(f"No new commits on origin/{branch}")
@@ -225,7 +196,8 @@ class AutoUpdateService:
             else:
                 logger.error(
                     f"Failed to check for new commits: {
-                        result.stderr}")
+                        result.stderr}"
+                )
                 return False
 
         except Exception as e:
@@ -246,10 +218,7 @@ class AutoUpdateService:
                         # Schedule restart in the main event loop
                         try:
                             loop = asyncio.get_running_loop()
-                            asyncio.run_coroutine_threadsafe(
-                                self.trigger_restart(manual=False),
-                                loop
-                            )
+                            asyncio.run_coroutine_threadsafe(self.trigger_restart(manual=False), loop)
                         except RuntimeError:
                             # No running loop, create a new one
                             asyncio.run(self.trigger_restart(manual=False))
@@ -260,12 +229,10 @@ class AutoUpdateService:
                     self._consecutive_failures = 0
                 else:
                     self._consecutive_failures += 1
-                    logger.warning(
-                        f"Git fetch failed ({self._consecutive_failures}/{self._max_consecutive_failures})")
+                    logger.warning(f"Git fetch failed ({self._consecutive_failures}/{self._max_consecutive_failures})")
 
                     if self._consecutive_failures >= self._max_consecutive_failures:
-                        logger.error(
-                            "Too many consecutive git failures, disabling auto-update")
+                        logger.error("Too many consecutive git failures, disabling auto-update")
                         break
 
             except Exception as e:
@@ -273,8 +240,7 @@ class AutoUpdateService:
                 logger.error(f"Error in git monitoring loop: {e}")
 
                 if self._consecutive_failures >= self._max_consecutive_failures:
-                    logger.error(
-                        "Too many consecutive errors, disabling auto-update")
+                    logger.error("Too many consecutive errors, disabling auto-update")
                     break
 
             # Wait for next check or stop signal

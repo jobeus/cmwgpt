@@ -1,11 +1,11 @@
 import discord
 
 
-async def get_mention_legend(channel: discord.TextChannel) -> str:
-    all_members = channel.guild.fetch_members(limit=None)
+async def get_mention_legend(channel: discord.TextChannel, bot_user: discord.User) -> str:
     # channel.members is all members who can see this channel
-    lines = []
-    async for member in all_members:
+    lines = [f"You are <@{bot_user.id}>!"]
+
+    for member in channel.members:
         # use nickname if set, otherwise username
         name = member.display_name
         lines.append(f"@{name} = <@{member.id}>")

@@ -31,10 +31,12 @@ class TestDiscordHelper(unittest.TestCase):
         """Test basic mention legend generation."""
 
         async def run_test():
-            # Mock channel and guild
+            # Mock channel
             mock_channel = MagicMock()
-            mock_guild = MagicMock()
-            mock_channel.guild = mock_guild
+
+            # Mock bot user
+            mock_bot_user = MagicMock()
+            mock_bot_user.id = 99999
 
             # Mock members
             mock_member1 = MagicMock()
@@ -45,19 +47,16 @@ class TestDiscordHelper(unittest.TestCase):
             mock_member2.display_name = "Bob"
             mock_member2.id = 67890
 
-            # Mock async iterator for fetch_members
-            async def mock_fetch_members(limit=None):
-                for member in [mock_member1, mock_member2]:
-                    yield member
-
-            mock_guild.fetch_members = mock_fetch_members
+            # Mock channel.members (list, not async iterator)
+            mock_channel.members = [mock_member1, mock_member2]
 
             # Test the function
-            result = await get_mention_legend(mock_channel)
+            result = await get_mention_legend(mock_channel, mock_bot_user)
 
             # Verify result
             expected_lines = [
                 "Here are all the users in this channel:",
+                "You are <@99999>!",
                 "@Alice = <@12345>",
                 "@Bob = <@67890>",
                 "Whenever you see a mention like <@USER_ID>, map it back to the corresponding handle. "
@@ -74,25 +73,23 @@ class TestDiscordHelper(unittest.TestCase):
         """Test mention legend with no members."""
 
         async def run_test():
-            # Mock channel and guild
+            # Mock channel
             mock_channel = MagicMock()
-            mock_guild = MagicMock()
-            mock_channel.guild = mock_guild
 
-            # Mock empty async iterator
-            async def mock_fetch_members(limit=None):
-                return
-                yield  # This line never executes, making it an empty async generator
+            # Mock bot user
+            mock_bot_user = MagicMock()
+            mock_bot_user.id = 99999
 
-            mock_guild.fetch_members = mock_fetch_members
+            # Mock empty members list
+            mock_channel.members = []
 
             # Test the function
-            result = await get_mention_legend(mock_channel)
+            result = await get_mention_legend(mock_channel, mock_bot_user)
 
             # Verify result
             expected_lines = [
                 "Here are all the users in this channel:",
-                "",
+                "You are <@99999>!",
                 "Whenever you see a mention like <@USER_ID>, map it back to the corresponding handle. "
                 "If you want to @mention someone yourself use <@USER_ID> instead of @nickname for discord "
                 "to recoginize your intent.",
@@ -107,10 +104,12 @@ class TestDiscordHelper(unittest.TestCase):
         """Test mention legend with special characters in names."""
 
         async def run_test():
-            # Mock channel and guild
+            # Mock channel
             mock_channel = MagicMock()
-            mock_guild = MagicMock()
-            mock_channel.guild = mock_guild
+
+            # Mock bot user
+            mock_bot_user = MagicMock()
+            mock_bot_user.id = 99999
 
             # Mock members with special characters
             mock_member1 = MagicMock()
@@ -125,17 +124,14 @@ class TestDiscordHelper(unittest.TestCase):
             mock_member3.display_name = "émoji🚀user"
             mock_member3.id = 33333
 
-            # Mock async iterator
-            async def mock_fetch_members(limit=None):
-                for member in [mock_member1, mock_member2, mock_member3]:
-                    yield member
-
-            mock_guild.fetch_members = mock_fetch_members
+            # Mock channel.members
+            mock_channel.members = [mock_member1, mock_member2, mock_member3]
 
             # Test the function
-            result = await get_mention_legend(mock_channel)
+            result = await get_mention_legend(mock_channel, mock_bot_user)
 
             # Verify special characters are handled
+            self.assertIn("You are <@99999>!", result)
             self.assertIn("@User_123 = <@11111>", result)
             self.assertIn("@Test-User = <@22222>", result)
             self.assertIn("@émoji🚀user = <@33333>", result)
@@ -146,10 +142,12 @@ class TestDiscordHelper(unittest.TestCase):
         """Test mention legend with many members."""
 
         async def run_test():
-            # Mock channel and guild
+            # Mock channel
             mock_channel = MagicMock()
-            mock_guild = MagicMock()
-            mock_channel.guild = mock_guild
+
+            # Mock bot user
+            mock_bot_user = MagicMock()
+            mock_bot_user.id = 99999
 
             # Create many mock members
             members = []
@@ -159,15 +157,14 @@ class TestDiscordHelper(unittest.TestCase):
                 mock_member.id = 10000 + i
                 members.append(mock_member)
 
-            # Mock async iterator
-            async def mock_fetch_members(limit=None):
-                for member in members:
-                    yield member
-
-            mock_guild.fetch_members = mock_fetch_members
+            # Mock channel.members
+            mock_channel.members = members
 
             # Test the function
-            result = await get_mention_legend(mock_channel)
+            result = await get_mention_legend(mock_channel, mock_bot_user)
+
+            # Verify bot identity is included
+            self.assertIn("You are <@99999>!", result)
 
             # Verify all members are included
             for i in range(100):
@@ -183,10 +180,12 @@ class TestDiscordHelper(unittest.TestCase):
         """Test mention legend with duplicate display names."""
 
         async def run_test():
-            # Mock channel and guild
+            # Mock channel
             mock_channel = MagicMock()
-            mock_guild = MagicMock()
-            mock_channel.guild = mock_guild
+
+            # Mock bot user
+            mock_bot_user = MagicMock()
+            mock_bot_user.id = 99999
 
             # Mock members with same display name but different IDs
             mock_member1 = MagicMock()
@@ -197,15 +196,14 @@ class TestDiscordHelper(unittest.TestCase):
             mock_member2.display_name = "SameName"
             mock_member2.id = 22222
 
-            # Mock async iterator
-            async def mock_fetch_members(limit=None):
-                for member in [mock_member1, mock_member2]:
-                    yield member
-
-            mock_guild.fetch_members = mock_fetch_members
+            # Mock channel.members
+            mock_channel.members = [mock_member1, mock_member2]
 
             # Test the function
-            result = await get_mention_legend(mock_channel)
+            result = await get_mention_legend(mock_channel, mock_bot_user)
+
+            # Verify bot identity is included
+            self.assertIn("You are <@99999>!", result)
 
             # Verify both members are listed with their unique IDs
             self.assertIn("@SameName = <@11111>", result)
@@ -217,32 +215,31 @@ class TestDiscordHelper(unittest.TestCase):
         """Test that the mention legend format is consistent."""
 
         async def run_test():
-            # Mock channel and guild
+            # Mock channel
             mock_channel = MagicMock()
-            mock_guild = MagicMock()
-            mock_channel.guild = mock_guild
+
+            # Mock bot user
+            mock_bot_user = MagicMock()
+            mock_bot_user.id = 99999
 
             # Mock single member
             mock_member = MagicMock()
             mock_member.display_name = "TestUser"
             mock_member.id = 12345
 
-            # Mock async iterator
-            async def mock_fetch_members(limit=None):
-                yield mock_member
-
-            mock_guild.fetch_members = mock_fetch_members
+            # Mock channel.members
+            mock_channel.members = [mock_member]
 
             # Test the function
-            result = await get_mention_legend(mock_channel)
+            result = await get_mention_legend(mock_channel, mock_bot_user)
 
             # Verify exact format
             lines = result.split("\n")
-            self.assertEqual(
-                lines[0], "Here are all the users in this channel:")
-            self.assertEqual(lines[1], "@TestUser = <@12345>")
-            self.assertTrue(lines[2].startswith("Whenever you see a mention"))
-            self.assertTrue(lines[2].endswith("to recoginize your intent."))
+            self.assertEqual(lines[0], "Here are all the users in this channel:")
+            self.assertEqual(lines[1], "You are <@99999>!")
+            self.assertEqual(lines[2], "@TestUser = <@12345>")
+            self.assertTrue(lines[3].startswith("Whenever you see a mention"))
+            self.assertTrue(lines[3].endswith("to recoginize your intent."))
 
         self.loop.run_until_complete(run_test())
 
