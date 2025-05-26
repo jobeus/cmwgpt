@@ -126,7 +126,7 @@ class AnnouncementService:
 
         if changelog:
             # Check if message would be too long for Discord
-            full_message = f"{base_message}\n\n**Changes:**\n{changelog}\n\n*Ready to assist! Use `/chat` or mention me to continue.*"
+            full_message = f"{base_message} Changes:\n{changelog}"
 
             if len(full_message) <= 2000:
                 message = full_message
@@ -134,7 +134,7 @@ class AnnouncementService:
                 # Message too long, upload to paste service
                 try:
                     paste_url = upload_to_pasters(changelog)
-                    message = f"{base_message}\n\n**Changes:** [View complete changelog]({paste_url})\n\n*Ready to assist! Use `/chat` or mention me to continue.*"
+                    message = f"{base_message} Changes:\n[View complete changelog]({paste_url})"
                 except Exception as e:
                     logger.error(f"Failed to upload changelog to paste service: {e}")
                     # Fallback to truncated message
@@ -142,9 +142,9 @@ class AnnouncementService:
                     truncated_changelog = "\n".join(lines[:5])
                     if len(lines) > 5:
                         truncated_changelog += f"\n• ... and {len(lines) - 5} more commits"
-                    message = f"{base_message}\n\n**Recent changes:**\n{truncated_changelog}\n\n*Ready to assist! Use `/chat` or mention me to continue.*"
+                    message = f"{base_message} Recent changes:\n{truncated_changelog}"
         else:
-            message = f"{base_message}\n\n*Ready to assist! Use `/chat` or mention me to continue.*"
+            message = f"{base_message}"
 
         logger.info(f"Announcing update to {len(active_channels)} channels: {current_sha_short}")
 
