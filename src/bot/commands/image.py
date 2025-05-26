@@ -63,9 +63,7 @@ class ImageCommands:
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue draw command from {
-                        interaction.user} in #{
-                        interaction.channel} - queue may be full")
+                    f"Failed to queue draw command from {interaction.user} in #{interaction.channel} - queue may be full")
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )

@@ -49,9 +49,7 @@ class ChatCommands:
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue chat command from {
-                        interaction.user} in #{
-                        interaction.channel} - queue may be full")
+                    f"Failed to queue chat command from {interaction.user} in #{interaction.channel} - queue may be full")
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
@@ -73,9 +71,7 @@ class ChatCommands:
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue reset command from {
-                        interaction.user} in #{
-                        interaction.channel} - queue may be full")
+                    f"Failed to queue reset command from {interaction.user} in #{interaction.channel} - queue may be full")
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
@@ -171,8 +167,7 @@ class ChatCommands:
                         message)
 
                 error_message = (
-                    f"{base_content}\n\nSorry, I encountered an error while processing your request: {
-                        str(e)}")
+                    f"{base_content}\n\nSorry, I encountered an error while processing your request: {str(e)}")
 
                 try:
                     await interaction.followup.send(content=error_message)
