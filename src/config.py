@@ -29,7 +29,7 @@ def load_system_prompt() -> str:
             content = f.read().strip()
             if content:
                 # Replace [[CURRENT_DATE_AND_TIME]] with current date and time
-                current_datetime = datetime.now(ZoneInfo("America/Denver")).strftime("%Y-%m-%d %H:%M:%S %z").strip()
+                current_datetime = datetime.now(ZoneInfo("America/Denver")).strftime("%Y-%m-%d %H:%M:%S %Z").strip()
                 content = content.replace("[[CURRENT_DATE_AND_TIME]]", current_datetime)
                 return content
     except FileNotFoundError:
