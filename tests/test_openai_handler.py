@@ -17,10 +17,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 class TestOpenAIHandler(unittest.TestCase):
     """Test openai_handler.py functionality."""
 
-    @patch("openai_handler.client")
-    def test_get_chat_completion_success(self, mock_client):
+    @patch("openai_handler.get_client")
+    def test_get_chat_completion_success(self, mock_get_client):
         """Test successful chat completion."""
-        # Mock response
+        # Mock client and response
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
         mock_response = MagicMock()
         mock_response.output_text = "Hello! How can I help you today?"
         mock_client.responses.create.return_value = mock_response
@@ -40,9 +42,11 @@ class TestOpenAIHandler(unittest.TestCase):
         mock_client.responses.create.assert_called_once_with(
             model=model, input=messages)
 
-    @patch("openai_handler.client")
-    def test_get_chat_completion_different_models(self, mock_client):
+    @patch("openai_handler.get_client")
+    def test_get_chat_completion_different_models(self, mock_get_client):
         """Test chat completion with different models."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
         models_to_test = ["gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini"]
 
         for model in models_to_test:
@@ -61,10 +65,12 @@ class TestOpenAIHandler(unittest.TestCase):
                 # Verify result
                 self.assertEqual(result, f"Response from {model}")
 
-    @patch("openai_handler.client")
-    def test_generate_image_dalle2_success(self, mock_client):
+    @patch("openai_handler.get_client")
+    def test_generate_image_dalle2_success(self, mock_get_client):
         """Test successful image generation with DALL-E 2."""
-        # Mock response
+        # Mock client and response
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
         mock_data = MagicMock()
         mock_data.b64_json = base64.b64encode(b"fake_image_data").decode()
         mock_response = MagicMock()
@@ -85,10 +91,12 @@ class TestOpenAIHandler(unittest.TestCase):
         mock_client.images.generate.assert_called_once_with(
             model=model, prompt=prompt, n=1, response_format="b64_json")
 
-    @patch("openai_handler.client")
-    def test_generate_image_dalle3_success(self, mock_client):
+    @patch("openai_handler.get_client")
+    def test_generate_image_dalle3_success(self, mock_get_client):
         """Test successful image generation with DALL-E 3."""
-        # Mock response
+        # Mock client and response
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
         mock_data = MagicMock()
         mock_data.b64_json = base64.b64encode(b"dalle3_image_data").decode()
         mock_response = MagicMock()
@@ -105,10 +113,12 @@ class TestOpenAIHandler(unittest.TestCase):
         # Verify result
         self.assertEqual(result, b"dalle3_image_data")
 
-    @patch("openai_handler.client")
-    def test_generate_image_custom_model_without_edit(self, mock_client):
+    @patch("openai_handler.get_client")
+    def test_generate_image_custom_model_without_edit(self, mock_get_client):
         """Test image generation with custom model (gpt-image-1) without editing."""
-        # Mock response
+        # Mock client and response
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
         mock_data = MagicMock()
         mock_data.b64_json = base64.b64encode(b"custom_image_data").decode()
         mock_response = MagicMock()
@@ -129,9 +139,13 @@ class TestOpenAIHandler(unittest.TestCase):
         mock_client.images.generate.assert_called_once_with(
             model=model, prompt=prompt, n=1)
 
-    @patch("openai_handler.client")
-    def test_generate_image_with_edit(self, mock_client):
+    @patch("openai_handler.get_client")
+    def test_generate_image_with_edit(self, mock_get_client):
         """Test image editing functionality."""
+        # Mock client and response
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
         # Mock Discord attachment
         mock_attachment = MagicMock()
         mock_file = MagicMock()
@@ -161,10 +175,12 @@ class TestOpenAIHandler(unittest.TestCase):
         # Verify attachment was processed
         mock_attachment.to_file.assert_called_once()
 
-    @patch("openai_handler.client")
-    def test_generate_image_no_data_error(self, mock_client):
+    @patch("openai_handler.get_client")
+    def test_generate_image_no_data_error(self, mock_get_client):
         """Test error handling when no image data is returned."""
-        # Mock response with no b64_json
+        # Mock client and response
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
         mock_data = MagicMock()
         mock_data.b64_json = None
         mock_response = MagicMock()
@@ -182,10 +198,12 @@ class TestOpenAIHandler(unittest.TestCase):
         self.assertEqual(str(context.exception),
                          "Image generation failed, no b64_json data returned.")
 
-    @patch("openai_handler.client")
-    def test_generate_image_no_result_error(self, mock_client):
+    @patch("openai_handler.get_client")
+    def test_generate_image_no_result_error(self, mock_get_client):
         """Test error handling when no result is returned."""
-        # Mock no response
+        # Mock client
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
         mock_client.images.generate.return_value = None
 
         # Test parameters
@@ -199,9 +217,13 @@ class TestOpenAIHandler(unittest.TestCase):
         self.assertEqual(str(context.exception),
                          "Image generation failed, no b64_json data returned.")
 
-    @patch("openai_handler.client")
-    def test_generate_image_base64_decoding(self, mock_client):
+    @patch("openai_handler.get_client")
+    def test_generate_image_base64_decoding(self, mock_get_client):
         """Test that base64 decoding works correctly."""
+        # Mock client and response
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
         # Create test image data
         test_data = b"test_image_bytes_12345"
         encoded_data = base64.b64encode(test_data).decode()
@@ -223,10 +245,12 @@ class TestOpenAIHandler(unittest.TestCase):
         # Verify correct decoding
         self.assertEqual(result, test_data)
 
-    @patch("openai_handler.client")
-    def test_chat_completion_empty_messages(self, mock_client):
+    @patch("openai_handler.get_client")
+    def test_chat_completion_empty_messages(self, mock_get_client):
         """Test chat completion with empty messages list."""
-        # Mock response
+        # Mock client and response
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
         mock_response = MagicMock()
         mock_response.output_text = "I'm ready to help!"
         mock_client.responses.create.return_value = mock_response
@@ -237,10 +261,12 @@ class TestOpenAIHandler(unittest.TestCase):
         # Verify it still works
         self.assertEqual(result, "I'm ready to help!")
 
-    @patch("openai_handler.client")
-    def test_chat_completion_complex_messages(self, mock_client):
+    @patch("openai_handler.get_client")
+    def test_chat_completion_complex_messages(self, mock_get_client):
         """Test chat completion with complex message structure."""
-        # Mock response
+        # Mock client and response
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
         mock_response = MagicMock()
         mock_response.output_text = "Complex response"
         mock_client.responses.create.return_value = mock_response

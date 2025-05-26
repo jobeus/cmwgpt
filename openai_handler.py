@@ -3,16 +3,37 @@ import base64
 from openai import OpenAI
 from discord import Attachment
 
-from config import OPENAI_API_KEY
+from config import OPENAI_API_KEY, IS_TESTING
 
-# Instantiate OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY)
+# Global client variable for lazy initialization
+_client = None
+
+
+def get_client():
+    """Get OpenAI client with lazy initialization."""
+    global _client
+    if _client is None:
+        if IS_TESTING:
+            # In testing environment, create a mock-friendly client
+            # The actual mocking will be done in tests
+            try:
+                _client = OpenAI(api_key=OPENAI_API_KEY)
+            except Exception:
+                # If OpenAI client fails in testing, create a dummy object
+                class MockClient:
+                    def __getattr__(self, name):  # noqa: ARG002
+                        return lambda *args, **kwargs: None  # noqa: ARG005
+                _client = MockClient()
+        else:
+            _client = OpenAI(api_key=OPENAI_API_KEY)
+    return _client
 
 
 def get_chat_completion(model: str, messages: list) -> str:
     """
     Gets a chat completion from the OpenAI API.
     """
+    client = get_client()
     response = client.responses.create(model=model, input=messages)
     return response.output_text
 
@@ -26,6 +47,7 @@ def generate_image(
     Can also edit an image if edit_image_bytes and edit_image_filename are provided.
     Returns the raw image bytes.
     """
+    client = get_client()
     b64_json_data = None  # Initialize to ensure it's always defined
     result = None
     if model == "dall-e-2" or model == "dall-e-3":
