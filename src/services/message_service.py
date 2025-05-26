@@ -8,7 +8,7 @@ import logging
 import discord
 from discord import HTTPException, Forbidden, NotFound
 
-from .paste_service import paste_service
+from src.utils.pasters import paste_service
 
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ class MessageService:
         for attempt in range(max_retries):
             try:
                 if len(reply_text) <= self.DISCORD_MESSAGE_LIMIT:
-                    await channel.send(reply_text)
+                    await channel.send(reply_text, suppress_embeds=True)
                     return
 
                 # Message is too long, try to upload to paste service
@@ -47,7 +47,7 @@ class MessageService:
                     )
                     pasted_url = paste_service.upload_markdown(reply_text)
                     final_reply = f"My response was too long to post here, so I've uploaded it to: {pasted_url}"
-                    await channel.send(final_reply)
+                    await channel.send(final_reply, suppress_embeds=True)
                     return
                 except Exception as e:
                     logger.error(f"Error uploading to paste service: {e}")
@@ -56,7 +56,7 @@ class MessageService:
                         "(discord limit), and there was a problem uploading it to paste service. "
                         "Sorry, try again later."
                     )
-                    await channel.send(error_reply)
+                    await channel.send(error_reply, suppress_embeds=True)
                     return
 
             except HTTPException as e:
@@ -125,7 +125,7 @@ class MessageService:
 
                 if total_length <= self.DISCORD_MESSAGE_LIMIT:
                     final_content = f"{base_content}\n{reply_text}"
-                    await interaction.followup.send(content=final_content)
+                    await interaction.followup.send(content=final_content, suppress_embeds=True)
                     return
 
                 # Message would be too long, upload reply to paste service
@@ -148,7 +148,7 @@ class MessageService:
                         f"The content of my response was over {self.DISCORD_MESSAGE_LIMIT} characters, "
                         "and there was a problem uploading it. Sorry, try again later."
                     )
-                    await interaction.followup.send(content=error_content)
+                    await interaction.followup.send(content=error_content, suppress_embeds=True)
                     return
 
             except HTTPException as e:
