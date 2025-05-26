@@ -226,7 +226,7 @@ class TestConfig(unittest.TestCase):
 
             # Should be in YYYY-MM-DD HH:MM:SS format
             try:
-                datetime.strptime(date_part, "%Y-%m-%d %H:%M:%S")
+                datetime.strptime(date_part, "%Y-%m-%d %H:%M:%S %Z")
             except ValueError:
                 self.fail(f"Date format is incorrect: {date_part}")
 
