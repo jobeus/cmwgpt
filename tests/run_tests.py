@@ -18,7 +18,7 @@ def run_all_tests():
     # Discover and run all tests
     loader = unittest.TestLoader()
     start_dir = os.path.dirname(os.path.abspath(__file__))
-    suite = loader.discover(start_dir, pattern='test_*.py')
+    suite = loader.discover(start_dir, pattern="test_*.py")
 
     # Capture output
     stream = StringIO()
@@ -50,10 +50,8 @@ def run_all_tests():
             print(f"  - {test}")
 
     if result.testsRun > 0:
-        success_rate = (
-            (result.testsRun - len(result.failures) - len(result.errors))
-            / result.testsRun * 100
-        )
+        success_rate = (result.testsRun - len(result.failures) -
+                        len(result.errors)) / result.testsRun * 100
     else:
         success_rate = 0
     print(f"\nSuccess rate: {success_rate:.1f}%")
@@ -70,7 +68,7 @@ def run_specific_test(test_name):
     """Run a specific test module."""
     try:
         # Import the test module
-        module = __import__(f'test_{test_name}', fromlist=[''])
+        module = __import__(f"test_{test_name}", fromlist=[""])
 
         # Create test suite
         loader = unittest.TestLoader()
@@ -97,6 +95,6 @@ def main():
         return run_all_tests()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     exit_code = main()
     sys.exit(exit_code)

@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 class TestOpenAIHandler(unittest.TestCase):
     """Test openai_handler.py functionality."""
 
-    @patch('openai_handler.client')
+    @patch("openai_handler.client")
     def test_get_chat_completion_success(self, mock_client):
         """Test successful chat completion."""
         # Mock response
@@ -27,10 +27,8 @@ class TestOpenAIHandler(unittest.TestCase):
 
         # Test parameters
         model = "gpt-4.1-nano"
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": "Hello"}
-        ]
+        messages = [{"role": "system", "content": "You are a helpful assistant."}, {
+            "role": "user", "content": "Hello"}]
 
         # Call function
         result = get_chat_completion(model, messages)
@@ -40,11 +38,9 @@ class TestOpenAIHandler(unittest.TestCase):
 
         # Verify API call
         mock_client.responses.create.assert_called_once_with(
-            model=model,
-            input=messages
-        )
+            model=model, input=messages)
 
-    @patch('openai_handler.client')
+    @patch("openai_handler.client")
     def test_get_chat_completion_different_models(self, mock_client):
         """Test chat completion with different models."""
         models_to_test = ["gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini"]
@@ -65,7 +61,7 @@ class TestOpenAIHandler(unittest.TestCase):
                 # Verify result
                 self.assertEqual(result, f"Response from {model}")
 
-    @patch('openai_handler.client')
+    @patch("openai_handler.client")
     def test_generate_image_dalle2_success(self, mock_client):
         """Test successful image generation with DALL-E 2."""
         # Mock response
@@ -87,13 +83,9 @@ class TestOpenAIHandler(unittest.TestCase):
 
         # Verify API call
         mock_client.images.generate.assert_called_once_with(
-            model=model,
-            prompt=prompt,
-            n=1,
-            response_format='b64_json'
-        )
+            model=model, prompt=prompt, n=1, response_format="b64_json")
 
-    @patch('openai_handler.client')
+    @patch("openai_handler.client")
     def test_generate_image_dalle3_success(self, mock_client):
         """Test successful image generation with DALL-E 3."""
         # Mock response
@@ -113,7 +105,7 @@ class TestOpenAIHandler(unittest.TestCase):
         # Verify result
         self.assertEqual(result, b"dalle3_image_data")
 
-    @patch('openai_handler.client')
+    @patch("openai_handler.client")
     def test_generate_image_custom_model_without_edit(self, mock_client):
         """Test image generation with custom model (gpt-image-1) without editing."""
         # Mock response
@@ -135,12 +127,9 @@ class TestOpenAIHandler(unittest.TestCase):
 
         # Verify API call
         mock_client.images.generate.assert_called_once_with(
-            model=model,
-            prompt=prompt,
-            n=1
-        )
+            model=model, prompt=prompt, n=1)
 
-    @patch('openai_handler.client')
+    @patch("openai_handler.client")
     def test_generate_image_with_edit(self, mock_client):
         """Test image editing functionality."""
         # Mock Discord attachment
@@ -167,15 +156,12 @@ class TestOpenAIHandler(unittest.TestCase):
 
         # Verify API call
         mock_client.images.edit.assert_called_once_with(
-            model=model,
-            image=[mock_file],
-            prompt=prompt
-        )
+            model=model, image=[mock_file], prompt=prompt)
 
         # Verify attachment was processed
         mock_attachment.to_file.assert_called_once()
 
-    @patch('openai_handler.client')
+    @patch("openai_handler.client")
     def test_generate_image_no_data_error(self, mock_client):
         """Test error handling when no image data is returned."""
         # Mock response with no b64_json
@@ -196,7 +182,7 @@ class TestOpenAIHandler(unittest.TestCase):
         self.assertEqual(str(context.exception),
                          "Image generation failed, no b64_json data returned.")
 
-    @patch('openai_handler.client')
+    @patch("openai_handler.client")
     def test_generate_image_no_result_error(self, mock_client):
         """Test error handling when no result is returned."""
         # Mock no response
@@ -213,7 +199,7 @@ class TestOpenAIHandler(unittest.TestCase):
         self.assertEqual(str(context.exception),
                          "Image generation failed, no b64_json data returned.")
 
-    @patch('openai_handler.client')
+    @patch("openai_handler.client")
     def test_generate_image_base64_decoding(self, mock_client):
         """Test that base64 decoding works correctly."""
         # Create test image data
@@ -237,7 +223,7 @@ class TestOpenAIHandler(unittest.TestCase):
         # Verify correct decoding
         self.assertEqual(result, test_data)
 
-    @patch('openai_handler.client')
+    @patch("openai_handler.client")
     def test_chat_completion_empty_messages(self, mock_client):
         """Test chat completion with empty messages list."""
         # Mock response
@@ -251,7 +237,7 @@ class TestOpenAIHandler(unittest.TestCase):
         # Verify it still works
         self.assertEqual(result, "I'm ready to help!")
 
-    @patch('openai_handler.client')
+    @patch("openai_handler.client")
     def test_chat_completion_complex_messages(self, mock_client):
         """Test chat completion with complex message structure."""
         # Mock response
@@ -262,9 +248,12 @@ class TestOpenAIHandler(unittest.TestCase):
         # Test with complex messages including JSON content
         messages = [
             {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": '[{"type": "text", "text": "Hello"}, {"type": "image_url", "image_url": {"url": "http://example.com/image.jpg"}}]'},
+            {
+                "role": "user",
+                "content": '[{"type": "text", "text": "Hello"}, {"type": "image_url", "image_url": {"url": "http://example.com/image.jpg"}}]',
+            },
             {"role": "assistant", "content": "I can see your image!"},
-            {"role": "user", "content": "What do you think?"}
+            {"role": "user", "content": "What do you think?"},
         ]
 
         result = get_chat_completion("gpt-4.1-mini", messages)
@@ -272,10 +261,8 @@ class TestOpenAIHandler(unittest.TestCase):
         # Verify it handles complex structure
         self.assertEqual(result, "Complex response")
         mock_client.responses.create.assert_called_once_with(
-            model="gpt-4.1-mini",
-            input=messages
-        )
+            model="gpt-4.1-mini", input=messages)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

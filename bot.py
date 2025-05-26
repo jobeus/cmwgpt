@@ -18,38 +18,37 @@ from config import (
     DEFAULT_IMAGE_MODEL,
     INCLUDE_USERNAMES,
     REPLY_TO_MENTIONS,
-    INCLUDE_NUM_CHATLINES
+    INCLUDE_NUM_CHATLINES,
 )
 from bot_state import conversations, models, channel_system_prompts
 
 # Configure root logger to stdout
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s %(levelname)s:%(name)s: %(message)s'
-)
-logger = logging.getLogger('discord_bot')
+    format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
+logger = logging.getLogger("discord_bot")
 
 # Configure Discord bot with intents
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-bot = commands.Bot(command_prefix='/', intents=intents)
+bot = commands.Bot(command_prefix="/", intents=intents)
 
 
 @bot.event
 async def on_connect():
-    logger.info('Connected to Discord')
+    logger.info("Connected to Discord")
 
 
 @bot.event
 async def on_ready():
     await bot.tree.sync()
-    logger.info(f'Logged in as {bot.user} (ID: {bot.user.id})')
+    logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
 
 
 @bot.event
 async def on_disconnect():
-    logger.warning('Disconnected from Discord, attempting to reconnect')
+    logger.warning("Disconnected from Discord, attempting to reconnect")
 
 
 @bot.event
@@ -65,9 +64,10 @@ async def on_message(message: discord.Message):
         async with message.channel.typing():
             chat_msgs = await _prepare_mention_context(message, bot.user)
             reply_content = get_chat_completion(
-                model=models.get(message.channel.id, DEFAULT_MODEL),
-                messages=chat_msgs
-            )
+                model=models.get(
+                    message.channel.id,
+                    DEFAULT_MODEL),
+                messages=chat_msgs)
             await _send_channel_reply(message.channel, reply_content)
 
     # ensure other commands still processed
@@ -78,10 +78,11 @@ async def _prepare_mention_context(
         message: discord.Message, bot_user: discord.User) -> list[dict[str, str]]:
     """Prepares the message list for OpenAI context in case of a mention."""
     logger.info(
-        f'Mention by {
+        f"Mention by {
             message.author} in #{
             message.channel}: {
-                message.content}')
+                message.content}"
+    )
     history_msgs = []
     async for msg in message.channel.history(limit=INCLUDE_NUM_CHATLINES):
         history_msgs.append(msg)
@@ -104,14 +105,14 @@ async def _prepare_mention_context(
     )
 
     chat_context = [
-        {'role': 'system', 'content': current_channel_system_prompt}]
+        {"role": "system", "content": current_channel_system_prompt}]
 
     chat_history = []
     for msg in history_msgs:
         chat_history.append(
-            {'user': f'<@{msg.author.id}>', 'says': msg.content})
+            {"user": f"<@{msg.author.id}>", "says": msg.content})
     chat_context.append(
-        {'role': 'user', 'content': ask_amble + "\n\n" + json.dumps(chat_history)})
+        {"role": "user", "content": ask_amble + "\n\n" + json.dumps(chat_history)})
 
     with open("debug.txt", "w") as f:
         json.dump(chat_context, f, indent=2)
@@ -133,27 +134,29 @@ async def _send_channel_reply(channel: discord.TextChannel, reply_text: str):
     await channel.send(final_reply)
 
 
-@bot.tree.command(name='reset', description='Reset the conversation history')
+@bot.tree.command(name="reset", description="Reset the conversation history")
 async def reset(interaction: discord.Interaction):
     channel_id = interaction.channel.id
     legend_section = await get_mention_legend(interaction.channel)
-    conversations[channel_id] = [{'role': 'system',
-                                  'content': channel_system_prompts.get(channel_id,
+    conversations[channel_id] = [{"role": "system",
+                                  "content": channel_system_prompts.get(channel_id,
                                                                         SYSTEM_PROMPT) + "\n" + legend_section}]
     models[channel_id] = DEFAULT_MODEL
-    logger.info(f'[/reset] Channel {channel_id}: conversation reset')
+    logger.info(f"[/reset] Channel {channel_id}: conversation reset")
     await interaction.response.defer(ephemeral=False, thinking=True)
-    await interaction.followup.send('Conversation reset.', ephemeral=True)
+    await interaction.followup.send("Conversation reset.", ephemeral=True)
 
 
-@bot.tree.command(name='model', description='View or set OpenAI model')
-@app_commands.describe(model='Model name to use')
-@app_commands.choices(model=[
-    # Choice(name='gpt-4.1', value='gpt-4.1'), # expensive
-    Choice(name='gpt-4.1-mini', value='gpt-4.1-mini'),
-    Choice(name='gpt-4.1-nano', value='gpt-4.1-nano'),
-    Choice(name='gpt-4o-mini', value='gpt-4o-mini')
-])
+@bot.tree.command(name="model", description="View or set OpenAI model")
+@app_commands.describe(model="Model name to use")
+@app_commands.choices(
+    model=[
+        # Choice(name='gpt-4.1', value='gpt-4.1'), # expensive
+        Choice(name="gpt-4.1-mini", value="gpt-4.1-mini"),
+        Choice(name="gpt-4.1-nano", value="gpt-4.1-nano"),
+        Choice(name="gpt-4o-mini", value="gpt-4o-mini"),
+    ]
+)
 async def set_model(
         interaction: discord.Interaction,
         model: str | None = None):
@@ -161,21 +164,22 @@ async def set_model(
     await interaction.response.defer(ephemeral=False, thinking=True)
     if model:
         models[channel_id] = model
-        logger.info(f'[/model] Channel {channel_id}: model set to {model}')
-        await interaction.followup.send(f'Model set to `{model}`.', ephemeral=True)
+        logger.info(f"[/model] Channel {channel_id}: model set to {model}")
+        await interaction.followup.send(f"Model set to `{model}`.", ephemeral=True)
     else:
         model = models.get(channel_id, DEFAULT_MODEL)
-        await interaction.followup.send(f'Model is `{model}`.', ephemeral=True)
+        await interaction.followup.send(f"Model is `{model}`.", ephemeral=True)
+
 
 # Define the systemprompt command group
 systemprompt_group = app_commands.Group(
-    name='systemprompt',
-    description='Manage channel-specific system prompt')
+    name="systemprompt",
+    description="Manage channel-specific system prompt")
 
 
-@systemprompt_group.command(name='set',
-                            description='View or set the system prompt for this channel')
-@app_commands.describe(prompt_text='The new system prompt. Omit to view current prompt.')
+@systemprompt_group.command(name="set",
+                            description="View or set the system prompt for this channel")
+@app_commands.describe(prompt_text="The new system prompt. Omit to view current prompt.")
 async def systemprompt_set(
         interaction: discord.Interaction,
         prompt_text: str | None = None):
@@ -186,28 +190,33 @@ async def systemprompt_set(
     if prompt_text:
         channel_system_prompts[channel_id] = prompt_text
         if channel_id in conversations and conversations[channel_id]:
-            if conversations[channel_id][0]['role'] == 'system':
-                conversations[channel_id][0]['content'] = prompt_text
+            if conversations[channel_id][0]["role"] == "system":
+                conversations[channel_id][0]["content"] = prompt_text
             else:
                 conversations[channel_id].insert(
-                    0, {'role': 'system', 'content': prompt_text})
+                    0, {"role": "system", "content": prompt_text})
         else:
             conversations.setdefault(channel_id, []).insert(
-                0, {'role': 'system', 'content': prompt_text})
+                0, {"role": "system", "content": prompt_text})
 
         logger.info(
-            f'[/systemprompt set] Channel {channel_id}: system prompt updated.')
-        await interaction.followup.send('System prompt updated for this channel. The new prompt will be used for future messages and context.', ephemeral=True)
+            f"[/systemprompt set] Channel {channel_id}: system prompt updated.")
+        await interaction.followup.send(
+            "System prompt updated for this channel. The new prompt will be used for future messages and context.",
+            ephemeral=True,
+        )
     else:
         current_prompt = channel_system_prompts.get(
             channel_id, SYSTEM_PROMPT + "\n" + legend_section)
         logger.info(
-            f'[/systemprompt set] Channel {channel_id}: displayed current system prompt.')
-        await interaction.followup.send(f'Current system prompt for this channel:\n```\n{current_prompt}\n```', ephemeral=True)
+            f"[/systemprompt set] Channel {channel_id}: displayed current system prompt.")
+        await interaction.followup.send(
+            f"Current system prompt for this channel:\n```\n{current_prompt}\n```", ephemeral=True
+        )
 
 
-@systemprompt_group.command(name='reset',
-                            description='Reset the system prompt for this channel to the default')
+@systemprompt_group.command(name="reset",
+                            description="Reset the system prompt for this channel to the default")
 async def systemprompt_reset(interaction: discord.Interaction):
     channel_id = interaction.channel.id
     await interaction.response.defer(ephemeral=True, thinking=True)
@@ -215,15 +224,15 @@ async def systemprompt_reset(interaction: discord.Interaction):
     if channel_id in channel_system_prompts:
         del channel_system_prompts[channel_id]
         logger.info(
-            f'[/systemprompt reset] Channel {channel_id}: custom prompt removed, reverting to default.')
+            f"[/systemprompt reset] Channel {channel_id}: custom prompt removed, reverting to default.")
 
     if channel_id in conversations and conversations[
-            channel_id] and conversations[channel_id][0]['role'] == 'system':
-        conversations[channel_id][0]['content'] = SYSTEM_PROMPT
+            channel_id] and conversations[channel_id][0]["role"] == "system":
+        conversations[channel_id][0]["content"] = SYSTEM_PROMPT
     else:
         # Ensure conversation list exists and prepend system prompt
         conversations.setdefault(channel_id, []).insert(
-            0, {'role': 'system', 'content': SYSTEM_PROMPT})
+            0, {"role": "system", "content": SYSTEM_PROMPT})
         # If the conversation existed but didn't start with a system prompt, this ensures the new system prompt is first.
         # If it was already first, this path isn't taken. If it was empty or didn't exist, it's created with the system prompt.
         # To avoid duplicate system prompts if one was already there but not at index 0 (which is an unlikely state):
@@ -234,27 +243,23 @@ async def systemprompt_reset(interaction: discord.Interaction):
             # Keep the first (our new/updated one) and any non-system messages
             new_convo = [conversations[channel_id][0]]
             for msg in conversations[channel_id][1:]:
-                if msg['role'] != 'system':
+                if msg["role"] != "system":
                     new_convo.append(msg)
             conversations[channel_id] = new_convo
 
     logger.info(
-        f'[/systemprompt reset] Channel {channel_id}: system prompt reset to default.')
-    await interaction.followup.send('System prompt for this channel has been reset to the default.', ephemeral=True)
+        f"[/systemprompt reset] Channel {channel_id}: system prompt reset to default.")
+    await interaction.followup.send("System prompt for this channel has been reset to the default.", ephemeral=True)
+
 
 bot.tree.add_command(systemprompt_group)
 
 
-@bot.tree.command(name='chat', description='Send a message to the chatbot')
-@app_commands.describe(
-    message='Your message',
-    attachment='Optional image to attach to the prompt'
-)
-async def chat(
-    interaction: discord.Interaction,
-    message: str,
-    attachment: discord.Attachment | None = None
-):
+@bot.tree.command(name="chat", description="Send a message to the chatbot")
+@app_commands.describe(message="Your message",
+                       attachment="Optional image to attach to the prompt")
+async def chat(interaction: discord.Interaction, message: str,
+               attachment: discord.Attachment | None = None):
     channel_id = interaction.channel.id
     legend_section = await get_mention_legend(interaction.channel)
 
@@ -262,27 +267,27 @@ async def chat(
         message = interaction.user.display_name + " says: " + message
     # Initialize if missing
     if channel_id not in conversations:
-        conversations[channel_id] = [{'role': 'system', 'content': channel_system_prompts.get(
+        conversations[channel_id] = [{"role": "system", "content": channel_system_prompts.get(
             channel_id, SYSTEM_PROMPT + "\n" + legend_section)}]
         models[channel_id] = DEFAULT_MODEL
         logger.info(
-            f'[/chat] Channel {channel_id}: initialized conversation and model')
+            f"[/chat] Channel {channel_id}: initialized conversation and model")
 
     # Construct content payload for OpenAI
     if attachment:
         logger.info(
-            f'[/chat] Channel {channel_id}: including image URL {attachment.url}')
+            f"[/chat] Channel {channel_id}: including image URL {attachment.url}")
         content_payload = [
-            {'type': 'text', 'text': message},
-            {'type': 'image_url', 'image_url': {'url': attachment.url}}
+            {"type": "text", "text": message},
+            {"type": "image_url", "image_url": {"url": attachment.url}},
         ]
     else:
         content_payload = message
 
     # Log user input
-    logger.info(f'[/chat] Channel {channel_id} User: {message}')
+    logger.info(f"[/chat] Channel {channel_id} User: {message}")
     conversations[channel_id].append(
-        {'role': 'user', 'content': json.dumps(content_payload)})
+        {"role": "user", "content": json.dumps(content_payload)})
 
     # Acknowledge and send prompt-only message
     await interaction.response.defer(ephemeral=False, thinking=True)
@@ -290,14 +295,15 @@ async def chat(
     # Typing indicator while waiting for OpenAI
     async with interaction.channel.typing():
         reply = get_chat_completion(
-            model=models.get(channel_id, DEFAULT_MODEL),
-            messages=conversations[channel_id]
-        )
+            model=models.get(
+                channel_id,
+                DEFAULT_MODEL),
+            messages=conversations[channel_id])
 
         # Log and store assistant reply
-        logger.info(f'[/chat] Channel {channel_id} Assistant: {reply}')
+        logger.info(f"[/chat] Channel {channel_id} Assistant: {reply}")
         conversations[channel_id].append(
-            {'role': 'assistant', 'content': json.dumps(reply)})
+            {"role": "assistant", "content": json.dumps(reply)})
 
         # Prepare base message content (original prompt + attachment if any)
         base_interaction_message = ""
@@ -309,27 +315,29 @@ async def chat(
         await _send_interaction_followup(interaction, base_interaction_message, reply)
 
 
-@bot.tree.command(name='draw', description='Generate an image from a prompt')
+@bot.tree.command(name="draw", description="Generate an image from a prompt")
 @app_commands.describe(
-    prompt='Prompt for image generation',
-    edit_image='Optional image to edit',
-    model='Optional image model to use',
+    prompt="Prompt for image generation",
+    edit_image="Optional image to edit",
+    model="Optional image model to use",
 )
-@app_commands.choices(model=[
-    Choice(name='gpt-image-1', value='gpt-image-1'),
-    Choice(name='dall-e-2', value='dall-e-2'),
-    Choice(name='dall-e-3', value='dall-e-3')
-])
+@app_commands.choices(
+    model=[
+        Choice(name="gpt-image-1", value="gpt-image-1"),
+        Choice(name="dall-e-2", value="dall-e-2"),
+        Choice(name="dall-e-3", value="dall-e-3"),
+    ]
+)
 async def draw(
     interaction: discord.Interaction,
     prompt: str,
     edit_image: discord.Attachment | None = None,
     # This is a parameter, not from config directly here
-    model: str = DEFAULT_IMAGE_MODEL
+    model: str = DEFAULT_IMAGE_MODEL,
 ):
     channel_id = interaction.channel.id  # Used for logging
     logger.info(
-        f'[/draw] Channel {channel_id} Prompt: {prompt} Model: {model} Edit? {bool(edit_image)}')
+        f"[/draw] Channel {channel_id} Prompt: {prompt} Model: {model} Edit? {bool(edit_image)}")
 
     # Typing indicator while generating image
     async with interaction.channel.typing():
@@ -338,18 +346,15 @@ async def draw(
         try:
             if edit_image:
                 logger.info(
-                    f'[/draw] Channel {channel_id}: editing image {edit_image.filename}')
+                    f"[/draw] Channel {channel_id}: editing image {edit_image.filename}")
 
             # Call the helper function from openai_handler.py
             img_bytes = generate_image(
-                prompt=prompt,
-                model=model,
-                edit_image=edit_image
-            )
+                prompt=prompt, model=model, edit_image=edit_image)
 
             # Log image generation
-            logger.info(f'[/draw] Channel {channel_id}: image generated')
-            file = discord.File(io.BytesIO(img_bytes), filename='image.png')
+            logger.info(f"[/draw] Channel {channel_id}: image generated")
+            file = discord.File(io.BytesIO(img_bytes), filename="image.png")
 
             if edit_image:
                 await interaction.followup.send(content=f"{edit_image.url}\n> {prompt}", file=file)
@@ -373,7 +378,8 @@ async def _send_interaction_followup(
     if len(base_content + f"\n{reply_text}") > 2000:
         try:
             logger.info(
-                "Reply for interaction followup exceeded 2000 characters with base_content, attempting to upload to pasters.rs")
+                "Reply for interaction followup exceeded 2000 characters with base_content, attempting to upload to pasters.rs"
+            )
             pasted_url = upload_to_pasters(markdown_text=reply_text)
             # Add the pasters link for the reply part
             final_content += f"\n\nMy detailed response was too long, so I've uploaded it here: {pasted_url}"
@@ -387,7 +393,8 @@ async def _send_interaction_followup(
         final_content += f"\n{reply_text}"
         await interaction.followup.send(content=final_content)
 
-if __name__ == '__main__':
-    logger.info('Starting bot...')
+
+if __name__ == "__main__":
+    logger.info("Starting bot...")
     bot.run(DISCORD_BOT_TOKEN)
-    logger.info('Bot shutdown.')
+    logger.info("Bot shutdown.")

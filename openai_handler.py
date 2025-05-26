@@ -28,13 +28,9 @@ def generate_image(
     """
     b64_json_data = None  # Initialize to ensure it's always defined
     result = None
-    if model == 'dall-e-2' or model == 'dall-e-3':
+    if model == "dall-e-2" or model == "dall-e-3":
         result = client.images.generate(
-            model=model,
-            prompt=prompt,
-            n=1,
-            response_format='b64_json'
-        )
+            model=model, prompt=prompt, n=1, response_format="b64_json")
     else:  # assume gpt-image-1 or similar custom model that might support edit or generate
         if edit_image:
             file_obj = edit_image.to_file()

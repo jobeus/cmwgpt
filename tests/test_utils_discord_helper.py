@@ -29,6 +29,7 @@ class TestDiscordHelper(unittest.TestCase):
 
     def test_get_mention_legend_basic(self):
         """Test basic mention legend generation."""
+
         async def run_test():
             # Mock channel and guild
             mock_channel = MagicMock()
@@ -61,7 +62,8 @@ class TestDiscordHelper(unittest.TestCase):
                 "@Bob = <@67890>",
                 "Whenever you see a mention like <@USER_ID>, map it back to the corresponding handle. "
                 "If you want to @mention someone yourself use <@USER_ID> instead of @nickname for discord "
-                "to recoginize your intent."]
+                "to recoginize your intent.",
+            ]
             expected = "\n".join(expected_lines)
 
             self.assertEqual(result, expected)
@@ -70,6 +72,7 @@ class TestDiscordHelper(unittest.TestCase):
 
     def test_get_mention_legend_empty_guild(self):
         """Test mention legend with no members."""
+
         async def run_test():
             # Mock channel and guild
             mock_channel = MagicMock()
@@ -92,7 +95,8 @@ class TestDiscordHelper(unittest.TestCase):
                 "",
                 "Whenever you see a mention like <@USER_ID>, map it back to the corresponding handle. "
                 "If you want to @mention someone yourself use <@USER_ID> instead of @nickname for discord "
-                "to recoginize your intent."]
+                "to recoginize your intent.",
+            ]
             expected = "\n".join(expected_lines)
 
             self.assertEqual(result, expected)
@@ -101,6 +105,7 @@ class TestDiscordHelper(unittest.TestCase):
 
     def test_get_mention_legend_special_characters(self):
         """Test mention legend with special characters in names."""
+
         async def run_test():
             # Mock channel and guild
             mock_channel = MagicMock()
@@ -139,6 +144,7 @@ class TestDiscordHelper(unittest.TestCase):
 
     def test_get_mention_legend_large_guild(self):
         """Test mention legend with many members."""
+
         async def run_test():
             # Mock channel and guild
             mock_channel = MagicMock()
@@ -175,6 +181,7 @@ class TestDiscordHelper(unittest.TestCase):
 
     def test_get_mention_legend_duplicate_names(self):
         """Test mention legend with duplicate display names."""
+
         async def run_test():
             # Mock channel and guild
             mock_channel = MagicMock()
@@ -208,6 +215,7 @@ class TestDiscordHelper(unittest.TestCase):
 
     def test_get_mention_legend_format_consistency(self):
         """Test that the mention legend format is consistent."""
+
         async def run_test():
             # Mock channel and guild
             mock_channel = MagicMock()
@@ -229,7 +237,7 @@ class TestDiscordHelper(unittest.TestCase):
             result = await get_mention_legend(mock_channel)
 
             # Verify exact format
-            lines = result.split('\n')
+            lines = result.split("\n")
             self.assertEqual(
                 lines[0], "Here are all the users in this channel:")
             self.assertEqual(lines[1], "@TestUser = <@12345>")
@@ -239,5 +247,5 @@ class TestDiscordHelper(unittest.TestCase):
         self.loop.run_until_complete(run_test())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,7 @@ class TestBotState(unittest.TestCase):
         """Set up test environment."""
         # Import and reset bot_state
         import bot_state
+
         bot_state.conversations.clear()
         bot_state.models.clear()
         bot_state.channel_system_prompts.clear()
@@ -33,9 +34,9 @@ class TestBotState(unittest.TestCase):
         """Test conversation storage functionality."""
         channel_id = 12345
         conversation = [
-            {'role': 'system', 'content': 'You are a helpful assistant.'},
-            {'role': 'user', 'content': 'Hello'},
-            {'role': 'assistant', 'content': 'Hi there!'}
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
         ]
 
         # Store conversation
@@ -51,7 +52,7 @@ class TestBotState(unittest.TestCase):
     def test_models_storage(self):
         """Test model storage functionality."""
         channel_id = 12345
-        model = 'gpt-4.1-mini'
+        model = "gpt-4.1-mini"
 
         # Store model
         self.bot_state.models[channel_id] = model
@@ -64,7 +65,7 @@ class TestBotState(unittest.TestCase):
     def test_channel_system_prompts_storage(self):
         """Test channel system prompts storage functionality."""
         channel_id = 12345
-        system_prompt = 'You are a coding assistant.'
+        system_prompt = "You are a coding assistant."
 
         # Store system prompt
         self.bot_state.channel_system_prompts[channel_id] = system_prompt
@@ -82,9 +83,9 @@ class TestBotState(unittest.TestCase):
 
         for i, channel_id in enumerate(channel_ids):
             self.bot_state.conversations[channel_id] = [
-                {'role': 'system', 'content': f'Prompt {i}'}]
-            self.bot_state.models[channel_id] = f'model-{i}'
-            self.bot_state.channel_system_prompts[channel_id] = f'System prompt {i}'
+                {"role": "system", "content": f"Prompt {i}"}]
+            self.bot_state.models[channel_id] = f"model-{i}"
+            self.bot_state.channel_system_prompts[channel_id] = f"System prompt {i}"
 
         # Verify all channels are stored
         self.assertEqual(len(self.bot_state.conversations), 3)
@@ -96,29 +97,29 @@ class TestBotState(unittest.TestCase):
             self.assertIn(channel_id, self.bot_state.conversations)
             self.assertIn(channel_id, self.bot_state.models)
             self.assertIn(channel_id, self.bot_state.channel_system_prompts)
-            self.assertEqual(self.bot_state.models[channel_id], f'model-{i}')
+            self.assertEqual(self.bot_state.models[channel_id], f"model-{i}")
 
     def test_conversation_modification(self):
         """Test modifying existing conversations."""
         channel_id = 12345
-        initial_conversation = [{'role': 'system', 'content': 'Initial'}]
+        initial_conversation = [{"role": "system", "content": "Initial"}]
 
         # Store initial conversation
         self.bot_state.conversations[channel_id] = initial_conversation
 
         # Modify conversation
         self.bot_state.conversations[channel_id].append(
-            {'role': 'user', 'content': 'Hello'})
+            {"role": "user", "content": "Hello"})
         self.bot_state.conversations[channel_id].append(
-            {'role': 'assistant', 'content': 'Hi!'})
+            {"role": "assistant", "content": "Hi!"})
 
         # Verify modification
         self.assertEqual(len(self.bot_state.conversations[channel_id]), 3)
         self.assertEqual(
-            self.bot_state.conversations[channel_id][1]['content'],
-            'Hello')
+            self.bot_state.conversations[channel_id][1]["content"],
+            "Hello")
         self.assertEqual(
-            self.bot_state.conversations[channel_id][2]['content'], 'Hi!')
+            self.bot_state.conversations[channel_id][2]["content"], "Hi!")
 
     def test_data_types(self):
         """Test that the data structures have correct types."""
@@ -133,23 +134,21 @@ class TestBotState(unittest.TestCase):
 
         # Set different data for each channel
         self.bot_state.conversations[channel1] = [
-            {'role': 'system', 'content': 'Channel 1'}]
+            {"role": "system", "content": "Channel 1"}]
         self.bot_state.conversations[channel2] = [
-            {'role': 'system', 'content': 'Channel 2'}]
+            {"role": "system", "content": "Channel 2"}]
 
-        self.bot_state.models[channel1] = 'model-1'
-        self.bot_state.models[channel2] = 'model-2'
+        self.bot_state.models[channel1] = "model-1"
+        self.bot_state.models[channel2] = "model-2"
 
         # Verify isolation
         self.assertNotEqual(
             self.bot_state.conversations[channel1],
-            self.bot_state.conversations[channel2]
-        )
+            self.bot_state.conversations[channel2])
         self.assertNotEqual(
             self.bot_state.models[channel1],
-            self.bot_state.models[channel2]
-        )
+            self.bot_state.models[channel2])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

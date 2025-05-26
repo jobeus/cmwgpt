@@ -26,15 +26,16 @@ class TestBotFunctions(unittest.TestCase):
         """Clean up test environment."""
         self.loop.close()
 
-    @patch('bot._send_channel_reply')
-    @patch('bot.get_mention_legend')
-    @patch('bot.get_chat_completion')
+    @patch("bot._send_channel_reply")
+    @patch("bot.get_mention_legend")
+    @patch("bot.get_chat_completion")
     def test_prepare_mention_context(
             self,
             mock_get_chat,
             mock_get_legend,
             mock_send_reply):
         """Test _prepare_mention_context function."""
+
         async def run_test():
             # Import the function we want to test
             from bot import _prepare_mention_context
@@ -72,9 +73,9 @@ class TestBotFunctions(unittest.TestCase):
             mock_get_legend.return_value = "Legend: @user1 = <@11111>"
 
             # Mock channel system prompts
-            with patch('bot.channel_system_prompts', {}):
-                with patch('bot.SYSTEM_PROMPT', 'Default system prompt'):
-                    with patch('bot.INCLUDE_NUM_CHATLINES', 3):
+            with patch("bot.channel_system_prompts", {}):
+                with patch("bot.SYSTEM_PROMPT", "Default system prompt"):
+                    with patch("bot.INCLUDE_NUM_CHATLINES", 3):
                         # Call the function
                         result = await _prepare_mention_context(mock_message, mock_bot_user)
 
@@ -84,39 +85,40 @@ class TestBotFunctions(unittest.TestCase):
             self.assertEqual(len(result), 2)
 
             # Verify system message
-            self.assertEqual(result[0]['role'], 'system')
-            self.assertIn('Default system prompt', result[0]['content'])
+            self.assertEqual(result[0]["role"], "system")
+            self.assertIn("Default system prompt", result[0]["content"])
             # Bot ID should be in system prompt
-            self.assertIn('<@99999>', result[0]['content'])
+            self.assertIn("<@99999>", result[0]["content"])
 
             # Verify user message with history
-            self.assertEqual(result[1]['role'], 'user')
+            self.assertEqual(result[1]["role"], "user")
 
             # Parse the JSON content to verify history structure
-            content = result[1]['content']
-            self.assertIn('Conversation lines are below', content)
+            content = result[1]["content"]
+            self.assertIn("Conversation lines are below", content)
 
             # Extract JSON from content
-            json_start = content.find('[')
+            json_start = content.find("[")
             json_content = content[json_start:]
             history_data = json.loads(json_content)
 
             # Verify history is in correct order (oldest first)
             self.assertEqual(len(history_data), 3)
-            self.assertEqual(history_data[0]['user'], '<@11111>')
-            self.assertEqual(history_data[0]['says'], 'First message')
-            self.assertEqual(history_data[1]['user'], '<@22222>')
-            self.assertEqual(history_data[1]['says'], 'Second message')
-            self.assertEqual(history_data[2]['user'], '<@12345>')
+            self.assertEqual(history_data[0]["user"], "<@11111>")
+            self.assertEqual(history_data[0]["says"], "First message")
+            self.assertEqual(history_data[1]["user"], "<@22222>")
+            self.assertEqual(history_data[1]["says"], "Second message")
+            self.assertEqual(history_data[2]["user"], "<@12345>")
             self.assertEqual(
-                history_data[2]['says'],
-                'Hey @bot, can you help me?')
+                history_data[2]["says"],
+                "Hey @bot, can you help me?")
 
         self.loop.run_until_complete(run_test())
 
-    @patch('bot.upload_to_pasters')
+    @patch("bot.upload_to_pasters")
     def test_send_channel_reply_short_message(self, mock_upload):
         """Test _send_channel_reply with short message."""
+
         async def run_test():
             from bot import _send_channel_reply
 
@@ -134,9 +136,10 @@ class TestBotFunctions(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    @patch('bot.upload_to_pasters')
+    @patch("bot.upload_to_pasters")
     def test_send_channel_reply_long_message(self, mock_upload):
         """Test _send_channel_reply with long message that needs pasting."""
+
         async def run_test():
             from bot import _send_channel_reply
 
@@ -155,14 +158,17 @@ class TestBotFunctions(unittest.TestCase):
             mock_upload.assert_called_once_with(markdown_text=long_message)
 
             # Verify channel send was called with paste URL
-            expected_message = "My response was too long to post here, so I've uploaded it to: https://paste.rs/abc123.md"
+            expected_message = (
+                "My response was too long to post here, so I've uploaded it to: https://paste.rs/abc123.md"
+            )
             mock_channel.send.assert_called_once_with(expected_message)
 
         self.loop.run_until_complete(run_test())
 
-    @patch('bot.upload_to_pasters')
+    @patch("bot.upload_to_pasters")
     def test_send_channel_reply_upload_error(self, mock_upload):
         """Test _send_channel_reply when paste upload fails."""
+
         async def run_test():
             from bot import _send_channel_reply
 
@@ -186,9 +192,10 @@ class TestBotFunctions(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    @patch('bot.upload_to_pasters')
+    @patch("bot.upload_to_pasters")
     def test_send_interaction_followup_short_message(self, mock_upload):
         """Test _send_interaction_followup with short message."""
+
         async def run_test():
             from bot import _send_interaction_followup
 
@@ -210,9 +217,10 @@ class TestBotFunctions(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    @patch('bot.upload_to_pasters')
+    @patch("bot.upload_to_pasters")
     def test_send_interaction_followup_long_message(self, mock_upload):
         """Test _send_interaction_followup with long message that needs pasting."""
+
         async def run_test():
             from bot import _send_interaction_followup
 
@@ -235,9 +243,7 @@ class TestBotFunctions(unittest.TestCase):
             # Verify followup was called with paste URL
             expected_content = f"{base_content}\n\nMy detailed response was too long, so I've uploaded it here: https://paste.rs/xyz789.md"
             mock_interaction.followup.send.assert_called_once_with(
-                content=expected_content,
-                suppress_embeds=True
-            )
+                content=expected_content, suppress_embeds=True)
 
         self.loop.run_until_complete(run_test())
 
@@ -258,16 +264,16 @@ class TestBotFunctions(unittest.TestCase):
         """Test JSON content handling in conversations."""
         # Test that JSON serialization works correctly
         content_payload = [
-            {'type': 'text', 'text': 'Hello'},
-            {'type': 'image_url', 'image_url': {'url': 'http://example.com/image.jpg'}}
+            {"type": "text", "text": "Hello"},
+            {"type": "image_url", "image_url": {"url": "http://example.com/image.jpg"}},
         ]
 
         json_content = json.dumps(content_payload)
         parsed_content = json.loads(json_content)
 
         self.assertEqual(parsed_content, content_payload)
-        self.assertEqual(parsed_content[0]['type'], 'text')
-        self.assertEqual(parsed_content[1]['type'], 'image_url')
+        self.assertEqual(parsed_content[0]["type"], "text")
+        self.assertEqual(parsed_content[1]["type"], "image_url")
 
     def test_username_formatting(self):
         """Test username formatting for chat messages."""
@@ -297,5 +303,5 @@ class TestBotFunctions(unittest.TestCase):
         self.assertEqual(formatted, expected)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
