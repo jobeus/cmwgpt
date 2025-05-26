@@ -47,9 +47,21 @@ def setup_signal_handlers(bot_client):
             logger.error(f"Error during graceful shutdown: {e}")
             print(f"⚠️  Error during graceful shutdown: {e}")
 
-        # Exit normally (not with restart code)
         print("👋 Graceful shutdown complete")
-        sys.exit(0)
+
+        # Close the Discord bot gracefully instead of forcing exit
+        try:
+            if bot_client.bot and not bot_client.bot.is_closed():
+                # Schedule the bot to close
+                if loop.is_running():
+                    asyncio.create_task(bot_client.bot.close())
+                else:
+                    loop.run_until_complete(bot_client.bot.close())
+        except Exception as e:
+            logger.error(f"Error closing Discord bot: {e}")
+            print(f"⚠️  Error closing Discord bot: {e}")
+
+        # Don't call sys.exit() - let the bot's run() method handle the shutdown
 
     # Register signal handlers
     signal.signal(signal.SIGINT, signal_handler)
