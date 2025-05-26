@@ -186,6 +186,7 @@ class OpenAIService:
                             model=model,
                             prompt=prompt,
                             n=1,
+                            moderation="low",
                         )
 
                 if result and result.data and len(result.data) > 0:
