@@ -12,7 +12,7 @@ async def get_mention_legend(channel: discord.TextChannel) -> str:
 
     return (
         f"Here are all the users in this channel:\n"
-        f"{"\n".join(lines)}\n"
+        f"{chr(10).join(lines)}\n"
         f"Whenever you see a mention like <@USER_ID>, map it back to the corresponding handle. "
         f"If you want to @mention someone yourself use <@USER_ID> instead of @nickname for discord "
         f"to recoginize your intent."

@@ -70,8 +70,7 @@ class OpenAIService:
         for attempt in range(max_retries):
             try:
                 logger.debug(
-                    f"Attempting chat completion with model {model} (attempt {
-                        attempt + 1}/{max_retries})"
+                    f"Attempting chat completion with model {model} (attempt {attempt + 1}/{max_retries})"
                 )
                 response = await client.responses.create(model=model, input=messages)
                 logger.debug("Chat completion successful")
@@ -96,8 +95,7 @@ class OpenAIService:
 
             except APIConnectionError as e:
                 logger.warning(
-                    f"Connection error on attempt {
-                        attempt + 1}: {e}"
+                    f"Connection error on attempt {attempt + 1}: {e}"
                 )
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
@@ -112,9 +110,7 @@ class OpenAIService:
             except BadRequestError as e:
                 logger.error(f"Bad request error: {e}")
                 raise OpenAIServiceError(
-                    f"Invalid request: {
-                        e.message if hasattr(
-                            e, 'message') else str(e)}"
+                    f"Invalid request: {e.message if hasattr(e, 'message') else str(e)}"
                 ) from e
 
             except APIError as e:
@@ -126,8 +122,7 @@ class OpenAIService:
                     continue
                 logger.error("Max retries exceeded for API error")
                 raise OpenAIServiceError(
-                    f"OpenAI API error after {max_retries} attempts: {
-                        str(e)}"
+                    f"OpenAI API error after {max_retries} attempts: {str(e)}"
                 ) from e
 
             except OpenAIServiceError:
@@ -169,8 +164,7 @@ class OpenAIService:
         for attempt in range(max_retries):
             try:
                 logger.debug(
-                    f"Attempting image generation with model {model} (attempt {
-                        attempt + 1}/{max_retries})"
+                    f"Attempting image generation with model {model} (attempt {attempt + 1}/{max_retries})"
                 )
                 b64_json_data = None
                 result = None
@@ -224,8 +218,7 @@ class OpenAIService:
 
             except APIConnectionError as e:
                 logger.warning(
-                    f"Connection error on attempt {
-                        attempt + 1}: {e}"
+                    f"Connection error on attempt {attempt + 1}: {e}"
                 )
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
@@ -242,9 +235,7 @@ class OpenAIService:
                 # BadRequestError is often due to content policy violations,
                 # don't retry
                 raise OpenAIServiceError(
-                    f"Request rejected: {
-                        e.message if hasattr(
-                            e, 'message') else str(e)}"
+                    f"Request rejected: {e.message if hasattr(e, 'message') else str(e)}"
                 ) from e
 
             except APIError as e:
@@ -256,8 +247,7 @@ class OpenAIService:
                     continue
                 logger.error("Max retries exceeded for API error")
                 raise OpenAIServiceError(
-                    f"OpenAI API error after {max_retries} attempts: {
-                        str(e)}"
+                    f"OpenAI API error after {max_retries} attempts: {str(e)}"
                 ) from e
 
             except OpenAIServiceError:

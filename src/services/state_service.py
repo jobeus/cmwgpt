@@ -59,8 +59,7 @@ class StateService:
         with self._conversations_lock:
             self._conversations[channel_id] = conversation.copy()
             logger.debug(
-                f"Set conversation for channel {channel_id} with {
-                    len(conversation)} messages"
+                f"Set conversation for channel {channel_id} with {len(conversation)} messages"
             )
 
     def add_message_to_conversation(

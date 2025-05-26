@@ -46,8 +46,7 @@ class MentionHandler:
 
             except OpenAIServiceError as e:
                 logger.error(f"OpenAI API error in mention handler: {e}")
-                error_message = f"Sorry, I encountered an error while processing your mention: {
-                    str(e)}"
+                error_message = f"Sorry, I encountered an error while processing your mention: {str(e)}"
 
                 try:
                     await message_service.send_channel_reply(message.channel, error_message)
@@ -117,10 +116,7 @@ class MentionHandler:
             List of message dictionaries for OpenAI API
         """
         logger.info(
-            f"Mention by {
-                message.author} in #{
-                message.channel}: {
-                message.content}")
+            f"Mention by {message.author} in #{message.channel}: {message.content}")
 
         # Gather message history
         history_msgs = []
