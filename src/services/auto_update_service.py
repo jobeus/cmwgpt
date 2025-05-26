@@ -76,7 +76,7 @@ class AutoUpdateService:
         self._last_known_commit = self._get_current_commit_hash()
         if self._last_known_commit:
             logger.info(
-                f"Starting auto-update monitoring from commit: {self._last_known_commit[:8]}")
+                f"Starting auto-update monitoring from commit: {self._last_known_commit[:7]}")
         else:
             logger.warning("Could not determine current commit hash")
 
