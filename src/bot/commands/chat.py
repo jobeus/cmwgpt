@@ -175,8 +175,7 @@ class ChatCommands:
                     base_content = message_service.format_prompt_message(
                         message)
 
-                error_message = f"{base_content}\n\nSorry, I encountered an error while processing your request: {
-                    str(e)}"
+                error_message = f"{base_content}\n\nSorry, I encountered an error while processing your request: {str(e)}"
 
                 try:
                     await interaction.followup.send(content=error_message)
