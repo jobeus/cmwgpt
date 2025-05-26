@@ -13,7 +13,13 @@ import os
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Add src directory for new architecture
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(
+            os.path.dirname(
+                os.path.abspath(__file__))),
+        "src"))
 
 
 class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
@@ -43,8 +49,10 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "Hello! How can I help you today?")
 
         # Verify API call - should include system prompt at the beginning
-        expected_messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": "Hello"}]
-        self.mock_client.responses.create.assert_called_once_with(model=model, input=expected_messages)
+        expected_messages = [{"role": "system", "content": system_prompt}, {
+            "role": "user", "content": "Hello"}]
+        self.mock_client.responses.create.assert_called_once_with(
+            model=model, input=expected_messages)
 
     async def test_get_chat_completion_different_models(self):
         """Test chat completion with different models."""
@@ -129,7 +137,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, b"custom_image_data")
 
         # Verify API call
-        self.mock_client.images.generate.assert_called_once_with(model=model, prompt=prompt, n=1, moderation="low")
+        self.mock_client.images.generate.assert_called_once_with(
+            model=model, prompt=prompt, n=1, moderation="low")
 
     async def test_generate_image_with_edit(self):
         """Test image editing functionality."""
@@ -156,7 +165,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, b"edited_image_data")
 
         # Verify API call
-        self.mock_client.images.edit.assert_called_once_with(model=model, image=[mock_file], prompt=prompt)
+        self.mock_client.images.edit.assert_called_once_with(
+            model=model, image=[mock_file], prompt=prompt)
 
         # Verify attachment was processed
         mock_attachment.to_file.assert_called_once()
@@ -178,7 +188,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(OpenAIServiceError) as context:
             await openai_service.generate_image(prompt, model)
 
-        self.assertEqual(str(context.exception), "Image generation failed, no image data returned.")
+        self.assertEqual(str(context.exception),
+                         "Image generation failed, no image data returned.")
 
     async def test_generate_image_no_result_error(self):
         """Test error handling when no result is returned."""
@@ -193,7 +204,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(OpenAIServiceError) as context:
             await openai_service.generate_image(prompt, model)
 
-        self.assertEqual(str(context.exception), "Image generation failed, no image data returned.")
+        self.assertEqual(str(context.exception),
+                         "Image generation failed, no image data returned.")
 
     async def test_generate_image_base64_decoding(self):
         """Test that base64 decoding works correctly."""
@@ -238,7 +250,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         mock_response.output_text = "Complex response"
         self.mock_client.responses.create.return_value = mock_response
 
-        # Test with complex messages including JSON content (without system prompt in messages)
+        # Test with complex messages including JSON content (without system
+        # prompt in messages)
         messages = [
             {
                 "role": "user",
@@ -264,7 +277,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
             {"role": "assistant", "content": "I can see your image!"},
             {"role": "user", "content": "What do you think?"},
         ]
-        self.mock_client.responses.create.assert_called_once_with(model="gpt-4.1-mini", input=expected_messages)
+        self.mock_client.responses.create.assert_called_once_with(
+            model="gpt-4.1-mini", input=expected_messages)
 
 
 if __name__ == "__main__":

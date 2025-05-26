@@ -236,7 +236,8 @@ class TestConfig(unittest.TestCase):
                 datetime.strptime(datetime_part, "%Y-%m-%d %H:%M:%S")
 
                 # Check if tz_abbr is in allowed list
-                assert tz_abbr in ("MDT", "MST"), f"Unexpected timezone: {tz_abbr}"
+                assert tz_abbr in (
+                    "MDT", "MST"), f"Unexpected timezone: {tz_abbr}"
 
             except Exception as e:
                 self.fail(f"Date format is incorrect: {date_part} ({e})")

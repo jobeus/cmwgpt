@@ -12,6 +12,11 @@ All operations are protected by locks to ensure thread safety.
 import threading
 from typing import Dict, List, Any, Optional
 import logging
+import json
+import os
+import stat
+import time
+import glob
 
 logger = logging.getLogger(__name__)
 
@@ -24,16 +29,19 @@ class StateService:
         self._conversations: Dict[int, List[Dict[str, Any]]] = {}
         self._models: Dict[int, str] = {}
         self._channel_system_prompts: Dict[int, str] = {}
+        self._active_channels: set[int] = set()  # Track channels where bot has been used
 
         # Thread locks for each data structure
         self._conversations_lock = threading.RLock()
         self._models_lock = threading.RLock()
         self._prompts_lock = threading.RLock()
+        self._active_channels_lock = threading.RLock()
 
         logger.info("StateService initialized with thread-safe storage")
 
     # Conversation management
-    def get_conversation(self, channel_id: int) -> Optional[List[Dict[str, Any]]]:
+    def get_conversation(
+            self, channel_id: int) -> Optional[List[Dict[str, Any]]]:
         """
         Get conversation history for a channel.
 
@@ -46,7 +54,8 @@ class StateService:
         with self._conversations_lock:
             return self._conversations.get(channel_id)
 
-    def set_conversation(self, channel_id: int, conversation: List[Dict[str, Any]]) -> None:
+    def set_conversation(self, channel_id: int,
+                         conversation: List[Dict[str, Any]]) -> None:
         """
         Set conversation history for a channel.
 
@@ -56,9 +65,12 @@ class StateService:
         """
         with self._conversations_lock:
             self._conversations[channel_id] = conversation.copy()
-            logger.debug(f"Set conversation for channel {channel_id} with {len(conversation)} messages")
+            logger.debug(
+                f"Set conversation for channel {channel_id} with {
+                    len(conversation)} messages")
 
-    def add_message_to_conversation(self, channel_id: int, message: Dict[str, Any]) -> None:
+    def add_message_to_conversation(
+            self, channel_id: int, message: Dict[str, Any]) -> None:
         """
         Add a message to the conversation history for a channel.
 
@@ -70,7 +82,8 @@ class StateService:
             if channel_id not in self._conversations:
                 self._conversations[channel_id] = []
             self._conversations[channel_id].append(message)
-            logger.debug(f"Added message to conversation for channel {channel_id}")
+            logger.debug(
+                f"Added message to conversation for channel {channel_id}")
 
     def clear_conversation(self, channel_id: int) -> None:
         """
@@ -181,10 +194,11 @@ class StateService:
     # Utility methods
     def clear_all_data(self) -> None:
         """Clear all stored data (for testing purposes)."""
-        with self._conversations_lock, self._models_lock, self._prompts_lock:
+        with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock:
             self._conversations.clear()
             self._models.clear()
             self._channel_system_prompts.clear()
+            self._active_channels.clear()
             logger.info("Cleared all state data")
 
     def get_stats(self) -> Dict[str, int]:
@@ -194,12 +208,196 @@ class StateService:
         Returns:
             Dictionary with counts of stored data
         """
-        with self._conversations_lock, self._models_lock, self._prompts_lock:
+        with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock:
             return {
                 "conversations": len(self._conversations),
                 "models": len(self._models),
                 "system_prompts": len(self._channel_system_prompts),
+                "active_channels": len(self._active_channels),
             }
+
+    # Active channel management
+    def mark_channel_active(self, channel_id: int) -> None:
+        """
+        Mark a channel as active (bot has been used there).
+
+        Args:
+            channel_id: Discord channel ID
+        """
+        with self._active_channels_lock:
+            self._active_channels.add(channel_id)
+            logger.debug(f"Marked channel {channel_id} as active")
+
+    def get_active_channels(self) -> set[int]:
+        """
+        Get all channels where the bot has been used.
+
+        Returns:
+            Set of channel IDs
+        """
+        with self._active_channels_lock:
+            return self._active_channels.copy()
+
+    def clear_active_channels(self) -> None:
+        """Clear the active channels list."""
+        with self._active_channels_lock:
+            self._active_channels.clear()
+            logger.info("Cleared active channels list")
+
+    def save_state_to_temp_file(self) -> Optional[str]:
+        """
+        Save current state to a secure temporary file.
+
+        Returns:
+            Path to the temporary file, or None if save failed
+        """
+        try:
+            # Create unique filename with timestamp and PID
+            timestamp = int(time.time())
+            pid = os.getpid()
+            temp_filename = f"/tmp/cmwgpt_state_backup_{timestamp}_{pid}.json"
+
+            # Gather all state data under locks
+            with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock:
+                state_data = {
+                    "conversations": self._conversations.copy(),
+                    "models": self._models.copy(),
+                    "system_prompts": self._channel_system_prompts.copy(),
+                    "active_channels": list(self._active_channels),
+                    "timestamp": timestamp,
+                    "pid": pid,
+                }
+
+            # Write to temporary file with secure permissions
+            with open(temp_filename, "w", encoding="utf-8") as f:
+                json.dump(state_data, f, indent=2)
+
+            # Set restrictive permissions (600 - read/write for owner only)
+            os.chmod(temp_filename, stat.S_IRUSR | stat.S_IWUSR)
+
+            logger.info(f"State saved to temporary file: {temp_filename}")
+            return temp_filename
+
+        except Exception as e:
+            logger.error(f"Failed to save state to temporary file: {e}")
+            return None
+
+    def load_state_from_temp_files(self) -> bool:
+        """
+        Load state from any existing temporary files and clean them up.
+
+        Returns:
+            True if state was loaded, False otherwise
+        """
+        try:
+            # Find all matching temporary files
+            pattern = "/tmp/cmwgpt_state_backup_*.json"
+            temp_files = glob.glob(pattern)
+
+            if not temp_files:
+                logger.info("No temporary state files found")
+                return False
+
+            # Sort by timestamp (newest first)
+            temp_files.sort(reverse=True)
+
+            for temp_file in temp_files:
+                try:
+                    logger.info(f"Attempting to load state from: {temp_file}")
+
+                    with open(temp_file, "r", encoding="utf-8") as f:
+                        state_data = json.load(f)
+
+                    # Validate the data structure
+                    if not all(
+                        key in state_data for key in [
+                            "conversations",
+                            "models",
+                            "system_prompts"]):
+                        logger.warning(
+                            f"Invalid state file format: {temp_file}")
+                        continue
+
+                    # Load the state under locks
+                    with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock:
+                        # Convert string keys back to integers for channel IDs
+                        self._conversations = {
+                            int(k): v for k, v in state_data["conversations"].items()
+                        }
+                        self._models = {
+                            int(k): v for k, v in state_data["models"].items()
+                        }
+                        self._channel_system_prompts = {
+                            int(k): v for k, v in state_data["system_prompts"].items()
+                        }
+                        # Load active channels (may not exist in older state files)
+                        if "active_channels" in state_data:
+                            self._active_channels = set(state_data["active_channels"])
+                        else:
+                            # If not present, derive from existing conversations and models
+                            self._active_channels = set(self._conversations.keys()) | set(self._models.keys())
+
+                    logger.info(f"Successfully loaded state from: {temp_file}")
+                    logger.info(f"Restored {len(self._conversations)} conversations, "
+                                f"{len(self._models)} models, "
+                                f"{len(self._channel_system_prompts)} system prompts, "
+                                f"{len(self._active_channels)} active channels")
+
+                    # Successfully loaded, break out of loop
+                    break
+
+                except Exception as e:
+                    logger.error(f"Failed to load state from {temp_file}: {e}")
+                    continue
+
+            # Clean up all temporary files
+            for temp_file in temp_files:
+                try:
+                    os.remove(temp_file)
+                    logger.info(f"Cleaned up temporary file: {temp_file}")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to clean up temporary file {temp_file}: {e}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error during state loading: {e}")
+            return False
+
+    def cleanup_temp_files(self) -> None:
+        """
+        Clean up any leftover temporary state files.
+        """
+        try:
+            # Clean up state backup files
+            pattern = "/tmp/cmwgpt_state_backup_*.json"
+            temp_files = glob.glob(pattern)
+
+            for temp_file in temp_files:
+                try:
+                    os.remove(temp_file)
+                    logger.info(
+                        f"Cleaned up leftover temporary file: {temp_file}")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to clean up temporary file {temp_file}: {e}")
+
+            # Clean up restart info files
+            restart_info_pattern = "/tmp/cmwgpt_state_backup_*_restart_info.json"
+            restart_info_files = glob.glob(restart_info_pattern)
+
+            for info_file in restart_info_files:
+                try:
+                    os.remove(info_file)
+                    logger.info(
+                        f"Cleaned up leftover restart info file: {info_file}")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to clean up restart info file {info_file}: {e}")
+
+        except Exception as e:
+            logger.error(f"Error during temp file cleanup: {e}")
 
 
 # Global state service instance

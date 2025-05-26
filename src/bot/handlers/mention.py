@@ -22,7 +22,11 @@ logger = logging.getLogger(__name__)
 class MentionHandler:
     """Handles bot mentions and context preparation."""
 
-    async def handle_mention(self, message: discord.Message, bot_user: discord.User, model: str) -> None:
+    async def handle_mention(
+            self,
+            message: discord.Message,
+            bot_user: discord.User,
+            model: str) -> None:
         """
         Handle a bot mention by preparing context and sending a reply.
 
@@ -36,6 +40,9 @@ class MentionHandler:
         """
         async with message.channel.typing():
             try:
+                # Mark channel as active
+                state_service.mark_channel_active(message.channel.id)
+
                 chat_msgs, system_prompt = await self._prepare_mention_context(message, bot_user)
                 reply_content = await openai_service.get_chat_completion(
                     model=model, messages=chat_msgs, system_prompt=system_prompt
@@ -44,12 +51,14 @@ class MentionHandler:
 
             except OpenAIServiceError as e:
                 logger.error(f"OpenAI API error in mention handler: {e}")
-                error_message = f"Sorry, I encountered an error while processing your mention: {str(e)}"
+                error_message = f"Sorry, I encountered an error while processing your mention: {
+                    str(e)}"
 
                 try:
                     await message_service.send_channel_reply(message.channel, error_message)
                 except Exception as discord_error:
-                    logger.error(f"Failed to send error message to Discord: {discord_error}")
+                    logger.error(
+                        f"Failed to send error message to Discord: {discord_error}")
                     # Try to send a simpler error message
                     try:
                         await message.channel.send(
@@ -67,7 +76,8 @@ class MentionHandler:
                 try:
                     await message_service.send_channel_reply(message.channel, error_message)
                 except Exception as discord_error:
-                    logger.error(f"Failed to send error message to Discord: {discord_error}")
+                    logger.error(
+                        f"Failed to send error message to Discord: {discord_error}")
                     # Try to send a simpler error message
                     try:
                         await message.channel.send(
@@ -76,7 +86,11 @@ class MentionHandler:
                     except Exception:
                         logger.error("Failed to send fallback error message")
 
-    async def queue_mention(self, message: discord.Message, bot_user: discord.User, model: str) -> bool:
+    async def queue_mention(
+            self,
+            message: discord.Message,
+            bot_user: discord.User,
+            model: str) -> bool:
         """
         Queue a bot mention for FIFO processing.
 
@@ -108,7 +122,11 @@ class MentionHandler:
         Returns:
             Tuple of (message list for OpenAI API, system prompt string)
         """
-        logger.info(f"Mention by {message.author} in #{message.channel}: {message.content}")
+        logger.info(
+            f"Mention by {
+                message.author} in #{
+                message.channel}: {
+                message.content}")
 
         # Gather message history
         history_msgs = []
@@ -120,7 +138,8 @@ class MentionHandler:
         legend_section = await get_mention_legend(message.channel)
 
         # Prepare system prompt
-        channel_system_prompt = state_service.get_system_prompt(message.channel.id)
+        channel_system_prompt = state_service.get_system_prompt(
+            message.channel.id)
         if channel_system_prompt:
             current_channel_system_prompt = channel_system_prompt
         else:
@@ -153,9 +172,11 @@ class MentionHandler:
         # Build chat history
         chat_history = []
         for msg in history_msgs:
-            chat_history.append({"user": f"<@{msg.author.id}>", "says": msg.content})
+            chat_history.append(
+                {"user": f"<@{msg.author.id}>", "says": msg.content})
 
-        chat_context.append({"role": "user", "content": ask_preamble + "\n\n" + json.dumps(chat_history)})
+        chat_context.append(
+            {"role": "user", "content": ask_preamble + "\n\n" + json.dumps(chat_history)})
 
         return chat_context, current_channel_system_prompt
 

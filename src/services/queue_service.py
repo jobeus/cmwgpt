@@ -24,6 +24,7 @@ class MessageType(Enum):
     MENTION = "mention"
     COMMAND = "command"
     SHUTDOWN = "shutdown"
+    RESTART = "restart"
 
 
 @dataclass
@@ -52,12 +53,17 @@ class QueueService:
         Args:
             max_queue_size: Maximum number of messages to queue
         """
-        self._queue: asyncio.Queue[QueuedMessage] = asyncio.Queue(maxsize=max_queue_size)
+        self._queue: asyncio.Queue[QueuedMessage] = asyncio.Queue(
+            maxsize=max_queue_size)
         self._processing_task: Optional[asyncio.Task] = None
         self._is_running = False
-        self._stats = {"messages_processed": 0, "messages_failed": 0, "queue_overflows": 0}
+        self._stats = {
+            "messages_processed": 0,
+            "messages_failed": 0,
+            "queue_overflows": 0}
 
-        logger.info(f"QueueService initialized with max queue size: {max_queue_size}")
+        logger.info(
+            f"QueueService initialized with max queue size: {max_queue_size}")
 
     async def start(self) -> None:
         """Start the message processing loop."""
@@ -99,7 +105,8 @@ class QueueService:
             try:
                 await asyncio.wait_for(self._processing_task, timeout=10.0)
             except asyncio.TimeoutError:
-                logger.warning("Processing task did not complete within timeout, cancelling")
+                logger.warning(
+                    "Processing task did not complete within timeout, cancelling")
                 self._processing_task.cancel()
                 try:
                     await self._processing_task
@@ -144,16 +151,25 @@ class QueueService:
         try:
             # Use put_nowait to immediately fail if queue is full
             self._queue.put_nowait(queued_msg)
-            logger.debug(f"Queued mention from {message.author} in #{message.channel}")
+            logger.debug(
+                f"Queued mention from {
+                    message.author} in #{
+                    message.channel}")
             return True
         except asyncio.QueueFull:
             self._stats["queue_overflows"] += 1
-            logger.warning(f"Queue full, dropping message from {message.author} in #{message.channel}")
+            logger.warning(
+                f"Queue full, dropping message from {
+                    message.author} in #{
+                    message.channel}")
             return False
 
-    async def queue_command(
-        self, interaction: discord.Interaction, handler: Callable[..., Awaitable[None]], *args, **kwargs
-    ) -> bool:
+    async def queue_command(self,
+                            interaction: discord.Interaction,
+                            handler: Callable[...,
+                                              Awaitable[None]],
+                            *args,
+                            **kwargs) -> bool:
         """
         Queue a command for processing.
 
@@ -182,11 +198,50 @@ class QueueService:
         try:
             # Use put_nowait to immediately fail if queue is full
             self._queue.put_nowait(queued_msg)
-            logger.debug(f"Queued command from {interaction.user} in #{interaction.channel}")
+            logger.debug(
+                f"Queued command from {
+                    interaction.user} in #{
+                    interaction.channel}")
             return True
         except asyncio.QueueFull:
             self._stats["queue_overflows"] += 1
-            logger.warning(f"Queue full, dropping command from {interaction.user} in #{interaction.channel}")
+            logger.warning(
+                f"Queue full, dropping command from {
+                    interaction.user} in #{
+                    interaction.channel}")
+            return False
+
+    async def queue_restart(
+        self,
+        handler: Callable[[],
+                          Awaitable[None]]) -> bool:
+        """
+        Queue a restart signal for processing.
+
+        Args:
+            handler: Async handler function to process the restart
+
+        Returns:
+            True if restart was queued successfully, False if queue is full
+        """
+        if not self._is_running:
+            logger.error("Cannot queue restart: QueueService is not running")
+            return False
+
+        queued_msg = QueuedMessage(
+            message_type=MessageType.RESTART,
+            handler=handler,
+            timestamp=asyncio.get_event_loop().time(),
+        )
+
+        try:
+            # Use put_nowait to immediately fail if queue is full
+            self._queue.put_nowait(queued_msg)
+            logger.info("Queued restart signal")
+            return True
+        except asyncio.QueueFull:
+            self._stats["queue_overflows"] += 1
+            logger.warning("Queue full, dropping restart signal")
             return False
 
     async def _process_messages(self) -> None:
@@ -203,6 +258,14 @@ class QueueService:
                     logger.info("Received shutdown signal")
                     break
 
+                # Check for restart signal
+                if queued_msg.message_type == MessageType.RESTART:
+                    logger.info("Received restart signal")
+                    await queued_msg.handler()
+                    # Mark task as done for restart
+                    self._queue.task_done()
+                    continue
+
                 # Process the message
                 await self._handle_queued_message(queued_msg)
 
@@ -213,7 +276,9 @@ class QueueService:
                 logger.info("Message processing loop cancelled")
                 break
             except Exception as e:
-                logger.error(f"Error in message processing loop: {e}", exc_info=True)
+                logger.error(
+                    f"Error in message processing loop: {e}",
+                    exc_info=True)
                 self._stats["messages_failed"] += 1
 
         logger.info("Message processing loop ended")
@@ -231,10 +296,18 @@ class QueueService:
             # Log processing start
             if queued_msg.message_type == MessageType.MENTION:
                 logger.debug(
-                    f"Processing {queued_msg.message_type.value} message from {queued_msg.discord_message.author}"
-                )
+                    f"Processing {
+                        queued_msg.message_type.value} message from {
+                        queued_msg.discord_message.author}")
             elif queued_msg.message_type == MessageType.COMMAND:
-                logger.debug(f"Processing {queued_msg.message_type.value} from {queued_msg.interaction.user}")
+                logger.debug(
+                    f"Processing {
+                        queued_msg.message_type.value} from {
+                        queued_msg.interaction.user}")
+            elif queued_msg.message_type == MessageType.RESTART:
+                logger.debug(
+                    f"Processing {
+                        queued_msg.message_type.value} signal")
 
             # Call the appropriate handler directly - they should be properly
             # async
@@ -242,6 +315,8 @@ class QueueService:
                 await queued_msg.handler(queued_msg.discord_message, queued_msg.bot_user, queued_msg.model)
             elif queued_msg.message_type == MessageType.COMMAND:
                 await queued_msg.handler(queued_msg.interaction, *queued_msg.args, **queued_msg.kwargs)
+            elif queued_msg.message_type == MessageType.RESTART:
+                await queued_msg.handler()
 
             processing_time = asyncio.get_event_loop().time() - start_time
             self._stats["messages_processed"] += 1
@@ -254,11 +329,14 @@ class QueueService:
                 user_info = f"{queued_msg.discord_message.author}"
             elif queued_msg.message_type == MessageType.COMMAND:
                 user_info = f"{queued_msg.interaction.user}"
+            elif queued_msg.message_type == MessageType.RESTART:
+                user_info = "system"
             else:
                 user_info = "unknown"
 
             logger.error(
-                f"Error processing {queued_msg.message_type.value} from {user_info}: {e}",
+                f"Error processing {
+                    queued_msg.message_type.value} from {user_info}: {e}",
                 exc_info=True,
             )
 

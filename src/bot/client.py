@@ -2,6 +2,7 @@
 Discord Bot Client - Main bot setup and event handling
 """
 
+import asyncio
 import logging
 
 import discord
@@ -14,9 +15,14 @@ from src.bot.commands.image import ImageCommands
 from src.bot.commands.system import SystemCommands
 from src.services.queue_service import queue_service
 from src.services.state_service import state_service
+from src.services.auto_update_service import auto_update_service
+from src.services.restart_handler import restart_handler
+from src.services.announcement_service import announcement_service
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
 logger = logging.getLogger("discord_bot")
 
 
@@ -30,11 +36,102 @@ class DiscordBotClient:
         intents.members = True
         self.bot = commands.Bot(command_prefix="/", intents=intents)
 
+        # Load any saved state from previous restart
+        self._load_saved_state()
+
+        # Set up auto-update service
+        self._setup_auto_update()
+
+        # Set up announcement service
+        announcement_service.set_bot(self.bot)
+
         # Set up event handlers
         self._setup_events()
 
         # Set up commands
         self._setup_commands()
+
+    def _load_saved_state(self) -> None:
+        """Load any saved state from previous restart."""
+        try:
+            logger.info("Checking for saved state from previous restart")
+            if state_service.load_state_from_temp_files():
+                logger.info(
+                    "Successfully restored state from previous restart")
+            else:
+                logger.info("No saved state found, starting with fresh state")
+        except Exception as e:
+            logger.error(f"Error loading saved state: {e}")
+            # Continue with fresh state if loading fails
+
+    def _setup_auto_update(self) -> None:
+        """Set up the auto-update service."""
+        try:
+            # Set the restart callback
+            auto_update_service.set_restart_callback(
+                restart_handler.perform_restart)
+            logger.info("Auto-update service configured")
+        except Exception as e:
+            logger.error(f"Error setting up auto-update service: {e}")
+
+    async def _send_update_announcement_if_needed(self) -> None:
+        """Send update announcement if this was a restart."""
+        try:
+            # Check if we have active channels and this looks like a restart
+            active_channels = state_service.get_active_channels()
+            if not active_channels:
+                logger.info("No active channels found, skipping update announcement")
+                return
+
+            # Small delay to ensure bot is fully ready
+            await asyncio.sleep(2)
+
+            # Check for restart info to determine if it was manual
+            was_manual = self._check_for_restart_info()
+
+            # Send announcement
+            await announcement_service.announce_update(was_manual=was_manual)
+            logger.info(f"Sent update announcements to active channels (manual: {was_manual})")
+
+        except Exception as e:
+            logger.error(f"Error sending update announcement: {e}")
+
+    def _check_for_restart_info(self) -> bool:
+        """
+        Check for restart info files to determine if this was a manual restart.
+
+        Returns:
+            True if this was a manual restart, False otherwise
+        """
+        try:
+            import glob
+            import json
+            import os
+
+            # Look for restart info files
+            pattern = "/tmp/cmwgpt_state_backup_*_restart_info.json"
+            restart_info_files = glob.glob(pattern)
+
+            was_manual = False
+            for info_file in restart_info_files:
+                try:
+                    with open(info_file, 'r') as f:
+                        restart_info = json.load(f)
+                    was_manual = restart_info.get("manual_restart", False)
+                    logger.info(f"Found restart info: manual={was_manual}")
+
+                    # Clean up the info file
+                    os.remove(info_file)
+                    logger.debug(f"Cleaned up restart info file: {info_file}")
+                    break
+                except Exception as e:
+                    logger.warning(f"Error reading restart info file {info_file}: {e}")
+
+            return was_manual
+
+        except Exception as e:
+            logger.warning(f"Error checking for restart info: {e}")
+            return False
 
     def _setup_events(self) -> None:
         """Set up Discord event handlers."""
@@ -50,12 +147,30 @@ class DiscordBotClient:
             # Start the message queue service
             await queue_service.start()
 
-            logger.info(f"Logged in as {self.bot.user} (ID: {self.bot.user.id})")
+            # Start the auto-update service
+            auto_update_service.start()
+
+            logger.info(
+                f"Logged in as {
+                    self.bot.user} (ID: {
+                    self.bot.user.id})")
             logger.info("Message queue service started")
+
+            # Log auto-update status
+            status = auto_update_service.get_status()
+            if status["enabled"]:
+                logger.info(
+                    f"Auto-update service started (check interval: {status['check_interval']}s)")
+            else:
+                logger.info("Auto-update service disabled by configuration")
+
+            # Send update announcement if this was a restart
+            await self._send_update_announcement_if_needed()
 
         @self.bot.event
         async def on_disconnect():
-            logger.warning("Disconnected from Discord, attempting to reconnect")
+            logger.warning(
+                "Disconnected from Discord, attempting to reconnect")
 
         @self.bot.event
         async def on_message(message: discord.Message):
@@ -80,20 +195,23 @@ class DiscordBotClient:
             message: The Discord message to handle
         """
         # Ignore bots and DMs
-        if message.author.bot or not isinstance(message.channel, discord.TextChannel):
+        if message.author.bot or not isinstance(
+                message.channel, discord.TextChannel):
             return
 
         # Handle bot mentions
         if self.bot.user and self.bot.user in message.mentions and REPLY_TO_MENTIONS:
-            model = state_service.get_model(message.channel.id) or DEFAULT_MODEL
+            model = state_service.get_model(
+                message.channel.id) or DEFAULT_MODEL
 
             # Queue the mention for FIFO processing
             queued = await mention_handler.queue_mention(message, self.bot.user, model)
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue mention from {message.author} in #{message.channel} - queue may be full"
-                )
+                    f"Failed to queue mention from {
+                        message.author} in #{
+                        message.channel} - queue may be full")
                 # Optionally, you could fall back to immediate processing:
                 # await mention_handler.handle_mention(message, self.bot.user,
                 # model)
@@ -110,8 +228,15 @@ class DiscordBotClient:
             logger.error(f"Bot failed to start: {e}")
             raise
         finally:
-            # Ensure queue service is properly shut down
+            # Ensure services are properly shut down
             import asyncio
+
+            try:
+                # Stop auto-update service
+                auto_update_service.stop()
+                logger.info("Auto-update service stopped")
+            except Exception as e:
+                logger.error(f"Error shutting down auto-update service: {e}")
 
             try:
                 loop = asyncio.get_event_loop()
@@ -123,6 +248,13 @@ class DiscordBotClient:
                     loop.run_until_complete(queue_service.stop())
             except Exception as e:
                 logger.error(f"Error shutting down queue service: {e}")
+
+            # Clean up any leftover temporary files
+            try:
+                state_service.cleanup_temp_files()
+                logger.info("Temporary files cleaned up")
+            except Exception as e:
+                logger.error(f"Error cleaning up temporary files: {e}")
 
             logger.info("Bot shutdown.")
 

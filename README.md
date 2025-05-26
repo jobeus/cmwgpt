@@ -14,6 +14,7 @@ An intelligent Discord bot that brings OpenAI's powerful AI models directly to y
 - **Image Analysis**: Upload images for AI analysis and understanding
 - **Channel-Specific Personalities**: Set custom AI behavior per channel
 - **Smart Context**: Bot understands channel history when mentioned
+- **Auto-Update**: Automatically updates from git and restarts with state preservation
 
 ## 🎯 How It Works
 
@@ -106,6 +107,7 @@ OPENAI_API_KEY=your_openai_api_key_here
 - **`/systemprompt set [prompt]`** - Set custom AI personality for the channel
 - **`/systemprompt view`** - View current system prompt
 - **`/systemprompt reset`** - Reset to default system prompt
+- **`/restart`** - Restart the bot with latest updates (admin only)
 
 > 💡 **Tip**: Each Discord channel has its own conversation history and settings!
 
@@ -118,6 +120,7 @@ For detailed information, see the [docs/](docs/) folder:
 - **[Deployment](docs/deployment.md)** - CI/CD, Docker, and production deployment
 - **[Configuration](docs/configuration.md)** - Detailed configuration options
 - **[Commands](docs/commands.md)** - Complete command reference
+- **[Auto-Update](docs/auto-update.md)** - Automatic git-based updates and restarts
 - **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
 
 ## 🚀 Quick Examples
