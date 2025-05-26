@@ -4,6 +4,7 @@ OpenAI Service - Handles all OpenAI API interactions
 
 import asyncio
 import base64
+import json
 import logging
 from typing import List, Dict, Any, Optional
 
@@ -74,6 +75,18 @@ class OpenAIService:
         # Remove any existing system messages from the conversation
         api_messages = [
             msg for msg in api_messages if msg.get("role") != "system"]
+
+        # Parse JSON content if needed (for complex payloads like attachments)
+        for msg in api_messages:
+            content = msg.get("content", "")
+            if isinstance(content, str) and content.strip().startswith(('[', '{')):
+                try:
+                    # Try to parse as JSON - if successful, use parsed content
+                    parsed_content = json.loads(content)
+                    msg["content"] = parsed_content
+                except (json.JSONDecodeError, ValueError):
+                    # If parsing fails, keep original content
+                    pass
 
         # Add system prompt at the beginning if provided
         if system_prompt:

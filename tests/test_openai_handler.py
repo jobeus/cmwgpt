@@ -267,12 +267,12 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         # Verify it handles complex structure
         self.assertEqual(result, "Complex response")
 
-        # Expected messages should have system prompt prepended
+        # Expected messages should have system prompt prepended and JSON content parsed
         expected_messages = [
             {"role": "system", "content": system_prompt},
             {
                 "role": "user",
-                "content": '[{"type": "text", "text": "Hello"}, {"type": "image_url", "image_url": {"url": "http://example.com/image.jpg"}}]',
+                "content": [{"type": "text", "text": "Hello"}, {"type": "image_url", "image_url": {"url": "http://example.com/image.jpg"}}],
             },
             {"role": "assistant", "content": "I can see your image!"},
             {"role": "user", "content": "What do you think?"},
