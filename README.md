@@ -65,8 +65,9 @@ The bot operates in two distinct modes:
 1. Visit [Discord Developer Portal](https://discord.com/developers/applications)
 2. Create a new application and bot
 3. Copy the bot token from the "Bot" section
-4. Enable "MESSAGE CONTENT INTENT" in Bot settings
-5. Use OAuth2 URL Generator to invite the bot to your server
+4. Enable "SERVER MEMBERS INTENT" In Bot settings
+5. Enable "MESSAGE CONTENT INTENT" in Bot settings
+6. Use OAuth2 URL Generator to invite the bot to your server
    - Required permissions: Send Messages, Use Slash Commands, Read Message History
 
 ### 2. OpenAI API Setup
