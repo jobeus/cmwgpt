@@ -126,6 +126,7 @@ For detailed information, see the [docs/](docs/) folder:
 - **[Configuration](docs/configuration.md)** - Detailed configuration options
 - **[Commands](docs/commands.md)** - Complete command reference
 - **[Auto-Update](docs/auto-update.md)** - Automatic git-based updates and restarts
+- **[Function Calling](docs/function-calling.md)** - OpenAI function calling for dynamic user context
 - **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
 
 ## 🚀 Quick Examples

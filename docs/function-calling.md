@@ -23,7 +23,7 @@ If `USER_CONTEXT_URL` is not set or empty, the bot will use the legacy API witho
 The system prompt should include instructions for when to use the function. Example addition to `system_prompt.txt`:
 
 ```
-If the user asks about themselves, call function get_user_context() to fetch old 90s IRC quotes from our old channel (excuse the 90s behavior, don't judge just joke). Then use those quotes to roast them jokingly. You may have to fuzzy match some nicks like mem0ut and memout and jobez and jobe and jobeus, etc.
+If the user asks about themselves, call function get_user_context() to fetch historical chat logs or user context from your data source. Then use that information to provide personalized responses. You may need to handle variations in usernames and nicknames appropriately.
 ```
 
 ## How It Works
@@ -44,7 +44,7 @@ The bot automatically defines this function for OpenAI:
 ```json
 {
   "name": "get_user_context",
-  "description": "Fetch historical IRC quotes and context about the user for personalized responses",
+  "description": "Fetch historical chat logs and context about the user for personalized responses",
   "parameters": {
     "type": "object",
     "properties": {},
@@ -58,15 +58,15 @@ The bot automatically defines this function for OpenAI:
 Your context API endpoint should:
 
 - Accept HTTP GET requests
-- Return plain text content (IRC logs, user history, etc.)
+- Return plain text content (chat logs, user history, etc.)
 - Handle timeouts gracefully (10 second timeout)
 - Return appropriate HTTP status codes
 
 Example response:
 ```
-<jobe> hello world, this is a test message from 1999
-<memout> jobe: you're such a n00b
-<jobe> memout: at least I'm not using AOL
+<alice> hello world, this is a test message from yesterday
+<bob> alice: great to see you online!
+<alice> bob: thanks, good to be back
 ```
 
 ## Error Handling

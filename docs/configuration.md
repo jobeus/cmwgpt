@@ -89,6 +89,31 @@ The bot is configured through environment variables defined in a `.env` file. Co
 - **Range**: 1-200 (recommended: 50-100)
 - **Effect**: More lines = better context but higher token usage
 
+#### `KEEP_UP_TO_DATE_WITH_GIT`
+- **Required**: No
+- **Description**: Enable automatic git-based updates and restarts
+- **Example**: `KEEP_UP_TO_DATE_WITH_GIT=true`
+- **Default**: `false`
+- **Options**: `true`, `false`
+- **Effect**: When enabled, bot monitors git repository for updates and automatically restarts
+- **See**: [Auto-Update Documentation](auto-update.md) for detailed configuration
+
+#### `QUIET_UPDATES`
+- **Required**: No
+- **Description**: Control whether bot announces updates after restart
+- **Example**: `QUIET_UPDATES=true`
+- **Default**: `false`
+- **Options**: `true`, `false`
+- **Effect**: When enabled, bot skips update announcements to channels
+
+#### `USER_CONTEXT_URL`
+- **Required**: No
+- **Description**: URL endpoint for OpenAI function calling to fetch user context
+- **Example**: `USER_CONTEXT_URL=https://your-server.com/api/user-context`
+- **Default**: None (function calling disabled)
+- **Effect**: Enables dynamic user context fetching for personalized responses
+- **See**: [Function Calling Documentation](function-calling.md) for setup details
+
 ## Complete Example Configuration
 
 ```env
@@ -107,6 +132,13 @@ DEFAULT_IMAGE_MODEL=dall-e-3
 INCLUDE_USERNAMES=true
 REPLY_TO_MENTIONS=true
 INCLUDE_NUM_CHATLINES=75
+
+# Optional - Auto-Update and Restart Features
+KEEP_UP_TO_DATE_WITH_GIT=true
+QUIET_UPDATES=false
+
+# Optional - OpenAI Function Calling
+USER_CONTEXT_URL=https://your-server.com/api/user-context
 ```
 
 ### System Prompt File (`system_prompt.txt`)

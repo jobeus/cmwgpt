@@ -170,6 +170,36 @@ Reset to the default system prompt.
 - Applies immediately to current conversation
 - Affects all future conversations in this channel
 
+### `/restart`
+
+Restart the bot with latest updates (administrator only).
+
+**Parameters:** None
+
+**Requirements:**
+- Administrator permissions in the Discord server
+- Auto-update feature must be enabled (`KEEP_UP_TO_DATE_WITH_GIT=true`)
+
+**Example:**
+```
+/restart
+```
+
+**Behavior:**
+- Saves current bot state (conversations, models, system prompts)
+- Performs `git pull` to update code
+- Gracefully shuts down and restarts the bot
+- Restores saved state after restart
+- Announces update to active channels (unless `QUIET_UPDATES=true`)
+
+**Use Cases:**
+- Apply code updates immediately
+- Restart bot after configuration changes
+- Recover from stuck or unresponsive state
+- Test auto-update functionality
+
+**Note:** This command triggers the same process as automatic updates. See [Auto-Update Documentation](auto-update.md) for more details.
+
 ## Mention Interactions
 
 ### `@BotName [message]`
@@ -257,8 +287,8 @@ Visual feedback during processing:
    ```
    # In #coding channel
    /systemprompt set You are a senior software engineer
-   
-   # In #creative-writing channel  
+
+   # In #creative-writing channel
    /systemprompt set You are a creative writing mentor
    ```
 

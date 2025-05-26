@@ -21,9 +21,16 @@ Add the following to your `.env` file:
 ```bash
 # Enable/disable auto-update feature
 KEEP_UP_TO_DATE_WITH_GIT=True
+
+# Control update announcements (optional)
+QUIET_UPDATES=False
 ```
 
-Set to `False` to disable the auto-update feature entirely.
+**Configuration Options:**
+- `KEEP_UP_TO_DATE_WITH_GIT=True` - Enable auto-update feature
+- `KEEP_UP_TO_DATE_WITH_GIT=False` - Disable auto-update feature entirely
+- `QUIET_UPDATES=True` - Skip update announcements to channels
+- `QUIET_UPDATES=False` - Send update announcements (default)
 
 ### Requirements
 

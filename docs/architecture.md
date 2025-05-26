@@ -17,11 +17,14 @@ src/
 │   └── handlers/
 │       └── mention.py        # Bot mention handling and context preparation
 ├── services/
-│   ├── openai_service.py     # OpenAI API integration
-│   ├── message_service.py    # Message formatting and sending
+│   ├── openai_service.py     # OpenAI API integration with function calling support
+│   ├── message_service.py    # Message formatting and sending with error handling
 │   ├── paste_service.py      # Paste service integration (for long messages)
 │   ├── queue_service.py      # FIFO command queue management
-│   └── state_service.py      # Bot state management (conversations, models, prompts)
+│   ├── state_service.py      # Bot state management (conversations, models, prompts)
+│   ├── auto_update_service.py # Automatic git-based updates and monitoring
+│   ├── restart_handler.py    # Graceful restart and shutdown with state persistence
+│   └── announcement_service.py # Update announcements and channel tracking
 ├── utils/
 │   ├── discord_helper.py     # Discord utilities and helper functions
 │   └── pasters.py           # Legacy paste service compatibility
@@ -59,6 +62,7 @@ Modular command system with separate files for different functionality:
   - `set` - Set custom system prompt
   - `view` - Display current system prompt
   - `reset` - Reset to default system prompt
+- `/restart` - Manual restart with updates (administrator only)
 
 ### 3. Mention Handler (`src/bot/handlers/mention.py`)
 
@@ -71,10 +75,11 @@ Sophisticated mention handling that:
 ### 4. Service Layer (`src/services/`)
 
 #### OpenAI Service (`openai_service.py`)
-- Centralized OpenAI API integration
-- Handles chat completions and image generation
-- Error handling and retry logic
-- Model-agnostic interface
+- Centralized OpenAI API integration with function calling support
+- Handles chat completions, image generation, and dynamic context fetching
+- Comprehensive error handling and retry logic with exponential backoff
+- Model-agnostic interface supporting multiple OpenAI models
+- Function calling implementation for user context API integration
 
 #### Message Service (`message_service.py`)
 - Discord message formatting and sending
@@ -83,11 +88,14 @@ Sophisticated mention handling that:
 - Typing indicators and user feedback
 
 #### State Service (`state_service.py`)
-- In-memory state management for:
+- Thread-safe in-memory state management for:
   - Per-channel conversation histories
   - Per-channel AI model selections
   - Per-channel system prompts
-- Thread-safe operations
+  - Active channel tracking for announcements
+  - Git SHA tracking for update detection
+- Secure state persistence to temporary files during restarts
+- Automatic state restoration on startup with cleanup
 
 #### Queue Service (`queue_service.py`)
 - FIFO command processing queue
@@ -99,6 +107,27 @@ Sophisticated mention handling that:
 - Integration with paste.rs for long responses
 - Automatic fallback when Discord message limits are exceeded
 - Error handling for paste service failures
+
+#### Auto-Update Service (`auto_update_service.py`)
+- Background git repository monitoring
+- Automatic detection of new commits
+- Triggered restart process with state preservation
+- Configurable check intervals and failure limits
+- Manual restart capability through `/restart` command
+
+#### Restart Handler (`restart_handler.py`)
+- Graceful bot restart with state persistence
+- Git pull operations for code updates
+- Secure temporary file handling for state backup
+- Signal-based restart coordination (exit code 42)
+- Graceful shutdown handling for external termination
+
+#### Announcement Service (`announcement_service.py`)
+- Post-restart update announcements to active channels
+- Git commit tracking and changelog generation
+- Intelligent duplicate announcement prevention
+- Paste service integration for long changelogs
+- Configurable quiet mode for silent updates
 
 ## Key Architectural Patterns
 
@@ -137,6 +166,29 @@ Sophisticated mention handling that:
 - Does not maintain persistent conversation state
 - Perfect for getting AI input on ongoing discussions
 
+## Advanced Features
+
+### OpenAI Function Calling
+- Dynamic user context fetching when OpenAI determines it's helpful
+- HTTP-based context API integration for personalized responses
+- Automatic fallback to legacy API when function calling is disabled
+- Intelligent context injection without overwhelming token usage
+- Configurable context URL endpoint for external data sources
+
+### Auto-Update System
+- Background git repository monitoring with configurable intervals
+- Automatic restart triggering when new commits are detected
+- State persistence across restarts using secure temporary files
+- Manual restart capability through Discord `/restart` command
+- Intelligent update announcements with git commit information
+
+### State Persistence
+- Thread-safe in-memory state management for all bot data
+- Automatic state backup before restarts or shutdowns
+- Secure temporary file handling with restrictive permissions
+- State restoration on startup with automatic cleanup
+- Per-channel isolation of conversations, models, and system prompts
+
 ## Error Handling Strategy
 
 ### Robust Error Handling
@@ -144,12 +196,29 @@ Sophisticated mention handling that:
 - User-friendly error messages for common failures
 - Detailed logging for debugging and monitoring
 - Graceful degradation when services are unavailable
+- Automatic retry with exponential backoff for transient failures
+- Rate limiting protection for Discord and OpenAI APIs
+
+### OpenAI API Error Handling
+- Comprehensive error handling for all OpenAI API calls
+- Automatic retry for rate limits and temporary failures
+- Graceful handling of quota exceeded and invalid API key errors
+- Function calling error handling with fallback to legacy API
+- Timeout protection for long-running requests
+
+### Discord API Error Handling
+- Rate limiting detection and automatic retry
+- Permission error handling with clear user feedback
+- Message length handling with automatic paste service fallback
+- Connection error recovery and reconnection logic
+- Interaction timeout handling (3-second Discord limit)
 
 ### Queue Management
 - Commands are queued to prevent race conditions
 - Queue overflow handling with user feedback
 - Timeout handling for long-running operations
 - Fallback to immediate processing when queue is full
+- FIFO processing ensures command order preservation
 
 ## Scalability Considerations
 
