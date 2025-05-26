@@ -224,11 +224,22 @@ class TestConfig(unittest.TestCase):
             # Extract the date part
             date_part = result.replace("Current time: ", "")
 
-            # Should be in YYYY-MM-DD HH:MM:SS format
+            # Try parsing with known timezone suffixes
             try:
-                datetime.strptime(date_part, "%Y-%m-%d %H:%M:%S %Z")
-            except ValueError:
-                self.fail(f"Date format is incorrect: {date_part}")
+                # Remove timezone abbreviation and parse the rest
+                parts = date_part.rsplit(" ", 1)
+                if len(parts) != 2:
+                    raise ValueError("Could not split timezone suffix")
+
+                datetime_part, tz_abbr = parts
+                # Ensure datetime part is valid
+                datetime.strptime(datetime_part, "%Y-%m-%d %H:%M:%S")
+
+                # Check if tz_abbr is in allowed list
+                assert tz_abbr in ("MDT", "MST"), f"Unexpected timezone: {tz_abbr}"
+
+            except Exception as e:
+                self.fail(f"Date format is incorrect: {date_part} ({e})")
 
 
 if __name__ == '__main__':
