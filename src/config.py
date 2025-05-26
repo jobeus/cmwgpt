@@ -69,6 +69,11 @@ KEEP_UP_TO_DATE_WITH_GIT = os.getenv(
     "False").lower() in (
         "true",
     "1")
+QUIET_UPDATES = os.getenv(
+    "QUIET_UPDATES",
+    "False").lower() in (
+        "true",
+    "1")
 
 # Numeric Configuration
 INCLUDE_NUM_CHATLINES = int(os.getenv("INCLUDE_NUM_CHATLINES", 100))

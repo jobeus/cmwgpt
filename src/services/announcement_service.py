@@ -13,6 +13,7 @@ from typing import Optional
 import discord
 from discord.ext import commands
 
+from src.config import QUIET_UPDATES
 from src.services.state_service import state_service
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ class AnnouncementService:
                 timeout=10
             )
             if result.returncode == 0:
-                return result.stdout.strip()[:8]  # Short SHA
+                return result.stdout.strip()[:7]  # Short SHA
             else:
                 logger.debug(f"Could not get previous SHA: {result.stderr}")
                 return None
@@ -119,6 +120,11 @@ class AnnouncementService:
         """
         if not self._bot:
             logger.error("Bot instance not set, cannot send announcements")
+            return
+
+        # Check if quiet updates are enabled
+        if QUIET_UPDATES:
+            logger.info("QUIET_UPDATES is enabled, skipping update announcement")
             return
 
         # Get current git SHA
@@ -181,26 +187,6 @@ class AnnouncementService:
                 failed_announcements += 1
 
         logger.info(f"Update announcements sent: {successful_announcements} successful, {failed_announcements} failed")
-
-    async def announce_restart_starting(self, channel_id: int) -> None:
-        """
-        Announce that a restart is starting in a specific channel.
-
-        Args:
-            channel_id: Channel ID where restart was initiated
-        """
-        if not self._bot:
-            logger.error("Bot instance not set, cannot send restart announcement")
-            return
-
-        try:
-            channel = self._bot.get_channel(channel_id)
-            if channel and isinstance(channel, discord.TextChannel):
-                message = "🔄 **Restarting bot...** I'll be back shortly with any available updates!"
-                await channel.send(message)
-                logger.info(f"Sent restart announcement to #{channel.name} ({channel_id})")
-        except Exception as e:
-            logger.error(f"Failed to send restart announcement to channel {channel_id}: {e}")
 
 
 # Global announcement service instance

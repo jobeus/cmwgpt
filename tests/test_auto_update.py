@@ -5,6 +5,7 @@ Tests for the auto-update service functionality.
 import unittest
 import os
 import json
+
 from unittest.mock import patch, MagicMock
 
 from src.services.auto_update_service import AutoUpdateService
@@ -258,6 +259,34 @@ class TestAnnouncementService(unittest.TestCase):
         state_service.clear_active_channels()
         active_channels = state_service.get_active_channels()
         self.assertEqual(len(active_channels), 0)
+
+    @patch('src.services.announcement_service.QUIET_UPDATES', True)
+    @patch('subprocess.run')
+    def test_announce_update_quiet_mode(self, mock_run):
+        """Test that announcements are skipped when QUIET_UPDATES is enabled."""
+        # Set up mock bot
+        mock_bot = MagicMock()
+        self.service.set_bot(mock_bot)
+
+        # Mock git SHA
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "abcdef1234567890\n"
+
+        # Set up active channels
+        from src.services.state_service import state_service
+        state_service.mark_channel_active(12345)
+
+        # Call announce_update - should return early due to QUIET_UPDATES
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self.service.announce_update(was_manual=True))
+        finally:
+            loop.close()
+
+        # Verify no messages were sent
+        mock_bot.get_channel.assert_not_called()
 
 
 if __name__ == '__main__':
