@@ -71,6 +71,9 @@ class QueueService:
             return
 
         self._is_running = True
+
+        # Create the processing task but don't await it - let it run
+        # concurrently
         self._processing_task = asyncio.create_task(self._process_messages())
         logger.info("QueueService started")
 
@@ -266,7 +269,8 @@ class QueueService:
                         queued_msg.interaction.user}"
                 )
 
-            # Call the appropriate handler
+            # Call the appropriate handler directly - they should be properly
+            # async
             if queued_msg.message_type == MessageType.MENTION:
                 await queued_msg.handler(queued_msg.discord_message, queued_msg.bot_user, queued_msg.model)
             elif queued_msg.message_type == MessageType.COMMAND:

@@ -36,7 +36,7 @@ class MentionHandler:
         """
         async with message.channel.typing():
             chat_msgs = await self._prepare_mention_context(message, bot_user)
-            reply_content = openai_service.get_chat_completion(model=model, messages=chat_msgs)
+            reply_content = await openai_service.get_chat_completion(model=model, messages=chat_msgs)
             await message_service.send_channel_reply(message.channel, reply_content)
 
     async def queue_mention(self, message: discord.Message, bot_user: discord.User, model: str) -> bool:

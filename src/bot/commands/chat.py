@@ -132,7 +132,7 @@ class ChatCommands:
             current_conversation = state_service.get_conversation(channel_id)
             current_model = state_service.get_model(channel_id) or DEFAULT_MODEL
 
-            reply = openai_service.get_chat_completion(model=current_model, messages=current_conversation)
+            reply = await openai_service.get_chat_completion(model=current_model, messages=current_conversation)
 
             # Log and store assistant reply
             logger.info(f"[/chat] Channel {channel_id} Assistant: {reply}")

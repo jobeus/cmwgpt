@@ -5,7 +5,7 @@ OpenAI Service - Handles all OpenAI API interactions
 import base64
 from typing import List, Dict, Any, Optional
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 from discord import Attachment
 
 from src.config import OPENAI_API_KEY, IS_TESTING
@@ -15,13 +15,13 @@ class OpenAIService:
     """Service for handling OpenAI API interactions."""
 
     def __init__(self):
-        self._client: Optional[OpenAI] = None
+        self._client: Optional[AsyncOpenAI] = None
 
     def set_client(self, client) -> None:
         """Set a custom client (useful for testing)."""
         self._client = client
 
-    def get_client(self) -> OpenAI:
+    def get_client(self) -> AsyncOpenAI:
         """Get OpenAI client with lazy initialization."""
         if self._client is None:
             if IS_TESTING:
@@ -33,10 +33,10 @@ class OpenAIService:
 
                 self._client = MockClient()
             else:
-                self._client = OpenAI(api_key=OPENAI_API_KEY)
+                self._client = AsyncOpenAI(api_key=OPENAI_API_KEY)
         return self._client
 
-    def get_chat_completion(
+    async def get_chat_completion(
             self, model: str, messages: List[Dict[str, Any]]) -> str:
         """
         Gets a chat completion from the OpenAI API.
@@ -49,10 +49,10 @@ class OpenAIService:
             The completion text from OpenAI
         """
         client = self.get_client()
-        response = client.responses.create(model=model, input=messages)
+        response = await client.responses.create(model=model, input=messages)
         return response.output_text
 
-    def generate_image(
+    async def generate_image(
             self,
             prompt: str,
             model: str,
@@ -76,19 +76,18 @@ class OpenAIService:
         result = None
 
         if model == "dall-e-2" or model == "dall-e-3":
-            result = client.images.generate(
-                model=model, prompt=prompt, n=1, response_format="b64_json")
+            result = await client.images.generate(model=model, prompt=prompt, n=1, response_format="b64_json")
         else:  # assume gpt-image-1 or similar custom model
             if edit_image:
                 file_obj = edit_image.to_file()
-                result = client.images.edit(
+                result = await client.images.edit(
                     model=model,
                     image=[file_obj],
                     # image expects a list of file-like objects
                     prompt=prompt,
                 )
             else:
-                result = client.images.generate(
+                result = await client.images.generate(
                     model=model,
                     prompt=prompt,
                     n=1,

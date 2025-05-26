@@ -100,7 +100,7 @@ class ImageCommands:
                     logger.info(f"[/draw] Channel {channel_id}: editing image {edit_image.filename}")
 
                 # Generate the image
-                img_bytes = openai_service.generate_image(prompt=prompt, model=model, edit_image=edit_image)
+                img_bytes = await openai_service.generate_image(prompt=prompt, model=model, edit_image=edit_image)
 
                 # Log success and create Discord file
                 logger.info(f"[/draw] Channel {channel_id}: image generated")

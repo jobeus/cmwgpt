@@ -5,7 +5,7 @@ Tests OpenAI API integration functionality.
 
 from src.services.openai_service import openai_service
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 import base64
 import sys
 import os
@@ -22,15 +22,15 @@ sys.path.insert(
         "src"))
 
 
-class TestOpenAIHandler(unittest.TestCase):
+class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
     """Test OpenAI service functionality."""
 
     def setUp(self):
         """Set up test environment with mock client."""
-        self.mock_client = MagicMock()
+        self.mock_client = AsyncMock()
         openai_service.set_client(self.mock_client)
 
-    def test_get_chat_completion_success(self):
+    async def test_get_chat_completion_success(self):
         """Test successful chat completion."""
         # Mock response
         mock_response = MagicMock()
@@ -43,7 +43,7 @@ class TestOpenAIHandler(unittest.TestCase):
             "role": "user", "content": "Hello"}]
 
         # Call function
-        result = openai_service.get_chat_completion(model, messages)
+        result = await openai_service.get_chat_completion(model, messages)
 
         # Verify result
         self.assertEqual(result, "Hello! How can I help you today?")
@@ -52,7 +52,7 @@ class TestOpenAIHandler(unittest.TestCase):
         self.mock_client.responses.create.assert_called_once_with(
             model=model, input=messages)
 
-    def test_get_chat_completion_different_models(self):
+    async def test_get_chat_completion_different_models(self):
         """Test chat completion with different models."""
         models_to_test = ["gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini"]
 
@@ -67,12 +67,12 @@ class TestOpenAIHandler(unittest.TestCase):
                 messages = [{"role": "user", "content": "Test"}]
 
                 # Call function
-                result = openai_service.get_chat_completion(model, messages)
+                result = await openai_service.get_chat_completion(model, messages)
 
                 # Verify result
                 self.assertEqual(result, f"Response from {model}")
 
-    def test_generate_image_dalle2_success(self):
+    async def test_generate_image_dalle2_success(self):
         """Test successful image generation with DALL-E 2."""
         # Mock response
         mock_data = MagicMock()
@@ -86,7 +86,7 @@ class TestOpenAIHandler(unittest.TestCase):
         model = "dall-e-2"
 
         # Call function
-        result = openai_service.generate_image(prompt, model)
+        result = await openai_service.generate_image(prompt, model)
 
         # Verify result
         self.assertEqual(result, b"fake_image_data")
@@ -96,7 +96,7 @@ class TestOpenAIHandler(unittest.TestCase):
             model=model, prompt=prompt, n=1, response_format="b64_json"
         )
 
-    def test_generate_image_dalle3_success(self):
+    async def test_generate_image_dalle3_success(self):
         """Test successful image generation with DALL-E 3."""
         # Mock response
         mock_data = MagicMock()
@@ -110,12 +110,12 @@ class TestOpenAIHandler(unittest.TestCase):
         model = "dall-e-3"
 
         # Call function
-        result = openai_service.generate_image(prompt, model)
+        result = await openai_service.generate_image(prompt, model)
 
         # Verify result
         self.assertEqual(result, b"dalle3_image_data")
 
-    def test_generate_image_custom_model_without_edit(self):
+    async def test_generate_image_custom_model_without_edit(self):
         """Test image generation with custom model (gpt-image-1) without editing."""
         # Mock response
         mock_data = MagicMock()
@@ -129,7 +129,7 @@ class TestOpenAIHandler(unittest.TestCase):
         model = "gpt-image-1"
 
         # Call function
-        result = openai_service.generate_image(prompt, model)
+        result = await openai_service.generate_image(prompt, model)
 
         # Verify result
         self.assertEqual(result, b"custom_image_data")
@@ -138,7 +138,7 @@ class TestOpenAIHandler(unittest.TestCase):
         self.mock_client.images.generate.assert_called_once_with(
             model=model, prompt=prompt, n=1)
 
-    def test_generate_image_with_edit(self):
+    async def test_generate_image_with_edit(self):
         """Test image editing functionality."""
         # Mock Discord attachment
         mock_attachment = MagicMock()
@@ -157,8 +157,7 @@ class TestOpenAIHandler(unittest.TestCase):
         model = "gpt-image-1"
 
         # Call function
-        result = openai_service.generate_image(
-            prompt, model, edit_image=mock_attachment)
+        result = await openai_service.generate_image(prompt, model, edit_image=mock_attachment)
 
         # Verify result
         self.assertEqual(result, b"edited_image_data")
@@ -170,7 +169,7 @@ class TestOpenAIHandler(unittest.TestCase):
         # Verify attachment was processed
         mock_attachment.to_file.assert_called_once()
 
-    def test_generate_image_no_data_error(self):
+    async def test_generate_image_no_data_error(self):
         """Test error handling when no image data is returned."""
         # Mock response
         mock_data = MagicMock()
@@ -185,12 +184,12 @@ class TestOpenAIHandler(unittest.TestCase):
 
         # Call function and expect error
         with self.assertRaises(ValueError) as context:
-            openai_service.generate_image(prompt, model)
+            await openai_service.generate_image(prompt, model)
 
         self.assertEqual(str(context.exception),
                          "Image generation failed, no b64_json data returned.")
 
-    def test_generate_image_no_result_error(self):
+    async def test_generate_image_no_result_error(self):
         """Test error handling when no result is returned."""
         # Mock client
         self.mock_client.images.generate.return_value = None
@@ -201,12 +200,12 @@ class TestOpenAIHandler(unittest.TestCase):
 
         # Call function and expect error
         with self.assertRaises(ValueError) as context:
-            openai_service.generate_image(prompt, model)
+            await openai_service.generate_image(prompt, model)
 
         self.assertEqual(str(context.exception),
                          "Image generation failed, no b64_json data returned.")
 
-    def test_generate_image_base64_decoding(self):
+    async def test_generate_image_base64_decoding(self):
         """Test that base64 decoding works correctly."""
         # Create test image data
         test_data = b"test_image_bytes_12345"
@@ -224,12 +223,12 @@ class TestOpenAIHandler(unittest.TestCase):
         model = "dall-e-2"
 
         # Call function
-        result = openai_service.generate_image(prompt, model)
+        result = await openai_service.generate_image(prompt, model)
 
         # Verify correct decoding
         self.assertEqual(result, test_data)
 
-    def test_chat_completion_empty_messages(self):
+    async def test_chat_completion_empty_messages(self):
         """Test chat completion with empty messages list."""
         # Mock response
         mock_response = MagicMock()
@@ -237,12 +236,12 @@ class TestOpenAIHandler(unittest.TestCase):
         self.mock_client.responses.create.return_value = mock_response
 
         # Test with empty messages
-        result = openai_service.get_chat_completion("gpt-4.1-nano", [])
+        result = await openai_service.get_chat_completion("gpt-4.1-nano", [])
 
         # Verify it still works
         self.assertEqual(result, "I'm ready to help!")
 
-    def test_chat_completion_complex_messages(self):
+    async def test_chat_completion_complex_messages(self):
         """Test chat completion with complex message structure."""
         # Mock response
         mock_response = MagicMock()
@@ -260,7 +259,7 @@ class TestOpenAIHandler(unittest.TestCase):
             {"role": "user", "content": "What do you think?"},
         ]
 
-        result = openai_service.get_chat_completion("gpt-4.1-mini", messages)
+        result = await openai_service.get_chat_completion("gpt-4.1-mini", messages)
 
         # Verify it handles complex structure
         self.assertEqual(result, "Complex response")
