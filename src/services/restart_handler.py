@@ -172,6 +172,61 @@ class RestartHandler:
             logger.error(f"Error getting git SHA: {e}")
             return None
 
+    async def perform_graceful_shutdown(self) -> None:
+        """
+        Perform a graceful shutdown without restarting.
+
+        This saves the current state to disk just like a restart,
+        but doesn't perform git pull or exit with restart code.
+        Used when the bot is killed with Ctrl-C or kill signal.
+        """
+        if self._restart_in_progress:
+            logger.warning("Restart already in progress, graceful shutdown will proceed anyway")
+
+        print("💾 Performing graceful shutdown...")
+
+        try:
+            # Step 1: Save current git SHA to state
+            print("📝 Recording current git SHA...")
+            current_sha = self._get_current_git_sha()
+            if current_sha:
+                state_service.set_last_git_sha(current_sha)
+                print(f"✅ Recorded git SHA: {current_sha}")
+            else:
+                print("⚠️  Could not determine git SHA")
+
+            # Step 2: Save current state
+            print("💾 Saving bot state...")
+            temp_file = state_service.save_state_to_temp_file()
+            if temp_file:
+                print("✅ State saved")
+
+                # Save shutdown type information (not a restart)
+                shutdown_info_file = temp_file.replace(".json", "_restart_info.json")
+                try:
+                    import json
+
+                    with open(shutdown_info_file, "w") as f:
+                        json.dump({"manual_restart": False, "graceful_shutdown": True}, f)
+                    import os
+                    import stat
+
+                    os.chmod(shutdown_info_file, stat.S_IRUSR | stat.S_IWUSR)
+                except Exception as e:
+                    logger.warning(f"Failed to save shutdown info: {e}")
+            else:
+                print("⚠️  Failed to save state")
+
+            # Step 3: Give a moment for any final operations
+            await asyncio.sleep(0.5)
+
+            print("✅ Graceful shutdown preparation complete")
+
+        except Exception as e:
+            logger.error(f"Error during graceful shutdown: {e}")
+            print(f"⚠️  Error during graceful shutdown: {e}")
+            raise
+
 
 # Global restart handler instance
 restart_handler = RestartHandler()
