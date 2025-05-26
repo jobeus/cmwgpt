@@ -361,3 +361,6 @@ test_config.py
 # Ignore any file with 'password' in the name
 *password*
 *PASSWORD*
+
+# Don't commit my own prompt
+system_prompt.txt
