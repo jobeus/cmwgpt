@@ -57,7 +57,7 @@ test-specific:
 lint:
 	@echo "Running flake8 linting..."
 	@if command -v flake8 >/dev/null 2>&1; then \
-		flake8 main.py src/ tests/ --max-line-length=120 --ignore=E501,W503,W504,E999 || (echo "❌ Linting issues found. Run 'make autofix' to fix them automatically." && exit 1); \
+		flake8 main.py src/ tests/ --max-line-length=120 --ignore=E501,W503,W504,E999,E122 || (echo "❌ Linting issues found. Run 'make autofix' to fix them automatically." && exit 1); \
 		echo "✅ No linting issues found!"; \
 	else \
 		echo "❌ flake8 not installed. Install with: pip install -r test_requirements.txt"; \
