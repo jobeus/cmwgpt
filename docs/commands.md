@@ -1,0 +1,330 @@
+# 📖 Complete Commands Reference
+
+## Overview
+
+The AI Discord Bot supports two main interaction modes:
+1. **Slash Commands** (`/command`) - Structured commands with parameters
+2. **Mentions** (`@BotName`) - Natural language interactions with context
+
+## Chat Commands
+
+### `/chat [message] [attachment]`
+
+Start or continue a conversation with the AI.
+
+**Parameters:**
+- `message` (required): Your text message to the AI
+- `attachment` (optional): Image file for AI analysis
+
+**Features:**
+- Maintains conversation history per channel
+- Supports image analysis (JPG, PNG, GIF, WebP)
+- Auto-uploads long responses to paste.rs
+- Preserves context across multiple interactions
+
+**Examples:**
+```
+/chat Hello, can you help me with Python programming?
+/chat Explain this code [attach: code_screenshot.png]
+/chat What's the weather like? [attach: weather_photo.jpg]
+```
+
+**Behavior:**
+- Each Discord channel maintains its own conversation thread
+- Messages are added to persistent conversation history
+- Bot remembers previous context within the same channel
+- Images are analyzed using OpenAI's vision capabilities
+
+### `/reset`
+
+Clear conversation history for the current channel.
+
+**Parameters:** None
+
+**Effects:**
+- Clears all conversation history for the current channel
+- Resets to default or custom system prompt
+- Maintains current model selection
+- Does not affect other channels
+
+**Example:**
+```
+/reset
+```
+
+**Use Cases:**
+- Start fresh conversation
+- Clear sensitive information from history
+- Reset after conversation goes off-topic
+- Troubleshoot conversation issues
+
+## Image Commands
+
+### `/draw [prompt] [edit_image] [model]`
+
+Generate or edit images using AI.
+
+**Parameters:**
+- `prompt` (required): Description of the image you want
+- `edit_image` (optional): Existing image to modify
+- `model` (optional): AI model to use
+
+**Available Models:**
+- `dall-e-2` - DALL-E 2 (faster, lower cost)
+- `dall-e-3` - DALL-E 3 (higher quality, more detailed)
+- `gpt-image-1` - GPT Image model
+
+**Examples:**
+```
+/draw A sunset over mountains with a lake
+/draw A cat wearing a space helmet model:dall-e-3
+/draw Make this image more colorful [attach: original.jpg]
+```
+
+**Features:**
+- High-quality image generation
+- Image editing and modification
+- Multiple model support
+- Automatic format handling
+
+## System Management Commands
+
+### `/model [model_name]`
+
+View or change the AI model for the current channel.
+
+**Parameters:**
+- `model_name` (optional): Model to switch to
+
+**Available Models:**
+- `gpt-4.1-mini` - Balanced performance and cost (recommended)
+- `gpt-4.1-nano` - Fast and efficient (good for quick responses)
+- `gpt-4o-mini` - Optimized variant (specialized tasks)
+
+**Examples:**
+```
+/model                    # View current model
+/model gpt-4.1-mini      # Switch to GPT-4.1-mini
+/model gpt-4.1-nano      # Switch to GPT-4.1-nano
+```
+
+**Behavior:**
+- Model selection is per-channel
+- Setting persists until changed
+- Affects all future `/chat` commands in that channel
+- Does not affect conversation history
+
+### `/systemprompt` Command Group
+
+Manage channel-specific AI personalities and behavior.
+
+#### `/systemprompt set [prompt]`
+
+Set a custom system prompt for the current channel.
+
+**Parameters:**
+- `prompt` (required): The personality/behavior instructions for the AI
+
+**Examples:**
+```
+/systemprompt set You are a helpful coding assistant specializing in Python
+/systemprompt set You are a creative writing assistant who helps with storytelling
+/systemprompt set You are a technical documentation specialist
+/systemprompt set Act like a friendly teacher explaining complex topics simply
+```
+
+**Effects:**
+- Applies immediately to current conversation
+- Persists for all future conversations in this channel
+- Overrides default system prompt
+- Can be reset using `/systemprompt reset`
+
+#### `/systemprompt view`
+
+Display the current system prompt for the channel.
+
+**Parameters:** None
+
+**Example:**
+```
+/systemprompt view
+```
+
+**Output:**
+Shows the current system prompt, whether it's the default or a custom one.
+
+#### `/systemprompt reset`
+
+Reset to the default system prompt.
+
+**Parameters:** None
+
+**Example:**
+```
+/systemprompt reset
+```
+
+**Effects:**
+- Removes custom system prompt
+- Returns to default system prompt from configuration
+- Applies immediately to current conversation
+- Affects all future conversations in this channel
+
+## Mention Interactions
+
+### `@BotName [message]`
+
+Mention the bot for contextual responses based on recent channel activity.
+
+**Format:**
+```
+@YourBot what do you think about this?
+@YourBot can you help with the issue mentioned above?
+@YourBot summarize the last few messages
+```
+
+**Behavior:**
+- Analyzes recent channel history (configurable, default: 100 messages)
+- Provides context-aware responses
+- Does not maintain persistent conversation state
+- Uses current channel's system prompt and model settings
+
+**Context Analysis:**
+- Reads recent messages for context
+- Understands user mentions and references
+- Provides relevant responses based on ongoing discussions
+- Includes user legend for better understanding
+
+**Use Cases:**
+- Get AI input on ongoing discussions
+- Ask questions about recent conversation
+- Request summaries or clarifications
+- Participate in group conversations
+
+## Command Behavior Details
+
+### Queue Processing
+
+All commands are processed through a FIFO queue system:
+- Prevents race conditions between concurrent commands
+- Ensures commands are processed in order
+- Handles queue overflow gracefully
+- Provides user feedback for queue status
+
+### Error Handling
+
+Comprehensive error handling for all commands:
+- User-friendly error messages
+- Automatic retry for transient failures
+- Graceful degradation when services are unavailable
+- Detailed logging for debugging
+
+### Response Handling
+
+Smart response management:
+- **Short responses**: Sent directly to Discord
+- **Long responses**: Automatically uploaded to paste.rs with link
+- **Images**: Embedded directly in Discord
+- **Errors**: Clear, actionable error messages
+
+### Typing Indicators
+
+Visual feedback during processing:
+- Bot shows "typing" indicator while processing
+- Indicates active work on user requests
+- Helps users understand processing time
+- Automatic timeout handling
+
+## Advanced Usage Patterns
+
+### Conversation Workflows
+
+1. **Extended Discussions**:
+   ```
+   /chat Let's discuss Python best practices
+   /chat What about error handling?
+   /chat Can you show me an example?
+   ```
+
+2. **Image Analysis Workflows**:
+   ```
+   /chat Analyze this code screenshot [attach: code.png]
+   /chat What improvements would you suggest?
+   /draw Create a diagram showing the improved architecture
+   ```
+
+3. **Channel-Specific Assistants**:
+   ```
+   # In #coding channel
+   /systemprompt set You are a senior software engineer
+   
+   # In #creative-writing channel  
+   /systemprompt set You are a creative writing mentor
+   ```
+
+### Multi-Model Strategies
+
+- **Quick responses**: Use `gpt-4.1-nano` for fast, simple queries
+- **Complex reasoning**: Use `gpt-4.1-mini` for detailed analysis
+- **Specialized tasks**: Use `gpt-4o-mini` for specific use cases
+
+### Context Management
+
+- **Separate conversations**: Use `/chat` for focused discussions
+- **Contextual input**: Use `@mentions` for group participation
+- **Fresh starts**: Use `/reset` when changing topics
+- **Personality changes**: Use `/systemprompt set` for different contexts
+
+## Permissions and Limitations
+
+### Required Permissions
+
+The bot needs these Discord permissions:
+- Send Messages
+- Use Slash Commands
+- Read Message History
+- Attach Files
+- Embed Links
+
+### Rate Limiting
+
+- Discord API rate limits apply
+- OpenAI API rate limits apply
+- Queue system prevents overwhelming APIs
+- Automatic retry with exponential backoff
+
+### Content Limitations
+
+- Discord message limit: 2000 characters (auto-paste for longer)
+- Image size limits: Discord attachment limits apply
+- OpenAI content policies apply to all interactions
+- Token limits vary by model
+
+## Troubleshooting Commands
+
+### Common Issues
+
+1. **Command not responding**:
+   - Check bot permissions
+   - Verify bot is online
+   - Try `/reset` to clear any stuck state
+
+2. **Image commands failing**:
+   - Check image format (JPG, PNG, GIF, WebP supported)
+   - Verify image size is within Discord limits
+   - Ensure OpenAI API key has image access
+
+3. **Conversation context issues**:
+   - Use `/reset` to clear conversation history
+   - Check system prompt with `/systemprompt view`
+   - Verify model selection with `/model`
+
+### Debug Information
+
+For support, provide:
+- Command used
+- Error message received
+- Channel where issue occurred
+- Approximate time of issue
+
+For more troubleshooting help, see [troubleshooting.md](troubleshooting.md).
