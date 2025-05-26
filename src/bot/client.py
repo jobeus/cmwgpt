@@ -16,9 +16,7 @@ from src.services.queue_service import queue_service
 from src.services.state_service import state_service
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
 logger = logging.getLogger("discord_bot")
 
 
@@ -52,14 +50,12 @@ class DiscordBotClient:
             # Start the message queue service
             await queue_service.start()
 
-            logger.info(
-                f"Logged in as {self.bot.user} (ID: {self.bot.user.id})")
+            logger.info(f"Logged in as {self.bot.user} (ID: {self.bot.user.id})")
             logger.info("Message queue service started")
 
         @self.bot.event
         async def on_disconnect():
-            logger.warning(
-                "Disconnected from Discord, attempting to reconnect")
+            logger.warning("Disconnected from Discord, attempting to reconnect")
 
         @self.bot.event
         async def on_message(message: discord.Message):
@@ -84,21 +80,20 @@ class DiscordBotClient:
             message: The Discord message to handle
         """
         # Ignore bots and DMs
-        if message.author.bot or not isinstance(
-                message.channel, discord.TextChannel):
+        if message.author.bot or not isinstance(message.channel, discord.TextChannel):
             return
 
         # Handle bot mentions
         if self.bot.user and self.bot.user in message.mentions and REPLY_TO_MENTIONS:
-            model = state_service.get_model(
-                message.channel.id) or DEFAULT_MODEL
+            model = state_service.get_model(message.channel.id) or DEFAULT_MODEL
 
             # Queue the mention for FIFO processing
             queued = await mention_handler.queue_mention(message, self.bot.user, model)
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue mention from {message.author} in #{message.channel} - queue may be full")
+                    f"Failed to queue mention from {message.author} in #{message.channel} - queue may be full"
+                )
                 # Optionally, you could fall back to immediate processing:
                 # await mention_handler.handle_mention(message, self.bot.user,
                 # model)

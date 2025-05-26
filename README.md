@@ -51,6 +51,10 @@ The bot operates in two distinct modes:
    ```bash
    cp env.example .env
    # Edit .env with your Discord bot token and OpenAI API key
+
+   # Optional: Customize the AI system prompt
+   cp system_prompt.txt.example system_prompt.txt
+   # Edit system_prompt.txt to customize the AI's personality and behavior
    ```
 
 3. **Run the Bot**

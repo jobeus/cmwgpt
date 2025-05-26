@@ -13,13 +13,7 @@ import os
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Add src directory for new architecture
-sys.path.insert(
-    0,
-    os.path.join(
-        os.path.dirname(
-            os.path.dirname(
-                os.path.abspath(__file__))),
-        "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 
 class TestBotFunctions(unittest.TestCase):
@@ -78,28 +72,32 @@ class TestBotFunctions(unittest.TestCase):
             # Mock state service
             with patch("src.services.state_service.state_service") as mock_state_service:
                 mock_state_service.get_system_prompt.return_value = None
-                with patch("src.config.SYSTEM_PROMPT", "Default system prompt"):
+                with patch("src.config.get_system_prompt", return_value="Default system prompt"):
                     with patch("src.config.INCLUDE_NUM_CHATLINES", 3):
                         # Call the function
-                        result = await mention_handler._prepare_mention_context(mock_message, mock_bot_user)
+                        result, system_prompt = await mention_handler._prepare_mention_context(
+                            mock_message, mock_bot_user
+                        )
 
             # Verify result structure
             self.assertIsInstance(result, list)
-            # system message + user message with history
-            self.assertEqual(len(result), 2)
+            self.assertIsInstance(system_prompt, str)
+            # Only user message with history (no system message in result)
+            self.assertEqual(len(result), 1)
 
-            # Verify system message
-            self.assertEqual(result[0]["role"], "system")
+            # Verify system prompt
             # The system prompt should contain the mocked legend and bot ID
-            self.assertIn("Legend: @user1 = <@11111>", result[0]["content"])
+            self.assertIn("Legend: @user1 = <@11111>", system_prompt)
             # Bot ID should be in system prompt
-            self.assertIn("<@99999>", result[0]["content"])
+            self.assertIn("<@99999>", system_prompt)
+            # Should contain some system prompt content (either default or from file)
+            self.assertTrue(len(system_prompt) > 0)
 
             # Verify user message with history
-            self.assertEqual(result[1]["role"], "user")
+            self.assertEqual(result[0]["role"], "user")
 
             # Parse the JSON content to verify history structure
-            content = result[1]["content"]
+            content = result[0]["content"]
             self.assertIn("Conversation lines are below", content)
 
             # Extract JSON from content
@@ -114,9 +112,7 @@ class TestBotFunctions(unittest.TestCase):
             self.assertEqual(history_data[1]["user"], "<@22222>")
             self.assertEqual(history_data[1]["says"], "Second message")
             self.assertEqual(history_data[2]["user"], "<@12345>")
-            self.assertEqual(
-                history_data[2]["says"],
-                "Hey @bot, can you help me?")
+            self.assertEqual(history_data[2]["says"], "Hey @bot, can you help me?")
 
         self.loop.run_until_complete(run_test())
 
@@ -195,7 +191,8 @@ class TestBotFunctions(unittest.TestCase):
             expected_message = (
                 "The content of my response was over 2000 characters "
                 "(discord limit), and there was a problem uploading it to paste service. "
-                "Sorry, try again later.")
+                "Sorry, try again later."
+            )
             mock_channel.send.assert_called_once_with(expected_message)
 
         self.loop.run_until_complete(run_test())
@@ -219,8 +216,7 @@ class TestBotFunctions(unittest.TestCase):
 
             # Verify direct followup was called
             expected_content = f"{base_content}\n{reply_text}"
-            mock_interaction.followup.send.assert_called_once_with(
-                content=expected_content)
+            mock_interaction.followup.send.assert_called_once_with(content=expected_content)
             mock_upload.assert_not_called()
 
         self.loop.run_until_complete(run_test())
@@ -250,8 +246,7 @@ class TestBotFunctions(unittest.TestCase):
 
             # Verify followup was called with paste URL
             expected_content = f"{base_content}\n\nMy detailed response was too long, so I've uploaded it here: https://paste.rs/xyz789.md"
-            mock_interaction.followup.send.assert_called_once_with(
-                content=expected_content, suppress_embeds=True)
+            mock_interaction.followup.send.assert_called_once_with(content=expected_content, suppress_embeds=True)
 
         self.loop.run_until_complete(run_test())
 
@@ -306,8 +301,7 @@ class TestBotFunctions(unittest.TestCase):
 
         # Test formatting
         message = "Analyze this image"
-        formatted = message_service.format_attachment_message(
-            mock_attachment, message)
+        formatted = message_service.format_attachment_message(mock_attachment, message)
 
         expected = "https://cdn.discord.com/attachments/123/456/image.png\n> Analyze this image"
         self.assertEqual(formatted, expected)

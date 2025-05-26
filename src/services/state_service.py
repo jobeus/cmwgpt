@@ -33,8 +33,7 @@ class StateService:
         logger.info("StateService initialized with thread-safe storage")
 
     # Conversation management
-    def get_conversation(
-            self, channel_id: int) -> Optional[List[Dict[str, Any]]]:
+    def get_conversation(self, channel_id: int) -> Optional[List[Dict[str, Any]]]:
         """
         Get conversation history for a channel.
 
@@ -47,8 +46,7 @@ class StateService:
         with self._conversations_lock:
             return self._conversations.get(channel_id)
 
-    def set_conversation(self, channel_id: int,
-                         conversation: List[Dict[str, Any]]) -> None:
+    def set_conversation(self, channel_id: int, conversation: List[Dict[str, Any]]) -> None:
         """
         Set conversation history for a channel.
 
@@ -58,12 +56,9 @@ class StateService:
         """
         with self._conversations_lock:
             self._conversations[channel_id] = conversation.copy()
-            logger.debug(
-                f"Set conversation for channel {channel_id} with {len(conversation)} messages"
-            )
+            logger.debug(f"Set conversation for channel {channel_id} with {len(conversation)} messages")
 
-    def add_message_to_conversation(
-            self, channel_id: int, message: Dict[str, Any]) -> None:
+    def add_message_to_conversation(self, channel_id: int, message: Dict[str, Any]) -> None:
         """
         Add a message to the conversation history for a channel.
 
@@ -75,8 +70,7 @@ class StateService:
             if channel_id not in self._conversations:
                 self._conversations[channel_id] = []
             self._conversations[channel_id].append(message)
-            logger.debug(
-                f"Added message to conversation for channel {channel_id}")
+            logger.debug(f"Added message to conversation for channel {channel_id}")
 
     def clear_conversation(self, channel_id: int) -> None:
         """

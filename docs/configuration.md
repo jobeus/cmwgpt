@@ -10,7 +10,7 @@ The bot is configured through environment variables defined in a `.env` file. Co
 - **Required**: Yes
 - **Description**: Your Discord bot token from the Discord Developer Portal
 - **Example**: `DISCORD_BOT_TOKEN=1234567890abcdef1234567890abcdef12345678`
-- **How to get**: 
+- **How to get**:
   1. Visit [Discord Developer Portal](https://discord.com/developers/applications)
   2. Create or select your application
   3. Go to "Bot" section
@@ -34,11 +34,15 @@ The bot is configured through environment variables defined in a `.env` file. Co
 - **Default**: None (works in all channels)
 - **How to get**: Enable Developer Mode in Discord, right-click channel, "Copy ID"
 
-#### `SYSTEM_PROMPT`
-- **Required**: No
-- **Description**: Default system prompt for AI personality
-- **Example**: `SYSTEM_PROMPT="You are a helpful assistant specialized in programming and technology"`
-- **Default**: `"You're a helpful old robot"`
+#### System Prompt Configuration
+- **File**: `system_prompt.txt` (optional)
+- **Description**: Default system prompt for AI personality and behavior
+- **Example**: See `system_prompt.txt.example` for template
+- **Default**: Falls back to "You are a helpful assistant." if file doesn't exist
+- **Features**:
+  - Multi-line support for complex prompts
+  - Dynamic date/time insertion with `[[CURRENT_DATE_AND_TIME]]` variable
+  - Better readability than environment variables
 - **Notes**: Can be overridden per channel using `/systemprompt set`
 
 #### `DEFAULT_MODEL`
@@ -95,8 +99,7 @@ OPENAI_API_KEY=sk-1234567890abcdef1234567890abcdef12345678
 # Optional - Channel restriction (remove to work in all channels)
 DISCORD_CHANNEL_ID=1234567890123456789
 
-# Optional - AI Behavior
-SYSTEM_PROMPT="You are a helpful assistant that specializes in programming, technology, and creative problem-solving. Be concise but thorough in your responses."
+# Optional - AI Behavior (system prompt now in system_prompt.txt file)
 DEFAULT_MODEL=gpt-4.1-mini
 DEFAULT_IMAGE_MODEL=dall-e-3
 
@@ -105,6 +108,29 @@ INCLUDE_USERNAMES=true
 REPLY_TO_MENTIONS=true
 INCLUDE_NUM_CHATLINES=75
 ```
+
+### System Prompt File (`system_prompt.txt`)
+
+Create a `system_prompt.txt` file in the project root to customize the AI's personality:
+
+```txt
+You are a helpful assistant. Today's date and time is [[CURRENT_DATE_AND_TIME]].
+
+You are designed to be helpful, harmless, and honest. You can assist with a wide variety of tasks including:
+- Answering questions and providing information
+- Helping with writing and editing
+- Explaining concepts and ideas
+- Providing coding assistance
+- Creative tasks like brainstorming
+
+Please be concise but thorough in your responses. If you're unsure about something, say so rather than guessing.
+```
+
+**Key Features:**
+- **Multi-line support**: Write complex, formatted prompts
+- **Dynamic variables**: Use `[[CURRENT_DATE_AND_TIME]]` for current timestamp
+- **Version control friendly**: Track changes to AI behavior
+- **Fallback**: Uses default prompt if file is missing
 
 ## Discord Bot Setup
 

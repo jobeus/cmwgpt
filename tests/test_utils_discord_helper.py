@@ -238,8 +238,7 @@ class TestDiscordHelper(unittest.TestCase):
 
             # Verify exact format
             lines = result.split("\n")
-            self.assertEqual(
-                lines[0], "Here are all the users in this channel:")
+            self.assertEqual(lines[0], "Here are all the users in this channel:")
             self.assertEqual(lines[1], "@TestUser = <@12345>")
             self.assertTrue(lines[2].startswith("Whenever you see a mention"))
             self.assertTrue(lines[2].endswith("to recoginize your intent."))

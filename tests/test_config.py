@@ -5,7 +5,8 @@ Tests environment variable loading and configuration validation.
 
 import unittest
 import os
-from unittest.mock import patch
+from unittest.mock import patch, mock_open
+from datetime import datetime
 
 
 class TestConfig(unittest.TestCase):
@@ -15,7 +16,7 @@ class TestConfig(unittest.TestCase):
         """Set up test environment."""
         # Clear any existing environment variables
         self.env_vars_to_clear = [
-            'OPENAI_API_KEY', 'DISCORD_BOT_TOKEN', 'SYSTEM_PROMPT',
+            'OPENAI_API_KEY', 'DISCORD_BOT_TOKEN',
             'DEFAULT_MODEL', 'DEFAULT_IMAGE_MODEL', 'INCLUDE_USERNAMES',
             'REPLY_TO_MENTIONS', 'INCLUDE_NUM_CHATLINES'
         ]
@@ -50,9 +51,6 @@ class TestConfig(unittest.TestCase):
             import config
             importlib.reload(config)
 
-            self.assertEqual(
-                config.SYSTEM_PROMPT,
-                'You are a helpful assistant.')
             self.assertEqual(config.DEFAULT_MODEL, 'gpt-4.1-nano')
             self.assertEqual(config.DEFAULT_IMAGE_MODEL, 'gpt-image-1')
             self.assertTrue(config.INCLUDE_USERNAMES)
@@ -67,7 +65,6 @@ class TestConfig(unittest.TestCase):
         test_env_values = {
             'OPENAI_API_KEY': 'test_openai_key',
             'DISCORD_BOT_TOKEN': 'test_discord_token',
-            'SYSTEM_PROMPT': 'Test system prompt',
             'DEFAULT_MODEL': 'gpt-4',
             'DEFAULT_IMAGE_MODEL': 'dall-e-3',
             'INCLUDE_USERNAMES': 'false',
@@ -87,7 +84,6 @@ class TestConfig(unittest.TestCase):
 
             self.assertEqual(config.OPENAI_API_KEY, 'test_openai_key')
             self.assertEqual(config.DISCORD_BOT_TOKEN, 'test_discord_token')
-            self.assertEqual(config.SYSTEM_PROMPT, 'Test system prompt')
             self.assertEqual(config.DEFAULT_MODEL, 'gpt-4')
             self.assertEqual(config.DEFAULT_IMAGE_MODEL, 'dall-e-3')
             self.assertFalse(config.INCLUDE_USERNAMES)
@@ -162,6 +158,77 @@ class TestConfig(unittest.TestCase):
             # handling
             with self.assertRaises(ValueError):
                 importlib.reload(config)
+
+    def test_load_system_prompt_from_file(self):
+        """Test loading system prompt from file."""
+        # Import here to avoid import issues during test setup
+        from src.config import load_system_prompt
+
+        test_content = "You are a test assistant. Today is [[CURRENT_DATE_AND_TIME]]."
+
+        with patch("builtins.open", mock_open(read_data=test_content)):
+            result = load_system_prompt()
+
+            # Should replace the date/time variable
+            self.assertNotIn("[[CURRENT_DATE_AND_TIME]]", result)
+            self.assertIn("You are a test assistant. Today is", result)
+            # Should contain a date in YYYY-MM-DD format
+            self.assertRegex(result, r"\d{4}-\d{2}-\d{2}")
+
+    def test_load_system_prompt_file_not_found(self):
+        """Test fallback when system prompt file doesn't exist."""
+        from src.config import load_system_prompt, DEFAULT_SYSTEM_PROMPT
+
+        with patch("builtins.open", side_effect=FileNotFoundError):
+            result = load_system_prompt()
+            self.assertEqual(result, DEFAULT_SYSTEM_PROMPT)
+
+    def test_load_system_prompt_empty_file(self):
+        """Test fallback when system prompt file is empty."""
+        from src.config import load_system_prompt, DEFAULT_SYSTEM_PROMPT
+
+        with patch("builtins.open", mock_open(read_data="")):
+            result = load_system_prompt()
+            self.assertEqual(result, DEFAULT_SYSTEM_PROMPT)
+
+    def test_load_system_prompt_whitespace_only(self):
+        """Test fallback when system prompt file contains only whitespace."""
+        from src.config import load_system_prompt, DEFAULT_SYSTEM_PROMPT
+
+        with patch("builtins.open", mock_open(read_data="   \n\t  \n")):
+            result = load_system_prompt()
+            self.assertEqual(result, DEFAULT_SYSTEM_PROMPT)
+
+    def test_get_system_prompt(self):
+        """Test get_system_prompt function."""
+        from src.config import get_system_prompt
+
+        test_content = "Test prompt with [[CURRENT_DATE_AND_TIME]] variable."
+
+        with patch("builtins.open", mock_open(read_data=test_content)):
+            result = get_system_prompt()
+
+            # Should replace the date/time variable
+            self.assertNotIn("[[CURRENT_DATE_AND_TIME]]", result)
+            self.assertIn("Test prompt with", result)
+
+    def test_date_time_replacement_format(self):
+        """Test that date/time replacement uses correct format."""
+        from src.config import load_system_prompt
+
+        test_content = "Current time: [[CURRENT_DATE_AND_TIME]]"
+
+        with patch("builtins.open", mock_open(read_data=test_content)):
+            result = load_system_prompt()
+
+            # Extract the date part
+            date_part = result.replace("Current time: ", "")
+
+            # Should be in YYYY-MM-DD HH:MM:SS format
+            try:
+                datetime.strptime(date_part, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                self.fail(f"Date format is incorrect: {date_part}")
 
 
 if __name__ == '__main__':

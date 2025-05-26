@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -8,21 +9,52 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "test-key-for-ci")
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "test-token-for-ci")
 
 # Bot Configuration
-SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "You are a helpful assistant.")
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-4.1-nano")
 DEFAULT_IMAGE_MODEL = os.getenv("DEFAULT_IMAGE_MODEL", "gpt-image-1")
 
+# Default system prompt (fallback if file doesn't exist)
+DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
+
+
+def load_system_prompt() -> str:
+    """
+    Load system prompt from system_prompt.txt file with variable replacement.
+
+    Returns:
+        System prompt string with [[CURRENT_DATE_AND_TIME]] replaced
+    """
+    try:
+        with open("system_prompt.txt", "r", encoding="utf-8") as f:
+            content = f.read().strip()
+            if content:
+                # Replace [[CURRENT_DATE_AND_TIME]] with current date and time
+                current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z").strip()
+                if not current_datetime.endswith(" "):
+                    current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                content = content.replace("[[CURRENT_DATE_AND_TIME]]", current_datetime)
+                return content
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        # Log error but don't crash - fall back to default
+        print(f"Warning: Error loading system_prompt.txt: {e}")
+
+    return DEFAULT_SYSTEM_PROMPT
+
+
+def get_system_prompt() -> str:
+    """
+    Get the current system prompt with dynamic variable replacement.
+
+    Returns:
+        System prompt string with current date/time
+    """
+    return load_system_prompt()
+
+
 # Boolean Configuration
-INCLUDE_USERNAMES = os.getenv(
-    "INCLUDE_USERNAMES",
-    "True").lower() in (
-        "true",
-    "1")
-REPLY_TO_MENTIONS = os.getenv(
-    "REPLY_TO_MENTIONS",
-    "True").lower() in (
-        "true",
-    "1")
+INCLUDE_USERNAMES = os.getenv("INCLUDE_USERNAMES", "True").lower() in ("true", "1")
+REPLY_TO_MENTIONS = os.getenv("REPLY_TO_MENTIONS", "True").lower() in ("true", "1")
 
 # Numeric Configuration
 INCLUDE_NUM_CHATLINES = int(os.getenv("INCLUDE_NUM_CHATLINES", 100))
