@@ -15,8 +15,7 @@ logger = logging.getLogger(__name__)
 def is_git_repository() -> bool:
     """Check if the current directory is a git repository."""
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--git-dir"], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(["git", "rev-parse", "--git-dir"], capture_output=True, text=True, timeout=10)
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
         logger.error(f"Error checking git repository status: {e}")
@@ -26,8 +25,7 @@ def is_git_repository() -> bool:
 def get_current_commit_hash() -> Optional[str]:
     """Get the current commit hash."""
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
             return result.stdout.strip()
         else:
@@ -41,12 +39,7 @@ def get_current_commit_hash() -> Optional[str]:
 def get_current_branch() -> Optional[str]:
     """Get the current branch name."""
     try:
-        result = subprocess.run(["git",
-                                 "branch",
-                                 "--show-current"],
-                                capture_output=True,
-                                text=True,
-                                timeout=10)
+        result = subprocess.run(["git", "branch", "--show-current"], capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
             return result.stdout.strip()
         else:
@@ -60,8 +53,7 @@ def get_current_branch() -> Optional[str]:
 def fetch_updates() -> bool:
     """Fetch updates from origin."""
     try:
-        result = subprocess.run(
-            ["git", "fetch", "origin"], capture_output=True, text=True, timeout=30)
+        result = subprocess.run(["git", "fetch", "origin"], capture_output=True, text=True, timeout=30)
         if result.returncode == 0:
             logger.debug("Successfully fetched updates from origin")
             return True
@@ -81,19 +73,14 @@ def check_for_new_commits() -> bool:
             return False
 
         # Count commits between HEAD and origin/branch
-        result = subprocess.run(["git",
-                                 "rev-list",
-                                 f"HEAD..origin/{branch}",
-                                 "--count"],
-                                capture_output=True,
-                                text=True,
-                                timeout=10)
+        result = subprocess.run(
+            ["git", "rev-list", f"HEAD..origin/{branch}", "--count"], capture_output=True, text=True, timeout=10
+        )
 
         if result.returncode == 0:
             commit_count = int(result.stdout.strip())
             if commit_count > 0:
-                logger.info(
-                    f"Found {commit_count} new commits on origin/{branch}")
+                logger.info(f"Found {commit_count} new commits on origin/{branch}")
                 return True
             else:
                 logger.debug(f"No new commits on origin/{branch}")
@@ -116,15 +103,13 @@ def perform_git_pull() -> bool:
             return False
 
         # Check if there are any uncommitted changes
-        result = subprocess.run(
-            ["git", "status", "--porcelain"], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, timeout=10)
 
         if result.returncode == 0 and result.stdout.strip():
             logger.warning("Uncommitted changes detected, git pull may fail")
 
         # Perform the git pull
-        result = subprocess.run(
-            ["git", "pull", "origin"], capture_output=True, text=True, timeout=60)
+        result = subprocess.run(["git", "pull", "origin"], capture_output=True, text=True, timeout=60)
 
         if result.returncode == 0:
             output = result.stdout.strip()
@@ -134,8 +119,10 @@ def perform_git_pull() -> bool:
                 logger.info(f"Git pull: {output}")
             return True
         else:
-            logger.error(f"""Git pull failed with return code {
-                result.returncode}""")
+            logger.error(
+                f"""Git pull failed with return code {
+                result.returncode}"""
+            )
             if result.stderr.strip():
                 logger.error(f"Git pull error: {result.stderr.strip()}")
             return False

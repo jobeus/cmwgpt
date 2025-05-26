@@ -43,8 +43,7 @@ class StateService:
         logger.info("StateService initialized with thread-safe storage")
 
     # Conversation management
-    def get_conversation(
-            self, channel_id: int) -> Optional[List[Dict[str, Any]]]:
+    def get_conversation(self, channel_id: int) -> Optional[List[Dict[str, Any]]]:
         """
         Get conversation history for a channel.
 
@@ -57,8 +56,7 @@ class StateService:
         with self._conversations_lock:
             return self._conversations.get(channel_id)
 
-    def set_conversation(self, channel_id: int,
-                         conversation: List[Dict[str, Any]]) -> None:
+    def set_conversation(self, channel_id: int, conversation: List[Dict[str, Any]]) -> None:
         """
         Set conversation history for a channel.
 
@@ -68,11 +66,12 @@ class StateService:
         """
         with self._conversations_lock:
             self._conversations[channel_id] = conversation.copy()
-            logger.debug(f"""Set conversation for channel {channel_id} with {
-                len(conversation)} messages""")
+            logger.debug(
+                f"""Set conversation for channel {channel_id} with {
+                len(conversation)} messages"""
+            )
 
-    def add_message_to_conversation(
-            self, channel_id: int, message: Dict[str, Any]) -> None:
+    def add_message_to_conversation(self, channel_id: int, message: Dict[str, Any]) -> None:
         """
         Add a message to the conversation history for a channel.
 
@@ -84,8 +83,7 @@ class StateService:
             if channel_id not in self._conversations:
                 self._conversations[channel_id] = []
             self._conversations[channel_id].append(message)
-            logger.debug(
-                f"Added message to conversation for channel {channel_id}")
+            logger.debug(f"Added message to conversation for channel {channel_id}")
 
     def clear_conversation(self, channel_id: int) -> None:
         """
@@ -225,9 +223,7 @@ class StateService:
             self._last_git_sha = sha
             logger.debug(f"Updated last git SHA to: {sha}")
 
-    def save_state_to_temp_file(
-            self,
-            restart_info: Optional[dict] = None) -> Optional[str]:
+    def save_state_to_temp_file(self, restart_info: Optional[dict] = None) -> Optional[str]:
         """
         Save current state to a secure temporary file.
 
@@ -286,8 +282,7 @@ class StateService:
             all_temp_files = glob.glob(pattern)
 
             # Filter out restart info files - we only want the main state files
-            temp_files = [
-                f for f in all_temp_files if not f.endswith("_restart_info.json")]
+            temp_files = [f for f in all_temp_files if not f.endswith("_restart_info.json")]
 
             if not temp_files:
                 logger.info("No temporary state files found")
@@ -304,35 +299,24 @@ class StateService:
                         state_data = json.load(f)
 
                     # Validate the data structure
-                    if not all(
-                        key in state_data for key in [
-                            "conversations",
-                            "models",
-                            "system_prompts"]):
-                        logger.warning(
-                            f"Invalid state file format: {temp_file}")
+                    if not all(key in state_data for key in ["conversations", "models", "system_prompts"]):
+                        logger.warning(f"Invalid state file format: {temp_file}")
                         continue
 
                     # Load the state under locks
                     with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock, self._git_sha_lock:
                         # Convert string keys back to integers for channel IDs
-                        self._conversations = {
-                            int(k): v for k, v in state_data["conversations"].items()}
-                        self._models = {
-                            int(k): v for k, v in state_data["models"].items()}
-                        self._channel_system_prompts = {
-                            int(k): v for k, v in state_data["system_prompts"].items()}
+                        self._conversations = {int(k): v for k, v in state_data["conversations"].items()}
+                        self._models = {int(k): v for k, v in state_data["models"].items()}
+                        self._channel_system_prompts = {int(k): v for k, v in state_data["system_prompts"].items()}
                         # Load active channels (may not exist in older state
                         # files)
                         if "active_channels" in state_data:
-                            self._active_channels = set(
-                                state_data["active_channels"])
+                            self._active_channels = set(state_data["active_channels"])
                         else:
                             # If not present, derive from existing
                             # conversations and models
-                            self._active_channels = set(
-                                self._conversations.keys()) | set(
-                                self._models.keys())
+                            self._active_channels = set(self._conversations.keys()) | set(self._models.keys())
 
                         # Load last git SHA (may not exist in older state
                         # files)
@@ -342,11 +326,13 @@ class StateService:
                     sha_info = ""
                     if self._last_git_sha:
                         sha_info = f", last git SHA: {self._last_git_sha}"
-                    logger.info(f"""Restored {
+                    logger.info(
+                        f"""Restored {
                         len(self._conversations)} conversations, {
                         len(self._models)} models, {
                         len(self._channel_system_prompts)} system prompts, {
-                        len(self._active_channels)} active channels{sha_info}""")
+                        len(self._active_channels)} active channels{sha_info}"""
+                    )
 
                     # Successfully loaded, break out of loop
                     break
@@ -361,13 +347,11 @@ class StateService:
                 try:
                     os.remove(temp_file)
                     if temp_file.endswith("_restart_info.json"):
-                        logger.debug(
-                            f"Cleaned up restart info file: {temp_file}")
+                        logger.debug(f"Cleaned up restart info file: {temp_file}")
                     else:
                         logger.debug(f"Cleaned up temporary file: {temp_file}")
                 except OSError as e:
-                    logger.error(
-                        f"Failed to clean up temporary file {temp_file}: {e}")
+                    logger.error(f"Failed to clean up temporary file {temp_file}: {e}")
 
             return True
 
@@ -389,14 +373,11 @@ class StateService:
                 try:
                     os.remove(temp_file)
                     if temp_file.endswith("_restart_info.json"):
-                        logger.info(
-                            f"Cleaned up leftover restart info file: {temp_file}")
+                        logger.info(f"Cleaned up leftover restart info file: {temp_file}")
                     else:
-                        logger.info(
-                            f"Cleaned up leftover temporary file: {temp_file}")
+                        logger.info(f"Cleaned up leftover temporary file: {temp_file}")
                 except OSError as e:
-                    logger.error(
-                        f"Failed to clean up temporary file {temp_file}: {e}")
+                    logger.error(f"Failed to clean up temporary file {temp_file}: {e}")
 
         except (OSError, ValueError) as e:
             logger.error(f"Error during temp file cleanup: {e}")

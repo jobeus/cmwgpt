@@ -8,9 +8,7 @@ stateless utility functions from stateful service classes.
 import discord
 
 
-def format_attachment_message(
-        attachment: discord.Attachment,
-        message: str) -> str:
+def format_attachment_message(attachment: discord.Attachment, message: str) -> str:
     """Format a message with an attachment URL."""
     return f"{attachment.url}\n> {message}"
 
@@ -49,7 +47,7 @@ def clean_openai_response(response: str) -> str:
                 if i == 0 or cleaned[i - 1] != "\\":
                     quote_count += 1
                 # Handle the case where the backslash itself is escaped
-                elif i >= 2 and cleaned[i - 2: i] == "\\\\":
+                elif i >= 2 and cleaned[i - 2 : i] == "\\\\":
                     quote_count += 1
             i += 1
 

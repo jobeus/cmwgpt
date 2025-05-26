@@ -40,8 +40,7 @@ class RestartHandler:
         4. Exiting with restart code
         """
         if self._restart_in_progress:
-            logger.warning(
-                "Restart already in progress, ignoring duplicate request")
+            logger.warning("Restart already in progress, ignoring duplicate request")
             return
 
         self._restart_in_progress = True
@@ -106,8 +105,7 @@ class RestartHandler:
         Used when the bot is killed with Ctrl-C or kill signal.
         """
         if self._restart_in_progress:
-            logger.warning(
-                "Restart already in progress, graceful shutdown will proceed anyway")
+            logger.warning("Restart already in progress, graceful shutdown will proceed anyway")
 
         # Set skip cleanup flag to prevent temp file cleanup during shutdown
         self._skip_cleanup = True
@@ -126,9 +124,7 @@ class RestartHandler:
 
             # Step 2: Save current state with shutdown info
             print("💾 Saving bot state...")
-            shutdown_info = {
-                "manual_restart": False,
-                "graceful_shutdown": True}
+            shutdown_info = {"manual_restart": False, "graceful_shutdown": True}
             temp_file = state_service.save_state_to_temp_file(shutdown_info)
             if temp_file:
                 print("✅ State saved")

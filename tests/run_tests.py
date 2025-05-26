@@ -36,8 +36,7 @@ def run_all_tests():
     print(f"Tests run: {result.testsRun}")
     print(f"Failures: {len(result.failures)}")
     print(f"Errors: {len(result.errors)}")
-    print(
-        f"Skipped: {len(result.skipped) if hasattr(result, 'skipped') else 0}")
+    print(f"Skipped: {len(result.skipped) if hasattr(result, 'skipped') else 0}")
 
     if result.failures:
         print(f"\nFAILURES ({len(result.failures)}):")
@@ -50,8 +49,7 @@ def run_all_tests():
             print(f"  - {test}")
 
     if result.testsRun > 0:
-        success_rate = (result.testsRun - len(result.failures) -
-                        len(result.errors)) / result.testsRun * 100
+        success_rate = (result.testsRun - len(result.failures) - len(result.errors)) / result.testsRun * 100
     else:
         success_rate = 0
     print(f"\nSuccess rate: {success_rate:.1f}%")

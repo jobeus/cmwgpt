@@ -79,7 +79,7 @@ autofix:
 # Format code (if black is installed)
 format:
 	@if command -v black >/dev/null 2>&1; then \
-		black main.py src/ tests/ --line-length=120 --preview --enable-unstable-feature multiline_string_handling; \
+		black main.py src/ tests/ --line-length=120; \
 		echo "✅ Code formatting complete!"; \
 	else \
 		echo "❌ black not installed. Install with: pip install -r test_requirements.txt"; \

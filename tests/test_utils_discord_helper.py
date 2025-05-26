@@ -235,8 +235,7 @@ class TestDiscordHelper(unittest.TestCase):
 
             # Verify exact format
             lines = result.split("\n")
-            self.assertEqual(
-                lines[0], "Here are all the users in this channel:")
+            self.assertEqual(lines[0], "Here are all the users in this channel:")
             self.assertEqual(lines[1], "You are <@99999>!")
             self.assertEqual(lines[2], "@TestUser = <@12345>")
             self.assertTrue(lines[3].startswith("Whenever you see a mention"))

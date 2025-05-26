@@ -38,12 +38,10 @@ def setup_signal_handlers(bot_client):
             # Run the graceful shutdown
             if loop.is_running():
                 # If we're already in an async context, schedule the shutdown
-                asyncio.create_task(
-                    restart_handler.perform_graceful_shutdown())
+                asyncio.create_task(restart_handler.perform_graceful_shutdown())
             else:
                 # If we're not in an async context, run it
-                loop.run_until_complete(
-                    restart_handler.perform_graceful_shutdown())
+                loop.run_until_complete(restart_handler.perform_graceful_shutdown())
 
         except Exception as e:
             logger.error(f"Error during graceful shutdown: {e}")

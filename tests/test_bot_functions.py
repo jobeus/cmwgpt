@@ -13,13 +13,7 @@ import os
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Add src directory for new architecture
-sys.path.insert(
-    0,
-    os.path.join(
-        os.path.dirname(
-            os.path.dirname(
-                os.path.abspath(__file__))),
-        "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 
 class TestBotFunctions(unittest.TestCase):
@@ -119,9 +113,7 @@ class TestBotFunctions(unittest.TestCase):
             self.assertEqual(history_data[1]["user"], "<@22222>")
             self.assertEqual(history_data[1]["says"], "Second message")
             self.assertEqual(history_data[2]["user"], "<@12345>")
-            self.assertEqual(
-                history_data[2]["says"],
-                "Hey @bot, can you help me?")
+            self.assertEqual(history_data[2]["says"], "Hey @bot, can you help me?")
 
         self.loop.run_until_complete(run_test())
 
@@ -141,8 +133,7 @@ class TestBotFunctions(unittest.TestCase):
             await message_service.send_channel_reply(mock_channel, short_message)
 
             # Verify direct send was called
-            mock_channel.send.assert_called_once_with(
-                short_message, suppress_embeds=True)
+            mock_channel.send.assert_called_once_with(short_message, suppress_embeds=True)
             mock_upload.assert_not_called()
 
         self.loop.run_until_complete(run_test())
@@ -172,8 +163,7 @@ class TestBotFunctions(unittest.TestCase):
             expected_message = (
                 "My response was too long to post here, so I've uploaded it to: https://paste.rs/abc123.md"
             )
-            mock_channel.send.assert_called_once_with(
-                expected_message, suppress_embeds=True)
+            mock_channel.send.assert_called_once_with(expected_message, suppress_embeds=True)
 
         self.loop.run_until_complete(run_test())
 
@@ -202,9 +192,9 @@ class TestBotFunctions(unittest.TestCase):
             expected_message = (
                 "The content of my response was over 2000 characters "
                 "(discord limit), and there was a problem uploading it to paste service. "
-                "Sorry, try again later.")
-            mock_channel.send.assert_called_once_with(
-                expected_message, suppress_embeds=True)
+                "Sorry, try again later."
+            )
+            mock_channel.send.assert_called_once_with(expected_message, suppress_embeds=True)
 
         self.loop.run_until_complete(run_test())
 
@@ -227,8 +217,7 @@ class TestBotFunctions(unittest.TestCase):
 
             # Verify direct followup was called
             expected_content = f"{base_content}\n{reply_text}"
-            mock_interaction.followup.send.assert_called_once_with(
-                content=expected_content, suppress_embeds=True)
+            mock_interaction.followup.send.assert_called_once_with(content=expected_content, suppress_embeds=True)
             mock_upload.assert_not_called()
 
         self.loop.run_until_complete(run_test())
@@ -258,8 +247,7 @@ class TestBotFunctions(unittest.TestCase):
 
             # Verify followup was called with paste URL
             expected_content = f"{base_content}\n\nMy detailed response was too long, so I've uploaded it here: https://paste.rs/xyz789.md"
-            mock_interaction.followup.send.assert_called_once_with(
-                content=expected_content, suppress_embeds=True)
+            mock_interaction.followup.send.assert_called_once_with(content=expected_content, suppress_embeds=True)
 
         self.loop.run_until_complete(run_test())
 
@@ -315,8 +303,7 @@ class TestBotFunctions(unittest.TestCase):
 
         # Test formatting
         message = "Analyze this image"
-        formatted = message_service.format_attachment_message(
-            mock_attachment, message)
+        formatted = message_service.format_attachment_message(mock_attachment, message)
 
         expected = "https://cdn.discord.com/attachments/123/456/image.png\n> Analyze this image"
         self.assertEqual(formatted, expected)
