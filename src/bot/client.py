@@ -280,15 +280,9 @@ class DiscordBotClient:
             except Exception as e:
                 logger.error(f"Error shutting down queue service: {e}")
 
-            # Clean up any leftover temporary files (but not during restart)
-            if not restart_handler.should_skip_cleanup():
-                try:
-                    state_service.cleanup_temp_files()
-                    logger.info("Temporary files cleaned up")
-                except Exception as e:
-                    logger.error(f"Error cleaning up temporary files: {e}")
-            else:
-                logger.debug("Skipping cleanup during restart")
+            # Never clean up temporary files during shutdown - they should only be
+            # cleaned up after successful loading on startup
+            logger.debug("Skipping temp file cleanup during shutdown - files will be cleaned up on next startup after loading")
 
             logger.info("Bot shutdown.")
 

@@ -375,6 +375,16 @@ class StateService:
                 except Exception as e:
                     logger.error(f"Failed to clean up temporary file {temp_file}: {e}")
 
+            # Also clean up any leftover restart info files
+            restart_info_pattern = "/tmp/cmwgpt_state_backup_*_restart_info.json"
+            restart_info_files = glob.glob(restart_info_pattern)
+            for info_file in restart_info_files:
+                try:
+                    os.remove(info_file)
+                    logger.debug(f"Cleaned up restart info file: {info_file}")
+                except Exception as e:
+                    logger.error(f"Failed to clean up restart info file {info_file}: {e}")
+
             return True
 
         except Exception as e:
