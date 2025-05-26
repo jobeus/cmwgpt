@@ -262,9 +262,12 @@ class StateService:
             self._last_git_sha = sha
             logger.debug(f"Updated last git SHA to: {sha}")
 
-    def save_state_to_temp_file(self) -> Optional[str]:
+    def save_state_to_temp_file(self, restart_info: Optional[dict] = None) -> Optional[str]:
         """
         Save current state to a secure temporary file.
+
+        Args:
+            restart_info: Optional restart information to include in the state file
 
         Returns:
             Path to the temporary file, or None if save failed
@@ -286,6 +289,10 @@ class StateService:
                     "timestamp": timestamp,
                     "pid": pid,
                 }
+
+                # Include restart info if provided
+                if restart_info:
+                    state_data["restart_info"] = restart_info
 
             # Write to temporary file with secure permissions
             with open(temp_filename, "w", encoding="utf-8") as f:
@@ -309,9 +316,12 @@ class StateService:
             True if state was loaded, False otherwise
         """
         try:
-            # Find all matching temporary files
+            # Find all matching temporary files, excluding restart info files
             pattern = "/tmp/cmwgpt_state_backup_*.json"
-            temp_files = glob.glob(pattern)
+            all_temp_files = glob.glob(pattern)
+
+            # Filter out restart info files - we only want the main state files
+            temp_files = [f for f in all_temp_files if not f.endswith("_restart_info.json")]
 
             if not temp_files:
                 logger.info("No temporary state files found")
@@ -361,23 +371,16 @@ class StateService:
                     logger.error(f"Failed to load state from {temp_file}: {e}")
                     continue
 
-            # Clean up all temporary files
-            for temp_file in temp_files:
+            # Clean up all temporary files (both main state files and restart info files)
+            for temp_file in all_temp_files:
                 try:
                     os.remove(temp_file)
-                    logger.debug(f"Cleaned up temporary file: {temp_file}")
+                    if temp_file.endswith("_restart_info.json"):
+                        logger.debug(f"Cleaned up restart info file: {temp_file}")
+                    else:
+                        logger.debug(f"Cleaned up temporary file: {temp_file}")
                 except Exception as e:
                     logger.error(f"Failed to clean up temporary file {temp_file}: {e}")
-
-            # Also clean up any leftover restart info files
-            restart_info_pattern = "/tmp/cmwgpt_state_backup_*_restart_info.json"
-            restart_info_files = glob.glob(restart_info_pattern)
-            for info_file in restart_info_files:
-                try:
-                    os.remove(info_file)
-                    logger.debug(f"Cleaned up restart info file: {info_file}")
-                except Exception as e:
-                    logger.error(f"Failed to clean up restart info file {info_file}: {e}")
 
             return True
 
@@ -390,27 +393,19 @@ class StateService:
         Clean up any leftover temporary state files.
         """
         try:
-            # Clean up state backup files
+            # Clean up all state backup files (including any old restart info files)
             pattern = "/tmp/cmwgpt_state_backup_*.json"
             temp_files = glob.glob(pattern)
 
             for temp_file in temp_files:
                 try:
                     os.remove(temp_file)
-                    logger.info(f"Cleaned up leftover temporary file: {temp_file}")
+                    if temp_file.endswith("_restart_info.json"):
+                        logger.info(f"Cleaned up leftover restart info file: {temp_file}")
+                    else:
+                        logger.info(f"Cleaned up leftover temporary file: {temp_file}")
                 except Exception as e:
                     logger.error(f"Failed to clean up temporary file {temp_file}: {e}")
-
-            # Clean up restart info files
-            restart_info_pattern = "/tmp/cmwgpt_state_backup_*_restart_info.json"
-            restart_info_files = glob.glob(restart_info_pattern)
-
-            for info_file in restart_info_files:
-                try:
-                    os.remove(info_file)
-                    logger.info(f"Cleaned up leftover restart info file: {info_file}")
-                except Exception as e:
-                    logger.error(f"Failed to clean up restart info file {info_file}: {e}")
 
         except Exception as e:
             logger.error(f"Error during temp file cleanup: {e}")

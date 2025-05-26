@@ -59,25 +59,12 @@ class RestartHandler:
             else:
                 print("⚠️  Could not determine git SHA")
 
-            # Step 2: Save current state
+            # Step 2: Save current state with restart info
             print("💾 Saving bot state...")
-            temp_file = state_service.save_state_to_temp_file()
+            restart_info = {"manual_restart": manual}
+            temp_file = state_service.save_state_to_temp_file(restart_info)
             if temp_file:
                 print("✅ State saved")
-
-                # Also save restart type information
-                restart_info_file = temp_file.replace(".json", "_restart_info.json")
-                try:
-                    import json
-
-                    with open(restart_info_file, "w") as f:
-                        json.dump({"manual_restart": manual}, f)
-                    import os
-                    import stat
-
-                    os.chmod(restart_info_file, stat.S_IRUSR | stat.S_IWUSR)
-                except Exception as e:
-                    logger.warning(f"Failed to save restart info: {e}")
             else:
                 print("⚠️  Failed to save state, continuing anyway")
 
@@ -198,25 +185,12 @@ class RestartHandler:
             else:
                 print("⚠️  Could not determine git SHA")
 
-            # Step 2: Save current state
+            # Step 2: Save current state with shutdown info
             print("💾 Saving bot state...")
-            temp_file = state_service.save_state_to_temp_file()
+            shutdown_info = {"manual_restart": False, "graceful_shutdown": True}
+            temp_file = state_service.save_state_to_temp_file(shutdown_info)
             if temp_file:
                 print("✅ State saved")
-
-                # Save shutdown type information (not a restart)
-                shutdown_info_file = temp_file.replace(".json", "_restart_info.json")
-                try:
-                    import json
-
-                    with open(shutdown_info_file, "w") as f:
-                        json.dump({"manual_restart": False, "graceful_shutdown": True}, f)
-                    import os
-                    import stat
-
-                    os.chmod(shutdown_info_file, stat.S_IRUSR | stat.S_IWUSR)
-                except Exception as e:
-                    logger.warning(f"Failed to save shutdown info: {e}")
             else:
                 print("⚠️  Failed to save state")
 

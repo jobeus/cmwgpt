@@ -134,7 +134,7 @@ class DiscordBotClient:
 
     def _check_for_restart_info(self) -> bool:
         """
-        Check for restart info files to determine if this was a manual restart.
+        Check for restart info in the loaded state to determine if this was a manual restart.
 
         Returns:
             True if this was a manual restart, False otherwise
@@ -144,24 +144,38 @@ class DiscordBotClient:
             import json
             import os
 
-            # Look for restart info files
-            pattern = "/tmp/cmwgpt_state_backup_*_restart_info.json"
-            restart_info_files = glob.glob(pattern)
+            # Look for state files that might contain restart info
+            pattern = "/tmp/cmwgpt_state_backup_*.json"
+            state_files = glob.glob(pattern)
+
+            # Filter out any old restart info files (shouldn't exist with new approach)
+            state_files = [f for f in state_files if not f.endswith("_restart_info.json")]
 
             was_manual = False
-            for info_file in restart_info_files:
+            for state_file in state_files:
                 try:
-                    with open(info_file, "r") as f:
-                        restart_info = json.load(f)
-                    was_manual = restart_info.get("manual_restart", False)
-                    logger.info(f"Found restart info: manual={was_manual}")
+                    with open(state_file, "r") as f:
+                        state_data = json.load(f)
 
-                    # Clean up the info file
-                    os.remove(info_file)
-                    logger.debug(f"Cleaned up restart info file: {info_file}")
-                    break
+                    # Check if restart info is embedded in the state file
+                    restart_info = state_data.get("restart_info", {})
+                    if restart_info:
+                        was_manual = restart_info.get("manual_restart", False)
+                        logger.info(f"Found restart info in state: manual={was_manual}")
+                        break
+
                 except Exception as e:
-                    logger.warning(f"Error reading restart info file {info_file}: {e}")
+                    logger.warning(f"Error reading state file {state_file}: {e}")
+
+            # Also clean up any old-style restart info files if they exist
+            old_restart_info_pattern = "/tmp/cmwgpt_state_backup_*_restart_info.json"
+            old_restart_info_files = glob.glob(old_restart_info_pattern)
+            for info_file in old_restart_info_files:
+                try:
+                    os.remove(info_file)
+                    logger.debug(f"Cleaned up old restart info file: {info_file}")
+                except Exception as e:
+                    logger.warning(f"Error cleaning up old restart info file {info_file}: {e}")
 
             return was_manual
 
