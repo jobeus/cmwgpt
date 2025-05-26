@@ -351,10 +351,7 @@ class StateService:
                     logger.debug(f"Successfully loaded state from: {temp_file}")
                     sha_info = f", last git SHA: {self._last_git_sha}" if self._last_git_sha else ""
                     logger.info(
-                        f"Restored {len(self._conversations)} conversations, "
-                        f"{len(self._models)} models, "
-                        f"{len(self._channel_system_prompts)} system prompts, "
-                        f"{len(self._active_channels)} active channels{sha_info}"
+                        f"Restored {len(self._conversations)} conversations, {len(self._models)} models, {len(self._channel_system_prompts)} system prompts, {len(self._active_channels)} active channels{sha_info}"
                     )
 
                     # Successfully loaded, break out of loop

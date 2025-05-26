@@ -30,6 +30,54 @@ class OpenAIService:
     def __init__(self):
         self._client: Optional[AsyncOpenAI] = None
 
+    def _clean_response(self, response: str) -> str:
+        """
+        Clean OpenAI response by removing unwanted quote wrapping and fixing escaped characters.
+
+        Args:
+            response: Raw response from OpenAI
+
+        Returns:
+            Cleaned response string
+        """
+        if not response:
+            return response
+
+        # Strip leading/trailing whitespace
+        cleaned = response.strip()
+
+        # Check if the entire response is wrapped in quotes
+        # We need to be more careful about counting quotes to handle escaped quotes
+        if (len(cleaned) >= 2 and
+            cleaned.startswith('"') and
+            cleaned.endswith('"')):
+
+            # Count unescaped quotes to see if it's just outer wrapping
+            quote_count = 0
+            i = 0
+            while i < len(cleaned):
+                if cleaned[i] == '"':
+                    # Check if this quote is escaped
+                    if i == 0 or cleaned[i-1] != '\\':
+                        quote_count += 1
+                    # Handle the case where the backslash itself is escaped
+                    elif i >= 2 and cleaned[i-2:i] == '\\\\':
+                        quote_count += 1
+                i += 1
+
+            # If there are only 2 unescaped quotes (start and end), remove them
+            if quote_count == 2:
+                cleaned = cleaned[1:-1]
+
+        # Handle escaped characters that should be unescaped
+        # Only unescape common cases that OpenAI might escape unnecessarily
+        cleaned = cleaned.replace('\\n', '\n')
+        cleaned = cleaned.replace('\\t', '\t')
+        cleaned = cleaned.replace('\\"', '"')
+        cleaned = cleaned.replace('\\\\', '\\')
+
+        return cleaned
+
     def set_client(self, client) -> None:
         """Set a custom client (useful for testing)."""
         self._client = client
@@ -182,14 +230,14 @@ class OpenAIService:
 
                         final_message = follow_up_response.choices[0].message
                         logger.debug("Chat completion with function calling successful")
-                        return final_message.content
+                        return self._clean_response(final_message.content)
                     else:
                         logger.warning(f"Unknown function call requested: {function_name}")
                         return f"I tried to call an unknown function: {function_name}"
                 else:
                     # No function call, return the response directly
                     logger.debug("Chat completion successful (no function call)")
-                    return message.content
+                    return self._clean_response(message.content)
 
             except RateLimitError as e:
                 logger.warning(f"Rate limit hit on attempt {attempt + 1}: {e}")
@@ -288,7 +336,7 @@ class OpenAIService:
                     tools=[{"type": "web_search_preview"}],
                 )
                 logger.debug("Legacy chat completion successful")
-                return response.output_text
+                return self._clean_response(response.output_text)
 
             except RateLimitError as e:
                 logger.warning(f"Rate limit hit on attempt {attempt + 1}: {e}")
