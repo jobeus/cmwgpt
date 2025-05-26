@@ -1,5 +1,5 @@
 import discord
-import pprint
+
 
 async def get_mention_legend(channel: discord.TextChannel) -> str:
     all_members = channel.guild.fetch_members(limit=None)

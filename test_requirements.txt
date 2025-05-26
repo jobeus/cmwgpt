@@ -1,0 +1,24 @@
+# Test requirements for Discord Bot
+# These are additional packages needed for testing
+
+# Core testing framework (usually included with Python)
+# unittest is built-in, but we might want additional test utilities
+
+# Mocking and testing utilities
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.10.0
+pytest-cov>=4.0.0
+
+# For async testing
+asynctest>=0.13.0
+
+# For better test output and reporting
+colorama>=0.4.6
+coverage>=7.0.0
+
+# All the main dependencies (for testing against real implementations)
+discord.py>=2.0.0
+python-dotenv>=1.0.0
+openai>=1.0.0
+requests>=2.28.0

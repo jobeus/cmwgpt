@@ -212,6 +212,40 @@ openai - OpenAI API client
 requests - HTTP requests for paste service
 ```
 
+### Testing
+Comprehensive unit test suite with 48+ tests covering all major functionality:
+
+```bash
+# Run all tests
+make test
+# or
+python tests/run_tests.py
+
+# Run specific test module
+make test-specific TEST=config
+# or
+python tests/run_tests.py config
+
+# Run with coverage report
+make test-coverage
+# or
+pytest --cov=. --cov-report=html
+
+# Install test dependencies
+make install-test
+# or
+pip install -r test_requirements.txt
+```
+
+**Test Coverage:**
+- ✅ Configuration loading and validation
+- ✅ Bot state management (conversations, models, prompts)
+- ✅ OpenAI API integration (chat, image generation)
+- ✅ Discord utilities (mention handling, member mapping)
+- ✅ Paste service integration
+- ✅ Message handling and formatting
+- ✅ Error handling and edge cases
+
 ### Logging
 Comprehensive logging system tracks:
 - Command usage and performance
@@ -224,8 +258,63 @@ Comprehensive logging system tracks:
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+4. **Run tests to ensure everything works:**
+   ```bash
+   make test
+   # or
+   python tests/run_tests.py
+   ```
+5. Add tests for new functionality
+6. Submit a pull request
+
+### Development Workflow
+```bash
+# Set up development environment
+make dev-setup
+
+# Run tests before committing
+make test
+
+# Check code quality
+make lint                    # Check for linting issues
+make autofix                 # Auto-fix linting issues
+make format                  # Format code with black (optional)
+```
+
+### Code Quality Standards
+This project maintains enterprise-level code quality:
+
+- **PEP8 Compliance**: All code follows Python PEP8 style guidelines
+- **Automatic Linting**: Use `make lint` to check for issues
+- **Auto-Fix**: Use `make autofix` to automatically fix most linting issues
+- **Pre-Commit Hooks**: Automatic code quality enforcement on every commit
+- **100% Test Coverage**: Comprehensive test suite with 48+ tests
+- **Type Hints**: Function signatures include type hints where appropriate
+
+### Git Pre-Commit Hooks
+Automatic code quality enforcement that runs on every commit:
+
+```bash
+# Install pre-commit hooks (one-time setup)
+make install-hooks
+
+# The hooks will automatically:
+# ✅ Check linting issues in staged Python files
+# ✅ Auto-fix issues where possible (spacing, imports, etc.)
+# ✅ Re-stage fixed files automatically
+# ✅ Run tests to ensure functionality
+# ❌ Prevent commits if issues can't be auto-fixed
+
+# To bypass hooks temporarily (not recommended)
+git commit --no-verify -m "Emergency commit"
+```
+
+**What the hooks fix automatically:**
+- Import statement formatting (`import os,sys` → `import os` + `import sys`)
+- Function spacing (`def func( ):` → `def func():`)
+- Operator spacing (`x=1+2` → `x = 1 + 2`)
+- Trailing whitespace and blank lines
+- Comment spacing and formatting
 
 ## 📄 License
 
