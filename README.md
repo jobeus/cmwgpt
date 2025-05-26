@@ -1,40 +1,236 @@
-# ChatGPT Discord Bot
-# Setup
-## Prerequisites
-* **Python 3.9 or later**
-* **Rename the file `env.example` to `.env`**
-* Running `pip3 install -r requirements.txt` to install the required dependencies
+# 🤖 Advanced AI Discord Bot
+
+A powerful, feature-rich Discord bot that integrates multiple AI models for chat, image generation, and intelligent conversation management. Built with Python and designed for seamless Discord server integration.
+
+## ✨ Features
+
+### 🗣️ **Intelligent Chat System**
+- **Multi-Model Support**: Switch between GPT-4.1-mini, GPT-4.1-nano, and GPT-4o-mini
+- **Contextual Conversations**: Maintains conversation history per channel
+- **Image Understanding**: Upload images with your messages for AI analysis
+- **Smart Mentions**: Bot responds intelligently when mentioned, analyzing recent channel context
+- **Username Integration**: Optional username inclusion in conversations for personalized responses
+
+### 🎨 **Advanced Image Generation**
+- **Multiple AI Models**: Support for DALL-E 2, DALL-E 3, and GPT-Image-1
+- **Image Editing**: Edit existing images with AI-powered modifications
+- **High-Quality Output**: Generate stunning images from text prompts
+- **Flexible Formats**: Automatic handling of different image formats and sizes
+
+### ⚙️ **Customization & Management**
+- **Channel-Specific System Prompts**: Set unique AI personalities per channel
+- **Conversation Reset**: Clear chat history when needed
+- **Model Switching**: Change AI models on-the-fly per channel
+- **Configurable Behavior**: Extensive environment variable configuration
+
+### 🔧 **Smart Technical Features**
+- **Auto-Paste Integration**: Long responses automatically uploaded to paste.rs
+- **Discord Limits Handling**: Intelligent message splitting for 2000+ character responses
+- **Member Recognition**: Automatic user mention mapping and legend generation
+- **Typing Indicators**: Visual feedback during AI processing
+- **Error Handling**: Robust error management with user-friendly messages
+
+### 📊 **Monitoring & Logging**
+- **Comprehensive Logging**: Detailed logs for debugging and monitoring
+- **Channel Tracking**: Per-channel conversation and model tracking
+- **Usage Analytics**: Built-in logging for command usage and performance
+
+## 🚀 Quick Start
+
+### Prerequisites
+- **Python 3.9 or later**
+- **Discord Bot Token** (from Discord Developer Portal)
+- **OpenAI API Key** (from OpenAI Platform)
+
+### Installation
+
+1. **Clone and Setup**
+   ```bash
+   git clone <repository-url>
+   cd chatter
+   pip3 install -r requirements.txt
+   ```
+
+2. **Environment Configuration**
+   ```bash
+   cp env.example .env
+   # Edit .env with your tokens and preferences
+   ```
+
+3. **Run the Bot**
+   ```bash
+   python3 bot.py
+   ```
+
+## 🔧 Configuration
+
+### Discord Bot Setup
+
+1. **Create Application**: Visit [Discord Developer Portal](https://discord.com/developers/applications)
+2. **Create Bot**: Build a Discord bot under your application
+3. **Get Token**: Copy the bot token from bot settings
+
+   ![Discord Bot Token](https://user-images.githubusercontent.com/89479282/205949161-4b508c6d-19a7-49b6-b8ed-7525ddbef430.png)
+
+4. **Configure Intents**: Enable "MESSAGE CONTENT INTENT"
+
+   ![Message Content Intent](https://user-images.githubusercontent.com/89479282/205949323-4354bd7d-9bb9-4f4b-a87e-deb9933a89b5.png)
+
+5. **Invite Bot**: Use OAuth2 URL Generator with appropriate permissions
+
+   ![OAuth2 Setup](https://user-images.githubusercontent.com/89479282/205949600-0c7ddb40-7e82-47a0-b59a-b089f929d177.png)
+
+### OpenAI API Setup
+
+1. **Get API Key**: Visit [OpenAI API Keys](https://platform.openai.com/api-keys)
+2. **Add to Environment**: Set `OPENAI_API_KEY` in your `.env` file
+
+### Environment Variables
+
+```env
+# Required
+DISCORD_BOT_TOKEN=your_discord_bot_token
+OPENAI_API_KEY=your_openai_api_key
+
+# Optional Customization
+SYSTEM_PROMPT="You are a helpful assistant"
+DEFAULT_MODEL=gpt-4.1-nano
+DEFAULT_IMAGE_MODEL=gpt-image-1
+INCLUDE_USERNAMES=true
+REPLY_TO_MENTIONS=true
+INCLUDE_NUM_CHATLINES=100
+```
+
+## 📖 Commands Reference
+
+### 💬 Chat Commands
+
+#### `/chat [message] [attachment]`
+Start or continue a conversation with the AI
+- **message**: Your text message to the AI
+- **attachment**: Optional image for AI analysis
+- **Features**:
+  - Maintains conversation context
+  - Supports image analysis
+  - Auto-uploads long responses to paste.rs
+
+#### **@mention** (Natural Mentions)
+Mention the bot in any message for contextual responses
+- Analyzes recent channel history
+- Provides relevant, context-aware replies
+- Maintains conversational flow
+
+### 🎨 Image Commands
+
+#### `/draw [prompt] [edit_image] [model]`
+Generate or edit images with AI
+- **prompt**: Description of the image you want
+- **edit_image**: Optional image to modify
+- **model**: Choose from dall-e-2, dall-e-3, or gpt-image-1
+- **Features**:
+  - High-quality image generation
+  - Image editing capabilities
+  - Multiple model support
+
+### ⚙️ Management Commands
+
+#### `/reset`
+Clear conversation history for the current channel
+- Resets to default system prompt
+- Clears all previous context
+- Maintains model selection
+
+#### `/model [model_name]`
+View or change the AI model for the current channel
+- **Available Models**:
+  - `gpt-4.1-mini` - Balanced performance and cost
+  - `gpt-4.1-nano` - Fast and efficient
+  - `gpt-4o-mini` - Optimized variant
+- **Usage**:
+  - `/model` - View current model
+  - `/model gpt-4.1-mini` - Switch to specific model
+
+#### `/systemprompt` (Group Commands)
+Manage channel-specific AI personalities
+
+##### `/systemprompt set [prompt]`
+Set a custom system prompt for the current channel
+- **prompt**: The personality/behavior instructions for the AI
+- **Example**: `/systemprompt set You are a helpful coding assistant specializing in Python`
+
+##### `/systemprompt view`
+Display the current system prompt for the channel
+
+##### `/systemprompt reset`
+Reset to the default system prompt
+
+## 🏗️ Architecture
+
+### Core Components
+
+- **`bot.py`**: Main Discord bot logic and command handlers
+- **`openai_handler.py`**: OpenAI API integration and response processing
+- **`config.py`**: Environment configuration and settings management
+- **`bot_state.py`**: In-memory conversation and state management
+- **`utils/discord_helper.py`**: Discord-specific utility functions
+- **`utils/pasters.py`**: Automatic paste service integration
+
+### Key Features
+
+- **Stateful Conversations**: Per-channel conversation memory
+- **Intelligent Context**: Automatic user mention mapping
+- **Robust Error Handling**: Graceful failure management
+- **Performance Optimized**: Efficient API usage and response handling
+
+## 🔍 Advanced Usage
+
+### Custom System Prompts
+Create specialized AI assistants for different channels:
+```
+/systemprompt set You are a Python expert who provides concise, executable code examples
+/systemprompt set You are a creative writing assistant who helps with storytelling
+/systemprompt set You are a technical documentation specialist
+```
+
+### Image Analysis Workflows
+1. Upload an image with `/chat`
+2. Ask specific questions about the image
+3. Request modifications with `/draw` using the edit feature
+
+### Multi-Model Strategy
+- Use `gpt-4.1-nano` for quick responses
+- Use `gpt-4.1-mini` for complex reasoning
+- Use `gpt-4o-mini` for specialized tasks
+
+## 🛠️ Development
+
+### Dependencies
+```
+discord.py - Discord API integration
+python-dotenv - Environment variable management
+openai - OpenAI API client
+requests - HTTP requests for paste service
+```
+
+### Logging
+Comprehensive logging system tracks:
+- Command usage and performance
+- API interactions and errors
+- Channel-specific activities
+- User interactions and mentions
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
+
+## 📄 License
+
+This project is open source and available under the MIT License.
+
 ---
-## Step 1: Create a Discord bot
 
-1. Go to https://discord.com/developers/applications create an application
-2. Build a Discord bot under the application
-3. Get the token from bot setting
-
-   ![image](https://user-images.githubusercontent.com/89479282/205949161-4b508c6d-19a7-49b6-b8ed-7525ddbef430.png)
-4. Store the token to `.env` under the `DISCORD_BOT_TOKEN`
-
-   <img height="190" width="390" alt="image" src="https://user-images.githubusercontent.com/89479282/222661803-a7537ca7-88ae-4e66-9bec-384f3e83e6bd.png">
-
-5. Turn MESSAGE CONTENT INTENT `ON`
-
-   ![image](https://user-images.githubusercontent.com/89479282/205949323-4354bd7d-9bb9-4f4b-a87e-deb9933a89b5.png)
-
-6. Invite your bot to your server via OAuth2 URL Generator
-
-   ![image](https://user-images.githubusercontent.com/89479282/205949600-0c7ddb40-7e82-47a0-b59a-b089f929d177.png)
-
-
-## Step 2: Configure OpenAI API
-
-1. Obtain your API key by visiting https://platform.openai.com/api-keys
-2. Paste the API key under `OPENAI_KEY` in `.env`
-
-## Step 3: Run the bot 
-
-Run `python3 bot.py` or `python bot.py` to run the bot
-
-* `/chat [message] [optional attachment]` Chat with ChatGPT/Gemini
-* `/draw [prompt] [optional editable image for gpt-1 images] [optional model]` Generate an image with Gemini/OpenAI/Bing
-* `/reset` Clear ChatGPT conversation history
-* `/model` Switch or view chat model
+**Ready to enhance your Discord server with AI?** Follow the setup guide above and start chatting with your new AI assistant! 🚀
