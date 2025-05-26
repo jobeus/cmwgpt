@@ -136,7 +136,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
         # Verify API call
         self.mock_client.images.generate.assert_called_once_with(
-            model=model, prompt=prompt, n=1)
+            model=model, prompt=prompt, n=1, moderation='low')
 
     async def test_generate_image_with_edit(self):
         """Test image editing functionality."""
