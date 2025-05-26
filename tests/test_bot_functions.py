@@ -1,5 +1,5 @@
 """
-Unit tests for testable functions in bot.py module.
+Unit tests for bot service functions.
 Tests helper functions and logic that can be tested without Discord integration.
 """
 
@@ -12,10 +12,12 @@ import os
 
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add src directory for new architecture
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 
 class TestBotFunctions(unittest.TestCase):
-    """Test bot.py helper functions."""
+    """Test bot service functions."""
 
     def setUp(self):
         """Set up test environment."""
@@ -26,19 +28,14 @@ class TestBotFunctions(unittest.TestCase):
         """Clean up test environment."""
         self.loop.close()
 
-    @patch("bot._send_channel_reply")
-    @patch("bot.get_mention_legend")
-    @patch("bot.get_chat_completion")
-    def test_prepare_mention_context(
-            self,
-            mock_get_chat,
-            mock_get_legend,
-            mock_send_reply):
-        """Test _prepare_mention_context function."""
+    @patch("src.services.openai_service.openai_service.get_chat_completion")
+    @patch("src.utils.discord_helper.get_mention_legend")
+    def test_prepare_mention_context(self, mock_get_legend, mock_get_chat):
+        """Test mention handler _prepare_mention_context function."""
 
         async def run_test():
             # Import the function we want to test
-            from bot import _prepare_mention_context
+            from src.bot.handlers.mention import mention_handler
 
             # Mock message and bot user
             mock_message = MagicMock()
@@ -73,11 +70,11 @@ class TestBotFunctions(unittest.TestCase):
             mock_get_legend.return_value = "Legend: @user1 = <@11111>"
 
             # Mock channel system prompts
-            with patch("bot.channel_system_prompts", {}):
-                with patch("bot.SYSTEM_PROMPT", "Default system prompt"):
-                    with patch("bot.INCLUDE_NUM_CHATLINES", 3):
+            with patch("src.bot_state.channel_system_prompts", {}):
+                with patch("src.config.SYSTEM_PROMPT", "Default system prompt"):
+                    with patch("src.config.INCLUDE_NUM_CHATLINES", 3):
                         # Call the function
-                        result = await _prepare_mention_context(mock_message, mock_bot_user)
+                        result = await mention_handler._prepare_mention_context(mock_message, mock_bot_user)
 
             # Verify result structure
             self.assertIsInstance(result, list)
@@ -86,7 +83,8 @@ class TestBotFunctions(unittest.TestCase):
 
             # Verify system message
             self.assertEqual(result[0]["role"], "system")
-            self.assertIn("Default system prompt", result[0]["content"])
+            # The system prompt should contain the mocked legend and bot ID
+            self.assertIn("Legend: @user1 = <@11111>", result[0]["content"])
             # Bot ID should be in system prompt
             self.assertIn("<@99999>", result[0]["content"])
 
@@ -109,18 +107,16 @@ class TestBotFunctions(unittest.TestCase):
             self.assertEqual(history_data[1]["user"], "<@22222>")
             self.assertEqual(history_data[1]["says"], "Second message")
             self.assertEqual(history_data[2]["user"], "<@12345>")
-            self.assertEqual(
-                history_data[2]["says"],
-                "Hey @bot, can you help me?")
+            self.assertEqual(history_data[2]["says"], "Hey @bot, can you help me?")
 
         self.loop.run_until_complete(run_test())
 
-    @patch("bot.upload_to_pasters")
+    @patch("src.services.paste_service.paste_service.upload_markdown")
     def test_send_channel_reply_short_message(self, mock_upload):
-        """Test _send_channel_reply with short message."""
+        """Test message service send_channel_reply with short message."""
 
         async def run_test():
-            from bot import _send_channel_reply
+            from src.services.message_service import message_service
 
             # Mock channel
             mock_channel = AsyncMock()
@@ -128,7 +124,7 @@ class TestBotFunctions(unittest.TestCase):
             # Test short message
             short_message = "This is a short reply."
 
-            await _send_channel_reply(mock_channel, short_message)
+            await message_service.send_channel_reply(mock_channel, short_message)
 
             # Verify direct send was called
             mock_channel.send.assert_called_once_with(short_message)
@@ -136,12 +132,12 @@ class TestBotFunctions(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    @patch("bot.upload_to_pasters")
+    @patch("src.services.paste_service.paste_service.upload_markdown")
     def test_send_channel_reply_long_message(self, mock_upload):
-        """Test _send_channel_reply with long message that needs pasting."""
+        """Test message service send_channel_reply with long message that needs pasting."""
 
         async def run_test():
-            from bot import _send_channel_reply
+            from src.services.message_service import message_service
 
             # Mock channel
             mock_channel = AsyncMock()
@@ -152,10 +148,10 @@ class TestBotFunctions(unittest.TestCase):
             # Test long message (over 2000 characters)
             long_message = "A" * 2500
 
-            await _send_channel_reply(mock_channel, long_message)
+            await message_service.send_channel_reply(mock_channel, long_message)
 
             # Verify upload was called
-            mock_upload.assert_called_once_with(markdown_text=long_message)
+            mock_upload.assert_called_once_with(long_message)
 
             # Verify channel send was called with paste URL
             expected_message = (
@@ -165,12 +161,12 @@ class TestBotFunctions(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    @patch("bot.upload_to_pasters")
+    @patch("src.services.paste_service.paste_service.upload_markdown")
     def test_send_channel_reply_upload_error(self, mock_upload):
-        """Test _send_channel_reply when paste upload fails."""
+        """Test message service send_channel_reply when paste upload fails."""
 
         async def run_test():
-            from bot import _send_channel_reply
+            from src.services.message_service import message_service
 
             # Mock channel
             mock_channel = AsyncMock()
@@ -181,23 +177,27 @@ class TestBotFunctions(unittest.TestCase):
             # Test long message
             long_message = "B" * 2500
 
-            await _send_channel_reply(mock_channel, long_message)
+            await message_service.send_channel_reply(mock_channel, long_message)
 
             # Verify upload was attempted
-            mock_upload.assert_called_once_with(markdown_text=long_message)
+            mock_upload.assert_called_once_with(long_message)
 
             # Verify error message was sent
-            expected_message = "The content of my response was over 2000 characters (discord limit), and there was a problem uploading it to paste.rs. Sorry, try again later."
+            expected_message = (
+                "The content of my response was over 2000 characters "
+                "(discord limit), and there was a problem uploading it to paste service. "
+                "Sorry, try again later."
+            )
             mock_channel.send.assert_called_once_with(expected_message)
 
         self.loop.run_until_complete(run_test())
 
-    @patch("bot.upload_to_pasters")
+    @patch("src.services.paste_service.paste_service.upload_markdown")
     def test_send_interaction_followup_short_message(self, mock_upload):
-        """Test _send_interaction_followup with short message."""
+        """Test message service send_interaction_followup with short message."""
 
         async def run_test():
-            from bot import _send_interaction_followup
+            from src.services.message_service import message_service
 
             # Mock interaction
             mock_interaction = MagicMock()
@@ -207,22 +207,21 @@ class TestBotFunctions(unittest.TestCase):
             base_content = "> Test prompt"
             reply_text = "Short reply"
 
-            await _send_interaction_followup(mock_interaction, base_content, reply_text)
+            await message_service.send_interaction_followup(mock_interaction, base_content, reply_text)
 
             # Verify direct followup was called
             expected_content = f"{base_content}\n{reply_text}"
-            mock_interaction.followup.send.assert_called_once_with(
-                content=expected_content)
+            mock_interaction.followup.send.assert_called_once_with(content=expected_content)
             mock_upload.assert_not_called()
 
         self.loop.run_until_complete(run_test())
 
-    @patch("bot.upload_to_pasters")
+    @patch("src.services.paste_service.paste_service.upload_markdown")
     def test_send_interaction_followup_long_message(self, mock_upload):
-        """Test _send_interaction_followup with long message that needs pasting."""
+        """Test message service send_interaction_followup with long message that needs pasting."""
 
         async def run_test():
-            from bot import _send_interaction_followup
+            from src.services.message_service import message_service
 
             # Mock interaction
             mock_interaction = MagicMock()
@@ -235,15 +234,14 @@ class TestBotFunctions(unittest.TestCase):
             base_content = "> Test prompt"
             reply_text = "C" * 2500  # Long reply that would exceed 2000 chars with base_content
 
-            await _send_interaction_followup(mock_interaction, base_content, reply_text)
+            await message_service.send_interaction_followup(mock_interaction, base_content, reply_text)
 
             # Verify upload was called
-            mock_upload.assert_called_once_with(markdown_text=reply_text)
+            mock_upload.assert_called_once_with(reply_text)
 
             # Verify followup was called with paste URL
             expected_content = f"{base_content}\n\nMy detailed response was too long, so I've uploaded it here: https://paste.rs/xyz789.md"
-            mock_interaction.followup.send.assert_called_once_with(
-                content=expected_content, suppress_embeds=True)
+            mock_interaction.followup.send.assert_called_once_with(content=expected_content, suppress_embeds=True)
 
         self.loop.run_until_complete(run_test())
 
@@ -291,13 +289,15 @@ class TestBotFunctions(unittest.TestCase):
 
     def test_attachment_url_formatting(self):
         """Test attachment URL formatting in messages."""
+        from src.services.message_service import message_service
+
         # Mock attachment
         mock_attachment = MagicMock()
         mock_attachment.url = "https://cdn.discord.com/attachments/123/456/image.png"
 
         # Test formatting
         message = "Analyze this image"
-        formatted = f"{mock_attachment.url}\n> {message}"
+        formatted = message_service.format_attachment_message(mock_attachment, message)
 
         expected = "https://cdn.discord.com/attachments/123/456/image.png\n> Analyze this image"
         self.assertEqual(formatted, expected)

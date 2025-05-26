@@ -3,7 +3,7 @@ Unit tests for utils/pasters.py module.
 Tests paste.rs integration functionality.
 """
 
-from utils.pasters import upload_to_pasters
+from src.utils.pasters import upload_to_pasters
 import unittest
 from unittest.mock import patch, MagicMock
 import sys
@@ -11,12 +11,14 @@ import os
 
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add src directory for new architecture
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 
 class TestPasters(unittest.TestCase):
     """Test pasters.py functionality."""
 
-    @patch("utils.pasters.requests.post")
+    @patch("src.services.paste_service.requests.post")
     def test_successful_upload(self, mock_post):
         """Test successful upload to paste.rs."""
         # Mock successful response
@@ -41,7 +43,7 @@ class TestPasters(unittest.TestCase):
         data_param = call_args[1]["data"]
         self.assertEqual(data_param.read(), test_text.encode("utf-8"))
 
-    @patch("utils.pasters.requests.post")
+    @patch("src.services.paste_service.requests.post")
     def test_failed_upload_400(self, mock_post):
         """Test failed upload with 400 status code."""
         # Mock failed response
@@ -58,7 +60,7 @@ class TestPasters(unittest.TestCase):
         self.assertIn("paste.rs error: 400", str(context.exception))
         self.assertIn("Bad Request", str(context.exception))
 
-    @patch("utils.pasters.requests.post")
+    @patch("src.services.paste_service.requests.post")
     def test_failed_upload_500(self, mock_post):
         """Test failed upload with 500 status code."""
         # Mock server error response
@@ -75,7 +77,7 @@ class TestPasters(unittest.TestCase):
         self.assertIn("paste.rs error: 500", str(context.exception))
         self.assertIn("Internal Server Error", str(context.exception))
 
-    @patch("utils.pasters.requests.post")
+    @patch("src.services.paste_service.requests.post")
     def test_upload_with_special_characters(self, mock_post):
         """Test upload with special characters and unicode."""
         # Mock successful response
@@ -96,7 +98,7 @@ class TestPasters(unittest.TestCase):
         data_param = call_args[1]["data"]
         self.assertEqual(data_param.read(), test_text.encode("utf-8"))
 
-    @patch("utils.pasters.requests.post")
+    @patch("src.services.paste_service.requests.post")
     def test_upload_empty_string(self, mock_post):
         """Test upload with empty string."""
         # Mock successful response
@@ -112,7 +114,7 @@ class TestPasters(unittest.TestCase):
         # Verify result
         self.assertEqual(result, "https://paste.rs/empty123.md")
 
-    @patch("utils.pasters.requests.post")
+    @patch("src.services.paste_service.requests.post")
     def test_upload_large_text(self, mock_post):
         """Test upload with large text content."""
         # Mock successful response
@@ -128,7 +130,7 @@ class TestPasters(unittest.TestCase):
         # Verify result
         self.assertEqual(result, "https://paste.rs/large456.md")
 
-    @patch("utils.pasters.requests.post")
+    @patch("src.services.paste_service.requests.post")
     def test_response_text_stripping(self, mock_post):
         """Test that response text is properly stripped of whitespace."""
         # Mock response with whitespace
@@ -144,18 +146,21 @@ class TestPasters(unittest.TestCase):
         # Verify whitespace is stripped
         self.assertEqual(result, "https://paste.rs/whitespace123.md")
 
-    @patch("utils.pasters.requests.post")
+    @patch("src.services.paste_service.requests.post")
     def test_network_error(self, mock_post):
         """Test handling of network errors."""
-        # Mock network error
-        mock_post.side_effect = Exception("Network error")
+        # Import the exception class properly
+        import requests
 
-        # Test upload should raise the network exception
+        # Mock network error
+        mock_post.side_effect = requests.RequestException("Network error")
+
+        # Test upload should raise exception with proper message
         test_text = "Test content"
         with self.assertRaises(Exception) as context:
             upload_to_pasters(test_text)
 
-        self.assertEqual(str(context.exception), "Network error")
+        self.assertIn("Failed to upload to paste service", str(context.exception))
 
 
 if __name__ == "__main__":

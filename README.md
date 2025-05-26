@@ -65,7 +65,7 @@ A powerful, feature-rich Discord bot that integrates multiple AI models for chat
 
 3. **Run the Bot**
    ```bash
-   python3 bot.py
+   python3 main.py
    ```
 
 ## 🔧 Configuration
@@ -172,21 +172,39 @@ Reset to the default system prompt
 
 ## 🏗️ Architecture
 
-### Core Components
+### Modern Modular Design
 
-- **`bot.py`**: Main Discord bot logic and command handlers
-- **`openai_handler.py`**: OpenAI API integration and response processing
-- **`config.py`**: Environment configuration and settings management
-- **`bot_state.py`**: In-memory conversation and state management
-- **`utils/discord_helper.py`**: Discord-specific utility functions
-- **`utils/pasters.py`**: Automatic paste service integration
+This bot follows a clean, modular architecture with proper separation of concerns:
 
-### Key Features
+```
+src/
+├── bot/
+│   ├── client.py              # Main Discord bot client
+│   ├── commands/
+│   │   ├── chat.py           # Chat-related commands (/chat, /reset)
+│   │   ├── image.py          # Image generation (/draw)
+│   │   └── system.py         # System commands (/model, /systemprompt)
+│   └── handlers/
+│       └── mention.py        # Bot mention handling
+├── services/
+│   ├── openai_service.py     # OpenAI API integration
+│   ├── message_service.py    # Message formatting and sending
+│   └── paste_service.py      # Paste service integration
+├── utils/
+│   ├── discord_helper.py     # Discord utilities
+│   └── pasters.py           # Legacy compatibility
+├── config.py                 # Configuration management
+└── bot_state.py             # State management
+main.py                       # Entry point
+```
 
-- **Stateful Conversations**: Per-channel conversation memory
-- **Intelligent Context**: Automatic user mention mapping
-- **Robust Error Handling**: Graceful failure management
-- **Performance Optimized**: Efficient API usage and response handling
+### Key Architectural Benefits
+
+- **Separation of Concerns**: Each module has a single responsibility
+- **Testability**: Services can be easily mocked and tested independently
+- **Maintainability**: Changes to one feature don't affect others
+- **Extensibility**: New commands and services can be added without touching existing code
+- **Clean Dependencies**: Clear import structure and minimal coupling
 
 ## 🔍 Advanced Usage
 
@@ -390,7 +408,7 @@ docker pull ghcr.io/username/chatter:latest
 3. **Run with Process Manager**:
    ```bash
    # Using systemd, pm2, or supervisor
-   python bot.py
+   python main.py
    ```
 
 ## 📄 License

@@ -1,0 +1,3 @@
+"""
+Discord Bot Core Module
+"""

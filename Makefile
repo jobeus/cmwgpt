@@ -56,7 +56,7 @@ test-specific:
 lint:
 	@echo "Running flake8 linting..."
 	@if command -v flake8 >/dev/null 2>&1; then \
-		flake8 bot.py config.py openai_handler.py bot_state.py utils/ tests/ --max-line-length=120 --ignore=E501,W503 || (echo "❌ Linting issues found. Run 'make autofix' to fix them automatically." && exit 1); \
+		flake8 main.py src/ tests/ --max-line-length=120 --ignore=E501,W503 || (echo "❌ Linting issues found. Run 'make autofix' to fix them automatically." && exit 1); \
 		echo "✅ No linting issues found!"; \
 	else \
 		echo "❌ flake8 not installed. Install with: pip install flake8"; \
@@ -67,7 +67,7 @@ lint:
 autofix:
 	@echo "🔧 Auto-fixing linting issues..."
 	@if command -v autopep8 >/dev/null 2>&1; then \
-		autopep8 --in-place --aggressive --aggressive bot.py config.py openai_handler.py bot_state.py utils/*.py tests/*.py; \
+		autopep8 --in-place --aggressive --aggressive main.py src/**/*.py tests/*.py; \
 		echo "✅ Auto-fix complete! Run 'make lint' to verify."; \
 	else \
 		echo "❌ autopep8 not installed. Install with: pip install autopep8"; \
@@ -77,7 +77,7 @@ autofix:
 # Format code (if black is installed)
 format:
 	@if command -v black >/dev/null 2>&1; then \
-		black *.py utils/ tests/ --line-length=120; \
+		black main.py src/ tests/ --line-length=120; \
 	else \
 		echo "black not installed. Install with: pip install black"; \
 	fi
@@ -126,7 +126,7 @@ docker-run:
 
 # Run the Discord bot
 run:
-	python bot.py
+	python main.py
 
 # Development setup (install everything)
 dev-setup: install install-test install-hooks

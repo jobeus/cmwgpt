@@ -12,7 +12,7 @@ import os
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.discord_helper import get_mention_legend  # noqa: E402
+from src.utils.discord_helper import get_mention_legend  # noqa: E402
 
 
 class TestDiscordHelper(unittest.TestCase):
@@ -238,8 +238,7 @@ class TestDiscordHelper(unittest.TestCase):
 
             # Verify exact format
             lines = result.split("\n")
-            self.assertEqual(
-                lines[0], "Here are all the users in this channel:")
+            self.assertEqual(lines[0], "Here are all the users in this channel:")
             self.assertEqual(lines[1], "@TestUser = <@12345>")
             self.assertTrue(lines[2].startswith("Whenever you see a mention"))
             self.assertTrue(lines[2].endswith("to recoginize your intent."))

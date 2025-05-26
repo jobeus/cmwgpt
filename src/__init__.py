@@ -1,0 +1,3 @@
+"""
+Discord Bot - Refactored Architecture
+"""
