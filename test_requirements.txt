@@ -17,6 +17,11 @@ asynctest>=0.13.0
 colorama>=0.4.6
 coverage>=7.0.0
 
+# Code quality and linting tools
+flake8>=6.0.0
+autopep8>=2.0.0
+black>=23.0.0
+
 # All the main dependencies (for testing against real implementations)
 discord.py>=2.0.0
 python-dotenv>=1.0.0

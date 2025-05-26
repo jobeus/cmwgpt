@@ -55,14 +55,24 @@ test-specific:
 # Run code linting
 lint:
 	@echo "Running flake8 linting..."
-	@flake8 bot.py config.py openai_handler.py bot_state.py utils/ tests/ --max-line-length=120 --ignore=E501,W503 || (echo "❌ Linting issues found. Run 'make autofix' to fix them automatically." && exit 1)
-	@echo "✅ No linting issues found!"
+	@if command -v flake8 >/dev/null 2>&1; then \
+		flake8 bot.py config.py openai_handler.py bot_state.py utils/ tests/ --max-line-length=120 --ignore=E501,W503 || (echo "❌ Linting issues found. Run 'make autofix' to fix them automatically." && exit 1); \
+		echo "✅ No linting issues found!"; \
+	else \
+		echo "❌ flake8 not installed. Install with: pip install flake8"; \
+		exit 1; \
+	fi
 
 # Auto-fix linting issues
 autofix:
 	@echo "🔧 Auto-fixing linting issues..."
-	@autopep8 --in-place --aggressive --aggressive bot.py config.py openai_handler.py bot_state.py utils/*.py tests/*.py
-	@echo "✅ Auto-fix complete! Run 'make lint' to verify."
+	@if command -v autopep8 >/dev/null 2>&1; then \
+		autopep8 --in-place --aggressive --aggressive bot.py config.py openai_handler.py bot_state.py utils/*.py tests/*.py; \
+		echo "✅ Auto-fix complete! Run 'make lint' to verify."; \
+	else \
+		echo "❌ autopep8 not installed. Install with: pip install autopep8"; \
+		exit 1; \
+	fi
 
 # Format code (if black is installed)
 format:
