@@ -15,6 +15,7 @@ An intelligent Discord bot that brings OpenAI's powerful AI models directly to y
 - **Channel-Specific Personalities**: Set custom AI behavior per channel
 - **Smart Context**: Bot understands channel history when mentioned
 - **Auto-Update**: Automatically updates from git and restarts with state preservation
+- **Smart Restart**: Built-in restart script with automatic recovery and clean console output
 
 ## 🎯 How It Works
 
@@ -60,6 +61,10 @@ The bot operates in two distinct modes:
 
 3. **Run the Bot**
    ```bash
+   # With auto-restart support (recommended)
+   make run
+
+   # Or run directly
    python3 main.py
    ```
 

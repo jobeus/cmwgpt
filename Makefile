@@ -20,7 +20,8 @@ help:
 	@echo "  docker-build  - Build Docker image"
 	@echo "  docker-run    - Run Docker container"
 	@echo "  clean         - Clean up generated files"
-	@echo "  run           - Run the Discord bot"
+	@echo "  run           - Run the Discord bot with auto-restart support"
+	@echo "  run-direct    - Run the Discord bot directly (no auto-restart)"
 	@echo "  dev-setup     - Complete development environment setup"
 
 # Install dependencies
@@ -127,8 +128,12 @@ docker-run:
 		discord-bot:latest
 	@echo "✅ Docker container started!"
 
-# Run the Discord bot
+# Run the Discord bot with auto-restart support
 run:
+	./start.sh
+
+# Run the Discord bot directly (without auto-restart)
+run-direct:
 	python main.py
 
 # Development setup (install everything)

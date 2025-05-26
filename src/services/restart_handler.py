@@ -24,6 +24,7 @@ class RestartHandler:
     def __init__(self):
         """Initialize the restart handler."""
         self._restart_in_progress = False
+        self._skip_cleanup = False  # Flag to prevent cleanup during restart
 
     async def perform_restart(self, manual: bool = False) -> None:
         """
@@ -43,14 +44,16 @@ class RestartHandler:
             return
 
         self._restart_in_progress = True
-        logger.info("Starting bot restart process")
+        self._skip_cleanup = True  # Prevent cleanup during restart
+
+        print("🔄 Restarting bot...")
 
         try:
             # Step 1: Save current state
-            logger.info("Saving bot state before restart")
+            print("💾 Saving bot state...")
             temp_file = state_service.save_state_to_temp_file()
             if temp_file:
-                logger.info(f"State saved to: {temp_file}")
+                print("✅ State saved")
 
                 # Also save restart type information
                 restart_info_file = temp_file.replace('.json', '_restart_info.json')
@@ -61,24 +64,23 @@ class RestartHandler:
                     import os
                     import stat
                     os.chmod(restart_info_file, stat.S_IRUSR | stat.S_IWUSR)
-                    logger.info(f"Restart info saved to: {restart_info_file}")
                 except Exception as e:
                     logger.warning(f"Failed to save restart info: {e}")
             else:
-                logger.warning("Failed to save state, continuing with restart")
+                print("⚠️  Failed to save state, continuing anyway")
 
             # Step 2: Perform git pull
-            logger.info("Performing git pull to update code")
+            print("📥 Updating code...")
             if self._perform_git_pull():
-                logger.info("Git pull completed successfully")
+                print("✅ Code updated")
             else:
-                logger.warning("Git pull failed, continuing with restart anyway")
+                print("⚠️  Git pull failed, continuing anyway")
 
             # Step 3: Give a moment for any final operations
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
 
             # Step 4: Exit with restart code
-            logger.info("Exiting for restart")
+            print("🚀 Restarting...")
             # Use exit code 42 to signal that this is an intentional restart
             # The process manager (systemd, pm2, etc.) should restart the bot
             sys.exit(42)
@@ -128,9 +130,11 @@ class RestartHandler:
             )
 
             if result.returncode == 0:
-                logger.info("Git pull completed successfully")
-                if result.stdout.strip():
-                    logger.info(f"Git pull output: {result.stdout.strip()}")
+                output = result.stdout.strip()
+                if "Already up to date" in output:
+                    logger.debug("Git pull: Already up to date")
+                elif output:
+                    logger.info(f"Git pull: {output}")
                 return True
             else:
                 logger.error(f"Git pull failed with return code {result.returncode}")
@@ -148,6 +152,10 @@ class RestartHandler:
     def is_restart_in_progress(self) -> bool:
         """Check if a restart is currently in progress."""
         return self._restart_in_progress
+
+    def should_skip_cleanup(self) -> bool:
+        """Check if cleanup should be skipped (during restart)."""
+        return self._skip_cleanup
 
 
 # Global restart handler instance

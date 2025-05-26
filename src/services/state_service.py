@@ -275,7 +275,7 @@ class StateService:
             # Set restrictive permissions (600 - read/write for owner only)
             os.chmod(temp_filename, stat.S_IRUSR | stat.S_IWUSR)
 
-            logger.info(f"State saved to temporary file: {temp_filename}")
+            logger.debug(f"State saved to temporary file: {temp_filename}")
             return temp_filename
 
         except Exception as e:
@@ -337,7 +337,7 @@ class StateService:
                             # If not present, derive from existing conversations and models
                             self._active_channels = set(self._conversations.keys()) | set(self._models.keys())
 
-                    logger.info(f"Successfully loaded state from: {temp_file}")
+                    logger.debug(f"Successfully loaded state from: {temp_file}")
                     logger.info(f"Restored {len(self._conversations)} conversations, "
                                 f"{len(self._models)} models, "
                                 f"{len(self._channel_system_prompts)} system prompts, "
@@ -354,7 +354,7 @@ class StateService:
             for temp_file in temp_files:
                 try:
                     os.remove(temp_file)
-                    logger.info(f"Cleaned up temporary file: {temp_file}")
+                    logger.debug(f"Cleaned up temporary file: {temp_file}")
                 except Exception as e:
                     logger.error(
                         f"Failed to clean up temporary file {temp_file}: {e}")

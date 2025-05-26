@@ -108,6 +108,41 @@ The bot automatically saves and restores the following state across restarts:
 
 The auto-update feature works with various process managers:
 
+### Built-in Auto-Restart Script
+
+The project includes a `start.sh` script that provides automatic restart functionality without requiring external process managers:
+
+```bash
+# Run with auto-restart support
+make run
+
+# Or run the script directly
+./start.sh
+
+# With custom options
+./start.sh -m 5 -d 3  # Max 5 restarts with 3s delay
+```
+
+**Features:**
+- Automatically restarts on exit code 42
+- Configurable maximum restart attempts
+- Configurable restart delay
+- Colored output with timestamps
+- Git commit tracking
+- Virtual environment detection
+
+**Usage:**
+```bash
+./start.sh [OPTIONS]
+
+Options:
+  -h, --help     Show help message
+  -s, --script   Bot script (default: main.py)
+  -p, --python   Python command (default: python)
+  -m, --max      Maximum restart attempts (default: 10)
+  -d, --delay    Restart delay in seconds (default: 2)
+```
+
 ### systemd
 
 ```ini

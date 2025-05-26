@@ -54,14 +54,13 @@ class DiscordBotClient:
     def _load_saved_state(self) -> None:
         """Load any saved state from previous restart."""
         try:
-            logger.info("Checking for saved state from previous restart")
             if state_service.load_state_from_temp_files():
-                logger.info(
-                    "Successfully restored state from previous restart")
+                print("✅ Restored previous state")
             else:
-                logger.info("No saved state found, starting with fresh state")
+                print("🆕 Starting with fresh state")
         except Exception as e:
             logger.error(f"Error loading saved state: {e}")
+            print("⚠️  Failed to restore state, starting fresh")
             # Continue with fresh state if loading fails
 
     def _setup_auto_update(self) -> None:
@@ -150,22 +149,19 @@ class DiscordBotClient:
             # Start the auto-update service
             auto_update_service.start()
 
-            logger.info(
-                f"Logged in as {
-                    self.bot.user} (ID: {
-                    self.bot.user.id})")
-            logger.info("Message queue service started")
+            print(f"🤖 Logged in as {self.bot.user}")
 
             # Log auto-update status
             status = auto_update_service.get_status()
             if status["enabled"]:
-                logger.info(
-                    f"Auto-update service started (check interval: {status['check_interval']}s)")
+                print(f"🔄 Auto-update enabled (checking every {status['check_interval']}s)")
             else:
-                logger.info("Auto-update service disabled by configuration")
+                print("🔄 Auto-update disabled")
 
             # Send update announcement if this was a restart
             await self._send_update_announcement_if_needed()
+
+            print("🚀 Bot ready!")
 
         @self.bot.event
         async def on_disconnect():
@@ -221,7 +217,7 @@ class DiscordBotClient:
 
     def run(self) -> None:
         """Start the Discord bot."""
-        logger.info("Starting bot...")
+        print("🔌 Starting Discord bot...")
         try:
             self.bot.run(DISCORD_BOT_TOKEN)
         except Exception as e:
@@ -249,12 +245,15 @@ class DiscordBotClient:
             except Exception as e:
                 logger.error(f"Error shutting down queue service: {e}")
 
-            # Clean up any leftover temporary files
-            try:
-                state_service.cleanup_temp_files()
-                logger.info("Temporary files cleaned up")
-            except Exception as e:
-                logger.error(f"Error cleaning up temporary files: {e}")
+            # Clean up any leftover temporary files (but not during restart)
+            if not restart_handler.should_skip_cleanup():
+                try:
+                    state_service.cleanup_temp_files()
+                    logger.info("Temporary files cleaned up")
+                except Exception as e:
+                    logger.error(f"Error cleaning up temporary files: {e}")
+            else:
+                logger.debug("Skipping cleanup during restart")
 
             logger.info("Bot shutdown.")
 
