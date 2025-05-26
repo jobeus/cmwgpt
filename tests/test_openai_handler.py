@@ -3,7 +3,7 @@ Unit tests for OpenAI service module.
 Tests OpenAI API integration functionality.
 """
 
-from src.services.openai_service import openai_service
+from src.services.openai_service import openai_service, OpenAIServiceError
 import unittest
 from unittest.mock import MagicMock, AsyncMock
 import base64
@@ -183,11 +183,11 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         model = "dall-e-2"
 
         # Call function and expect error
-        with self.assertRaises(ValueError) as context:
+        with self.assertRaises(OpenAIServiceError) as context:
             await openai_service.generate_image(prompt, model)
 
         self.assertEqual(str(context.exception),
-                         "Image generation failed, no b64_json data returned.")
+                         "Image generation failed, no image data returned.")
 
     async def test_generate_image_no_result_error(self):
         """Test error handling when no result is returned."""
@@ -199,11 +199,11 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         model = "dall-e-2"
 
         # Call function and expect error
-        with self.assertRaises(ValueError) as context:
+        with self.assertRaises(OpenAIServiceError) as context:
             await openai_service.generate_image(prompt, model)
 
         self.assertEqual(str(context.exception),
-                         "Image generation failed, no b64_json data returned.")
+                         "Image generation failed, no image data returned.")
 
     async def test_generate_image_base64_decoding(self):
         """Test that base64 decoding works correctly."""

@@ -11,7 +11,7 @@ import discord
 from src.config import SYSTEM_PROMPT, INCLUDE_NUM_CHATLINES
 from src.services.state_service import state_service
 from src.utils.discord_helper import get_mention_legend
-from src.services.openai_service import openai_service
+from src.services.openai_service import openai_service, OpenAIServiceError
 from src.services.message_service import message_service
 from src.services.queue_service import queue_service
 
@@ -35,9 +35,44 @@ class MentionHandler:
             model: The model to use for the response
         """
         async with message.channel.typing():
-            chat_msgs = await self._prepare_mention_context(message, bot_user)
-            reply_content = await openai_service.get_chat_completion(model=model, messages=chat_msgs)
-            await message_service.send_channel_reply(message.channel, reply_content)
+            try:
+                chat_msgs = await self._prepare_mention_context(message, bot_user)
+                reply_content = await openai_service.get_chat_completion(model=model, messages=chat_msgs)
+                await message_service.send_channel_reply(message.channel, reply_content)
+
+            except OpenAIServiceError as e:
+                logger.error(f"OpenAI API error in mention handler: {e}")
+                error_message = f"Sorry, I encountered an error while processing your mention: {str(e)}"
+
+                try:
+                    await message_service.send_channel_reply(message.channel, error_message)
+                except Exception as discord_error:
+                    logger.error(f"Failed to send error message to Discord: {discord_error}")
+                    # Try to send a simpler error message
+                    try:
+                        await message.channel.send(
+                            "Sorry, I encountered an error and couldn't respond to your mention. Please try again later."
+                        )
+                    except Exception:
+                        logger.error("Failed to send fallback error message")
+
+            except Exception as e:
+                logger.error(f"Unexpected error in mention handler: {e}")
+                error_message = (
+                    "Sorry, I encountered an unexpected error while processing your mention. Please try again later."
+                )
+
+                try:
+                    await message_service.send_channel_reply(message.channel, error_message)
+                except Exception as discord_error:
+                    logger.error(f"Failed to send error message to Discord: {discord_error}")
+                    # Try to send a simpler error message
+                    try:
+                        await message.channel.send(
+                            "Sorry, I encountered an error and couldn't respond to your mention. Please try again later."
+                        )
+                    except Exception:
+                        logger.error("Failed to send fallback error message")
 
     async def queue_mention(self, message: discord.Message, bot_user: discord.User, model: str) -> bool:
         """

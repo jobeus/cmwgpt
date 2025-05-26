@@ -11,7 +11,7 @@ from discord import app_commands
 
 from src.config import SYSTEM_PROMPT, DEFAULT_MODEL, INCLUDE_USERNAMES
 from src.utils.discord_helper import get_mention_legend
-from src.services.openai_service import openai_service
+from src.services.openai_service import openai_service, OpenAIServiceError
 from src.services.message_service import message_service
 from src.services.queue_service import queue_service
 from src.services.state_service import state_service
@@ -129,22 +129,71 @@ class ChatCommands:
         # Get response from OpenAI (interaction already deferred in slash
         # command handler)
         async with interaction.channel.typing():
-            current_conversation = state_service.get_conversation(channel_id)
-            current_model = state_service.get_model(channel_id) or DEFAULT_MODEL
+            try:
+                current_conversation = state_service.get_conversation(channel_id)
+                current_model = state_service.get_model(channel_id) or DEFAULT_MODEL
 
-            reply = await openai_service.get_chat_completion(model=current_model, messages=current_conversation)
+                reply = await openai_service.get_chat_completion(model=current_model, messages=current_conversation)
 
-            # Log and store assistant reply
-            logger.info(f"[/chat] Channel {channel_id} Assistant: {reply}")
-            state_service.add_message_to_conversation(channel_id, {"role": "assistant", "content": json.dumps(reply)})
+                # Log and store assistant reply
+                logger.info(f"[/chat] Channel {channel_id} Assistant: {reply}")
+                state_service.add_message_to_conversation(
+                    channel_id, {"role": "assistant", "content": json.dumps(reply)}
+                )
 
-            # Prepare base message content
-            if attachment:
-                base_content = message_service.format_attachment_message(attachment, message)
-            else:
-                base_content = message_service.format_prompt_message(message)
+                # Prepare base message content
+                if attachment:
+                    base_content = message_service.format_attachment_message(attachment, message)
+                else:
+                    base_content = message_service.format_prompt_message(message)
 
-            await message_service.send_interaction_followup(interaction, base_content, reply)
+                await message_service.send_interaction_followup(interaction, base_content, reply)
+
+            except OpenAIServiceError as e:
+                logger.error(f"OpenAI API error in chat command: {e}")
+                # Prepare base message content for error response
+                if attachment:
+                    base_content = message_service.format_attachment_message(attachment, message)
+                else:
+                    base_content = message_service.format_prompt_message(message)
+
+                error_message = (
+                    f"{base_content}\n\nSorry, I encountered an error while processing your request: {str(e)}"
+                )
+
+                try:
+                    await interaction.followup.send(content=error_message)
+                except Exception as discord_error:
+                    logger.error(f"Failed to send error message to Discord: {discord_error}")
+                    # Try to send a simpler error message
+                    try:
+                        await interaction.followup.send(
+                            content="Sorry, I encountered an error and couldn't send my response. Please try again later."
+                        )
+                    except Exception:
+                        logger.error("Failed to send fallback error message")
+
+            except Exception as e:
+                logger.error(f"Unexpected error in chat command: {e}")
+                # Prepare base message content for error response
+                if attachment:
+                    base_content = message_service.format_attachment_message(attachment, message)
+                else:
+                    base_content = message_service.format_prompt_message(message)
+
+                error_message = f"{base_content}\n\nSorry, I encountered an unexpected error. Please try again later."
+
+                try:
+                    await interaction.followup.send(content=error_message)
+                except Exception as discord_error:
+                    logger.error(f"Failed to send error message to Discord: {discord_error}")
+                    # Try to send a simpler error message
+                    try:
+                        await interaction.followup.send(
+                            content="Sorry, I encountered an error and couldn't send my response. Please try again later."
+                        )
+                    except Exception:
+                        logger.error("Failed to send fallback error message")
 
     async def _handle_reset_command(self, interaction: discord.Interaction) -> None:
         """

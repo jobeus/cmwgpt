@@ -10,10 +10,8 @@ import discord
 from discord import app_commands
 from discord.app_commands import Choice
 from discord.ext import commands
-from openai import BadRequestError
-
 from src.config import DEFAULT_IMAGE_MODEL
-from src.services.openai_service import openai_service
+from src.services.openai_service import openai_service, OpenAIServiceError
 from src.services.message_service import message_service
 from src.services.queue_service import queue_service
 
@@ -114,18 +112,38 @@ class ImageCommands:
 
                 await interaction.followup.send(content=content, file=file)
 
-            except BadRequestError as e:
-                logger.error(f"OpenAI API BadRequestError in draw command: {e}")
+            except OpenAIServiceError as e:
+                logger.error(f"OpenAI API error in draw command: {e}")
                 error_message = (
                     f"{message_service.format_prompt_message(prompt)}\n\n"
-                    f"Sorry, your request was rejected by the safety system. Details: "
-                    f"{e.error.message if e.error else 'No specific error message provided by API.'}"
+                    f"Sorry, I encountered an error while generating your image: {str(e)}"
                 )
-                await interaction.followup.send(content=error_message)
+                try:
+                    await interaction.followup.send(content=error_message)
+                except Exception as discord_error:
+                    logger.error(f"Failed to send error message to Discord: {discord_error}")
+                    # Try to send a simpler error message
+                    try:
+                        await interaction.followup.send(
+                            content="Sorry, I encountered an error generating your image. Please try again later."
+                        )
+                    except Exception:
+                        logger.error("Failed to send fallback error message")
+
             except Exception as e:
                 logger.error(f"Unexpected error in draw command: {e}")
                 error_message = (
                     f"{message_service.format_prompt_message(prompt)}\n\n"
-                    f"Sorry, there was an error generating your image. Please try again later."
+                    f"Sorry, there was an unexpected error generating your image. Please try again later."
                 )
-                await interaction.followup.send(content=error_message)
+                try:
+                    await interaction.followup.send(content=error_message)
+                except Exception as discord_error:
+                    logger.error(f"Failed to send error message to Discord: {discord_error}")
+                    # Try to send a simpler error message
+                    try:
+                        await interaction.followup.send(
+                            content="Sorry, I encountered an error generating your image. Please try again later."
+                        )
+                    except Exception:
+                        logger.error("Failed to send fallback error message")
