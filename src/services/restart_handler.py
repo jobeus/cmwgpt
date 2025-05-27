@@ -49,16 +49,8 @@ class RestartHandler:
         print("🔄 Restarting bot...")
 
         try:
-            # Step 1: Save current git SHA to state
-            print("📝 Recording current git SHA...")
-            current_sha = self._get_current_git_sha()
-            if current_sha:
-                state_service.set_last_git_sha(current_sha)
-                print(f"✅ Recorded git SHA: {current_sha}")
-            else:
-                print("⚠️  Could not determine git SHA")
-
-            # Step 2: Save current state with restart info
+            # Step 1: Save current state with restart info (don't update git SHA yet)
+            # The announcement service will handle git SHA comparison and update
             print("💾 Saving bot state...")
             restart_info = {"manual_restart": manual}
             temp_file = state_service.save_state_to_temp_file(restart_info)
@@ -67,17 +59,17 @@ class RestartHandler:
             else:
                 print("⚠️  Failed to save state, continuing anyway")
 
-            # Step 3: Perform git pull
+            # Step 2: Perform git pull
             print("📥 Updating code...")
             if perform_git_pull():
                 print("✅ Code updated")
             else:
                 print("⚠️  Git pull failed, continuing anyway")
 
-            # Step 4: Give a moment for any final operations
+            # Step 3: Give a moment for any final operations
             await asyncio.sleep(0.5)
 
-            # Step 5: Exit with restart code
+            # Step 4: Exit with restart code
             print("🚀 Restarting...")
             # Use exit code 42 to signal that this is an intentional restart
             # The process manager (systemd, pm2, etc.) should restart the bot
@@ -113,16 +105,8 @@ class RestartHandler:
         print("💾 Performing graceful shutdown...")
 
         try:
-            # Step 1: Save current git SHA to state
-            print("📝 Recording current git SHA...")
-            current_sha = get_current_commit_hash()
-            if current_sha:
-                state_service.set_last_git_sha(current_sha)
-                print(f"✅ Recorded git SHA: {current_sha}")
-            else:
-                print("⚠️  Could not determine git SHA")
-
-            # Step 2: Save current state with shutdown info
+            # Step 1: Save current state with shutdown info (don't update git SHA)
+            # The announcement service will handle git SHA comparison on next startup
             print("💾 Saving bot state...")
             shutdown_info = {"manual_restart": False, "graceful_shutdown": True}
             temp_file = state_service.save_state_to_temp_file(shutdown_info)
@@ -131,7 +115,7 @@ class RestartHandler:
             else:
                 print("⚠️  Failed to save state")
 
-            # Step 3: Give a moment for any final operations
+            # Step 2: Give a moment for any final operations
             await asyncio.sleep(0.5)
 
             print("✅ Graceful shutdown preparation complete")

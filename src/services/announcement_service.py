@@ -185,6 +185,10 @@ class AnnouncementService:
 
         logger.info(f"Update announcements sent: {successful_announcements} successful, {failed_announcements} failed")
 
+        # Update the git SHA in state now that we've announced the update
+        state_service.set_last_git_sha(current_sha)
+        logger.debug(f"Updated last git SHA to: {current_sha[:7]}")
+
 
 # Global announcement service instance
 announcement_service = AnnouncementService()

@@ -72,12 +72,13 @@ class DiscordBotClient:
             current_sha = self._get_current_git_sha()
             if current_sha:
                 # Only update if we don't already have a SHA (from loaded state)
-                # This preserves the previous SHA for comparison
+                # This preserves the previous SHA for comparison by the announcement service
                 if not state_service.get_last_git_sha():
                     state_service.set_last_git_sha(current_sha)
                     logger.info(f"Set initial git SHA: {current_sha[:7]}")
                 else:
-                    logger.debug(f"Current git SHA: {current_sha[:7]}")
+                    # Don't update - let the announcement service handle the comparison and update
+                    logger.debug(f"Current git SHA: {current_sha[:7]}, preserving previous SHA for comparison")
             else:
                 logger.warning("Could not determine current git SHA")
         except Exception as e:
