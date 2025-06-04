@@ -253,7 +253,7 @@ class OpenAIService:
                 # Check if the model wants to call a function
                 if message.function_call:
                     function_name = message.function_call.name
-                    function_params = message.function.call.arguments
+                    function_params = message.function_call.arguments
 
                     logger.info(f"OpenAI requested function call: {function_name}")
 
