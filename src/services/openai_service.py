@@ -124,6 +124,7 @@ class OpenAIService:
                 yt_cmd = [
                     "yt-dlp",
                     "--skip-download",
+                    "--write-sub",
                     "--write-auto-sub",
                     "--sub-lang", "en",
                     "--sub-format", "vtt",
