@@ -88,84 +88,84 @@ class OpenAIService:
             logger.error(f"Error fetching user context: {e}")
             return f"User context fetch failed: {str(e)}"
 
-async def _fetch_youtube_transcript(self, video_url: str) -> str:
-    """
-    Fetch the English transcript (auto-generated or manually provided) for a YouTube video,
-    using yt-dlp in the background. Returns the raw VTT content as a string, or an error message.
+    async def _fetch_youtube_transcript(self, video_url: str) -> str:
+        """
+        Fetch the English transcript (auto-generated or manually provided) for a YouTube video,
+        using yt-dlp in the background. Returns the raw VTT content as a string, or an error message.
 
-    Args:
-        video_url: URL of the YouTube video.
+        Args:
+            video_url: URL of the YouTube video.
 
-    Returns:
-        The transcript (.vtt) as a string, or an error description if something goes wrong.
-    """
-    # Ensure yt-dlp is available on PATH
-    cmd = ["yt-dlp", "--version"]
-    try:
-        proc_check = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-        )
-        await proc_check.wait()
-        if proc_check.returncode != 0:
-            return "yt-dlp is not installed or not found on PATH."
-    except OSError as e:
-        logger.error(f"Error checking yt-dlp availability: {e}")
-        return f"Failed to run yt-dlp: {e}"
-
-    # Create a temporary directory to hold the subtitle file
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Build the yt-dlp command to download only the English VTT subtitles
-            # --skip-download : do not download the video itself
-            # --write-auto-sub: grab the auto-generated subtitles if no manual ones exist
-            # --sub-lang en    : request English subtitles
-            # --sub-format vtt : force output format to WebVTT
-            # -o {tmpdir}/transcript.%(ext)s : write to a predictable filename with .vtt extension
-            yt_cmd = [
-                "yt-dlp",
-                "--skip-download",
-                "--write-auto-sub",
-                "--sub-lang", "en",
-                "--sub-format", "vtt",
-                "-o", os.path.join(tmpdir, "transcript.%(ext)s"),
-                video_url,
-            ]
-
-            logger.debug(f"Running yt-dlp to fetch subtitles: {' '.join(yt_cmd)}")
-            proc = await asyncio.create_subprocess_exec(
-                *yt_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+        Returns:
+            The transcript (.vtt) as a string, or an error description if something goes wrong.
+        """
+        # Ensure yt-dlp is available on PATH
+        cmd = ["yt-dlp", "--version"]
+        try:
+            proc_check = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
             )
+            await proc_check.wait()
+            if proc_check.returncode != 0:
+                return "yt-dlp is not installed or not found on PATH."
+        except OSError as e:
+            logger.error(f"Error checking yt-dlp availability: {e}")
+            return f"Failed to run yt-dlp: {e}"
 
-            try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                return "Timed out while attempting to download subtitles."
+        # Create a temporary directory to hold the subtitle file
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                # Build the yt-dlp command to download only the English VTT subtitles
+                # --skip-download : do not download the video itself
+                # --write-auto-sub: grab the auto-generated subtitles if no manual ones exist
+                # --sub-lang en    : request English subtitles
+                # --sub-format vtt : force output format to WebVTT
+                # -o {tmpdir}/transcript.%(ext)s : write to a predictable filename with .vtt extension
+                yt_cmd = [
+                    "yt-dlp",
+                    "--skip-download",
+                    "--write-auto-sub",
+                    "--sub-lang", "en",
+                    "--sub-format", "vtt",
+                    "-o", os.path.join(tmpdir, "transcript.%(ext)s"),
+                    video_url,
+                ]
 
-            if proc.returncode != 0:
-                err_output = stderr.decode(errors="ignore").strip()
-                logger.warning(f"yt-dlp exited with code {proc.returncode}: {err_output}")
-                return f"yt-dlp failed to fetch subtitles: {err_output}"
+                logger.debug(f"Running yt-dlp to fetch subtitles: {' '.join(yt_cmd)}")
+                proc = await asyncio.create_subprocess_exec(
+                    *yt_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
 
-            # Locate the downloaded .vtt file in the temporary directory
-            vtt_files = glob.glob(os.path.join(tmpdir, "*.vtt"))
-            if not vtt_files:
-                return "No English subtitles found for this video."
-            vtt_path = vtt_files[0]
+                try:
+                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                    return "Timed out while attempting to download subtitles."
 
-            # Read and return its contents
-            with open(vtt_path, "r", encoding="utf-8") as f:
-                transcript_text = f.read()
+                if proc.returncode != 0:
+                    err_output = stderr.decode(errors="ignore").strip()
+                    logger.warning(f"yt-dlp exited with code {proc.returncode}: {err_output}")
+                    return f"yt-dlp failed to fetch subtitles: {err_output}"
 
-            logger.debug(f"Fetched transcript ({len(transcript_text)} characters)")
-            return transcript_text
+                # Locate the downloaded .vtt file in the temporary directory
+                vtt_files = glob.glob(os.path.join(tmpdir, "*.vtt"))
+                if not vtt_files:
+                    return "No English subtitles found for this video."
+                vtt_path = vtt_files[0]
 
-    except Exception as e:
-        logger.error(f"Error while fetching YouTube transcript: {e}")
-        return f"Failed to fetch transcript: {e}"
+                # Read and return its contents
+                with open(vtt_path, "r", encoding="utf-8") as f:
+                    transcript_text = f.read()
+
+                logger.debug(f"Fetched transcript ({len(transcript_text)} characters)")
+                return transcript_text
+
+        except Exception as e:
+            logger.error(f"Error while fetching YouTube transcript: {e}")
+            return f"Failed to fetch transcript: {e}"
 
     async def get_chat_completion(self, model: str, messages: List[Dict[str, Any]], system_prompt: str = None) -> str:
         """
