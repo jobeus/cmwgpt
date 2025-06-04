@@ -285,7 +285,8 @@ class OpenAIService:
                         return clean_openai_response(final_message.content)
                     elif function_name == "get_youtube_transcript":
                         # Fetch user context
-                        url = function_params.get("url")
+                        url = function_params
+                        logger.info(f"Fetching YouTube transcript for {url}")
                         context_data = await self._fetch_youtube_transcript(url)
 
                         # Add the assistant's function call message to
