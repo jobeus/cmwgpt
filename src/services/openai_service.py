@@ -3,10 +3,14 @@ OpenAI Service - Handles all OpenAI API interactions
 """
 
 import asyncio
+import tempfile
 import base64
 import json
 import logging
 import httpx
+import glob
+import os
+
 from typing import List, Dict, Any, Optional
 
 from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError, AuthenticationError, BadRequestError
@@ -84,6 +88,85 @@ class OpenAIService:
             logger.error(f"Error fetching user context: {e}")
             return f"User context fetch failed: {str(e)}"
 
+async def _fetch_youtube_transcript(self, video_url: str) -> str:
+    """
+    Fetch the English transcript (auto-generated or manually provided) for a YouTube video,
+    using yt-dlp in the background. Returns the raw VTT content as a string, or an error message.
+
+    Args:
+        video_url: URL of the YouTube video.
+
+    Returns:
+        The transcript (.vtt) as a string, or an error description if something goes wrong.
+    """
+    # Ensure yt-dlp is available on PATH
+    cmd = ["yt-dlp", "--version"]
+    try:
+        proc_check = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+        )
+        await proc_check.wait()
+        if proc_check.returncode != 0:
+            return "yt-dlp is not installed or not found on PATH."
+    except OSError as e:
+        logger.error(f"Error checking yt-dlp availability: {e}")
+        return f"Failed to run yt-dlp: {e}"
+
+    # Create a temporary directory to hold the subtitle file
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Build the yt-dlp command to download only the English VTT subtitles
+            # --skip-download : do not download the video itself
+            # --write-auto-sub: grab the auto-generated subtitles if no manual ones exist
+            # --sub-lang en    : request English subtitles
+            # --sub-format vtt : force output format to WebVTT
+            # -o {tmpdir}/transcript.%(ext)s : write to a predictable filename with .vtt extension
+            yt_cmd = [
+                "yt-dlp",
+                "--skip-download",
+                "--write-auto-sub",
+                "--sub-lang", "en",
+                "--sub-format", "vtt",
+                "-o", os.path.join(tmpdir, "transcript.%(ext)s"),
+                video_url,
+            ]
+
+            logger.debug(f"Running yt-dlp to fetch subtitles: {' '.join(yt_cmd)}")
+            proc = await asyncio.create_subprocess_exec(
+                *yt_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return "Timed out while attempting to download subtitles."
+
+            if proc.returncode != 0:
+                err_output = stderr.decode(errors="ignore").strip()
+                logger.warning(f"yt-dlp exited with code {proc.returncode}: {err_output}")
+                return f"yt-dlp failed to fetch subtitles: {err_output}"
+
+            # Locate the downloaded .vtt file in the temporary directory
+            vtt_files = glob.glob(os.path.join(tmpdir, "*.vtt"))
+            if not vtt_files:
+                return "No English subtitles found for this video."
+            vtt_path = vtt_files[0]
+
+            # Read and return its contents
+            with open(vtt_path, "r", encoding="utf-8") as f:
+                transcript_text = f.read()
+
+            logger.debug(f"Fetched transcript ({len(transcript_text)} characters)")
+            return transcript_text
+
+    except Exception as e:
+        logger.error(f"Error while fetching YouTube transcript: {e}")
+        return f"Failed to fetch transcript: {e}"
+
     async def get_chat_completion(self, model: str, messages: List[Dict[str, Any]], system_prompt: str = None) -> str:
         """
         Gets a chat completion from the OpenAI API with function calling support.
@@ -141,6 +224,11 @@ class OpenAIService:
                 "name": "get_user_context",
                 "description": "Fetch historical IRC quotes and context about the user for personalized responses",
                 "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+            {
+                "name": "get_youtube_transcript",
+                "description": "Fetch the transcript of a YouTube video",
+                "parameters": {"type": "object", "properties": {}, "required": []},
             }
         ]
 
@@ -165,11 +253,40 @@ class OpenAIService:
                 # Check if the model wants to call a function
                 if message.function_call:
                     function_name = message.function_call.name
+                    function_params = message.function.call.arguments
+
                     logger.info(f"OpenAI requested function call: {function_name}")
 
                     if function_name == "get_user_context":
                         # Fetch user context
                         context_data = await self._fetch_user_context()
+
+                        # Add the assistant's function call message to
+                        # conversation
+                        api_messages.append(
+                            {
+                                "role": "assistant",
+                                "content": None,
+                                "function_call": {"name": function_name, "arguments": message.function_call.arguments},
+                            }
+                        )
+
+                        # Add the function response
+                        api_messages.append({"role": "function", "name": function_name, "content": context_data})
+
+                        # Make another request with the function result
+                        logger.debug("Making follow-up request with function result")
+                        follow_up_response = await client.chat.completions.create(
+                            model=model, messages=api_messages, functions=functions, function_call="auto"
+                        )
+
+                        final_message = follow_up_response.choices[0].message
+                        logger.debug("Chat completion with function calling successful")
+                        return clean_openai_response(final_message.content)
+                    elif function_name == "get_youtube_transcript":
+                        # Fetch user context
+                        url = function_params.get("url")
+                        context_data = await self._fetch_youtube_transcript(url)
 
                         # Add the assistant's function call message to
                         # conversation
