@@ -222,16 +222,18 @@ class OpenAIService:
         # Define the get_user_context function
         functions = [
             {
-                "name": "get_user_context",
-                "description": "Fetch historical IRC quotes and context about the user for personalized responses",
-                "parameters": {"type": "object", "properties": {}, "required": []},
-            },
-            {
                 "name": "get_youtube_transcript",
                 "description": "Fetch the transcript of a YouTube video",
                 "parameters": {"type": "object", "properties": {}, "required": []},
             }
         ]
+
+        if USER_CONTEXT_URL:
+            functions += {
+                "name": "get_user_context",
+                "description": "Fetch historical IRC quotes and context about the user for personalized responses",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
 
         max_retries = 3
         base_delay = 1.0
