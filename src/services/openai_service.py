@@ -16,7 +16,7 @@ from typing import List, Dict, Any, Optional
 from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError, AuthenticationError, BadRequestError
 from discord import Attachment
 
-from src.config import OPENAI_API_KEY, IS_TESTING, USER_CONTEXT_URL
+from src.config import OPENAI_API_KEY, IS_TESTING, USER_CONTEXT_URL, VECTOR_STORE_ID
 from src.utils.message_utils import clean_openai_response
 
 logger = logging.getLogger(__name__)
@@ -416,20 +416,32 @@ class OpenAIService:
         max_retries = 3
         base_delay = 1.0
 
+        response = None
+
         for attempt in range(max_retries):
             try:
                 logger.debug(
                     f"""Attempting legacy chat completion with model {model} (attempt {
                         attempt + 1}/{max_retries})"""
                 )
-                response = await client.responses.create(
-                    model=model,
-                    input=api_messages,
-                    tools=[
-                        {"type": "web_search_preview"},
-                        {"type": "file_search"}
-                    ],
-                )
+                if not VECTOR_STORE_ID:
+                    response = await client.responses.create(
+                        model=model,
+                        input=api_messages,
+                        tools=[
+                            {"type": "web_search_preview"}
+                        ],
+                    )
+                else:
+                    response = await client.responses.create(
+                        model=model,
+                        input=api_messages,
+                        tools=[
+                            {"type": "web_search_preview"},
+                            {"type": "file_search"}
+                        ],
+                        tool_resources={"file_search": {"vector_store_ids": [VECTOR_STORE_ID]}},
+                    )
                 logger.debug("Legacy chat completion successful")
                 return clean_openai_response(response.output_text)
 

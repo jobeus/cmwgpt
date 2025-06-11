@@ -9,6 +9,7 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "test-key-for-ci")
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "test-token-for-ci")
 
+VECTOR_STORE_ID = os.getenv("VECTOR_STORE_ID", "")
 # Bot Configuration
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-4.1-nano")
 DEFAULT_IMAGE_MODEL = os.getenv("DEFAULT_IMAGE_MODEL", "gpt-image-1")
