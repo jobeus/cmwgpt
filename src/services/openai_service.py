@@ -425,7 +425,10 @@ class OpenAIService:
                 response = await client.responses.create(
                     model=model,
                     input=api_messages,
-                    tools=[{"type": "web_search_preview"}],
+                    tools=[
+                        {"type": "web_search_preview"},
+                        {"type": "file_search"}
+                    ],
                 )
                 logger.debug("Legacy chat completion successful")
                 return clean_openai_response(response.output_text)
