@@ -440,9 +440,10 @@ class OpenAIService:
                         input=api_messages,
                         tools=[
                             {"type": "web_search_preview"},
-                            {"type": "file_search"}
-                        ],
-                        tool_resources={"file_search": {"vector_store_ids": [VECTOR_STORE_ID]}},
+                            {
+                                "type": "file_search",
+                                "vector_store_ids": [str(VECTOR_STORE_ID)]
+                            }]
                     )
                 logger.debug("Legacy chat completion successful")
                 return clean_openai_response(response.output_text)
