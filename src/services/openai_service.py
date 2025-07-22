@@ -258,7 +258,7 @@ class OpenAIService:
                         tool_result_input = api_input.copy()
                         tool_result = {
                             "type": "function_call_output",
-                            "call_id": tool_call.id,
+                            "call_id": tool_call.call_id,
                             "output": context_data
                         }
 
