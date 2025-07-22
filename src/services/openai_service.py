@@ -29,12 +29,24 @@ from src.utils.message_utils import clean_openai_response
 
 logger = logging.getLogger(__name__)
 
-def strip_subtitle_time_data(subtitle_text: str) -> str:
+def clean_subtitle_text(subtitle_text: str) -> str:
     # Remove SRT/VTT timestamps (e.g., "00:00:10,500 --> 00:00:12,000")
-    text = re.sub(r"\d{2}:\d{2}:\d{2}[.,]\d{3} --> \d{2}:\d{2}:\d{2}[.,]\d{3}", "", subtitle_text)
+    text = re.sub(
+        r"\d{2}:\d{2}:\d{2}[.,]\d{3} --> \d{2}:\d{2}:\d{2}[.,]\d{3}",
+        "",
+        subtitle_text
+    )
+
+    # Remove alignment/position metadata (e.g., "align:start position:0%")
+    text = re.sub(r"align:start position:\d+%.*", "", text)
 
     # Remove ASS dialogue timing (e.g., "Dialogue: 0,0:00:01.00,0:00:02.00,Default,...")
-    text = re.sub(r"^Dialogue:.*?,\d+:\d{2}:\d{2}\.\d+,\d+:\d{2}:\d{2}\.\d+.*?,", "", text, flags=re.MULTILINE)
+    text = re.sub(
+        r"^Dialogue:.*?,\d+:\d{2}:\d{2}\.\d+,\d+:\d{2}:\d{2}\.\d+.*?,",
+        "",
+        text,
+        flags=re.MULTILINE
+    )
 
     # Remove numeric line numbers in SRT
     text = re.sub(r"^\d+\s*$", "", text, flags=re.MULTILINE)
@@ -46,10 +58,18 @@ def strip_subtitle_time_data(subtitle_text: str) -> str:
     text = re.sub(r"<[^>]+>", "", text)
     text = re.sub(r"\{[^}]+\}", "", text)
 
-    # Remove extra spaces
-    text = re.sub(r"\s+", " ", text).strip()
+    # Split lines, strip whitespace, remove empty lines
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
 
-    return text
+    # Remove consecutive duplicate lines
+    cleaned_lines = []
+    previous_line = None
+    for line in lines:
+        if line != previous_line:
+            cleaned_lines.append(line)
+        previous_line = line
+
+    return "\n".join(cleaned_lines)
 
 class OpenAIServiceError(Exception):
     """Custom exception for OpenAI service errors."""
@@ -199,8 +219,8 @@ class OpenAIService:
                     transcript_text = f.read()
 
                 logger.debug(f"Fetched transcript ({len(transcript_text)} characters)")
-                stripped_transcript_text = strip_subtitle_time_data(transcript_text)
-                return stripped_transcript_text
+                cleaned_subtitle_text = clean_subtitle_text(transcript_text)
+                return cleaned_subtitle_text
 
         except Exception as e:
             logger.error(f"Error while fetching YouTube transcript: {e}")
