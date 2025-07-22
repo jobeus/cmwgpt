@@ -201,6 +201,7 @@ class OpenAIService:
         tools = [
             {
                 "type": "function",
+                "strict": True,
                 "name": "get_youtube_transcript",
                 "description": "Fetch the transcript of a YouTube video from its URL. Returns the transcript as a string.",
                 "parameters": {"type": "object", "properties": {"url": {"type": "string", "description": "The URL of the YouTube video to transcribe"}}, "required": ["url"]},
@@ -210,6 +211,7 @@ class OpenAIService:
         if USER_CONTEXT_URL:
             tools.append({
                 "type": "function",
+                "strict": True,
                 "name": "get_user_context",
                 "description": "Fetch historical IRC quotes and context about the user for personalized responses",
                 "parameters": {"type": "object", "properties": {}, "required": []},
@@ -299,8 +301,8 @@ class OpenAIService:
                         tool_result_input = api_input.copy()
                         tool_result = {
                             "type": "function_call_output",
-                            "call_id": tool_call.id,
-                            "content": context_data
+                            "call_id": tool_call.call_id,
+                            "output": context_data
                         }
 
                         state_service.add_message_to_conversation(
