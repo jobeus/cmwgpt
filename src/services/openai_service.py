@@ -275,10 +275,16 @@ class OpenAIService:
                     tool_choice="auto",
                 )
 
-                # Look for tool calls in the output
-                tool_calls = response.output[0].tool_calls
+                first_block = response.output[0]
 
-                if tool_calls:
+                tool_calls = []
+
+                if first_block.type == "message":
+                    tool_calls = first_block.tool_calls  # Normal case
+                elif first_block.type == "tool_call":
+                    tool_calls = [first_block]  # It's already a tool call
+
+                if tool_calls.count > 0:
                     # Process the first tool call (assuming one at a time for now)
                     tool_call = tool_calls[0]
                     function_name = (
