@@ -290,7 +290,7 @@ class OpenAIService:
                                         return clean_openai_response(content.text)
                     elif function_name == "get_youtube_transcript":
                         # Extract URL from tool call arguments
-                        function_params = tool_call.function.arguments if hasattr(tool_call.function, 'arguments') else "{}"
+                        function_params = tool_call.arguments if hasattr(tool_call, 'arguments') else "{}"
                         url = json.loads(function_params).get("url")
                         logger.info(f"Fetching YouTube transcript for {url}")
                         context_data = await self._fetch_youtube_transcript(url)
