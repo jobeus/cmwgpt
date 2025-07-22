@@ -217,14 +217,16 @@ class OpenAIService:
         # Define tools for the new responses API
         tools = [
             {
+                "type": "function",
                 "name": "get_youtube_transcript",
                 "description": "Fetch the transcript of a YouTube video",
-                "parameters": {"type": "object", "properties": {}, "required": []},
+                "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
             }
         ]
 
         if USER_CONTEXT_URL:
             tools.append({
+                "type": "function",
                 "name": "get_user_context",
                 "description": "Fetch historical IRC quotes and context about the user for personalized responses",
                 "parameters": {"type": "object", "properties": {}, "required": []},
