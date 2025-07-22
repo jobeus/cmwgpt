@@ -284,7 +284,7 @@ class OpenAIService:
                 elif first_block.type == "tool_call":
                     tool_calls = [first_block]  # It's already a tool call
 
-                if tool_calls.count > 0:
+                if len(tool_calls) > 0:
                     # Process the first tool call (assuming one at a time for now)
                     tool_call = tool_calls[0]
                     function_name = (
