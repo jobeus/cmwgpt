@@ -106,7 +106,7 @@ From the Discord user's perspective:
 ## Dependencies
 
 - `httpx`: Added for async HTTP requests to context API
-- OpenAI function calling support (uses standard `chat.completions.create` API)
+- OpenAI function calling support (uses new `responses.create` API)
 
 ## Backward Compatibility
 

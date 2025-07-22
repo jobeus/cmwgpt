@@ -26,17 +26,18 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_chat_completion_success(self):
         """Test successful chat completion."""
-        # Mock response for function calling path
-        mock_message = MagicMock()
-        mock_message.content = "Hello! How can I help you today?"
-        mock_message.function_call = None  # No function call
+        # Mock response for responses API
+        mock_content = MagicMock()
+        mock_content.type = "output_text"
+        mock_content.text = "Hello! How can I help you today?"
 
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
+        mock_message = MagicMock()
+        mock_message.type = "message"
+        mock_message.content = [mock_content]
 
         mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-        self.mock_client.chat.completions.create.return_value = mock_response
+        mock_response.output = [mock_message]
+        self.mock_client.responses.create.return_value = mock_response
 
         # Test parameters
         model = "gpt-4.1-nano"
@@ -49,10 +50,10 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         # Verify result
         self.assertEqual(result, "Hello! How can I help you today?")
 
-        # Verify API call - should include system prompt at the beginning
-        expected_messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": "Hello"}]
-        self.mock_client.chat.completions.create.assert_called_once_with(
-            model=model, messages=expected_messages, functions=unittest.mock.ANY, function_call="auto"
+        # Verify API call - should use responses.create with input and instructions
+        expected_input = [{"role": "user", "content": "Hello"}]
+        self.mock_client.responses.create.assert_called_once_with(
+            model=model, input=expected_input, instructions=system_prompt, tools=unittest.mock.ANY, tool_choice="auto"
         )
 
     async def test_get_chat_completion_different_models(self):
@@ -61,17 +62,18 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
         for model in models_to_test:
             with self.subTest(model=model):
-                # Mock response for function calling path
-                mock_message = MagicMock()
-                mock_message.content = f"Response from {model}"
-                mock_message.function_call = None  # No function call
+                # Mock response for responses API
+                mock_content = MagicMock()
+                mock_content.type = "output_text"
+                mock_content.text = f"Response from {model}"
 
-                mock_choice = MagicMock()
-                mock_choice.message = mock_message
+                mock_message = MagicMock()
+                mock_message.type = "message"
+                mock_message.content = [mock_content]
 
                 mock_response = MagicMock()
-                mock_response.choices = [mock_choice]
-                self.mock_client.chat.completions.create.return_value = mock_response
+                mock_response.output = [mock_message]
+                self.mock_client.responses.create.return_value = mock_response
 
                 # Test parameters
                 messages = [{"role": "user", "content": "Test"}]
@@ -236,17 +238,18 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_chat_completion_empty_messages(self):
         """Test chat completion with empty messages list."""
-        # Mock response for function calling path
-        mock_message = MagicMock()
-        mock_message.content = "I'm ready to help!"
-        mock_message.function_call = None  # No function call
+        # Mock response for responses API
+        mock_content = MagicMock()
+        mock_content.type = "output_text"
+        mock_content.text = "I'm ready to help!"
 
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
+        mock_message = MagicMock()
+        mock_message.type = "message"
+        mock_message.content = [mock_content]
 
         mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-        self.mock_client.chat.completions.create.return_value = mock_response
+        mock_response.output = [mock_message]
+        self.mock_client.responses.create.return_value = mock_response
 
         # Test with empty messages
         result = await openai_service.get_chat_completion("gpt-4.1-nano", [])
@@ -256,17 +259,18 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_chat_completion_complex_messages(self):
         """Test chat completion with complex message structure."""
-        # Mock response for function calling path
-        mock_message = MagicMock()
-        mock_message.content = "Complex response"
-        mock_message.function_call = None  # No function call
+        # Mock response for responses API
+        mock_content = MagicMock()
+        mock_content.type = "output_text"
+        mock_content.text = "Complex response"
 
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
+        mock_message = MagicMock()
+        mock_message.type = "message"
+        mock_message.content = [mock_content]
 
         mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-        self.mock_client.chat.completions.create.return_value = mock_response
+        mock_response.output = [mock_message]
+        self.mock_client.responses.create.return_value = mock_response
 
         # Test with complex messages including JSON content (without system
         # prompt in messages)
@@ -288,9 +292,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         # Verify it handles complex structure
         self.assertEqual(result, "Complex response")
 
-        # Expected messages should have system prompt prepended
-        expected_messages = [
-            {"role": "system", "content": system_prompt},
+        # Expected input should exclude system messages (system prompt goes to instructions)
+        expected_input = [
             {
                 "role": "user",
                 "content": [
@@ -301,8 +304,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
             {"role": "assistant", "content": "I can see your image!"},
             {"role": "user", "content": "What do you think?"},
         ]
-        self.mock_client.chat.completions.create.assert_called_once_with(
-            model="gpt-4.1-mini", messages=expected_messages, functions=unittest.mock.ANY, function_call="auto"
+        self.mock_client.responses.create.assert_called_once_with(
+            model="gpt-4.1-mini", input=expected_input, instructions=system_prompt, tools=unittest.mock.ANY, tool_choice="auto"
         )
 
 

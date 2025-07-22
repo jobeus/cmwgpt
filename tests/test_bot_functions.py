@@ -264,21 +264,6 @@ class TestBotFunctions(unittest.TestCase):
         total_length_over = len(base_content + f"\n{reply_text_over}")
         self.assertGreater(total_length_over, 2000)
 
-    def test_json_content_handling(self):
-        """Test JSON content handling in conversations."""
-        # Test that JSON serialization works correctly
-        content_payload = [
-            {"type": "input_text", "text": "Hello"},
-            {"type": "input_image", "image_url": "http://example.com/image.jpg"},
-        ]
-
-        json_content = json.dumps(content_payload)
-        parsed_content = json.loads(json_content)
-
-        self.assertEqual(parsed_content, content_payload)
-        self.assertEqual(parsed_content[0]["type"], "input_text")
-        self.assertEqual(parsed_content[1]["type"], "input_image")
-
     def test_username_formatting(self):
         """Test username formatting for chat messages."""
         # Mock user

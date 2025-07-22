@@ -189,18 +189,18 @@ class OpenAIService:
         self, model: str, messages: List[Dict[str, Any]], system_prompt: str = None
     ) -> str:
         """
-        Gets a chat completion with function calling support.
+        Gets a chat completion with function calling support using the new Responses API.
         """
         client = self.get_client()
 
-        # Prepare messages with system prompt if provided
-        api_messages = messages.copy()
+        # Prepare input for the new responses API
+        api_input = messages.copy()
 
         # Remove any existing system messages from the conversation
-        api_messages = [msg for msg in api_messages if msg.get("role") != "system"]
+        api_input = [msg for msg in api_input if msg.get("role") != "system"]
 
         # Parse JSON content if needed (for complex payloads like attachments)
-        for msg in api_messages:
+        for msg in api_input:
             content = msg.get("content", "")
             if isinstance(content, str) and content.strip().startswith(("[", "{")):
                 try:
@@ -211,25 +211,30 @@ class OpenAIService:
                     # If parsing fails, keep original content
                     pass
 
-        # Add system prompt at the beginning if provided
-        if system_prompt:
-            api_messages.insert(0, {"role": "system", "content": system_prompt})
+        # Convert messages to the new input format and add system prompt as instructions
+        instructions = system_prompt if system_prompt else None
 
-        # Define the get_user_context function
-        functions = [
+        # Define tools for the new responses API
+        tools = [
             {
-                "name": "get_youtube_transcript",
-                "description": "Fetch the transcript of a YouTube video",
-                "parameters": {"type": "object", "properties": {}, "required": []},
+                "type": "function",
+                "function": {
+                    "name": "get_youtube_transcript",
+                    "description": "Fetch the transcript of a YouTube video",
+                    "parameters": {"type": "object", "properties": {}, "required": []},
+                }
             }
         ]
 
         if USER_CONTEXT_URL:
-            functions += {
-                "name": "get_user_context",
-                "description": "Fetch historical IRC quotes and context about the user for personalized responses",
-                "parameters": {"type": "object", "properties": {}, "required": []},
-            },
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": "get_user_context",
+                    "description": "Fetch historical IRC quotes and context about the user for personalized responses",
+                    "parameters": {"type": "object", "properties": {}, "required": []},
+                }
+            })
 
         max_retries = 3
         base_delay = 1.0
@@ -237,86 +242,112 @@ class OpenAIService:
         for attempt in range(max_retries):
             try:
                 logger.debug(
-                    f"""Attempting chat completion with functions for model {model} (attempt {
+                    f"""Attempting response creation with tools for model {model} (attempt {
                         attempt + 1}/{max_retries})"""
                 )
 
-                # Use standard OpenAI chat completions API with function
-                # calling
-                response = await client.chat.completions.create(
-                    model=model, messages=api_messages, functions=functions, function_call="auto"
+                # Use new OpenAI responses API with tool calling
+                response = await client.responses.create(
+                    model=model,
+                    input=api_input,
+                    instructions=instructions,
+                    tools=tools,
+                    tool_choice="auto"
                 )
 
-                message = response.choices[0].message
+                # Check if the response contains tool calls
+                output = response.output
 
-                # Check if the model wants to call a function
-                if message.function_call:
-                    function_name = message.function_call.name
-                    function_params = message.function_call.arguments
+                # Look for tool calls in the output
+                tool_calls = []
+                for item in output:
+                    if hasattr(item, 'type') and 'tool_call' in item.type:
+                        tool_calls.append(item)
 
-                    logger.info(f"OpenAI requested function call: {function_name}")
+                if tool_calls:
+                    # Process the first tool call (assuming one at a time for now)
+                    tool_call = tool_calls[0]
+                    function_name = tool_call.function.name if hasattr(tool_call, 'function') else None
+
+                    logger.info(f"OpenAI requested tool call: {function_name}")
 
                     if function_name == "get_user_context":
                         # Fetch user context
                         context_data = await self._fetch_user_context()
 
-                        # Add the assistant's function call message to
-                        # conversation
-                        api_messages.append(
-                            {
-                                "role": "assistant",
-                                "content": None,
-                                "function_call": {"name": function_name, "arguments": message.function_call.arguments},
-                            }
+                        # Create a new input with the tool result
+                        tool_result_input = api_input.copy()
+                        tool_result_input.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": context_data
+                        })
+
+                        # Make another request with the tool result
+                        logger.debug("Making follow-up request with tool result")
+                        follow_up_response = await client.responses.create(
+                            model=model,
+                            input=tool_result_input,
+                            instructions=instructions,
+                            tools=tools,
+                            tool_choice="auto"
                         )
 
-                        # Add the function response
-                        api_messages.append({"role": "function", "name": function_name, "content": context_data})
-
-                        # Make another request with the function result
-                        logger.debug("Making follow-up request with function result")
-                        follow_up_response = await client.chat.completions.create(
-                            model=model, messages=api_messages, functions=functions, function_call="auto"
-                        )
-
-                        final_message = follow_up_response.choices[0].message
-                        logger.debug("Chat completion with function calling successful")
-                        return clean_openai_response(final_message.content)
+                        # Extract the final response
+                        final_output = follow_up_response.output
+                        for item in final_output:
+                            if hasattr(item, 'type') and item.type == 'message':
+                                for content in item.content:
+                                    if hasattr(content, 'type') and content.type == 'output_text':
+                                        logger.debug("Response creation with tool calling successful")
+                                        return clean_openai_response(content.text)
                     elif function_name == "get_youtube_transcript":
-                        # Fetch user context
+                        # Extract URL from tool call arguments
+                        function_params = tool_call.function.arguments if hasattr(tool_call.function, 'arguments') else "{}"
                         url = json.loads(function_params).get("url")
                         logger.info(f"Fetching YouTube transcript for {url}")
                         context_data = await self._fetch_youtube_transcript(url)
 
-                        # Add the assistant's function call message to
-                        # conversation
-                        api_messages.append(
-                            {
-                                "role": "assistant",
-                                "content": None,
-                                "function_call": {"name": function_name, "arguments": message.function_call.arguments},
-                            }
+                        # Create a new input with the tool result
+                        tool_result_input = api_input.copy()
+                        tool_result_input.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": context_data
+                        })
+
+                        # Make another request with the tool result
+                        logger.debug("Making follow-up request with tool result")
+                        follow_up_response = await client.responses.create(
+                            model=model,
+                            input=tool_result_input,
+                            instructions=instructions,
+                            tools=tools,
+                            tool_choice="auto"
                         )
 
-                        # Add the function response
-                        api_messages.append({"role": "function", "name": function_name, "content": context_data})
-
-                        # Make another request with the function result
-                        logger.debug("Making follow-up request with function result")
-                        follow_up_response = await client.chat.completions.create(
-                            model=model, messages=api_messages, functions=functions, function_call="auto"
-                        )
-
-                        final_message = follow_up_response.choices[0].message
-                        logger.debug("Chat completion with function calling successful")
-                        return clean_openai_response(final_message.content)
+                        # Extract the final response
+                        final_output = follow_up_response.output
+                        for item in final_output:
+                            if hasattr(item, 'type') and item.type == 'message':
+                                for content in item.content:
+                                    if hasattr(content, 'type') and content.type == 'output_text':
+                                        logger.debug("Response creation with tool calling successful")
+                                        return clean_openai_response(content.text)
                     else:
-                        logger.warning(f"Unknown function call requested: {function_name}")
-                        return f"I tried to call an unknown function: {function_name}"
+                        logger.warning(f"Unknown tool call requested: {function_name}")
+                        return f"I tried to call an unknown tool: {function_name}"
                 else:
-                    # No function call, return the response directly
-                    logger.debug("Chat completion successful (no function call)")
-                    return clean_openai_response(message.content)
+                    # No tool calls, return the response directly
+                    logger.debug("Response creation successful (no tool calls)")
+                    for item in output:
+                        if hasattr(item, 'type') and item.type == 'message':
+                            for content in item.content:
+                                if hasattr(content, 'type') and content.type == 'output_text':
+                                    return clean_openai_response(content.text)
+
+                    # Fallback if we can't find the expected structure
+                    return "I received a response but couldn't extract the text content."
 
             except RateLimitError as e:
                 logger.warning(f"Rate limit hit on attempt {attempt + 1}: {e}")
