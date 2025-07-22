@@ -202,6 +202,7 @@ class OpenAIService:
             {
                 "type": "function",
                 "strict": True,
+                "additionalProperties": False,
                 "name": "get_youtube_transcript",
                 "description": "Fetch the transcript of a YouTube video from its URL. Returns the transcript as a string.",
                 "parameters": {"type": "object", "properties": {"url": {"type": "string", "description": "The URL of the YouTube video to transcribe"}}, "required": ["url"]},
@@ -212,6 +213,7 @@ class OpenAIService:
             tools.append({
                 "type": "function",
                 "strict": True,
+                "additionalProperties": False,
                 "name": "get_user_context",
                 "description": "Fetch historical IRC quotes and context about the user for personalized responses",
                 "parameters": {"type": "object", "properties": {}, "required": []},
