@@ -142,7 +142,7 @@ class ChatCommands:
                     system_prompt = get_system_prompt() + "\n" + legend_section
 
                 reply = await openai_service.get_chat_completion(
-                    model=current_model, messages=current_conversation, system_prompt=system_prompt
+                    model=current_model, messages=current_conversation, system_prompt=system_prompt, channel_id=channel_id, state_service=state_service
                 )
 
                 # Log and store assistant reply

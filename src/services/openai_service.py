@@ -168,25 +168,8 @@ class OpenAIService:
             logger.error(f"Error while fetching YouTube transcript: {e}")
             return f"Failed to fetch transcript: {e}"
 
-    async def get_chat_completion(self, model: str, messages: List[Dict[str, Any]], system_prompt: str = None) -> str:
-        """
-        Gets a chat completion from the OpenAI API with function calling support.
-
-        Args:
-            model: The model to use for completion
-            messages: List of message dictionaries for the conversation (without system prompt)
-            system_prompt: Optional system prompt to prepend to messages
-
-        Returns:
-            The completion text from OpenAI
-
-        Raises:
-            OpenAIServiceError: If OpenAI API call fails
-        """
-        return await self._get_chat_completion_with_functions(model, messages, system_prompt)
-
-    async def _get_chat_completion_with_functions(
-        self, model: str, messages: List[Dict[str, Any]], system_prompt: str = None
+    async def get_chat_completion(
+        self, model: str, messages: List[Dict[str, Any]], system_prompt: str = None, channel_id: int = None, state_service: Any = None
     ) -> str:
         """
         Gets a chat completion with function calling support using the new Responses API.
@@ -219,8 +202,8 @@ class OpenAIService:
             {
                 "type": "function",
                 "name": "get_youtube_transcript",
-                "description": "Fetch the transcript of a YouTube video",
-                "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+                "description": "Fetch the transcript of a YouTube video from its URL. Returns the transcript as a string.",
+                "parameters": {"type": "object", "properties": {"url": {"type": "string", "description": "The URL of the YouTube video to transcribe"}}, "required": ["url"]},
             }
         ]
 
@@ -257,13 +240,13 @@ class OpenAIService:
                 # Look for tool calls in the output
                 tool_calls = []
                 for item in output:
-                    if hasattr(item, 'type') and 'tool_call' in item.type:
+                    if hasattr(item, 'type') and 'function_call' in item.type:
                         tool_calls.append(item)
 
                 if tool_calls:
                     # Process the first tool call (assuming one at a time for now)
                     tool_call = tool_calls[0]
-                    function_name = tool_call.function.name if hasattr(tool_call, 'function') else None
+                    function_name = tool_call.name if hasattr(tool_call, 'name') else None
 
                     logger.info(f"OpenAI requested tool call: {function_name}")
 
@@ -273,11 +256,19 @@ class OpenAIService:
 
                         # Create a new input with the tool result
                         tool_result_input = api_input.copy()
-                        tool_result_input.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
+                        tool_result = {
+                            "type": "function_call_output",
+                            "call_id": tool_call.id,
                             "content": context_data
-                        })
+                        }
+
+                        state_service.add_message_to_conversation(
+                            channel_id, tool_call
+                        )
+                        tool_result_input.append(tool_result)
+                        state_service.add_message_to_conversation(
+                            channel_id, tool_result
+                        )
 
                         # Make another request with the tool result
                         logger.debug("Making follow-up request with tool result")
@@ -306,11 +297,19 @@ class OpenAIService:
 
                         # Create a new input with the tool result
                         tool_result_input = api_input.copy()
-                        tool_result_input.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
+                        tool_result = {
+                            "type": "function_call_output",
+                            "call_id": tool_call.id,
                             "content": context_data
-                        })
+                        }
+
+                        state_service.add_message_to_conversation(
+                            channel_id, tool_call
+                        )
+                        tool_result_input.append(tool_result)
+                        state_service.add_message_to_conversation(
+                            channel_id, tool_result
+                        )
 
                         # Make another request with the tool result
                         logger.debug("Making follow-up request with tool result")
