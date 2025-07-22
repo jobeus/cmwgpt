@@ -125,7 +125,7 @@ class ChatCommands:
 
         # Log user input and add to conversation
         logger.info(f"[/chat] Channel {channel_id} User: {message}")
-        state_service.add_message_to_conversation(channel_id, {"role": "user", "content": json.dumps(content_payload)})
+        state_service.add_message_to_conversation(channel_id, {"role": "user", "content": content_payload})
 
         # Get response from OpenAI (interaction already deferred in slash
         # command handler)
@@ -148,7 +148,7 @@ class ChatCommands:
                 # Log and store assistant reply
                 logger.info(f"[/chat] Channel {channel_id} Assistant: {reply}")
                 state_service.add_message_to_conversation(
-                    channel_id, {"role": "assistant", "content": json.dumps(reply)}
+                    channel_id, {"role": "assistant", "content": reply}
                 )
 
                 # Prepare base message content
