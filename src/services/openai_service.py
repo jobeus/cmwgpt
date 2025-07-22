@@ -10,6 +10,7 @@ import logging
 import httpx
 import glob
 import os
+import re
 
 from typing import List, Dict, Any, Optional
 
@@ -28,12 +29,32 @@ from src.utils.message_utils import clean_openai_response
 
 logger = logging.getLogger(__name__)
 
+def strip_subtitle_time_data(subtitle_text: str) -> str:
+    # Remove SRT/VTT timestamps (e.g., "00:00:10,500 --> 00:00:12,000")
+    text = re.sub(r"\d{2}:\d{2}:\d{2}[.,]\d{3} --> \d{2}:\d{2}:\d{2}[.,]\d{3}", "", subtitle_text)
+
+    # Remove ASS dialogue timing (e.g., "Dialogue: 0,0:00:01.00,0:00:02.00,Default,...")
+    text = re.sub(r"^Dialogue:.*?,\d+:\d{2}:\d{2}\.\d+,\d+:\d{2}:\d{2}\.\d+.*?,", "", text, flags=re.MULTILINE)
+
+    # Remove numeric line numbers in SRT
+    text = re.sub(r"^\d+\s*$", "", text, flags=re.MULTILINE)
+
+    # Remove ASS/SSA headers or other bracketed info
+    text = re.sub(r"^\[.*?\].*$", "", text, flags=re.MULTILINE)
+
+    # Remove leftover style tags (e.g., {italic}, <i>)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\{[^}]+\}", "", text)
+
+    # Remove extra spaces
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
 
 class OpenAIServiceError(Exception):
     """Custom exception for OpenAI service errors."""
 
     pass
-
 
 class OpenAIService:
     """Service for handling OpenAI API interactions."""
@@ -178,7 +199,8 @@ class OpenAIService:
                     transcript_text = f.read()
 
                 logger.debug(f"Fetched transcript ({len(transcript_text)} characters)")
-                return transcript_text
+                stripped_transcript_text = strip_subtitle_time_data(transcript_text)
+                return stripped_transcript_text
 
         except Exception as e:
             logger.error(f"Error while fetching YouTube transcript: {e}")
