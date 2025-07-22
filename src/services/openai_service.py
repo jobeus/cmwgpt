@@ -275,14 +275,8 @@ class OpenAIService:
                     tool_choice="auto",
                 )
 
-                # Check if the response contains tool calls
-                output = response.output
-
                 # Look for tool calls in the output
-                tool_calls = []
-                for item in output:
-                    if hasattr(item, "type") and "function_call" in item.type:
-                        tool_calls.append(item)
+                tool_calls = response.output[0].tool_calls
 
                 if tool_calls:
                     # Process the first tool call (assuming one at a time for now)
@@ -388,7 +382,7 @@ class OpenAIService:
                 else:
                     # No tool calls, return the response directly
                     logger.debug("Response creation successful (no tool calls)")
-                    for item in output:
+                    for item in response.output:
                         if hasattr(item, "type") and item.type == "message":
                             for content in item.content:
                                 if (
