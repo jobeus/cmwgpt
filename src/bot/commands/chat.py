@@ -112,13 +112,16 @@ class ChatCommands:
 
         # Construct content payload for OpenAI
         if attachment:
-            logger.info(f"[/chat] Channel {channel_id}: including image URL {attachment.url}")
             content_payload = [
                 {"type": "input_text", "text": message},
                 {"type": "input_image", "image_url": attachment.url},
             ]
+            logger.info(f"[/chat] Channel {channel_id}: payload: {json.dumps(content_payload)}")
         else:
-            content_payload = message
+            content_payload = [
+                {"type": "input_text", "text": message}
+            ]
+            logger.info(f"[/chat] Channel {channel_id}: payload: {json.dumps(content_payload)}")
 
         # Log user input and add to conversation
         logger.info(f"[/chat] Channel {channel_id} User: {message}")
