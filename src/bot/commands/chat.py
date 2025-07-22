@@ -148,7 +148,9 @@ class ChatCommands:
                 # Log and store assistant reply
                 logger.info(f"[/chat] Channel {channel_id} Assistant: {reply}")
                 state_service.add_message_to_conversation(
-                    channel_id, {"role": "assistant", "content": reply}
+                    channel_id, {"role": "assistant", "content": [
+                        {"type": "output_text", "text": reply}
+                    ]}
                 )
 
                 # Prepare base message content
