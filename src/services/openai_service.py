@@ -13,7 +13,14 @@ import os
 
 from typing import List, Dict, Any, Optional
 
-from openai import AsyncOpenAI, APIError, RateLimitError, APIConnectionError, AuthenticationError, BadRequestError
+from openai import (
+    AsyncOpenAI,
+    APIError,
+    RateLimitError,
+    APIConnectionError,
+    AuthenticationError,
+    BadRequestError,
+)
 from discord import Attachment
 
 from src.config import OPENAI_API_KEY, IS_TESTING, USER_CONTEXT_URL, VECTOR_STORE_ID
@@ -103,7 +110,9 @@ class OpenAIService:
         cmd = ["yt-dlp", "--version"]
         try:
             proc_check = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                *cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
             )
             await proc_check.wait()
             if proc_check.returncode != 0:
@@ -126,9 +135,12 @@ class OpenAIService:
                     "--skip-download",
                     "--write-sub",
                     "--write-auto-sub",
-                    "--sub-lang", "en",
-                    "--sub-format", "vtt",
-                    "-o", os.path.join(tmpdir, "transcript.%(ext)s"),
+                    "--sub-lang",
+                    "en",
+                    "--sub-format",
+                    "vtt",
+                    "-o",
+                    os.path.join(tmpdir, "transcript.%(ext)s"),
                     video_url,
                 ]
 
@@ -140,7 +152,9 @@ class OpenAIService:
                 )
 
                 try:
-                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
+                    stdout, stderr = await asyncio.wait_for(
+                        proc.communicate(), timeout=60.0
+                    )
                 except asyncio.TimeoutError:
                     proc.kill()
                     await proc.wait()
@@ -148,7 +162,9 @@ class OpenAIService:
 
                 if proc.returncode != 0:
                     err_output = stderr.decode(errors="ignore").strip()
-                    logger.warning(f"yt-dlp exited with code {proc.returncode}: {err_output}")
+                    logger.warning(
+                        f"yt-dlp exited with code {proc.returncode}: {err_output}"
+                    )
                     return f"yt-dlp failed to fetch subtitles: {err_output}"
 
                 # Locate the downloaded .vtt file in the temporary directory
@@ -169,7 +185,12 @@ class OpenAIService:
             return f"Failed to fetch transcript: {e}"
 
     async def get_chat_completion(
-        self, model: str, messages: List[Dict[str, Any]], system_prompt: str = None, channel_id: int = None, state_service: Any = None
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        system_prompt: str = None,
+        channel_id: int = None,
+        state_service: Any = None,
     ) -> str:
         """
         Gets a chat completion with function calling support using the new Responses API.
@@ -202,22 +223,38 @@ class OpenAIService:
             {
                 "type": "function",
                 "strict": True,
-                "additionalProperties": False,
                 "name": "get_youtube_transcript",
                 "description": "Fetch the transcript of a YouTube video from its URL. Returns the transcript as a string.",
-                "parameters": {"type": "object", "properties": {"url": {"type": "string", "description": "The URL of the YouTube video to transcribe"}}, "required": ["url"]},
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "The URL of the YouTube video to transcribe",
+                        }
+                    },
+                    "required": ["url"],
+                    "additionalProperties": False,
+                },
             }
         ]
 
         if USER_CONTEXT_URL:
-            tools.append({
-                "type": "function",
-                "strict": True,
-                "additionalProperties": False,
-                "name": "get_user_context",
-                "description": "Fetch historical IRC quotes and context about the user for personalized responses",
-                "parameters": {"type": "object", "properties": {}, "required": []},
-            })
+            tools.append(
+                {
+                    "type": "function",
+                    "strict": True,
+                    "additionalProperties": False,
+                    "name": "get_user_context",
+                    "description": "Fetch historical IRC quotes and context about the user for personalized responses",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                }
+            )
 
         max_retries = 3
         base_delay = 1.0
@@ -235,7 +272,7 @@ class OpenAIService:
                     input=api_input,
                     instructions=instructions,
                     tools=tools,
-                    tool_choice="auto"
+                    tool_choice="auto",
                 )
 
                 # Check if the response contains tool calls
@@ -244,13 +281,15 @@ class OpenAIService:
                 # Look for tool calls in the output
                 tool_calls = []
                 for item in output:
-                    if hasattr(item, 'type') and 'function_call' in item.type:
+                    if hasattr(item, "type") and "function_call" in item.type:
                         tool_calls.append(item)
 
                 if tool_calls:
                     # Process the first tool call (assuming one at a time for now)
                     tool_call = tool_calls[0]
-                    function_name = tool_call.name if hasattr(tool_call, 'name') else None
+                    function_name = (
+                        tool_call.name if hasattr(tool_call, "name") else None
+                    )
 
                     logger.info(f"OpenAI requested tool call: {function_name}")
 
@@ -263,12 +302,10 @@ class OpenAIService:
                         tool_result = {
                             "type": "function_call_output",
                             "call_id": tool_call.call_id,
-                            "output": context_data
+                            "output": context_data,
                         }
 
-                        state_service.add_message_to_conversation(
-                            channel_id, tool_call
-                        )
+                        state_service.add_message_to_conversation(channel_id, tool_call)
                         tool_result_input.append(tool_result)
                         state_service.add_message_to_conversation(
                             channel_id, tool_result
@@ -281,20 +318,29 @@ class OpenAIService:
                             input=tool_result_input,
                             instructions=instructions,
                             tools=tools,
-                            tool_choice="auto"
+                            tool_choice="auto",
                         )
 
                         # Extract the final response
                         final_output = follow_up_response.output
                         for item in final_output:
-                            if hasattr(item, 'type') and item.type == 'message':
+                            if hasattr(item, "type") and item.type == "message":
                                 for content in item.content:
-                                    if hasattr(content, 'type') and content.type == 'output_text':
-                                        logger.debug("Response creation with tool calling successful")
+                                    if (
+                                        hasattr(content, "type")
+                                        and content.type == "output_text"
+                                    ):
+                                        logger.debug(
+                                            "Response creation with tool calling successful"
+                                        )
                                         return clean_openai_response(content.text)
                     elif function_name == "get_youtube_transcript":
                         # Extract URL from tool call arguments
-                        function_params = tool_call.arguments if hasattr(tool_call, 'arguments') else "{}"
+                        function_params = (
+                            tool_call.arguments
+                            if hasattr(tool_call, "arguments")
+                            else "{}"
+                        )
                         url = json.loads(function_params).get("url")
                         logger.info(f"Fetching YouTube transcript for {url}")
                         context_data = await self._fetch_youtube_transcript(url)
@@ -304,12 +350,10 @@ class OpenAIService:
                         tool_result = {
                             "type": "function_call_output",
                             "call_id": tool_call.call_id,
-                            "output": context_data
+                            "output": context_data,
                         }
 
-                        state_service.add_message_to_conversation(
-                            channel_id, tool_call
-                        )
+                        state_service.add_message_to_conversation(channel_id, tool_call)
                         tool_result_input.append(tool_result)
                         state_service.add_message_to_conversation(
                             channel_id, tool_result
@@ -322,16 +366,21 @@ class OpenAIService:
                             input=tool_result_input,
                             instructions=instructions,
                             tools=tools,
-                            tool_choice="auto"
+                            tool_choice="auto",
                         )
 
                         # Extract the final response
                         final_output = follow_up_response.output
                         for item in final_output:
-                            if hasattr(item, 'type') and item.type == 'message':
+                            if hasattr(item, "type") and item.type == "message":
                                 for content in item.content:
-                                    if hasattr(content, 'type') and content.type == 'output_text':
-                                        logger.debug("Response creation with tool calling successful")
+                                    if (
+                                        hasattr(content, "type")
+                                        and content.type == "output_text"
+                                    ):
+                                        logger.debug(
+                                            "Response creation with tool calling successful"
+                                        )
                                         return clean_openai_response(content.text)
                     else:
                         logger.warning(f"Unknown tool call requested: {function_name}")
@@ -340,13 +389,18 @@ class OpenAIService:
                     # No tool calls, return the response directly
                     logger.debug("Response creation successful (no tool calls)")
                     for item in output:
-                        if hasattr(item, 'type') and item.type == 'message':
+                        if hasattr(item, "type") and item.type == "message":
                             for content in item.content:
-                                if hasattr(content, 'type') and content.type == 'output_text':
+                                if (
+                                    hasattr(content, "type")
+                                    and content.type == "output_text"
+                                ):
                                     return clean_openai_response(content.text)
 
                     # Fallback if we can't find the expected structure
-                    return "I received a response but couldn't extract the text content."
+                    return (
+                        "I received a response but couldn't extract the text content."
+                    )
 
             except RateLimitError as e:
                 logger.warning(f"Rate limit hit on attempt {attempt + 1}: {e}")
@@ -362,7 +416,9 @@ class OpenAIService:
 
             except AuthenticationError as e:
                 logger.error(f"Authentication error: {e}")
-                raise OpenAIServiceError("Authentication failed. Please check API key configuration.") from e
+                raise OpenAIServiceError(
+                    "Authentication failed. Please check API key configuration."
+                ) from e
 
             except APIConnectionError as e:
                 logger.warning(
@@ -405,13 +461,19 @@ class OpenAIService:
                 raise
 
             except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
-                logger.error(f"Unexpected error during chat completion with functions: {e}")
+                logger.error(
+                    f"Unexpected error during chat completion with functions: {e}"
+                )
                 raise OpenAIServiceError(f"Unexpected error: {str(e)}") from e
 
         # This should never be reached, but just in case
-        raise OpenAIServiceError("Failed to get chat completion with functions after all retry attempts")
+        raise OpenAIServiceError(
+            "Failed to get chat completion with functions after all retry attempts"
+        )
 
-    async def generate_image(self, prompt: str, model: str, edit_image: Optional[Attachment] = None) -> bytes:
+    async def generate_image(
+        self, prompt: str, model: str, edit_image: Optional[Attachment] = None
+    ) -> bytes:
         """
         Generates an image using the OpenAI API.
 
@@ -441,7 +503,9 @@ class OpenAIService:
                 result = None
 
                 if model == "dall-e-2" or model == "dall-e-3":
-                    result = await client.images.generate(model=model, prompt=prompt, n=1, response_format="b64_json")
+                    result = await client.images.generate(
+                        model=model, prompt=prompt, n=1, response_format="b64_json"
+                    )
                 else:  # assume gpt-image-1 or similar custom model
                     if edit_image:
                         file_obj = edit_image.to_file()
@@ -463,7 +527,9 @@ class OpenAIService:
                     b64_json_data = result.data[0].b64_json
 
                 if not b64_json_data:
-                    raise OpenAIServiceError("Image generation failed, no image data returned.")
+                    raise OpenAIServiceError(
+                        "Image generation failed, no image data returned."
+                    )
 
                 img_bytes = base64.b64decode(b64_json_data)
                 logger.debug("Image generation successful")
@@ -483,7 +549,9 @@ class OpenAIService:
 
             except AuthenticationError as e:
                 logger.error(f"Authentication error: {e}")
-                raise OpenAIServiceError("Authentication failed. Please check API key configuration.") from e
+                raise OpenAIServiceError(
+                    "Authentication failed. Please check API key configuration."
+                ) from e
 
             except APIConnectionError as e:
                 logger.warning(
