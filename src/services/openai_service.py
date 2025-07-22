@@ -301,7 +301,9 @@ class OpenAIService:
                             "output": context_data,
                         }
 
+                        tool_result_input.append(tool_call)
                         state_service.add_message_to_conversation(channel_id, tool_call)
+
                         tool_result_input.append(tool_result)
                         state_service.add_message_to_conversation(
                             channel_id, tool_result
@@ -349,12 +351,13 @@ class OpenAIService:
                             "output": context_data,
                         }
 
+                        tool_result_input.append(tool_call)
                         state_service.add_message_to_conversation(channel_id, tool_call)
+
                         tool_result_input.append(tool_result)
                         state_service.add_message_to_conversation(
                             channel_id, tool_result
                         )
-
                         # Make another request with the tool result
                         logger.debug("Making follow-up request with tool result")
                         follow_up_response = await client.responses.create(
