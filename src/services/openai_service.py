@@ -259,7 +259,7 @@ class OpenAIService:
                         tool_result = {
                             "type": "function_call_output",
                             "call_id": tool_call.id,
-                            "content": context_data
+                            "output": context_data
                         }
 
                         state_service.add_message_to_conversation(
