@@ -323,8 +323,8 @@ class OpenAIService:
                             "output": context_data,
                         }
 
-                        tool_result_input.append(tool_call)
-                        state_service.add_message_to_conversation(channel_id, tool_call)
+                        tool_result_input.append(tool_call.model_dump())
+                        state_service.add_message_to_conversation(channel_id, tool_call.model_dump())
 
                         tool_result_input.append(tool_result)
                         state_service.add_message_to_conversation(
@@ -373,8 +373,8 @@ class OpenAIService:
                             "output": context_data,
                         }
 
-                        tool_result_input.append(tool_call)
-                        state_service.add_message_to_conversation(channel_id, tool_call)
+                        tool_result_input.append(tool_call.model_dump())
+                        state_service.add_message_to_conversation(channel_id, tool_call.model_dump())
 
                         tool_result_input.append(tool_result)
                         state_service.add_message_to_conversation(
