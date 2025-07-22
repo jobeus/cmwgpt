@@ -246,7 +246,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
             {
                 "role": "user",
                 "content": (
-                    '[{"type": "text", "text": "Hello"}, {"type": "image_url", "image_url": {"url": "http://example.com/image.jpg"}}]'
+                    '[{"type": "input_text", "text": "Hello"}, {"type": "input_image", "image_url": "http://example.com/image.jpg"}]'
                 ),
             },
             {"role": "assistant", "content": "I can see your image!"},
@@ -266,8 +266,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Hello"},
-                    {"type": "image_url", "image_url": {"url": "http://example.com/image.jpg"}},
+                    {"type": "input_text", "text": "Hello"},
+                    {"type": "input_image", "image_url": "http://example.com/image.jpg"},
                 ],
             },
             {"role": "assistant", "content": "I can see your image!"},

@@ -268,16 +268,16 @@ class TestBotFunctions(unittest.TestCase):
         """Test JSON content handling in conversations."""
         # Test that JSON serialization works correctly
         content_payload = [
-            {"type": "text", "text": "Hello"},
-            {"type": "image_url", "image_url": {"url": "http://example.com/image.jpg"}},
+            {"type": "input_text", "text": "Hello"},
+            {"type": "input_image", "image_url": "http://example.com/image.jpg"},
         ]
 
         json_content = json.dumps(content_payload)
         parsed_content = json.loads(json_content)
 
         self.assertEqual(parsed_content, content_payload)
-        self.assertEqual(parsed_content[0]["type"], "text")
-        self.assertEqual(parsed_content[1]["type"], "image_url")
+        self.assertEqual(parsed_content[0]["type"], "input_text")
+        self.assertEqual(parsed_content[1]["type"], "input_image")
 
     def test_username_formatting(self):
         """Test username formatting for chat messages."""

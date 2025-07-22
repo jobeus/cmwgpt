@@ -114,8 +114,8 @@ class ChatCommands:
         if attachment:
             logger.info(f"[/chat] Channel {channel_id}: including image URL {attachment.url}")
             content_payload = [
-                {"type": "text", "text": message},
-                {"type": "image_url", "image_url": {"url": attachment.url}},
+                {"type": "input_text", "text": message},
+                {"type": "input_image", "image_url": attachment.url},
             ]
         else:
             content_payload = message
