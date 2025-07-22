@@ -282,8 +282,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
                     {"type": "input_image", "image_url": "http://example.com/image.jpg"},
                 ],
             },
-            {"role": "assistant", "content": "I can see your image!"},
-            {"role": "user", "content": "What do you think?"},
+            {"role": "assistant", "content": [{"type": "output_text", "text": "I can see your image!"}]},
+            {"role": "user", "content": [{"type": "input_text", "text": "What do you think?"}]},
         ]
         system_prompt = "You are a helpful assistant."
 
@@ -301,8 +301,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
                     {"type": "input_image", "image_url": "http://example.com/image.jpg"},
                 ],
             },
-            {"role": "assistant", "content": "I can see your image!"},
-            {"role": "user", "content": "What do you think?"},
+            {"role": "assistant", "content": [{"type": "output_text", "text": "I can see your image!"}]},
+            {"role": "user", "content": [{"type": "input_text", "text": "What do you think?"}]},
         ]
         self.mock_client.responses.create.assert_called_once_with(
             model="gpt-4.1-mini", input=expected_input, instructions=system_prompt, tools=unittest.mock.ANY, tool_choice="auto"
