@@ -149,10 +149,6 @@ class DiscordBotClient:
             pattern = "/tmp/cmwgpt_state_backup_*.json"
             state_files = glob.glob(pattern)
 
-            # Filter out any old restart info files (shouldn't exist with new
-            # approach)
-            state_files = [f for f in state_files if not f.endswith("_restart_info.json")]
-
             was_manual = False
             for state_file in state_files:
                 try:
@@ -168,16 +164,6 @@ class DiscordBotClient:
 
                 except Exception as e:
                     logger.warning(f"Error reading state file {state_file}: {e}")
-
-            # Also clean up any old-style restart info files if they exist
-            old_restart_info_pattern = "/tmp/cmwgpt_state_backup_*_restart_info.json"
-            old_restart_info_files = glob.glob(old_restart_info_pattern)
-            for info_file in old_restart_info_files:
-                try:
-                    os.remove(info_file)
-                    logger.debug(f"Cleaned up old restart info file: {info_file}")
-                except Exception as e:
-                    logger.warning(f"Error cleaning up old restart info file {info_file}: {e}")
 
             return was_manual
 

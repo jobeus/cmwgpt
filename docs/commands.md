@@ -97,7 +97,9 @@ View or change the AI model for the current channel.
 - `model_name` (optional): Model to switch to
 
 **Available Models:**
-- `gpt-4.1-mini` - Balanced performance and cost (recommended)
+- `gpt-5-mini` - Balanced performance and cost (recommended)
+- `gpt-5-nano` - Fast and efficient (good for quick responses)
+- `gpt-4.1-mini` - Balanced performance and cost
 - `gpt-4.1-nano` - Fast and efficient (good for quick responses)
 - `gpt-4o-mini` - Optimized variant (specialized tasks)
 

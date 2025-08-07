@@ -108,7 +108,7 @@ OPENAI_API_KEY=your_openai_api_key_here
 ### Management Commands
 
 - **`/reset`** - Clear conversation history for the current channel
-- **`/model [name]`** - View or change AI model (gpt-4.1-mini, gpt-4.1-nano, gpt-4o-mini)
+- **`/model [name]`** - View or change AI model (gpt-5-mini, gpt-5-nano, gpt-4.1-mini, gpt-4.1-nano)
 - **`/systemprompt set [prompt]`** - Set custom AI personality for the channel
 - **`/systemprompt view`** - View current system prompt
 - **`/systemprompt reset`** - Reset to default system prompt

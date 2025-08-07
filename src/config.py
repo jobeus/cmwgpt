@@ -11,7 +11,7 @@ DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "test-token-for-ci")
 
 VECTOR_STORE_ID = os.getenv("VECTOR_STORE_ID", "")
 # Bot Configuration
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-4.1-nano")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-5-mini")
 DEFAULT_IMAGE_MODEL = os.getenv("DEFAULT_IMAGE_MODEL", "gpt-image-1")
 
 # Default system prompt (fallback if file doesn't exist)

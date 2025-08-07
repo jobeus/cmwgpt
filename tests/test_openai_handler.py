@@ -58,7 +58,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_chat_completion_different_models(self):
         """Test chat completion with different models."""
-        models_to_test = ["gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini"]
+        models_to_test = ["gpt-5-mini", "gpt-5-nano", "gpt-4.1-mini", "gpt-4.1-nano"]
 
         for model in models_to_test:
             with self.subTest(model=model):

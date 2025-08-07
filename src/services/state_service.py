@@ -281,9 +281,6 @@ class StateService:
             pattern = "/tmp/cmwgpt_state_backup_*.json"
             all_temp_files = glob.glob(pattern)
 
-            # Filter out restart info files - we only want the main state files
-            temp_files = [f for f in all_temp_files if not f.endswith("_restart_info.json")]
-
             if not temp_files:
                 logger.info("No temporary state files found")
                 return False
@@ -346,10 +343,7 @@ class StateService:
             for temp_file in all_temp_files:
                 try:
                     os.remove(temp_file)
-                    if temp_file.endswith("_restart_info.json"):
-                        logger.debug(f"Cleaned up restart info file: {temp_file}")
-                    else:
-                        logger.debug(f"Cleaned up temporary file: {temp_file}")
+                    logger.debug(f"Cleaned up temporary file: {temp_file}")
                 except OSError as e:
                     logger.error(f"Failed to clean up temporary file {temp_file}: {e}")
 
@@ -372,10 +366,7 @@ class StateService:
             for temp_file in temp_files:
                 try:
                     os.remove(temp_file)
-                    if temp_file.endswith("_restart_info.json"):
-                        logger.info(f"Cleaned up leftover restart info file: {temp_file}")
-                    else:
-                        logger.info(f"Cleaned up leftover temporary file: {temp_file}")
+                    logger.info(f"Cleaned up leftover temporary file: {temp_file}")
                 except OSError as e:
                     logger.error(f"Failed to clean up temporary file {temp_file}: {e}")
 
