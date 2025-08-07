@@ -226,21 +226,165 @@ class OpenAIService:
             logger.error(f"Error while fetching YouTube transcript: {e}")
             return f"Failed to fetch transcript: {e}"
 
-    def _store_response_id(self, response, channel_id: int, state_service: Any) -> None:
+    def _extract_response_text_and_store_id(self, response, channel_id: int, state_service: Any) -> Optional[str]:
         """
-        Store the OpenAI response ID for conversation continuity.
+        Extract response text and store response ID in one operation.
 
         Args:
             response: OpenAI response object
             channel_id: Discord channel ID
             state_service: State service instance
+
+        Returns:
+            Extracted response text or None if not found
         """
+        # Store response ID first
         if response and hasattr(response, 'id') and channel_id and state_service:
             try:
                 state_service.set_response_id(channel_id, response.id)
                 logger.debug(f"Stored response ID {response.id} for channel {channel_id}")
             except Exception as e:
                 logger.warning(f"Failed to store response ID: {e}")
+
+        # Extract response text
+        if not response or not hasattr(response, 'output'):
+            return None
+
+        for item in response.output:
+            if hasattr(item, "type") and item.type == "message":
+                for content in item.content:
+                    if hasattr(content, "type") and content.type == "output_text":
+                        return clean_openai_response(content.text)
+
+        return None
+
+    def _prepare_api_params(self, model: str, api_input: List[Dict[str, Any]], instructions: str,
+                           tools: List[Dict[str, Any]], previous_response_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Prepare API parameters for OpenAI responses.create call.
+
+        Args:
+            model: Model name
+            api_input: Input messages
+            instructions: System instructions
+            tools: Available tools
+            previous_response_id: Previous response ID for continuity
+
+        Returns:
+            Dictionary of API parameters
+        """
+        params = {
+            "model": model,
+            "input": api_input,
+            "instructions": instructions,
+            "tools": tools,
+            "tool_choice": "auto",
+        }
+
+        if previous_response_id:
+            params["previous_response_id"] = previous_response_id
+
+        return params
+
+    async def _handle_openai_response_with_continuity(self, client, model: str, api_input: List[Dict[str, Any]],
+                                                     instructions: str, tools: List[Dict[str, Any]],
+                                                     channel_id: int, state_service: Any) -> str:
+        """
+        Handle OpenAI API response with conversation continuity in one comprehensive operation.
+
+        Args:
+            client: OpenAI client
+            model: Model name
+            api_input: Input messages
+            instructions: System instructions
+            tools: Available tools
+            channel_id: Discord channel ID
+            state_service: State service instance
+
+        Returns:
+            Response text
+        """
+        # Get previous response ID for continuity
+        previous_response_id = None
+        if channel_id and state_service:
+            previous_response_id = state_service.get_response_id(channel_id)
+            if previous_response_id:
+                logger.debug(f"Using previous response ID for continuity: {previous_response_id}")
+
+        # Make initial API call
+        api_params = self._prepare_api_params(model, api_input, instructions, tools, previous_response_id)
+        response = await client.responses.create(**api_params)
+
+        response_output = response.output[0]
+        if response_output.type == "function_call":
+            # Handle tool calling
+            return await self._handle_tool_call(client, response_output, model, api_input, instructions,
+                                              tools, previous_response_id, channel_id, state_service)
+        else:
+            # No tool calls, extract response and store ID
+            logger.debug("Response creation successful (no tool calls)")
+            response_text = self._extract_response_text_and_store_id(response, channel_id, state_service)
+            return response_text or "I received a response but couldn't extract the text content."
+
+    async def _handle_tool_call(self, client, tool_call, model: str, api_input: List[Dict[str, Any]],
+                               instructions: str, tools: List[Dict[str, Any]], previous_response_id: Optional[str],
+                               channel_id: int, state_service: Any) -> str:
+        """
+        Handle tool call execution and follow-up response.
+
+        Args:
+            client: OpenAI client
+            tool_call: Tool call object
+            model: Model name
+            api_input: Original input messages
+            instructions: System instructions
+            tools: Available tools
+            previous_response_id: Previous response ID
+            channel_id: Discord channel ID
+            state_service: State service instance
+
+        Returns:
+            Response text
+        """
+        function_name = tool_call.name if hasattr(tool_call, "name") else None
+        logger.info(f"OpenAI requested tool call: {function_name}")
+
+        if function_name == "get_user_context":
+            context_data = await self._fetch_user_context()
+        elif function_name == "get_youtube_transcript":
+            function_params = tool_call.arguments if hasattr(tool_call, "arguments") else "{}"
+            url = json.loads(function_params).get("url")
+            logger.info(f"Fetching YouTube transcript for {url}")
+            context_data = await self._fetch_youtube_transcript(url)
+        else:
+            logger.warning(f"Unknown tool call requested: {function_name}")
+            return f"I tried to call an unknown tool: {function_name}"
+
+        # Create tool result input
+        tool_result_input = api_input.copy()
+        tool_result = {
+            "type": "function_call_output",
+            "call_id": tool_call.call_id,
+            "output": context_data,
+        }
+
+        tool_result_input.append(tool_call.model_dump())
+        tool_result_input.append(tool_result)
+
+        # Add to conversation if state service available
+        if state_service and channel_id:
+            state_service.add_message_to_conversation(channel_id, tool_call.model_dump())
+            state_service.add_message_to_conversation(channel_id, tool_result)
+
+        # Make follow-up request
+        logger.debug("Making follow-up request with tool result")
+        follow_up_params = self._prepare_api_params(model, tool_result_input, instructions, tools, previous_response_id)
+        follow_up_response = await client.responses.create(**follow_up_params)
+
+        # Extract response and store ID
+        logger.debug("Response creation with tool calling successful")
+        response_text = self._extract_response_text_and_store_id(follow_up_response, channel_id, state_service)
+        return response_text or "I received a response but couldn't extract the text content."
 
     async def get_chat_completion(
         self,
@@ -324,179 +468,12 @@ class OpenAIService:
                         attempt + 1}/{max_retries})"""
                 )
 
-                # Get previous response ID for conversation continuity
-                previous_response_id = None
-                if channel_id and state_service:
-                    previous_response_id = state_service.get_response_id(channel_id)
-                    if previous_response_id:
-                        logger.debug(f"Using previous response ID for continuity: {previous_response_id}")
+                # Handle OpenAI response with conversation continuity
+                return await self._handle_openai_response_with_continuity(
+                    client, model, api_input, instructions, tools, channel_id, state_service
+                )
 
-                # Prepare API call parameters
-                api_params = {
-                    "model": model,
-                    "input": api_input,
-                    "instructions": instructions,
-                    "tools": tools,
-                    "tool_choice": "auto",
-                }
 
-                # Add previous_response_id if available
-                if previous_response_id:
-                    api_params["previous_response_id"] = previous_response_id
-
-                # Use new OpenAI responses API with tool calling
-                response = await client.responses.create(**api_params)
-
-                response_output = response.output[0]
-                if response_output.type == "function_call":
-                    tool_call = response_output
-                else:
-                    tool_call = None
-
-                if tool_call:
-                    # Process the first tool call (assuming one at a time for now)
-                    function_name = (
-                        tool_call.name if hasattr(tool_call, "name") else None
-                    )
-
-                    logger.info(f"OpenAI requested tool call: {function_name}")
-
-                    if function_name == "get_user_context":
-                        # Fetch user context
-                        context_data = await self._fetch_user_context()
-
-                        # Create a new input with the tool result
-                        tool_result_input = api_input.copy()
-                        tool_result = {
-                            "type": "function_call_output",
-                            "call_id": tool_call.call_id,
-                            "output": context_data,
-                        }
-
-                        tool_result_input.append(tool_call.model_dump())
-                        state_service.add_message_to_conversation(channel_id, tool_call.model_dump())
-
-                        tool_result_input.append(tool_result)
-                        state_service.add_message_to_conversation(
-                            channel_id, tool_result
-                        )
-
-                        # Make another request with the tool result
-                        logger.debug("Making follow-up request with tool result")
-
-                        # Prepare follow-up API call parameters
-                        follow_up_params = {
-                            "model": model,
-                            "input": tool_result_input,
-                            "instructions": instructions,
-                            "tools": tools,
-                            "tool_choice": "auto",
-                        }
-
-                        # Add previous_response_id if available (use the initial response ID)
-                        if previous_response_id:
-                            follow_up_params["previous_response_id"] = previous_response_id
-
-                        follow_up_response = await client.responses.create(**follow_up_params)
-
-                        # Extract the final response
-                        # Store response ID for conversation continuity
-                        self._store_response_id(follow_up_response, channel_id, state_service)
-
-                        final_output = follow_up_response.output
-                        for item in final_output:
-                            if hasattr(item, "type") and item.type == "message":
-                                for content in item.content:
-                                    if (
-                                        hasattr(content, "type")
-                                        and content.type == "output_text"
-                                    ):
-                                        logger.debug(
-                                            "Response creation with tool calling successful"
-                                        )
-                                        return clean_openai_response(content.text)
-                    elif function_name == "get_youtube_transcript":
-                        # Extract URL from tool call arguments
-                        function_params = (
-                            tool_call.arguments
-                            if hasattr(tool_call, "arguments")
-                            else "{}"
-                        )
-                        url = json.loads(function_params).get("url")
-                        logger.info(f"Fetching YouTube transcript for {url}")
-                        context_data = await self._fetch_youtube_transcript(url)
-
-                        # Create a new input with the tool result
-                        tool_result_input = api_input.copy()
-                        tool_result = {
-                            "type": "function_call_output",
-                            "call_id": tool_call.call_id,
-                            "output": context_data,
-                        }
-
-                        tool_result_input.append(tool_call.model_dump())
-                        state_service.add_message_to_conversation(channel_id, tool_call.model_dump())
-
-                        tool_result_input.append(tool_result)
-                        state_service.add_message_to_conversation(
-                            channel_id, tool_result
-                        )
-                        # Make another request with the tool result
-                        logger.debug("Making follow-up request with tool result")
-
-                        # Prepare follow-up API call parameters
-                        follow_up_params = {
-                            "model": model,
-                            "input": tool_result_input,
-                            "instructions": instructions,
-                            "tools": tools,
-                            "tool_choice": "auto",
-                        }
-
-                        # Add previous_response_id if available (use the initial response ID)
-                        if previous_response_id:
-                            follow_up_params["previous_response_id"] = previous_response_id
-
-                        follow_up_response = await client.responses.create(**follow_up_params)
-
-                        # Extract the final response
-                        # Store response ID for conversation continuity
-                        self._store_response_id(follow_up_response, channel_id, state_service)
-
-                        final_output = follow_up_response.output
-                        for item in final_output:
-                            if hasattr(item, "type") and item.type == "message":
-                                for content in item.content:
-                                    if (
-                                        hasattr(content, "type")
-                                        and content.type == "output_text"
-                                    ):
-                                        logger.debug(
-                                            "Response creation with tool calling successful"
-                                        )
-                                        return clean_openai_response(content.text)
-                    else:
-                        logger.warning(f"Unknown tool call requested: {function_name}")
-                        return f"I tried to call an unknown tool: {function_name}"
-                else:
-                    # No tool calls, return the response directly
-                    logger.debug("Response creation successful (no tool calls)")
-                    # Store response ID for conversation continuity
-                    self._store_response_id(response, channel_id, state_service)
-
-                    for item in response.output:
-                        if hasattr(item, "type") and item.type == "message":
-                            for content in item.content:
-                                if (
-                                    hasattr(content, "type")
-                                    and content.type == "output_text"
-                                ):
-                                    return clean_openai_response(content.text)
-
-                    # Fallback if we can't find the expected structure
-                    return (
-                        "I received a response but couldn't extract the text content."
-                    )
 
             except RateLimitError as e:
                 logger.warning(f"Rate limit hit on attempt {attempt + 1}: {e}")

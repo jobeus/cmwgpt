@@ -400,32 +400,47 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored_response_id, "resp_first123")
 
     async def test_response_id_storage_helper(self):
-        """Test the _store_response_id helper method."""
+        """Test the _extract_response_text_and_store_id helper method."""
         from src.services.state_service import StateService
 
         # Set up state service
         state_service = StateService()
         channel_id = 12345
 
-        # Mock response with ID
+        # Mock response with ID and content
+        mock_content = MagicMock()
+        mock_content.type = "output_text"
+        mock_content.text = "Test response text"
+
+        mock_message = MagicMock()
+        mock_message.type = "message"
+        mock_message.content = [mock_content]
+
         mock_response = MagicMock()
         mock_response.id = "resp_test123"
+        mock_response.output = [mock_message]
 
-        # Test storing response ID
-        openai_service._store_response_id(mock_response, channel_id, state_service)
+        # Test extracting response text and storing ID
+        result = openai_service._extract_response_text_and_store_id(mock_response, channel_id, state_service)
+
+        # Verify response text was extracted
+        self.assertEqual(result, "Test response text")
 
         # Verify response ID was stored
         stored_response_id = state_service.get_response_id(channel_id)
         self.assertEqual(stored_response_id, "resp_test123")
 
         # Test with None response (should not crash)
-        openai_service._store_response_id(None, channel_id, state_service)
+        result = openai_service._extract_response_text_and_store_id(None, channel_id, state_service)
+        self.assertIsNone(result)
 
         # Test with None channel_id (should not crash)
-        openai_service._store_response_id(mock_response, None, state_service)
+        result = openai_service._extract_response_text_and_store_id(mock_response, None, state_service)
+        self.assertEqual(result, "Test response text")
 
         # Test with None state_service (should not crash)
-        openai_service._store_response_id(mock_response, channel_id, None)
+        result = openai_service._extract_response_text_and_store_id(mock_response, channel_id, None)
+        self.assertEqual(result, "Test response text")
 
 
 if __name__ == "__main__":

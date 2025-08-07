@@ -80,7 +80,8 @@ Sophisticated mention handling that:
 - Comprehensive error handling and retry logic with exponential backoff
 - Model-agnostic interface supporting multiple OpenAI models
 - Function calling implementation for user context API integration
-- **Conversation continuity**: Tracks OpenAI response IDs per Discord channel for seamless conversation flow using `previous_response_id` parameter
+- **Optimized conversation continuity**: Streamlined response processing with consolidated response ID tracking and text extraction
+- **Consolidated API operations**: Single comprehensive method handles all response types with reduced code duplication
 
 #### Message Service (`message_service.py`)
 - Discord message formatting and sending
@@ -89,14 +90,15 @@ Sophisticated mention handling that:
 - Typing indicators and user feedback
 
 #### State Service (`state_service.py`)
-- Thread-safe in-memory state management for:
+- **Optimized thread-safe in-memory state management** with consolidated data structures:
   - Per-channel conversation histories
   - Per-channel AI model selections
   - Per-channel system prompts
   - **Per-channel OpenAI response IDs** for conversation continuity
   - Active channel tracking for announcements
   - Git SHA tracking for update detection
-- Secure state persistence to temporary files during restarts
+- **Streamlined state persistence** with single consolidated temporary file operations
+- **Batch operations** for efficient multi-field updates and context retrieval
 - Automatic state restoration on startup with cleanup
 
 #### Queue Service (`queue_service.py`)
@@ -288,8 +290,34 @@ The bot implements conversation continuity using OpenAI's `previous_response_id`
 
 ### Implementation Details
 
-- Response IDs are stored in the `StateService` with thread-safe access
-- The `OpenAIService` automatically handles response ID extraction and storage
+- Response IDs are stored in the `StateService` with thread-safe access using consolidated data structures
+- The `OpenAIService` automatically handles response ID extraction and storage in optimized single operations
 - All OpenAI API calls (including tool calling follow-ups) include the previous response ID when available
-- Response IDs are persisted to temporary files in `/tmp/` during bot restarts
+- Response IDs are persisted to temporary files in `/tmp/` during bot restarts using streamlined file operations
+
+## Performance Optimizations
+
+The conversation continuity implementation has been optimized for performance and maintainability:
+
+### Consolidated Data Structures
+- **Single channel data structure**: All per-channel data (conversations, models, system prompts, response IDs) stored in one consolidated dictionary
+- **Reduced lock contention**: Two locks instead of six (channel data lock + global data lock)
+- **Efficient batch operations**: Methods like `get_channel_context()` and `update_channel_context()` handle multiple fields in single operations
+
+### Streamlined State Persistence
+- **Single file operations**: Consolidated temporary file creation instead of multiple file handling
+- **Optimized serialization**: Efficient data extraction from consolidated structures
+- **Reduced I/O overhead**: Fewer file system operations during save/load cycles
+
+### Optimized OpenAI Integration
+- **Consolidated response handling**: Single method `_extract_response_text_and_store_id()` handles both text extraction and ID storage
+- **Unified API parameter preparation**: `_prepare_api_params()` eliminates duplicate parameter setup code
+- **Comprehensive response processing**: `_handle_openai_response_with_continuity()` manages entire response flow in one operation
+- **Eliminated code duplication**: Removed redundant response parsing logic across different code paths
+
+### Benefits
+- **Reduced memory footprint**: Consolidated data structures use less memory
+- **Improved performance**: Fewer function calls and lock acquisitions
+- **Better maintainability**: Less code duplication and clearer separation of concerns
+- **Enhanced reliability**: Atomic operations reduce race conditions
 - Queue-based processing prevents API flooding

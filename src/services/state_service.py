@@ -26,201 +26,211 @@ class StateService:
 
     def __init__(self):
         """Initialize the state service with thread-safe storage."""
-        self._conversations: Dict[int, List[Dict[str, Any]]] = {}
-        self._models: Dict[int, str] = {}
-        self._channel_system_prompts: Dict[int, str] = {}
-        # Track channels where bot has been used
+        # Consolidated channel data structure - all per-channel data in one dict
+        self._channel_data: Dict[int, Dict[str, Any]] = {}
+        # Global data not tied to specific channels
         self._active_channels: set[int] = set()
-        self._last_git_sha: Optional[str] = None  # Track last known git SHA
-        # Track OpenAI response IDs per channel for conversation continuity
-        self._response_ids: Dict[int, str] = {}
+        self._last_git_sha: Optional[str] = None
 
-        # Thread locks for each data structure
-        self._conversations_lock = threading.RLock()
-        self._models_lock = threading.RLock()
-        self._prompts_lock = threading.RLock()
-        self._active_channels_lock = threading.RLock()
-        self._git_sha_lock = threading.RLock()
-        self._response_ids_lock = threading.RLock()
+        # Single lock for all channel data operations (simpler and more efficient)
+        self._channel_data_lock = threading.RLock()
+        self._global_data_lock = threading.RLock()
 
-        logger.info("StateService initialized with thread-safe storage")
+        logger.info("StateService initialized with optimized thread-safe storage")
 
-    # Conversation management
+    # Optimized channel data management - all operations in one place
+    def _ensure_channel_data(self, channel_id: int) -> None:
+        """Ensure channel data structure exists."""
+        if channel_id not in self._channel_data:
+            self._channel_data[channel_id] = {
+                'conversation': [],
+                'model': None,
+                'system_prompt': None,
+                'response_id': None
+            }
+
     def get_conversation(self, channel_id: int) -> Optional[List[Dict[str, Any]]]:
-        """
-        Get conversation history for a channel.
-
-        Args:
-            channel_id: Discord channel ID
-
-        Returns:
-            List of conversation messages or None if not found
-        """
-        with self._conversations_lock:
-            return self._conversations.get(channel_id)
+        """Get conversation history for a channel."""
+        with self._channel_data_lock:
+            if channel_id not in self._channel_data:
+                return None
+            conversation = self._channel_data[channel_id]['conversation']
+            return conversation if conversation else None
 
     def set_conversation(self, channel_id: int, conversation: List[Dict[str, Any]]) -> None:
-        """
-        Set conversation history for a channel.
-
-        Args:
-            channel_id: Discord channel ID
-            conversation: List of conversation messages
-        """
-        with self._conversations_lock:
-            self._conversations[channel_id] = conversation.copy()
-            logger.debug(
-                f"""Set conversation for channel {channel_id} with {
-                len(conversation)} messages"""
-            )
+        """Set conversation history for a channel."""
+        with self._channel_data_lock:
+            self._ensure_channel_data(channel_id)
+            self._channel_data[channel_id]['conversation'] = conversation.copy()
+            logger.debug(f"Set conversation for channel {channel_id} with {len(conversation)} messages")
 
     def add_message_to_conversation(self, channel_id: int, message: Dict[str, Any]) -> None:
-        """
-        Add a message to the conversation history for a channel.
-
-        Args:
-            channel_id: Discord channel ID
-            message: Message dictionary to add
-        """
-        with self._conversations_lock:
-            if channel_id not in self._conversations:
-                self._conversations[channel_id] = []
-            self._conversations[channel_id].append(message)
+        """Add a message to the conversation history for a channel."""
+        with self._channel_data_lock:
+            self._ensure_channel_data(channel_id)
+            self._channel_data[channel_id]['conversation'].append(message)
             logger.debug(f"Added message to conversation for channel {channel_id}")
 
     def clear_conversation(self, channel_id: int) -> None:
-        """
-        Clear conversation history for a channel.
-
-        Args:
-            channel_id: Discord channel ID
-        """
-        with self._conversations_lock:
-            if channel_id in self._conversations:
-                del self._conversations[channel_id]
+        """Clear conversation history for a channel."""
+        with self._channel_data_lock:
+            if channel_id in self._channel_data:
+                # Check if this is the only data for this channel
+                channel_data = self._channel_data[channel_id]
+                if not any([channel_data['model'], channel_data['system_prompt'], channel_data['response_id']]):
+                    # Remove the entire channel entry if no other data exists
+                    del self._channel_data[channel_id]
+                else:
+                    # Just clear the conversation
+                    self._channel_data[channel_id]['conversation'] = []
                 logger.debug(f"Cleared conversation for channel {channel_id}")
 
     def get_all_conversations(self) -> Dict[int, List[Dict[str, Any]]]:
-        """
-        Get all conversation histories (for debugging/admin purposes).
-
-        Returns:
-            Dictionary mapping channel IDs to conversation histories
-        """
-        with self._conversations_lock:
-            return {k: v.copy() for k, v in self._conversations.items()}
+        """Get all conversation histories (for debugging/admin purposes)."""
+        with self._channel_data_lock:
+            return {k: v['conversation'].copy() for k, v in self._channel_data.items() if v['conversation']}
 
     # Response ID management for conversation continuity
     def get_response_id(self, channel_id: int) -> Optional[str]:
-        """
-        Get the last OpenAI response ID for a channel.
-
-        Args:
-            channel_id: Discord channel ID
-
-        Returns:
-            Last response ID for the channel or None if not found
-        """
-        with self._response_ids_lock:
-            return self._response_ids.get(channel_id)
+        """Get the last OpenAI response ID for a channel."""
+        with self._channel_data_lock:
+            return self._channel_data.get(channel_id, {}).get('response_id')
 
     def set_response_id(self, channel_id: int, response_id: str) -> None:
-        """
-        Set the OpenAI response ID for a channel.
-
-        Args:
-            channel_id: Discord channel ID
-            response_id: OpenAI response ID to store
-        """
-        with self._response_ids_lock:
-            self._response_ids[channel_id] = response_id
+        """Set the OpenAI response ID for a channel."""
+        with self._channel_data_lock:
+            self._ensure_channel_data(channel_id)
+            self._channel_data[channel_id]['response_id'] = response_id
             logger.debug(f"Set response ID for channel {channel_id}: {response_id}")
 
     def clear_response_id(self, channel_id: int) -> None:
-        """
-        Clear the OpenAI response ID for a channel.
-
-        Args:
-            channel_id: Discord channel ID
-        """
-        with self._response_ids_lock:
-            if channel_id in self._response_ids:
-                del self._response_ids[channel_id]
+        """Clear the OpenAI response ID for a channel."""
+        with self._channel_data_lock:
+            if channel_id in self._channel_data:
+                self._channel_data[channel_id]['response_id'] = None
                 logger.debug(f"Cleared response ID for channel {channel_id}")
 
     def get_all_response_ids(self) -> Dict[int, str]:
-        """
-        Get all response IDs (for debugging/admin purposes).
-
-        Returns:
-            Dictionary mapping channel IDs to response IDs
-        """
-        with self._response_ids_lock:
-            return self._response_ids.copy()
+        """Get all response IDs (for debugging/admin purposes)."""
+        with self._channel_data_lock:
+            return {k: v['response_id'] for k, v in self._channel_data.items() if v['response_id']}
 
     # Model management
     def get_model(self, channel_id: int) -> Optional[str]:
         """Get the model setting for a channel."""
-        with self._models_lock:
-            return self._models.get(channel_id)
+        with self._channel_data_lock:
+            return self._channel_data.get(channel_id, {}).get('model')
 
     def set_model(self, channel_id: int, model: str) -> None:
         """Set the model for a channel."""
-        with self._models_lock:
-            self._models[channel_id] = model
+        with self._channel_data_lock:
+            self._ensure_channel_data(channel_id)
+            self._channel_data[channel_id]['model'] = model
             logger.debug(f"Set model for channel {channel_id} to {model}")
 
     def get_all_models(self) -> Dict[int, str]:
         """Get all model settings."""
-        with self._models_lock:
-            return self._models.copy()
+        with self._channel_data_lock:
+            return {k: v['model'] for k, v in self._channel_data.items() if v['model']}
 
     # System prompt management
     def get_system_prompt(self, channel_id: int) -> Optional[str]:
         """Get the system prompt for a channel."""
-        with self._prompts_lock:
-            return self._channel_system_prompts.get(channel_id)
+        with self._channel_data_lock:
+            return self._channel_data.get(channel_id, {}).get('system_prompt')
 
     def set_system_prompt(self, channel_id: int, prompt: str) -> None:
         """Set the system prompt for a channel."""
-        with self._prompts_lock:
-            self._channel_system_prompts[channel_id] = prompt
+        with self._channel_data_lock:
+            self._ensure_channel_data(channel_id)
+            self._channel_data[channel_id]['system_prompt'] = prompt
             logger.debug(f"Set system prompt for channel {channel_id}")
 
     def clear_system_prompt(self, channel_id: int) -> None:
         """Clear the system prompt for a channel."""
-        with self._prompts_lock:
-            if channel_id in self._channel_system_prompts:
-                del self._channel_system_prompts[channel_id]
+        with self._channel_data_lock:
+            if channel_id in self._channel_data:
+                self._channel_data[channel_id]['system_prompt'] = None
                 logger.debug(f"Cleared system prompt for channel {channel_id}")
 
     def get_all_system_prompts(self) -> Dict[int, str]:
         """Get all system prompts."""
-        with self._prompts_lock:
-            return self._channel_system_prompts.copy()
+        with self._channel_data_lock:
+            return {k: v['system_prompt'] for k, v in self._channel_data.items() if v['system_prompt']}
+
+    # Optimized batch operations
+    def get_channel_context(self, channel_id: int) -> Dict[str, Any]:
+        """
+        Get all context for a channel in one operation.
+
+        Returns:
+            Dictionary with conversation, model, system_prompt, and response_id
+        """
+        with self._channel_data_lock:
+            if channel_id not in self._channel_data:
+                return {
+                    'conversation': None,
+                    'model': None,
+                    'system_prompt': None,
+                    'response_id': None
+                }
+            return self._channel_data[channel_id].copy()
+
+    def update_channel_context(self, channel_id: int, **updates) -> None:
+        """
+        Update multiple channel context fields in one operation.
+
+        Args:
+            channel_id: Discord channel ID
+            **updates: Fields to update (conversation, model, system_prompt, response_id)
+        """
+        with self._channel_data_lock:
+            self._ensure_channel_data(channel_id)
+
+            for field, value in updates.items():
+                if field in ['conversation', 'model', 'system_prompt', 'response_id']:
+                    if field == 'conversation' and isinstance(value, list):
+                        self._channel_data[channel_id][field] = value.copy()
+                    else:
+                        self._channel_data[channel_id][field] = value
+                    logger.debug(f"Updated {field} for channel {channel_id}")
+
+    def add_message_and_update_response_id(self, channel_id: int, message: Dict[str, Any], response_id: str) -> None:
+        """
+        Add a message to conversation and update response ID in one atomic operation.
+
+        Args:
+            channel_id: Discord channel ID
+            message: Message to add to conversation
+            response_id: New response ID to store
+        """
+        with self._channel_data_lock:
+            self._ensure_channel_data(channel_id)
+            self._channel_data[channel_id]['conversation'].append(message)
+            self._channel_data[channel_id]['response_id'] = response_id
+            logger.debug(f"Added message and updated response ID for channel {channel_id}: {response_id}")
 
     # Utility methods
     def clear_all_data(self) -> None:
         """Clear all stored data (for testing purposes)."""
-        with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock:
-            self._conversations.clear()
-            self._models.clear()
-            self._channel_system_prompts.clear()
+        with self._channel_data_lock, self._global_data_lock:
+            self._channel_data.clear()
             self._active_channels.clear()
             logger.info("Cleared all state data")
 
     def get_stats(self) -> Dict[str, int]:
-        """
-        Get statistics about stored data.
+        """Get statistics about stored data."""
+        with self._channel_data_lock, self._global_data_lock:
+            conversations = sum(1 for v in self._channel_data.values() if v['conversation'])
+            models = sum(1 for v in self._channel_data.values() if v['model'])
+            system_prompts = sum(1 for v in self._channel_data.values() if v['system_prompt'])
+            response_ids = sum(1 for v in self._channel_data.values() if v['response_id'])
 
-        Returns:
-            Dictionary with counts of stored data
-        """
-        with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock:
             return {
-                "conversations": len(self._conversations),
-                "models": len(self._models),
-                "system_prompts": len(self._channel_system_prompts),
+                "conversations": conversations,
+                "models": models,
+                "system_prompts": system_prompts,
+                "response_ids": response_ids,
                 "active_channels": len(self._active_channels),
             }
 
@@ -232,7 +242,7 @@ class StateService:
         Args:
             channel_id: Discord channel ID
         """
-        with self._active_channels_lock:
+        with self._global_data_lock:
             self._active_channels.add(channel_id)
             logger.debug(f"Marked channel {channel_id} as active")
 
@@ -243,12 +253,12 @@ class StateService:
         Returns:
             Set of channel IDs
         """
-        with self._active_channels_lock:
+        with self._global_data_lock:
             return self._active_channels.copy()
 
     def clear_active_channels(self) -> None:
         """Clear the active channels list."""
-        with self._active_channels_lock:
+        with self._global_data_lock:
             self._active_channels.clear()
             logger.info("Cleared active channels list")
 
@@ -260,7 +270,7 @@ class StateService:
         Returns:
             Last known git SHA or None if not available
         """
-        with self._git_sha_lock:
+        with self._global_data_lock:
             return self._last_git_sha
 
     def set_last_git_sha(self, sha: str) -> None:
@@ -270,7 +280,7 @@ class StateService:
         Args:
             sha: Git commit SHA
         """
-        with self._git_sha_lock:
+        with self._global_data_lock:
             self._last_git_sha = sha
             logger.debug(f"Updated last git SHA to: {sha}")
 
@@ -290,14 +300,20 @@ class StateService:
             pid = os.getpid()
             temp_filename = f"/tmp/cmwgpt_state_backup_{timestamp}_{pid}.json"
 
-            # Gather all state data under locks
-            with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock, self._git_sha_lock, self._response_ids_lock:
+            # Gather all state data under consolidated locks
+            with self._channel_data_lock, self._global_data_lock:
+                # Extract data from consolidated structure
+                conversations = {k: v['conversation'] for k, v in self._channel_data.items() if v['conversation']}
+                models = {k: v['model'] for k, v in self._channel_data.items() if v['model']}
+                system_prompts = {k: v['system_prompt'] for k, v in self._channel_data.items() if v['system_prompt']}
+                response_ids = {k: v['response_id'] for k, v in self._channel_data.items() if v['response_id']}
+
                 state_data = {
-                    "conversations": self._conversations.copy(),
-                    "models": self._models.copy(),
-                    "system_prompts": self._channel_system_prompts.copy(),
+                    "conversations": conversations,
+                    "models": models,
+                    "system_prompts": system_prompts,
+                    "response_ids": response_ids,
                     "active_channels": list(self._active_channels),
-                    "response_ids": self._response_ids.copy(),
                     "last_git_sha": self._last_git_sha,
                     "timestamp": timestamp,
                     "pid": pid,
@@ -352,26 +368,39 @@ class StateService:
                         logger.warning(f"Invalid state file format: {temp_file}")
                         continue
 
-                    # Load the state under locks
-                    with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock, self._git_sha_lock, self._response_ids_lock:
-                        # Convert string keys back to integers for channel IDs
-                        self._conversations = {int(k): v for k, v in state_data["conversations"].items()}
-                        self._models = {int(k): v for k, v in state_data["models"].items()}
-                        self._channel_system_prompts = {int(k): v for k, v in state_data["system_prompts"].items()}
-                        # Load active channels (may not exist in older state
-                        # files)
+                    # Load the state under consolidated locks
+                    with self._channel_data_lock, self._global_data_lock:
+                        # Clear existing data
+                        self._channel_data.clear()
+
+                        # Rebuild consolidated channel data structure
+                        conversations = state_data.get("conversations", {})
+                        models = state_data.get("models", {})
+                        system_prompts = state_data.get("system_prompts", {})
+                        response_ids = state_data.get("response_ids", {})
+
+                        # Get all channel IDs from all data sources
+                        all_channel_ids = set()
+                        all_channel_ids.update(int(k) for k in conversations.keys())
+                        all_channel_ids.update(int(k) for k in models.keys())
+                        all_channel_ids.update(int(k) for k in system_prompts.keys())
+                        all_channel_ids.update(int(k) for k in response_ids.keys())
+
+                        # Rebuild channel data structure
+                        for channel_id in all_channel_ids:
+                            self._channel_data[channel_id] = {
+                                'conversation': conversations.get(str(channel_id), []),
+                                'model': models.get(str(channel_id)),
+                                'system_prompt': system_prompts.get(str(channel_id)),
+                                'response_id': response_ids.get(str(channel_id))
+                            }
+
+                        # Load active channels
                         if "active_channels" in state_data:
                             self._active_channels = set(state_data["active_channels"])
                         else:
-                            # If not present, derive from existing
-                            # conversations and models
-                            self._active_channels = set(self._conversations.keys()) | set(self._models.keys())
-
-                        # Load response IDs (may not exist in older state files)
-                        if "response_ids" in state_data:
-                            self._response_ids = {int(k): v for k, v in state_data["response_ids"].items()}
-                        else:
-                            self._response_ids = {}
+                            # Derive from existing data
+                            self._active_channels = all_channel_ids
 
                         # Load last git SHA (may not exist in older state
                         # files)
@@ -381,13 +410,16 @@ class StateService:
                     sha_info = ""
                     if self._last_git_sha:
                         sha_info = f", last git SHA: {self._last_git_sha}"
+                    # Count restored data
+                    conversations_count = sum(1 for v in self._channel_data.values() if v['conversation'])
+                    models_count = sum(1 for v in self._channel_data.values() if v['model'])
+                    prompts_count = sum(1 for v in self._channel_data.values() if v['system_prompt'])
+                    response_ids_count = sum(1 for v in self._channel_data.values() if v['response_id'])
+
                     logger.info(
-                        f"""Restored {
-                        len(self._conversations)} conversations, {
-                        len(self._models)} models, {
-                        len(self._channel_system_prompts)} system prompts, {
-                        len(self._active_channels)} active channels, {
-                        len(self._response_ids)} response IDs{sha_info}"""
+                        f"Restored {conversations_count} conversations, {models_count} models, "
+                        f"{prompts_count} system prompts, {len(self._active_channels)} active channels, "
+                        f"{response_ids_count} response IDs{sha_info}"
                     )
 
                     # Successfully loaded, break out of loop
