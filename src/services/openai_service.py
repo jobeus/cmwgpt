@@ -314,7 +314,7 @@ class OpenAIService:
 
         # Make initial API call
         api_params = self._prepare_api_params(model, api_input, instructions, tools, previous_response_id)
-        logger.debug(f"_handle_openai_response_with_continuity API call with params: \n{json.dump(api_params, indent=2)}\n\n")
+        logger.debug(f"_handle_openai_response_with_continuity API call with params: \n{json.dumps(api_params, indent=2)}\n\n")
         response = await client.responses.create(**api_params)
 
         for response_output in response.output:
@@ -384,7 +384,7 @@ class OpenAIService:
         # Make follow-up request
         logger.debug("Making follow-up request with tool result")
         follow_up_params = self._prepare_api_params(model, tool_result_input, instructions, tools, previous_response_id)
-        logger.debug(f"_handle_tool_call API call with params: \n{json.dump(follow_up_params, indent=2)}\n\n")
+        logger.debug(f"_handle_tool_call API call with params: \n{json.dumps(follow_up_params, indent=2)}\n\n")
         follow_up_response = await client.responses.create(**follow_up_params)
 
         # Extract response and store ID
