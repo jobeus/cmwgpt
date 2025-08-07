@@ -316,16 +316,16 @@ class OpenAIService:
         api_params = self._prepare_api_params(model, api_input, instructions, tools, previous_response_id)
         response = await client.responses.create(**api_params)
 
-        response_output = response.output[0]
-        if response_output.type == "function_call":
-            # Handle tool calling
-            return await self._handle_tool_call(client, response_output, model, api_input, instructions,
-                                              tools, previous_response_id, channel_id, state_service)
-        else:
-            # No tool calls, extract response and store ID
-            logger.debug("Response creation successful (no tool calls)")
-            response_text = self._extract_response_text_and_store_id(response, channel_id, state_service)
-            return response_text or "I received a response but couldn't extract the text content."
+        for response_output in response.output:
+            if response_output.type == "function_call":
+                # Handle tool calling
+                return await self._handle_tool_call(client, response_output, model, api_input, instructions,
+                                                    tools, previous_response_id, channel_id, state_service)
+        
+        # No tool calls, extract response and store ID
+        logger.debug("Response creation successful (no tool calls)")
+        response_text = self._extract_response_text_and_store_id(response, channel_id, state_service)
+        return response_text or "I received a response but couldn't extract the text content."
 
     async def _handle_tool_call(self, client, tool_call, model: str, api_input: List[Dict[str, Any]],
                                instructions: str, tools: List[Dict[str, Any]],
