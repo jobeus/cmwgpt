@@ -260,7 +260,6 @@ class OpenAIService:
 
     def _prepare_api_params(self, model: str, api_input: List[Dict[str, Any]], instructions: str,
                            tools: List[Dict[str, Any]], 
-                           tool_resources: Dict[str, Any],
                            previous_response_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Prepare API parameters for OpenAI responses.create call.
@@ -280,7 +279,6 @@ class OpenAIService:
             "input": api_input,
             "instructions": instructions,
             "tools": tools,
-            "tool_resources": tool_resources,
             "tool_choice": "auto",
         }
 
@@ -291,7 +289,6 @@ class OpenAIService:
 
     async def _handle_openai_response_with_continuity(self, client, model: str, api_input: List[Dict[str, Any]],
                                                      instructions: str, tools: List[Dict[str, Any]],
-                                                     tool_resources: Dict[str, Any],
                                                      channel_id: int, state_service: Any) -> str:
         """
         Handle OpenAI API response with conversation continuity in one comprehensive operation.
@@ -316,14 +313,14 @@ class OpenAIService:
                 logger.debug(f"Using previous response ID for continuity: {previous_response_id}")
 
         # Make initial API call
-        api_params = self._prepare_api_params(model, api_input, instructions, tools, tool_resources, previous_response_id)
+        api_params = self._prepare_api_params(model, api_input, instructions, tools, previous_response_id)
         response = await client.responses.create(**api_params)
 
         response_output = response.output[0]
         if response_output.type == "function_call":
             # Handle tool calling
             return await self._handle_tool_call(client, response_output, model, api_input, instructions,
-                                              tools, tool_resources, previous_response_id, channel_id, state_service)
+                                              tools, previous_response_id, channel_id, state_service)
         else:
             # No tool calls, extract response and store ID
             logger.debug("Response creation successful (no tool calls)")
@@ -331,7 +328,7 @@ class OpenAIService:
             return response_text or "I received a response but couldn't extract the text content."
 
     async def _handle_tool_call(self, client, tool_call, model: str, api_input: List[Dict[str, Any]],
-                               instructions: str, tools: List[Dict[str, Any]], tool_resources: Dict[str, Any],
+                               instructions: str, tools: List[Dict[str, Any]],
                                previous_response_id: Optional[str], channel_id: int, state_service: Any) -> str:
         """
         Handle tool call execution and follow-up response.
@@ -343,7 +340,6 @@ class OpenAIService:
             api_input: Original input messages
             instructions: System instructions
             tools: Available tools
-            tool_resources: Tool resources
             previous_response_id: Previous response ID
             channel_id: Discord channel ID
             state_service: State service instance
@@ -383,7 +379,7 @@ class OpenAIService:
 
         # Make follow-up request
         logger.debug("Making follow-up request with tool result")
-        follow_up_params = self._prepare_api_params(model, tool_result_input, instructions, tools, tool_resources, previous_response_id)
+        follow_up_params = self._prepare_api_params(model, tool_result_input, instructions, tools, previous_response_id)
         follow_up_response = await client.responses.create(**follow_up_params)
 
         # Extract response and store ID
@@ -462,22 +458,18 @@ class OpenAIService:
                     },
                 }
             )
-        
-        # Initialize tool_resources
-        tool_resources = {}
 
         if VECTOR_STORE_ID:
             tools.append(
                 {
-                    "type": "file_search"
+                    "type": "file_search",
+                    "resources": {
+                        "file_search": {
+                            "vector_store_ids": [VECTOR_STORE_ID]
+                        }
+                    }
                 }
             )
-            tool_resources = {
-                "file_search": {
-                    "vector_store_ids": [VECTOR_STORE_ID]
-                }
-            }
-
         max_retries = 3
         base_delay = 1.0
 
@@ -490,7 +482,7 @@ class OpenAIService:
 
                 # Handle OpenAI response with conversation continuity
                 return await self._handle_openai_response_with_continuity(
-                    client, model, api_input, instructions, tools, tool_resources, channel_id, state_service
+                    client, model, api_input, instructions, tools, channel_id, state_service
                 )
 
             except RateLimitError as e:
