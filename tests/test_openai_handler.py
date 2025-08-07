@@ -53,7 +53,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         # Verify API call - should use responses.create with input and instructions
         expected_input = [{"role": "user", "content": "Hello"}]
         self.mock_client.responses.create.assert_called_once_with(
-            model=model, input=expected_input, instructions=system_prompt, tools=unittest.mock.ANY, tool_choice="auto"
+            model=model, input=expected_input, instructions=system_prompt, tools=unittest.mock.ANY, tool_resources=unittest.mock.ANY, tool_choice="auto"
         )
 
     async def test_get_chat_completion_different_models(self):
@@ -305,7 +305,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
             {"role": "user", "content": [{"type": "input_text", "text": "What do you think?"}]},
         ]
         self.mock_client.responses.create.assert_called_once_with(
-            model="gpt-4.1-mini", input=expected_input, instructions=system_prompt, tools=unittest.mock.ANY, tool_choice="auto"
+            model="gpt-4.1-mini", input=expected_input, instructions=system_prompt, tools=unittest.mock.ANY, tool_resources=unittest.mock.ANY, tool_choice="auto"
         )
 
     async def test_conversation_continuity_with_previous_response_id(self):
