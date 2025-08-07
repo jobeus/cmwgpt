@@ -379,6 +379,7 @@ class OpenAIService:
 
         # Add to conversation if state service available
         if state_service and channel_id:
+            state_service.add_message_to_conversation(channel_id, reasoning_item.model_dump())
             state_service.add_message_to_conversation(channel_id, tool_call.model_dump())
             state_service.add_message_to_conversation(channel_id, tool_result)
 
