@@ -51,7 +51,7 @@ class TestConfig(unittest.TestCase):
             import config
             importlib.reload(config)
 
-            self.assertEqual(config.DEFAULT_MODEL, 'gpt-4.1-nano')
+            self.assertEqual(config.DEFAULT_MODEL, 'gpt-5-mini')
             self.assertEqual(config.DEFAULT_IMAGE_MODEL, 'gpt-image-1')
             self.assertTrue(config.INCLUDE_USERNAMES)
             self.assertTrue(config.REPLY_TO_MENTIONS)

@@ -217,6 +217,113 @@ class TestStateService(unittest.TestCase):
         self.assertEqual(len(conversation), 1)
         self.assertEqual(conversation[0], message)
 
+    def test_response_id_management(self):
+        """Test response ID storage and retrieval for conversation continuity."""
+        channel_id = 12345
+        response_id = "resp_abc123"
+
+        # Test getting non-existent response ID
+        self.assertIsNone(self.state_service.get_response_id(channel_id))
+
+        # Test setting and getting response ID
+        self.state_service.set_response_id(channel_id, response_id)
+        retrieved = self.state_service.get_response_id(channel_id)
+        self.assertEqual(retrieved, response_id)
+
+        # Test updating response ID
+        new_response_id = "resp_def456"
+        self.state_service.set_response_id(channel_id, new_response_id)
+        retrieved = self.state_service.get_response_id(channel_id)
+        self.assertEqual(retrieved, new_response_id)
+
+        # Test clearing response ID
+        self.state_service.clear_response_id(channel_id)
+        self.assertIsNone(self.state_service.get_response_id(channel_id))
+
+        # Test clearing non-existent response ID (should not raise error)
+        self.state_service.clear_response_id(99999)
+
+    def test_response_id_isolation(self):
+        """Test that response IDs are isolated per channel."""
+        channel1 = 12345
+        channel2 = 67890
+        response_id1 = "resp_abc123"
+        response_id2 = "resp_def456"
+
+        # Set different response IDs for different channels
+        self.state_service.set_response_id(channel1, response_id1)
+        self.state_service.set_response_id(channel2, response_id2)
+
+        # Verify isolation
+        self.assertEqual(self.state_service.get_response_id(channel1), response_id1)
+        self.assertEqual(self.state_service.get_response_id(channel2), response_id2)
+
+        # Clear one channel's response ID
+        self.state_service.clear_response_id(channel1)
+        self.assertIsNone(self.state_service.get_response_id(channel1))
+        self.assertEqual(self.state_service.get_response_id(channel2), response_id2)
+
+    def test_get_all_response_ids(self):
+        """Test getting all response IDs."""
+        channels = [12345, 67890, 11111]
+        response_ids = ["resp_abc123", "resp_def456", "resp_ghi789"]
+
+        # Set response IDs for multiple channels
+        for channel, response_id in zip(channels, response_ids):
+            self.state_service.set_response_id(channel, response_id)
+
+        # Get all response IDs
+        all_response_ids = self.state_service.get_all_response_ids()
+
+        # Verify all response IDs are present
+        self.assertEqual(len(all_response_ids), 3)
+        for channel, response_id in zip(channels, response_ids):
+            self.assertEqual(all_response_ids[channel], response_id)
+
+    def test_response_id_persistence(self):
+        """Test that response IDs are included in state persistence."""
+        import tempfile
+        import json
+        import os
+
+        channel_id = 12345
+        response_id = "resp_abc123"
+        conversation = [{"role": "user", "content": "Hello"}]
+
+        # Set up state
+        self.state_service.set_response_id(channel_id, response_id)
+        self.state_service.set_conversation(channel_id, conversation)
+
+        # Save state to temp file
+        temp_file = self.state_service.save_state_to_temp_file()
+        self.assertIsNotNone(temp_file)
+
+        try:
+            # Verify the temp file contains response IDs
+            with open(temp_file, 'r', encoding='utf-8') as f:
+                state_data = json.load(f)
+
+            self.assertIn('response_ids', state_data)
+            self.assertEqual(state_data['response_ids'][str(channel_id)], response_id)
+
+            # Create new state service and load from temp file
+            new_state_service = StateService()
+            success = new_state_service.load_state_from_temp_files()
+            self.assertTrue(success)
+
+            # Verify response ID was restored
+            restored_response_id = new_state_service.get_response_id(channel_id)
+            self.assertEqual(restored_response_id, response_id)
+
+            # Verify other data was also restored
+            restored_conversation = new_state_service.get_conversation(channel_id)
+            self.assertEqual(restored_conversation, conversation)
+
+        finally:
+            # Clean up temp file
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+
 
 if __name__ == "__main__":
     unittest.main()

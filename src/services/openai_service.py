@@ -226,6 +226,22 @@ class OpenAIService:
             logger.error(f"Error while fetching YouTube transcript: {e}")
             return f"Failed to fetch transcript: {e}"
 
+    def _store_response_id(self, response, channel_id: int, state_service: Any) -> None:
+        """
+        Store the OpenAI response ID for conversation continuity.
+
+        Args:
+            response: OpenAI response object
+            channel_id: Discord channel ID
+            state_service: State service instance
+        """
+        if response and hasattr(response, 'id') and channel_id and state_service:
+            try:
+                state_service.set_response_id(channel_id, response.id)
+                logger.debug(f"Stored response ID {response.id} for channel {channel_id}")
+            except Exception as e:
+                logger.warning(f"Failed to store response ID: {e}")
+
     async def get_chat_completion(
         self,
         model: str,
@@ -308,14 +324,28 @@ class OpenAIService:
                         attempt + 1}/{max_retries})"""
                 )
 
+                # Get previous response ID for conversation continuity
+                previous_response_id = None
+                if channel_id and state_service:
+                    previous_response_id = state_service.get_response_id(channel_id)
+                    if previous_response_id:
+                        logger.debug(f"Using previous response ID for continuity: {previous_response_id}")
+
+                # Prepare API call parameters
+                api_params = {
+                    "model": model,
+                    "input": api_input,
+                    "instructions": instructions,
+                    "tools": tools,
+                    "tool_choice": "auto",
+                }
+
+                # Add previous_response_id if available
+                if previous_response_id:
+                    api_params["previous_response_id"] = previous_response_id
+
                 # Use new OpenAI responses API with tool calling
-                response = await client.responses.create(
-                    model=model,
-                    input=api_input,
-                    instructions=instructions,
-                    tools=tools,
-                    tool_choice="auto",
-                )
+                response = await client.responses.create(**api_params)
 
                 response_output = response.output[0]
                 if response_output.type == "function_call":
@@ -353,15 +383,26 @@ class OpenAIService:
 
                         # Make another request with the tool result
                         logger.debug("Making follow-up request with tool result")
-                        follow_up_response = await client.responses.create(
-                            model=model,
-                            input=tool_result_input,
-                            instructions=instructions,
-                            tools=tools,
-                            tool_choice="auto",
-                        )
+
+                        # Prepare follow-up API call parameters
+                        follow_up_params = {
+                            "model": model,
+                            "input": tool_result_input,
+                            "instructions": instructions,
+                            "tools": tools,
+                            "tool_choice": "auto",
+                        }
+
+                        # Add previous_response_id if available (use the initial response ID)
+                        if previous_response_id:
+                            follow_up_params["previous_response_id"] = previous_response_id
+
+                        follow_up_response = await client.responses.create(**follow_up_params)
 
                         # Extract the final response
+                        # Store response ID for conversation continuity
+                        self._store_response_id(follow_up_response, channel_id, state_service)
+
                         final_output = follow_up_response.output
                         for item in final_output:
                             if hasattr(item, "type") and item.type == "message":
@@ -402,15 +443,26 @@ class OpenAIService:
                         )
                         # Make another request with the tool result
                         logger.debug("Making follow-up request with tool result")
-                        follow_up_response = await client.responses.create(
-                            model=model,
-                            input=tool_result_input,
-                            instructions=instructions,
-                            tools=tools,
-                            tool_choice="auto",
-                        )
+
+                        # Prepare follow-up API call parameters
+                        follow_up_params = {
+                            "model": model,
+                            "input": tool_result_input,
+                            "instructions": instructions,
+                            "tools": tools,
+                            "tool_choice": "auto",
+                        }
+
+                        # Add previous_response_id if available (use the initial response ID)
+                        if previous_response_id:
+                            follow_up_params["previous_response_id"] = previous_response_id
+
+                        follow_up_response = await client.responses.create(**follow_up_params)
 
                         # Extract the final response
+                        # Store response ID for conversation continuity
+                        self._store_response_id(follow_up_response, channel_id, state_service)
+
                         final_output = follow_up_response.output
                         for item in final_output:
                             if hasattr(item, "type") and item.type == "message":
@@ -429,6 +481,9 @@ class OpenAIService:
                 else:
                     # No tool calls, return the response directly
                     logger.debug("Response creation successful (no tool calls)")
+                    # Store response ID for conversation continuity
+                    self._store_response_id(response, channel_id, state_service)
+
                     for item in response.output:
                         if hasattr(item, "type") and item.type == "message":
                             for content in item.content:

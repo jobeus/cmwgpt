@@ -32,6 +32,8 @@ class StateService:
         # Track channels where bot has been used
         self._active_channels: set[int] = set()
         self._last_git_sha: Optional[str] = None  # Track last known git SHA
+        # Track OpenAI response IDs per channel for conversation continuity
+        self._response_ids: Dict[int, str] = {}
 
         # Thread locks for each data structure
         self._conversations_lock = threading.RLock()
@@ -39,6 +41,7 @@ class StateService:
         self._prompts_lock = threading.RLock()
         self._active_channels_lock = threading.RLock()
         self._git_sha_lock = threading.RLock()
+        self._response_ids_lock = threading.RLock()
 
         logger.info("StateService initialized with thread-safe storage")
 
@@ -106,6 +109,54 @@ class StateService:
         """
         with self._conversations_lock:
             return {k: v.copy() for k, v in self._conversations.items()}
+
+    # Response ID management for conversation continuity
+    def get_response_id(self, channel_id: int) -> Optional[str]:
+        """
+        Get the last OpenAI response ID for a channel.
+
+        Args:
+            channel_id: Discord channel ID
+
+        Returns:
+            Last response ID for the channel or None if not found
+        """
+        with self._response_ids_lock:
+            return self._response_ids.get(channel_id)
+
+    def set_response_id(self, channel_id: int, response_id: str) -> None:
+        """
+        Set the OpenAI response ID for a channel.
+
+        Args:
+            channel_id: Discord channel ID
+            response_id: OpenAI response ID to store
+        """
+        with self._response_ids_lock:
+            self._response_ids[channel_id] = response_id
+            logger.debug(f"Set response ID for channel {channel_id}: {response_id}")
+
+    def clear_response_id(self, channel_id: int) -> None:
+        """
+        Clear the OpenAI response ID for a channel.
+
+        Args:
+            channel_id: Discord channel ID
+        """
+        with self._response_ids_lock:
+            if channel_id in self._response_ids:
+                del self._response_ids[channel_id]
+                logger.debug(f"Cleared response ID for channel {channel_id}")
+
+    def get_all_response_ids(self) -> Dict[int, str]:
+        """
+        Get all response IDs (for debugging/admin purposes).
+
+        Returns:
+            Dictionary mapping channel IDs to response IDs
+        """
+        with self._response_ids_lock:
+            return self._response_ids.copy()
 
     # Model management
     def get_model(self, channel_id: int) -> Optional[str]:
@@ -240,12 +291,13 @@ class StateService:
             temp_filename = f"/tmp/cmwgpt_state_backup_{timestamp}_{pid}.json"
 
             # Gather all state data under locks
-            with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock, self._git_sha_lock:
+            with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock, self._git_sha_lock, self._response_ids_lock:
                 state_data = {
                     "conversations": self._conversations.copy(),
                     "models": self._models.copy(),
                     "system_prompts": self._channel_system_prompts.copy(),
                     "active_channels": list(self._active_channels),
+                    "response_ids": self._response_ids.copy(),
                     "last_git_sha": self._last_git_sha,
                     "timestamp": timestamp,
                     "pid": pid,
@@ -281,14 +333,14 @@ class StateService:
             pattern = "/tmp/cmwgpt_state_backup_*.json"
             all_temp_files = glob.glob(pattern)
 
-            if not temp_files:
+            if not all_temp_files:
                 logger.info("No temporary state files found")
                 return False
 
             # Sort by timestamp (newest first)
-            temp_files.sort(reverse=True)
+            all_temp_files.sort(reverse=True)
 
-            for temp_file in temp_files:
+            for temp_file in all_temp_files:
                 try:
                     logger.info(f"Attempting to load state from: {temp_file}")
 
@@ -301,7 +353,7 @@ class StateService:
                         continue
 
                     # Load the state under locks
-                    with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock, self._git_sha_lock:
+                    with self._conversations_lock, self._models_lock, self._prompts_lock, self._active_channels_lock, self._git_sha_lock, self._response_ids_lock:
                         # Convert string keys back to integers for channel IDs
                         self._conversations = {int(k): v for k, v in state_data["conversations"].items()}
                         self._models = {int(k): v for k, v in state_data["models"].items()}
@@ -314,6 +366,12 @@ class StateService:
                             # If not present, derive from existing
                             # conversations and models
                             self._active_channels = set(self._conversations.keys()) | set(self._models.keys())
+
+                        # Load response IDs (may not exist in older state files)
+                        if "response_ids" in state_data:
+                            self._response_ids = {int(k): v for k, v in state_data["response_ids"].items()}
+                        else:
+                            self._response_ids = {}
 
                         # Load last git SHA (may not exist in older state
                         # files)
@@ -328,7 +386,8 @@ class StateService:
                         len(self._conversations)} conversations, {
                         len(self._models)} models, {
                         len(self._channel_system_prompts)} system prompts, {
-                        len(self._active_channels)} active channels{sha_info}"""
+                        len(self._active_channels)} active channels, {
+                        len(self._response_ids)} response IDs{sha_info}"""
                     )
 
                     # Successfully loaded, break out of loop

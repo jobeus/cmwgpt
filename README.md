@@ -14,6 +14,7 @@ An intelligent Discord bot that brings OpenAI's powerful AI models directly to y
 - **Image Analysis**: Upload images for AI analysis and understanding
 - **Channel-Specific Personalities**: Set custom AI behavior per channel
 - **Smart Context**: Bot understands channel history when mentioned
+- **Conversation Continuity**: Maintains conversation flow across interactions using OpenAI's response tracking
 - **Auto-Update**: Automatically updates from git and restarts with state preservation
 - **Smart Restart**: Built-in restart script with automatic recovery and clean console output
 

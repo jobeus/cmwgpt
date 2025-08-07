@@ -308,6 +308,125 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
             model="gpt-4.1-mini", input=expected_input, instructions=system_prompt, tools=unittest.mock.ANY, tool_choice="auto"
         )
 
+    async def test_conversation_continuity_with_previous_response_id(self):
+        """Test that previous_response_id is included when available."""
+        from src.services.state_service import StateService
+
+        # Mock response for responses API
+        mock_content = MagicMock()
+        mock_content.type = "output_text"
+        mock_content.text = "This is a follow-up response."
+
+        mock_message = MagicMock()
+        mock_message.type = "message"
+        mock_message.content = [mock_content]
+
+        mock_response = MagicMock()
+        mock_response.id = "resp_new123"
+        mock_response.output = [mock_message]
+        self.mock_client.responses.create.return_value = mock_response
+
+        # Set up state service with previous response ID
+        state_service = StateService()
+        channel_id = 12345
+        previous_response_id = "resp_prev456"
+        state_service.set_response_id(channel_id, previous_response_id)
+
+        # Test parameters
+        model = "gpt-4.1-nano"
+        messages = [{"role": "user", "content": [{"type": "input_text", "text": "Follow up question"}]}]
+        system_prompt = "You are a helpful assistant."
+
+        # Call function
+        result = await openai_service.get_chat_completion(
+            model, messages, system_prompt, channel_id=channel_id, state_service=state_service
+        )
+
+        # Verify result
+        self.assertEqual(result, "This is a follow-up response.")
+
+        # Verify API was called with previous_response_id
+        self.mock_client.responses.create.assert_called_once()
+        call_args = self.mock_client.responses.create.call_args
+        self.assertIn('previous_response_id', call_args.kwargs)
+        self.assertEqual(call_args.kwargs['previous_response_id'], previous_response_id)
+
+        # Verify new response ID was stored
+        stored_response_id = state_service.get_response_id(channel_id)
+        self.assertEqual(stored_response_id, "resp_new123")
+
+    async def test_conversation_continuity_without_previous_response_id(self):
+        """Test that previous_response_id is not included when not available."""
+        from src.services.state_service import StateService
+
+        # Mock response for responses API
+        mock_content = MagicMock()
+        mock_content.type = "output_text"
+        mock_content.text = "This is a first response."
+
+        mock_message = MagicMock()
+        mock_message.type = "message"
+        mock_message.content = [mock_content]
+
+        mock_response = MagicMock()
+        mock_response.id = "resp_first123"
+        mock_response.output = [mock_message]
+        self.mock_client.responses.create.return_value = mock_response
+
+        # Set up state service without previous response ID
+        state_service = StateService()
+        channel_id = 12345
+
+        # Test parameters
+        model = "gpt-4.1-nano"
+        messages = [{"role": "user", "content": [{"type": "input_text", "text": "First question"}]}]
+        system_prompt = "You are a helpful assistant."
+
+        # Call function
+        result = await openai_service.get_chat_completion(
+            model, messages, system_prompt, channel_id=channel_id, state_service=state_service
+        )
+
+        # Verify result
+        self.assertEqual(result, "This is a first response.")
+
+        # Verify API was called without previous_response_id
+        self.mock_client.responses.create.assert_called_once()
+        call_args = self.mock_client.responses.create.call_args
+        self.assertNotIn('previous_response_id', call_args.kwargs)
+
+        # Verify new response ID was stored
+        stored_response_id = state_service.get_response_id(channel_id)
+        self.assertEqual(stored_response_id, "resp_first123")
+
+    async def test_response_id_storage_helper(self):
+        """Test the _store_response_id helper method."""
+        from src.services.state_service import StateService
+
+        # Set up state service
+        state_service = StateService()
+        channel_id = 12345
+
+        # Mock response with ID
+        mock_response = MagicMock()
+        mock_response.id = "resp_test123"
+
+        # Test storing response ID
+        openai_service._store_response_id(mock_response, channel_id, state_service)
+
+        # Verify response ID was stored
+        stored_response_id = state_service.get_response_id(channel_id)
+        self.assertEqual(stored_response_id, "resp_test123")
+
+        # Test with None response (should not crash)
+        openai_service._store_response_id(None, channel_id, state_service)
+
+        # Test with None channel_id (should not crash)
+        openai_service._store_response_id(mock_response, None, state_service)
+
+        # Test with None state_service (should not crash)
+        openai_service._store_response_id(mock_response, channel_id, None)
+
 
 if __name__ == "__main__":
     unittest.main()

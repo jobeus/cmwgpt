@@ -80,6 +80,7 @@ Sophisticated mention handling that:
 - Comprehensive error handling and retry logic with exponential backoff
 - Model-agnostic interface supporting multiple OpenAI models
 - Function calling implementation for user context API integration
+- **Conversation continuity**: Tracks OpenAI response IDs per Discord channel for seamless conversation flow using `previous_response_id` parameter
 
 #### Message Service (`message_service.py`)
 - Discord message formatting and sending
@@ -92,6 +93,7 @@ Sophisticated mention handling that:
   - Per-channel conversation histories
   - Per-channel AI model selections
   - Per-channel system prompts
+  - **Per-channel OpenAI response IDs** for conversation continuity
   - Active channel tracking for announcements
   - Git SHA tracking for update detection
 - Secure state persistence to temporary files during restarts
@@ -260,4 +262,34 @@ Sophisticated mention handling that:
 ### Rate Limiting
 - Respect Discord API rate limits
 - OpenAI API rate limiting and retry logic
+
+## Conversation Continuity
+
+The bot implements conversation continuity using OpenAI's `previous_response_id` parameter to maintain context across interactions within each Discord channel.
+
+### How It Works
+
+1. **Response ID Tracking**: When the OpenAI API returns a response, the bot extracts the `id` field from the response object and stores it associated with the specific Discord channel.
+
+2. **Previous Response ID Parameter**: For subsequent API calls in the same channel, the bot includes the `previous_response_id` parameter referencing the most recent response ID for that channel.
+
+3. **Channel Isolation**: Response IDs are tracked separately per Discord channel, ensuring conversations in different channels don't interfere with each other.
+
+4. **First Messages**: For the first message in a new conversation (when no previous response exists for that channel), the `previous_response_id` parameter is omitted.
+
+5. **Persistence**: Response IDs are included in the bot's state persistence system, so conversation continuity is maintained across bot restarts.
+
+### Benefits
+
+- **Improved Context**: OpenAI can better understand the flow of conversation within each channel
+- **More Coherent Responses**: The AI maintains awareness of previous interactions in the same channel
+- **Channel-Specific Context**: Each Discord channel maintains its own conversation thread
+- **Restart Resilience**: Conversation continuity persists through bot restarts and updates
+
+### Implementation Details
+
+- Response IDs are stored in the `StateService` with thread-safe access
+- The `OpenAIService` automatically handles response ID extraction and storage
+- All OpenAI API calls (including tool calling follow-ups) include the previous response ID when available
+- Response IDs are persisted to temporary files in `/tmp/` during bot restarts
 - Queue-based processing prevents API flooding
