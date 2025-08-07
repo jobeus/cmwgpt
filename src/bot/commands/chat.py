@@ -218,7 +218,8 @@ class ChatCommands:
 
         # Reset conversation and model (no system prompt in conversation array)
         conversation = []  # Empty conversation - system prompt will be added dynamically
-        state_service.set_conversation(channel_id, conversation)
+        state_service.clear_conversation(channel_id)
+        state_service.clear_response_id(channel_id)
         state_service.set_model(channel_id, DEFAULT_MODEL)
 
         logger.info(f"[/reset] Channel {channel_id}: conversation reset")

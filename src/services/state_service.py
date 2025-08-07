@@ -83,6 +83,7 @@ class StateService:
                 else:
                     # Just clear the conversation
                     self._channel_data[channel_id]['conversation'] = []
+                    self._channel_data[channel_id]['response_id'] = None
                 logger.debug(f"Cleared conversation for channel {channel_id}")
 
     def get_all_conversations(self) -> Dict[int, List[Dict[str, Any]]]:

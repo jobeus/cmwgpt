@@ -22,7 +22,7 @@ from src.services.restart_handler import restart_handler
 from src.services.announcement_service import announcement_service
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
+logging.basicConfig(format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
 logger = logging.getLogger("discord_bot")
 
 
