@@ -373,8 +373,9 @@ class OpenAIService:
 
         for response in response_output:
             if response.type == "reasoning":
-                del response['status']
-            tool_result_input.append(response.model_dump())
+                tool_result_input.append(response.model_dump(exclude={"status"}))
+            else:
+                tool_result_input.append(response.model_dump())
         tool_result_input.append(tool_result)
 
         # Add to conversation if state service available
