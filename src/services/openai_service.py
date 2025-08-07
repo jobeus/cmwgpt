@@ -316,11 +316,14 @@ class OpenAIService:
         api_params = self._prepare_api_params(model, api_input, instructions, tools, previous_response_id)
         response = await client.responses.create(**api_params)
 
+        reasoning_item = None
         for response_output in response.output:
+            if response_output.type == "reasoning":
+                reasoning_item = response_output
             if response_output.type == "function_call":
                 # Handle tool calling
                 return await self._handle_tool_call(client, response_output, model, api_input, instructions,
-                                                    tools, previous_response_id, channel_id, state_service)
+                                                    tools, reasoning_item, previous_response_id, channel_id, state_service)
         
         # No tool calls, extract response and store ID
         logger.debug("Response creation successful (no tool calls)")
@@ -328,7 +331,7 @@ class OpenAIService:
         return response_text or "I received a response but couldn't extract the text content."
 
     async def _handle_tool_call(self, client, tool_call, model: str, api_input: List[Dict[str, Any]],
-                               instructions: str, tools: List[Dict[str, Any]],
+                               instructions: str, tools: List[Dict[str, Any]], reasoning_item: Optional[str],
                                previous_response_id: Optional[str], channel_id: int, state_service: Any) -> str:
         """
         Handle tool call execution and follow-up response.
@@ -340,6 +343,7 @@ class OpenAIService:
             api_input: Original input messages
             instructions: System instructions
             tools: Available tools
+            reasoning_item: Reasoning item
             previous_response_id: Previous response ID
             channel_id: Discord channel ID
             state_service: State service instance
@@ -369,6 +373,7 @@ class OpenAIService:
             "output": context_data,
         }
 
+        tool_result_input.append(reasoning_item.model_dump())
         tool_result_input.append(tool_call.model_dump())
         tool_result_input.append(tool_result)
 
