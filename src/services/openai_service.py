@@ -341,7 +341,7 @@ class OpenAIService:
             api_input: Original input messages
             instructions: System instructions
             tools: Available tools
-            reasoning_item: Reasoning item
+            response_output: Full response output (including reasoning)
             previous_response_id: Previous response ID
             channel_id: Discord channel ID
             state_service: State service instance
@@ -374,24 +374,24 @@ class OpenAIService:
         for response in response_output:
             if response.type == "reasoning":
                 tool_result_input.append(response.model_dump(exclude={"status"}))
+                if state_service and channel_id:
+                    state_service.add_message_to_conversation(channel_id, response.model_dump(exclude={"status"}))
             else:
                 tool_result_input.append(response.model_dump())
+                if state_service and channel_id:
+                    state_service.add_message_to_conversation(channel_id, response.model_dump())
         tool_result_input.append(tool_result)
-
-        # Add to conversation if state service available
         if state_service and channel_id:
-            for response in response_output:
-                state_service.add_message_to_conversation(channel_id, response.model_dump())
             state_service.add_message_to_conversation(channel_id, tool_result)
 
         # Make follow-up request
-        logger.info("Making follow-up request with tool result")
+        logger.debug("Making follow-up request with tool result")
         follow_up_params = self._prepare_api_params(model, tool_result_input, instructions, tools, previous_response_id)
-        logger.info(f"_handle_tool_call API call with params: \n{json.dumps(follow_up_params, indent=2)}\n\n")
+        logger.debug(f"_handle_tool_call API call with params: \n{json.dumps(follow_up_params, indent=2)}\n\n")
         follow_up_response = await client.responses.create(**follow_up_params)
 
         # Extract response and store ID
-        logger.info("Response creation with tool calling successful")
+        logger.debug("Response creation with tool calling successful")
         response_text = self._extract_response_text_and_store_id(follow_up_response, channel_id, state_service)
         return response_text or "I received a response but couldn't extract the text content."
 
