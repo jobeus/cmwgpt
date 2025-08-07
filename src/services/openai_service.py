@@ -316,7 +316,6 @@ class OpenAIService:
         api_params = self._prepare_api_params(model, api_input, instructions, tools, previous_response_id)
         response = await client.responses.create(**api_params)
 
-        reasoning_item = None
         for response_output in response.output:
             if response_output.type == "function_call":
                 # Handle tool calling
@@ -371,7 +370,8 @@ class OpenAIService:
             "output": context_data,
         }
 
-        tool_result_input.append(response_output)
+        for response in response_output:
+            tool_result_input.append(response.model_dump())
         tool_result_input.append(tool_result)
 
         # Add to conversation if state service available
