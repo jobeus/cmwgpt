@@ -26,43 +26,103 @@ def setup_signal_handlers(bot_client):
 
         # Import here to avoid circular imports
         from src.services.restart_handler import restart_handler
+        from src.services.auto_update_service import auto_update_service
+        from src.services.queue_service import queue_service
+        from src.services.openai_service import openai_service
+
+        async def complete_shutdown():
+            """Complete shutdown sequence with proper cleanup."""
+            try:
+                # Step 1: Save state
+                await restart_handler.perform_graceful_shutdown()
+                print("👋 Graceful shutdown complete")
+
+                # Step 2: Stop background services
+                print("🛑 Stopping background services...")
+
+                # Stop auto-update service (synchronous)
+                try:
+                    auto_update_service.stop()
+                    logger.info("Auto-update service stopped")
+                except Exception as e:
+                    logger.error(f"Error stopping auto-update service: {e}")
+
+                # Stop queue service (asynchronous)
+                try:
+                    await queue_service.stop()
+                    logger.info("Queue service stopped")
+                except Exception as e:
+                    logger.error(f"Error stopping queue service: {e}")
+
+                # Close OpenAI service
+                try:
+                    await openai_service.close()
+                    logger.info("OpenAI service closed")
+                except Exception as e:
+                    logger.error(f"Error closing OpenAI service: {e}")
+
+                # Step 3: Close Discord bot
+                print("🔌 Closing Discord connection...")
+                try:
+                    if bot_client.bot and not bot_client.bot.is_closed():
+                        await bot_client.bot.close()
+                        logger.info("Discord bot closed")
+                except Exception as e:
+                    logger.error(f"Error closing Discord bot: {e}")
+                    print(f"⚠️  Error closing Discord bot: {e}")
+
+                # Step 4: Cancel any remaining tasks
+                print("🧹 Cleaning up remaining tasks...")
+                try:
+                    # Get all tasks except the current one
+                    current_task = asyncio.current_task()
+                    tasks = [task for task in asyncio.all_tasks() if task != current_task]
+
+                    if tasks:
+                        logger.info(f"Cancelling {len(tasks)} remaining tasks")
+                        for task in tasks:
+                            task.cancel()
+
+                        # Wait for tasks to complete cancellation
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                        logger.info("All tasks cancelled")
+
+                except Exception as e:
+                    logger.error(f"Error during task cleanup: {e}")
+
+                print("✅ Shutdown complete, exiting...")
+
+            except Exception as e:
+                logger.error(f"Error during complete shutdown: {e}")
+                print(f"⚠️  Error during shutdown: {e}")
+
+            finally:
+                # Force exit after cleanup
+                import sys
+                sys.exit(0)
 
         try:
-            # Create an event loop if one doesn't exist
+            # Get or create event loop
             try:
                 loop = asyncio.get_event_loop()
             except RuntimeError:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
 
-            # Run the graceful shutdown
+            # Run complete shutdown
             if loop.is_running():
                 # If we're already in an async context, schedule the shutdown
-                asyncio.create_task(restart_handler.perform_graceful_shutdown())
+                asyncio.create_task(complete_shutdown())
             else:
                 # If we're not in an async context, run it
-                loop.run_until_complete(restart_handler.perform_graceful_shutdown())
+                loop.run_until_complete(complete_shutdown())
 
         except Exception as e:
-            logger.error(f"Error during graceful shutdown: {e}")
-            print(f"⚠️  Error during graceful shutdown: {e}")
-
-        print("👋 Graceful shutdown complete")
-
-        # Close the Discord bot gracefully instead of forcing exit
-        try:
-            if bot_client.bot and not bot_client.bot.is_closed():
-                # Schedule the bot to close
-                if loop.is_running():
-                    asyncio.create_task(bot_client.bot.close())
-                else:
-                    loop.run_until_complete(bot_client.bot.close())
-        except Exception as e:
-            logger.error(f"Error closing Discord bot: {e}")
-            print(f"⚠️  Error closing Discord bot: {e}")
-
-        # Don't call sys.exit() - let the bot's run() method handle the
-        # shutdown
+            logger.error(f"Error during signal handler execution: {e}")
+            print(f"⚠️  Critical error during shutdown: {e}")
+            # Force exit if something goes wrong
+            import sys
+            sys.exit(1)
 
     # Register signal handlers
     signal.signal(signal.SIGINT, signal_handler)

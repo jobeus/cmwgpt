@@ -101,6 +101,17 @@ class OpenAIService:
                 self._client = AsyncOpenAI(api_key=OPENAI_API_KEY)
         return self._client
 
+    async def close(self) -> None:
+        """Close the OpenAI client and clean up resources."""
+        if self._client is not None and hasattr(self._client, 'close'):
+            try:
+                await self._client.close()
+                logger.debug("OpenAI client closed")
+            except Exception as e:
+                logger.error(f"Error closing OpenAI client: {e}")
+            finally:
+                self._client = None
+
     async def _fetch_user_context(self) -> str:
         """
         Fetch user context from the configured URL.

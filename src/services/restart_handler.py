@@ -99,7 +99,7 @@ class RestartHandler:
         if self._restart_in_progress:
             logger.warning("Restart already in progress, graceful shutdown will proceed anyway")
 
-        # Set skip cleanup flag to prevent temp file cleanup during shutdown
+        # Set skip cleanup flag to prevent temp file cleanup and duplicate service shutdown
         self._skip_cleanup = True
 
         print("💾 Performing graceful shutdown...")

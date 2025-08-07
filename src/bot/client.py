@@ -261,32 +261,39 @@ class DiscordBotClient:
             logger.error(f"Bot failed to start: {e}")
             raise
         finally:
-            # Ensure services are properly shut down
-            import asyncio
+            # Only perform cleanup if not already handled by signal handler
+            # The signal handler sets skip_cleanup flag to prevent duplicate cleanup
+            if not restart_handler.should_skip_cleanup():
+                logger.info("Performing bot shutdown cleanup...")
 
-            try:
-                # Stop auto-update service
-                auto_update_service.stop()
-                logger.info("Auto-update service stopped")
-            except Exception as e:
-                logger.error(f"Error shutting down auto-update service: {e}")
+                # Ensure services are properly shut down
+                import asyncio
 
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # If we're in an async context, schedule the shutdown
-                    asyncio.create_task(queue_service.stop())
-                else:
-                    # If we're not in an async context, run it
-                    loop.run_until_complete(queue_service.stop())
-            except Exception as e:
-                logger.error(f"Error shutting down queue service: {e}")
+                try:
+                    # Stop auto-update service
+                    auto_update_service.stop()
+                    logger.info("Auto-update service stopped")
+                except Exception as e:
+                    logger.error(f"Error shutting down auto-update service: {e}")
 
-            # Never clean up temporary files during shutdown - they should only be
-            # cleaned up after successful loading on startup
-            logger.debug(
-                "Skipping temp file cleanup during shutdown - files will be cleaned up on next startup after loading"
-            )
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # If we're in an async context, schedule the shutdown
+                        asyncio.create_task(queue_service.stop())
+                    else:
+                        # If we're not in an async context, run it
+                        loop.run_until_complete(queue_service.stop())
+                except Exception as e:
+                    logger.error(f"Error shutting down queue service: {e}")
+
+                # Never clean up temporary files during shutdown - they should only be
+                # cleaned up after successful loading on startup
+                logger.debug(
+                    "Skipping temp file cleanup during shutdown - files will be cleaned up on next startup after loading"
+                )
+            else:
+                logger.info("Skipping bot cleanup - already handled by signal handler")
 
             logger.info("Bot shutdown.")
 
