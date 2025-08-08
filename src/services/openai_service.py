@@ -269,53 +269,6 @@ class OpenAIService:
                         return clean_openai_response(content.text)
 
         return None
-
-    async def _handle_web_search_output(self, response_output) -> Optional[str]:
-        """
-        Handle web search preview output from OpenAI response.
-
-        Args:
-            response_output: Web search response output object
-
-        Returns:
-            Formatted search results text or None if no results
-        """
-        try:
-            if not hasattr(response_output, 'web_search'):
-                logger.warning("Web search output missing web_search attribute")
-                return "🔍 **Web Search:** Missing search data."
-
-            web_search = response_output.web_search
-            if not web_search:
-                logger.warning("Web search attribute is None")
-                return "🔍 **Web Search:** No search data available."
-
-            # Extract search results
-            search_results = []
-            if hasattr(web_search, 'results') and web_search.results:
-                for result in web_search.results:
-                    title = getattr(result, 'title', 'No title')
-                    url = getattr(result, 'url', '')
-                    snippet = getattr(result, 'snippet', '')
-
-                    result_text = f"**{title}**"
-                    if url:
-                        result_text += f"\n{url}"
-                    if snippet:
-                        result_text += f"\n{snippet}"
-
-                    search_results.append(result_text)
-
-            if search_results:
-                formatted_results = "\n\n".join(search_results)
-                return f"🔍 **Web Search Results:**\n\n{formatted_results}"
-            else:
-                return "🔍 **Web Search:** No results found."
-
-        except Exception as e:
-            logger.error(f"Error processing web search output: {e}")
-            return "🔍 **Web Search:** Error processing search results."
-
     async def _handle_image_generation_output(self, response_output) -> tuple[Optional[str], List[discord.File]]:
         """
         Handle image generation output from OpenAI response.
@@ -327,45 +280,22 @@ class OpenAIService:
             Tuple of (description text, list of Discord File objects)
         """
         try:
-            if not hasattr(response_output, 'image_generation'):
-                logger.warning("Image generation output missing image_generation attribute")
+            if not hasattr(response_output, 'image_generation_call'):
+                logger.warning("Image generation output missing image_generation_call attribute")
                 return "🎨 **Image Generation:** Missing image generation data.", []
-
-            image_gen = response_output.image_generation
-            if not image_gen:
-                logger.warning("Image generation attribute is None")
-                return "🎨 **Image Generation:** No image generation data available.", []
 
             files_to_upload = []
 
-            # Process generated images
-            if hasattr(image_gen, 'images') and image_gen.images:
-                for i, image in enumerate(image_gen.images):
-                    try:
-                        # Get image data (could be URL or base64)
-                        image_data = None
-                        if hasattr(image, 'url') and image.url:
-                            # Download image from URL
-                            async with httpx.AsyncClient(timeout=30.0) as client:
-                                response = await client.get(image.url)
-                                response.raise_for_status()
-                                image_data = response.content
-                        elif hasattr(image, 'b64_json') and image.b64_json:
-                            # Decode base64 image
-                            image_data = base64.b64decode(image.b64_json)
+            image_data = base64.b64decode(response_output.image_generation_call.result)
 
-                        if image_data:
-                            # Create Discord file
-                            filename = f"generated_image_{i+1}.png"
-                            discord_file = discord.File(io.BytesIO(image_data), filename=filename)
-                            files_to_upload.append(discord_file)
-                            logger.info(f"Prepared generated image for upload: {filename}")
-                        else:
-                            logger.warning(f"No image data found for generated image {i+1}")
-
-                    except Exception as e:
-                        logger.error(f"Error processing generated image {i+1}: {e}")
-                        continue
+            if image_data:
+                # Create Discord file
+                filename = f"generated_image.png"
+                discord_file = discord.File(io.BytesIO(image_data), filename=filename)
+                files_to_upload.append(discord_file)
+                logger.info(f"Prepared generated image for upload: {filename}")
+            else:
+                logger.warning(f"No image data found for generated image")
 
             # Create description text
             image_count = len(files_to_upload)
@@ -448,12 +378,7 @@ class OpenAIService:
                 # Handle traditional function calling
                 return await self._handle_tool_call(client, response_output, model, api_input, instructions,
                                                     tools, response.output, previous_response_id, channel_id, state_service)
-            elif response_output.type == "web_search_preview":
-                # Handle web search results
-                search_text = await self._handle_web_search_output(response_output)
-                if search_text:
-                    response_parts.append(search_text)
-            elif response_output.type == "image_generation":
+            elif response_output.type == "image_generation_call":
                 # Handle image generation results
                 image_text, image_files = await self._handle_image_generation_output(response_output)
                 if image_text is not None:  # More explicit check - empty string is still valid
