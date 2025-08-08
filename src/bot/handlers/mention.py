@@ -42,7 +42,20 @@ class MentionHandler:
                 reply_content = await openai_service.get_chat_completion(
                     model=model, messages=chat_msgs, system_prompt=system_prompt
                 )
-                await message_service.send_channel_reply(message.channel, reply_content)
+
+                # Handle different response formats
+                if isinstance(reply_content, dict) and "text" in reply_content:
+                    # Response includes files (from image generation or other tools)
+                    reply_text = reply_content["text"]
+                    files_to_upload = reply_content.get("files", [])
+
+                    if files_to_upload:
+                        await message_service.send_channel_reply_with_files(message.channel, reply_text, files_to_upload)
+                    else:
+                        await message_service.send_channel_reply(message.channel, reply_text)
+                else:
+                    # Regular text response
+                    await message_service.send_channel_reply(message.channel, reply_content)
 
             except OpenAIServiceError as e:
                 logger.error(f"OpenAI API error in mention handler: {e}")

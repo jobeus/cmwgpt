@@ -11,8 +11,8 @@ import httpx
 import glob
 import os
 import re
-
-from typing import List, Dict, Any, Optional
+import io
+from typing import List, Dict, Any, Optional, Tuple, Union
 
 from openai import (
     AsyncOpenAI,
@@ -23,6 +23,7 @@ from openai import (
     BadRequestError,
 )
 from discord import Attachment
+import discord
 
 from src.config import OPENAI_API_KEY, IS_TESTING, USER_CONTEXT_URL, VECTOR_STORE_ID
 from src.utils.message_utils import clean_openai_response
@@ -269,8 +270,118 @@ class OpenAIService:
 
         return None
 
+    async def _handle_web_search_output(self, response_output) -> Optional[str]:
+        """
+        Handle web search preview output from OpenAI response.
+
+        Args:
+            response_output: Web search response output object
+
+        Returns:
+            Formatted search results text or None if no results
+        """
+        try:
+            if not hasattr(response_output, 'web_search'):
+                logger.warning("Web search output missing web_search attribute")
+                return None
+
+            web_search = response_output.web_search
+            if not web_search:
+                logger.warning("Web search attribute is None")
+                return None
+
+            # Extract search results
+            search_results = []
+            if hasattr(web_search, 'results') and web_search.results:
+                for result in web_search.results:
+                    title = getattr(result, 'title', 'No title')
+                    url = getattr(result, 'url', '')
+                    snippet = getattr(result, 'snippet', '')
+
+                    result_text = f"**{title}**"
+                    if url:
+                        result_text += f"\n{url}"
+                    if snippet:
+                        result_text += f"\n{snippet}"
+
+                    search_results.append(result_text)
+
+            if search_results:
+                formatted_results = "\n\n".join(search_results)
+                return f"🔍 **Web Search Results:**\n\n{formatted_results}"
+            else:
+                return "🔍 **Web Search:** No results found."
+
+        except Exception as e:
+            logger.error(f"Error processing web search output: {e}")
+            return "🔍 **Web Search:** Error processing search results."
+
+    async def _handle_image_generation_output(self, response_output) -> tuple[Optional[str], List[discord.File]]:
+        """
+        Handle image generation output from OpenAI response.
+
+        Args:
+            response_output: Image generation response output object
+
+        Returns:
+            Tuple of (description text, list of Discord File objects)
+        """
+        try:
+            if not hasattr(response_output, 'image_generation'):
+                logger.warning("Image generation output missing image_generation attribute")
+                return None, []
+
+            image_gen = response_output.image_generation
+            if not image_gen:
+                logger.warning("Image generation attribute is None")
+                return None, []
+
+            files_to_upload = []
+
+            # Process generated images
+            if hasattr(image_gen, 'images') and image_gen.images:
+                for i, image in enumerate(image_gen.images):
+                    try:
+                        # Get image data (could be URL or base64)
+                        image_data = None
+                        if hasattr(image, 'url') and image.url:
+                            # Download image from URL
+                            async with httpx.AsyncClient(timeout=30.0) as client:
+                                response = await client.get(image.url)
+                                response.raise_for_status()
+                                image_data = response.content
+                        elif hasattr(image, 'b64_json') and image.b64_json:
+                            # Decode base64 image
+                            image_data = base64.b64decode(image.b64_json)
+
+                        if image_data:
+                            # Create Discord file
+                            filename = f"generated_image_{i+1}.png"
+                            discord_file = discord.File(io.BytesIO(image_data), filename=filename)
+                            files_to_upload.append(discord_file)
+                            logger.info(f"Prepared generated image for upload: {filename}")
+                        else:
+                            logger.warning(f"No image data found for generated image {i+1}")
+
+                    except Exception as e:
+                        logger.error(f"Error processing generated image {i+1}: {e}")
+                        continue
+
+            # Create description text
+            image_count = len(files_to_upload)
+            if image_count > 0:
+                description = f"🎨 **Generated {image_count} image{'s' if image_count > 1 else ''}:**"
+            else:
+                description = "🎨 **Image Generation:** No images were generated."
+
+            return description, files_to_upload
+
+        except Exception as e:
+            logger.error(f"Error processing image generation output: {e}")
+            return "🎨 **Image Generation:** Error processing generated images.", []
+
     def _prepare_api_params(self, model: str, api_input: List[Dict[str, Any]], instructions: str,
-                           tools: List[Dict[str, Any]], 
+                           tools: List[Dict[str, Any]],
                            previous_response_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Prepare API parameters for OpenAI responses.create call.
@@ -328,16 +439,49 @@ class OpenAIService:
         logger.debug(f"_handle_openai_response_with_continuity API call with params: \n{json.dumps(api_params, indent=2)}\n\n")
         response = await client.responses.create(**api_params)
 
+        # Process all response outputs and collect results
+        response_parts = []
+        files_to_upload = []
+
         for response_output in response.output:
             if response_output.type == "function_call":
-                # Handle tool calling
+                # Handle traditional function calling
                 return await self._handle_tool_call(client, response_output, model, api_input, instructions,
                                                     tools, response.output, previous_response_id, channel_id, state_service)
-        
-        # No tool calls, extract response and store ID
-        logger.debug("Response creation successful (no tool calls)")
-        response_text = self._extract_response_text_and_store_id(response, channel_id, state_service)
-        return response_text or "I received a response but couldn't extract the text content."
+            elif response_output.type == "web_search_preview":
+                # Handle web search results
+                search_text = await self._handle_web_search_output(response_output)
+                if search_text:
+                    response_parts.append(search_text)
+            elif response_output.type == "image_generation":
+                # Handle image generation results
+                image_text, image_files = await self._handle_image_generation_output(response_output)
+                if image_text:
+                    response_parts.append(image_text)
+                if image_files:
+                    files_to_upload.extend(image_files)
+            elif response_output.type == "message":
+                # Handle regular text message
+                for content in response_output.content:
+                    if hasattr(content, "type") and content.type == "output_text":
+                        response_parts.append(clean_openai_response(content.text))
+
+        # Store response ID
+        if response and hasattr(response, 'id') and channel_id and state_service:
+            try:
+                state_service.set_response_id(channel_id, response.id)
+                logger.debug(f"Stored response ID {response.id} for channel {channel_id}")
+            except Exception as e:
+                logger.warning(f"Failed to store response ID: {e}")
+
+        # Combine all response parts
+        final_text = "\n\n".join(response_parts) if response_parts else "I received a response but couldn't extract the text content."
+
+        # Return both text and files for upload
+        if files_to_upload:
+            return {"text": final_text, "files": files_to_upload}
+        else:
+            return final_text
 
     async def _handle_tool_call(self, client, tool_call, model: str, api_input: List[Dict[str, Any]],
                                instructions: str, tools: List[Dict[str, Any]], response_output: List[Dict[str, Any]],
@@ -438,6 +582,8 @@ class OpenAIService:
 
         # Define tools for the new responses API
         tools = [
+            {"type": "image_generation"},
+            {"type": "web_search_preview"},
             {
                 "type": "function",
                 "strict": True,
@@ -454,7 +600,7 @@ class OpenAIService:
                     "required": ["url"],
                     "additionalProperties": False,
                 },
-            }
+            },
         ]
 
         if USER_CONTEXT_URL:
@@ -478,7 +624,7 @@ class OpenAIService:
             tools.append(
                 {
                     "type": "file_search",
-                    "vector_store_ids": [VECTOR_STORE_ID]
+                    "vector_store_ids": [VECTOR_STORE_ID],
                 }
             )
         max_retries = 3

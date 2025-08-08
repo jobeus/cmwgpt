@@ -145,11 +145,20 @@ class ChatCommands:
                     model=current_model, messages=current_conversation, system_prompt=system_prompt, channel_id=channel_id, state_service=state_service
                 )
 
+                # Handle different response formats
+                reply_text = reply
+                files_to_upload = []
+
+                if isinstance(reply, dict) and "text" in reply:
+                    # Response includes files (from image generation or other tools)
+                    reply_text = reply["text"]
+                    files_to_upload = reply.get("files", [])
+
                 # Log and store assistant reply
-                logger.info(f"[/chat] Channel {channel_id} Assistant: {reply}")
+                logger.info(f"[/chat] Channel {channel_id} Assistant: {reply_text}")
                 state_service.add_message_to_conversation(
                     channel_id, {"role": "assistant", "content": [
-                        {"type": "output_text", "text": reply}
+                        {"type": "output_text", "text": reply_text}
                     ]}
                 )
 
@@ -159,7 +168,11 @@ class ChatCommands:
                 else:
                     base_content = message_service.format_prompt_message(message)
 
-                await message_service.send_interaction_followup(interaction, base_content, reply)
+                # Send response with files if any
+                if files_to_upload:
+                    await message_service.send_interaction_followup_with_files(interaction, base_content, reply_text, files_to_upload)
+                else:
+                    await message_service.send_interaction_followup(interaction, base_content, reply_text)
 
             except OpenAIServiceError as e:
                 logger.error(f"OpenAI API error in chat command: {e}")
