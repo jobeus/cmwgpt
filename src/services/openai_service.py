@@ -297,7 +297,7 @@ class OpenAIService:
             # Create description text
             image_count = len(files_to_upload)
             if image_count > 0:
-                description = f"🎨 generated {image_count} image{'s' if image_count > 1 else ''}."
+                description = f""
             else:
                 description = "🎨 error w/ image generation: no images were generated."
 
