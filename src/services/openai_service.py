@@ -269,6 +269,7 @@ class OpenAIService:
                         return clean_openai_response(content.text)
 
         return None
+    
     async def _handle_image_generation_output(self, response_output) -> tuple[Optional[str], List[discord.File]]:
         """
         Handle image generation output from OpenAI response.
@@ -296,9 +297,9 @@ class OpenAIService:
             # Create description text
             image_count = len(files_to_upload)
             if image_count > 0:
-                description = f"🎨 **Generated {image_count} image{'s' if image_count > 1 else ''}:**"
+                description = f"🎨 generated {image_count} image{'s' if image_count > 1 else ''}."
             else:
-                description = "🎨 **Image Generation:** No images were generated."
+                description = "🎨 error w/ image generation: no images were generated."
 
             return description, files_to_upload
 

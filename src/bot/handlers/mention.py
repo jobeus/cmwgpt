@@ -163,10 +163,11 @@ class MentionHandler:
         # Prepare conversation context
         ask_preamble = (
             "Conversation lines are below and represent the last "
-            f"{INCLUDE_NUM_CHATLINES} chat lines in the chat. The last one mentions you "
-            f"but feel free to read all the context, then answer the very last line in the "
-            f"following array ONLY. History is provided in this json array format with "
-            f"{{ 'user':'<id>', 'says': '<content of message>'}}:"
+            f"{INCLUDE_NUM_CHATLINES} chat lines in the chat in order from oldest to newest. "
+            f"The newest one at the bottom mentions you "
+            f"but feel free to read all the context provided, then answer the very last line in the "
+            f"following array ONLY. Each line of history is provided in a json array format like this: "
+            f"{ 'user':'<@ID>', 'says': '<content of message>' }"
         )
 
         # No system prompt in chat_context - will be passed separately
