@@ -385,12 +385,8 @@ class OpenAIService:
         for response in response_output:
             if response.type == "reasoning":
                 tool_result_input.append(response.model_dump(exclude={"status"}))
-                if state_service and channel_id:
-                    state_service.add_message_to_conversation(channel_id, response.model_dump(exclude={"status"}))
             else:
                 tool_result_input.append(response.model_dump())
-                if state_service and channel_id:
-                    state_service.add_message_to_conversation(channel_id, response.model_dump())
         tool_result_input.append(tool_result)
         if state_service and channel_id:
             state_service.add_message_to_conversation(channel_id, tool_result)
