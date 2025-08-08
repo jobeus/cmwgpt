@@ -283,12 +283,12 @@ class OpenAIService:
         try:
             if not hasattr(response_output, 'web_search'):
                 logger.warning("Web search output missing web_search attribute")
-                return None
+                return "🔍 **Web Search:** Missing search data."
 
             web_search = response_output.web_search
             if not web_search:
                 logger.warning("Web search attribute is None")
-                return None
+                return "🔍 **Web Search:** No search data available."
 
             # Extract search results
             search_results = []
@@ -329,12 +329,12 @@ class OpenAIService:
         try:
             if not hasattr(response_output, 'image_generation'):
                 logger.warning("Image generation output missing image_generation attribute")
-                return None, []
+                return "🎨 **Image Generation:** Missing image generation data.", []
 
             image_gen = response_output.image_generation
             if not image_gen:
                 logger.warning("Image generation attribute is None")
-                return None, []
+                return "🎨 **Image Generation:** No image generation data available.", []
 
             files_to_upload = []
 
@@ -456,7 +456,7 @@ class OpenAIService:
             elif response_output.type == "image_generation":
                 # Handle image generation results
                 image_text, image_files = await self._handle_image_generation_output(response_output)
-                if image_text:
+                if image_text is not None:  # More explicit check - empty string is still valid
                     response_parts.append(image_text)
                 if image_files:
                     files_to_upload.extend(image_files)
@@ -475,7 +475,14 @@ class OpenAIService:
                 logger.warning(f"Failed to store response ID: {e}")
 
         # Combine all response parts
-        final_text = "\n\n".join(response_parts) if response_parts else "I received a response but couldn't extract the text content."
+        if response_parts:
+            final_text = "\n\n".join(response_parts)
+        elif files_to_upload:
+            # If we have files but no text, provide a minimal message
+            # This prevents Discord's "Cannot send an empty message" error
+            final_text = "Here are the generated images:"
+        else:
+            final_text = "I received a response but couldn't extract the text content."
 
         # Return both text and files for upload
         if files_to_upload:

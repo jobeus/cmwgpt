@@ -77,7 +77,7 @@ class TestNewOpenAITools(unittest.TestCase):
         result = asyncio.run(self.openai_service._handle_web_search_output(mock_response_output))
 
         # Verify the result
-        self.assertIsNone(result)
+        self.assertEqual(result, "🔍 **Web Search:** Missing search data.")
 
     @patch('src.services.openai_service.httpx.AsyncClient')
     def test_handle_image_generation_output_with_url(self, mock_client_class):
@@ -163,7 +163,7 @@ class TestNewOpenAITools(unittest.TestCase):
         description, files = asyncio.run(self.openai_service._handle_image_generation_output(mock_response_output))
 
         # Verify the result
-        self.assertIsNone(description)
+        self.assertEqual(description, "🎨 **Image Generation:** Missing image generation data.")
         self.assertEqual(len(files), 0)
 
     def test_handle_image_generation_output_multiple_images(self):
@@ -199,6 +199,53 @@ class TestNewOpenAITools(unittest.TestCase):
         self.assertEqual(len(files), 2)
         self.assertIsInstance(files[0], discord.File)
         self.assertIsInstance(files[1], discord.File)
+
+    @patch('src.services.openai_service.AsyncOpenAI')
+    def test_response_with_only_image_generation(self, mock_openai_class):
+        """Test response processing when only image generation output is returned."""
+        # Mock OpenAI client
+        mock_client = AsyncMock()
+        mock_openai_class.return_value = mock_client
+
+        # Mock response with only image generation output
+        fake_image_data = b"fake_image_data"
+        fake_b64_data = base64.b64encode(fake_image_data).decode()
+
+        mock_image = Mock()
+        mock_image.url = None
+        mock_image.b64_json = fake_b64_data
+
+        mock_image_gen = Mock()
+        mock_image_gen.images = [mock_image]
+
+        mock_response_output = Mock()
+        mock_response_output.type = "image_generation"
+        mock_response_output.image_generation = mock_image_gen
+
+        mock_response = Mock()
+        mock_response.output = [mock_response_output]
+        mock_response.id = "test_response_id"
+
+        mock_client.responses.create.return_value = mock_response
+
+        # Mock state service
+        mock_state_service = Mock()
+        mock_state_service.get_response_id.return_value = None
+
+        # Test the method
+        result = asyncio.run(
+            self.openai_service._handle_openai_response_with_continuity(
+                mock_client, "gpt-4", [], "test instructions", [], 12345, mock_state_service
+            )
+        )
+
+        # Verify the result
+        self.assertIsInstance(result, dict)
+        self.assertIn("text", result)
+        self.assertIn("files", result)
+        self.assertIn("🎨 **Generated 1 image:**", result["text"])
+        self.assertEqual(len(result["files"]), 1)
+        self.assertIsInstance(result["files"][0], discord.File)
 
 
 if __name__ == "__main__":
