@@ -282,7 +282,7 @@ class OpenAIService:
         try:
             files_to_upload = []
 
-            image_data = base64.b64decode(response_output.image_generation_call.result)
+            image_data = base64.b64decode(response_output.result)
 
             if image_data:
                 # Create Discord file
