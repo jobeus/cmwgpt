@@ -280,10 +280,6 @@ class OpenAIService:
             Tuple of (description text, list of Discord File objects)
         """
         try:
-            if not hasattr(response_output, 'image_generation_call'):
-                logger.warning("Image generation output missing image_generation_call attribute")
-                return "🎨 **Image Generation:** Missing image generation data.", []
-
             files_to_upload = []
 
             image_data = base64.b64decode(response_output.image_generation_call.result)
