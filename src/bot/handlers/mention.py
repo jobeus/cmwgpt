@@ -167,7 +167,7 @@ class MentionHandler:
             f"The newest one at the bottom mentions you "
             f"but feel free to read all the context provided, then answer the very last line in the "
             f"following array ONLY. Each line of history is provided in a json array format like this: "
-            f"{ 'user':'<@ID>', 'says': '<content of message>' }"
+            "{ 'user':'<@ID>', 'says': '<content of message>' }"
         )
 
         # No system prompt in chat_context - will be passed separately
