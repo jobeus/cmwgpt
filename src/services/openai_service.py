@@ -511,7 +511,14 @@ class OpenAIService:
 
         # Define tools for the new responses API
         tools = [
-            {"type": "image_generation"},
+            {
+                "type": "image_generation",
+                "moderation": "low",
+                "quality": "medium",
+                "format": "jpeg",
+                "size": "auto",
+                "background": "auto",
+            },
             {"type": "web_search_preview"},
             {
                 "type": "function",
