@@ -515,7 +515,6 @@ class OpenAIService:
                 "type": "image_generation",
                 "moderation": "low",
                 "quality": "medium",
-                "format": "jpeg",
                 "size": "auto",
                 "background": "auto",
             },
