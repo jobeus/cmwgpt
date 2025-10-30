@@ -97,17 +97,15 @@ View or change the AI model for the current channel.
 - `model_name` (optional): Model to switch to
 
 **Available Models:**
+- `gpt-5` - Latest GPT-5 model with best performance
 - `gpt-5-mini` - Balanced performance and cost (recommended)
 - `gpt-5-nano` - Fast and efficient (good for quick responses)
-- `gpt-4.1-mini` - Balanced performance and cost
-- `gpt-4.1-nano` - Fast and efficient (good for quick responses)
-- `gpt-4o-mini` - Optimized variant (specialized tasks)
 
 **Examples:**
 ```
 /model                    # View current model
-/model gpt-4.1-mini      # Switch to GPT-4.1-mini
-/model gpt-4.1-nano      # Switch to GPT-4.1-nano
+/model gpt-5-mini        # Switch to GPT-5-mini
+/model gpt-5-nano        # Switch to GPT-5-nano
 ```
 
 **Behavior:**
@@ -296,9 +294,9 @@ Visual feedback during processing:
 
 ### Multi-Model Strategies
 
-- **Quick responses**: Use `gpt-4.1-nano` for fast, simple queries
-- **Complex reasoning**: Use `gpt-4.1-mini` for detailed analysis
-- **Specialized tasks**: Use `gpt-4o-mini` for specific use cases
+- **Quick responses**: Use `gpt-5-nano` for fast, simple queries
+- **Complex reasoning**: Use `gpt-5-mini` for detailed analysis
+- **Best performance**: Use `gpt-5` for the most complex tasks
 
 ### Context Management
 

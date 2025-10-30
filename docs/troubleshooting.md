@@ -160,9 +160,9 @@ sudo systemctl restart discord-bot
    ```env
    # Reduce context size for mentions
    INCLUDE_NUM_CHATLINES=50
-   
+
    # Use more efficient model
-   DEFAULT_MODEL=gpt-4.1-nano
+   DEFAULT_MODEL=gpt-5-nano
    ```
 
 ### Configuration Issues

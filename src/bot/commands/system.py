@@ -37,10 +37,9 @@ class SystemCommands:
         @app_commands.describe(model="Model name to use")
         @app_commands.choices(
             model=[
+                Choice(name="gpt-5", value="gpt-5"),
                 Choice(name="gpt-5-mini", value="gpt-5-mini"),
                 Choice(name="gpt-5-nano", value="gpt-5-nano"),
-                Choice(name="gpt-4.1-mini", value="gpt-4.1-mini"),
-                Choice(name="gpt-4.1-nano", value="gpt-4.1-nano"),
             ]
         )
         async def model_command(interaction: discord.Interaction, model: Optional[str] = None):

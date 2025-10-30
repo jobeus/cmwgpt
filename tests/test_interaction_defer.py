@@ -101,7 +101,7 @@ class TestInteractionDefer(unittest.TestCase):
                 model_command = self.system_commands._create_model_command()
 
                 # Execute the command
-                await model_command.callback(mock_interaction, "gpt-4o-mini")
+                await model_command.callback(mock_interaction, "gpt-5-mini")
 
                 # Verify interaction was deferred first
                 mock_interaction.response.defer.assert_called_once_with(ephemeral=False, thinking=True)

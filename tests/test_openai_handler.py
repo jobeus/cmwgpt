@@ -40,7 +40,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.mock_client.responses.create.return_value = mock_response
 
         # Test parameters
-        model = "gpt-4.1-nano"
+        model = "gpt-5-nano"
         messages = [{"role": "user", "content": "Hello"}]
         system_prompt = "You are a helpful assistant."
 
@@ -58,7 +58,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_chat_completion_different_models(self):
         """Test chat completion with different models."""
-        models_to_test = ["gpt-5-mini", "gpt-5-nano", "gpt-4.1-mini", "gpt-4.1-nano"]
+        models_to_test = ["gpt-5", "gpt-5-mini", "gpt-5-nano"]
 
         for model in models_to_test:
             with self.subTest(model=model):
@@ -252,7 +252,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.mock_client.responses.create.return_value = mock_response
 
         # Test with empty messages
-        result = await openai_service.get_chat_completion("gpt-4.1-nano", [])
+        result = await openai_service.get_chat_completion("gpt-5-nano", [])
 
         # Verify it still works
         self.assertEqual(result, "I'm ready to help!")
@@ -287,7 +287,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         ]
         system_prompt = "You are a helpful assistant."
 
-        result = await openai_service.get_chat_completion("gpt-4.1-mini", messages, system_prompt)
+        result = await openai_service.get_chat_completion("gpt-5-mini", messages, system_prompt)
 
         # Verify it handles complex structure
         self.assertEqual(result, "Complex response")
@@ -333,7 +333,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         state_service.set_response_id(channel_id, previous_response_id)
 
         # Test parameters
-        model = "gpt-4.1-nano"
+        model = "gpt-5-nano"
         messages = [{"role": "user", "content": [{"type": "input_text", "text": "Follow up question"}]}]
         system_prompt = "You are a helpful assistant."
 
@@ -378,7 +378,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         channel_id = 12345
 
         # Test parameters
-        model = "gpt-4.1-nano"
+        model = "gpt-5-nano"
         messages = [{"role": "user", "content": [{"type": "input_text", "text": "First question"}]}]
         system_prompt = "You are a helpful assistant."
 

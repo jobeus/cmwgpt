@@ -90,7 +90,7 @@ class TestStateServicePersistence(unittest.TestCase):
         """Test saving and loading state to/from temporary files."""
         # Set up some test state
         channel_id = 12345
-        self.state_service.set_model(channel_id, "gpt-4o-mini")
+        self.state_service.set_model(channel_id, "gpt-5-mini")
         self.state_service.set_system_prompt(channel_id, "Test prompt")
         self.state_service.add_message_to_conversation(channel_id, {"role": "user", "content": "Hello"})
 

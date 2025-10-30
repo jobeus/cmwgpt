@@ -58,7 +58,7 @@ class TestStateService(unittest.TestCase):
     def test_model_management(self):
         """Test model storage and retrieval."""
         channel_id = 12345
-        model = "gpt-4.1-mini"
+        model = "gpt-5-mini"
 
         # Test setting and getting model
         self.state_service.set_model(channel_id, model)

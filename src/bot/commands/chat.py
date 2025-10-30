@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 
 from src.config import get_system_prompt, DEFAULT_MODEL, INCLUDE_USERNAMES
-from src.utils.discord_helper import get_mention_legend
+from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url
 from src.services.openai_service import openai_service, OpenAIServiceError
 from src.services.message_service import message_service
 from src.services.queue_service import queue_service
@@ -112,11 +112,22 @@ class ChatCommands:
 
         # Construct content payload for OpenAI
         if attachment:
-            content_payload = [
-                {"type": "input_text", "text": message},
-                {"type": "input_image", "image_url": attachment.url},
-            ]
-            logger.info(f"[/chat] Channel {channel_id}: payload: {json.dumps(content_payload)}")
+            try:
+                # Convert attachment to base64 data URL to prevent expiration issues
+                image_data_url = await attachment_to_base64_data_url(attachment)
+                content_payload = [
+                    {"type": "input_text", "text": message},
+                    {"type": "input_image", "image_url": image_data_url},
+                ]
+                logger.info(f"[/chat] Channel {channel_id}: payload with base64 image ({len(image_data_url)} chars)")
+            except Exception as e:
+                logger.error(f"[/chat] Channel {channel_id}: Failed to convert attachment to base64: {e}")
+                # Fall back to URL (will work for immediate request but may expire later)
+                content_payload = [
+                    {"type": "input_text", "text": message},
+                    {"type": "input_image", "image_url": attachment.url},
+                ]
+                logger.warning(f"[/chat] Channel {channel_id}: Using attachment URL as fallback (may expire)")
         else:
             content_payload = [
                 {"type": "input_text", "text": message}

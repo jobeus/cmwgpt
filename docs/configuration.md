@@ -48,12 +48,12 @@ The bot is configured through environment variables defined in a `.env` file. Co
 #### `DEFAULT_MODEL`
 - **Required**: No
 - **Description**: Default OpenAI model to use for chat
-- **Example**: `DEFAULT_MODEL=gpt-4.1-mini`
-- **Default**: `gpt-4.1-mini`
+- **Example**: `DEFAULT_MODEL=gpt-5-mini`
+- **Default**: `gpt-5-mini`
 - **Available Options**:
-  - `gpt-4.1-mini` - Balanced performance and cost
-  - `gpt-4.1-nano` - Fast and efficient
-  - `gpt-4o-mini` - Optimized variant
+  - `gpt-5` - Latest GPT-5 model with best performance
+  - `gpt-5-mini` - Balanced performance and cost (recommended)
+  - `gpt-5-nano` - Fast and efficient for quick responses
 
 #### `DEFAULT_IMAGE_MODEL`
 - **Required**: No
@@ -125,7 +125,7 @@ OPENAI_API_KEY=sk-1234567890abcdef1234567890abcdef12345678
 DISCORD_CHANNEL_ID=1234567890123456789
 
 # Optional - AI Behavior (system prompt now in system_prompt.txt file)
-DEFAULT_MODEL=gpt-4.1-mini
+DEFAULT_MODEL=gpt-5-mini
 DEFAULT_IMAGE_MODEL=dall-e-3
 
 # Optional - Bot Behavior
@@ -249,7 +249,7 @@ Some settings can be changed without restarting the bot:
 
 ```bash
 # Change AI model for current channel
-/model gpt-4.1-nano
+/model gpt-5-nano
 
 # Set custom personality for current channel
 /systemprompt set You are a creative writing assistant
@@ -269,7 +269,7 @@ OPENAI_API_KEY=your_openai_key
 
 # More verbose for debugging
 SYSTEM_PROMPT="You are a helpful assistant in development mode"
-DEFAULT_MODEL=gpt-4.1-nano  # Cheaper for testing
+DEFAULT_MODEL=gpt-5-nano  # Faster for testing
 INCLUDE_NUM_CHATLINES=20    # Fewer lines for testing
 ```
 
@@ -281,7 +281,7 @@ OPENAI_API_KEY=your_openai_key
 
 # Optimized for production
 SYSTEM_PROMPT="You are a helpful assistant"
-DEFAULT_MODEL=gpt-4.1-mini
+DEFAULT_MODEL=gpt-5-mini
 INCLUDE_NUM_CHATLINES=100
 INCLUDE_USERNAMES=true
 REPLY_TO_MENTIONS=true
