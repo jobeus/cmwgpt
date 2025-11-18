@@ -199,8 +199,18 @@ class OpenAIService:
 
                 # Add proxy if configured
                 if PROXY_ADDRESS:
-                    yt_cmd.extend(["--proxy", f"http://{PROXY_ADDRESS}"])
-                    logger.debug(f"Using proxy for yt-dlp: {PROXY_ADDRESS}")
+                    # Convert proxy format from host:port:username:password
+                    # to yt-dlp format http://username:password@host:port
+                    parts = PROXY_ADDRESS.split(":")
+                    if len(parts) == 4:
+                        host, port, username, password = parts
+                        proxy_url = f"http://{username}:{password}@{host}:{port}"
+                    else:
+                        # If not in expected format, assume it's already formatted correctly
+                        proxy_url = f"http://{PROXY_ADDRESS}"
+
+                    yt_cmd.extend(["--proxy", proxy_url])
+                    logger.debug(f"Using proxy for yt-dlp: {host}:{port}")
 
                 yt_cmd.append(video_url)
 
