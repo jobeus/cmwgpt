@@ -25,7 +25,7 @@ from openai import (
 from discord import Attachment
 import discord
 
-from src.config import OPENAI_API_KEY, IS_TESTING, USER_CONTEXT_URL, VECTOR_STORE_ID
+from src.config import OPENAI_API_KEY, IS_TESTING, USER_CONTEXT_URL, VECTOR_STORE_ID, PROXY_ADDRESS
 from src.utils.message_utils import clean_openai_response
 
 logger = logging.getLogger(__name__)
@@ -183,6 +183,7 @@ class OpenAIService:
                 # --sub-lang en    : request English subtitles
                 # --sub-format vtt : force output format to WebVTT
                 # -o {tmpdir}/transcript.%(ext)s : write to a predictable filename with .vtt extension
+                # --proxy          : use proxy if PROXY_ADDRESS is configured
                 yt_cmd = [
                     "yt-dlp",
                     "--skip-download",
@@ -194,8 +195,14 @@ class OpenAIService:
                     "vtt",
                     "-o",
                     os.path.join(tmpdir, "transcript.%(ext)s"),
-                    video_url,
                 ]
+
+                # Add proxy if configured
+                if PROXY_ADDRESS:
+                    yt_cmd.extend(["--proxy", f"http://{PROXY_ADDRESS}"])
+                    logger.debug(f"Using proxy for yt-dlp: {PROXY_ADDRESS}")
+
+                yt_cmd.append(video_url)
 
                 logger.debug(f"Running yt-dlp to fetch subtitles: {' '.join(yt_cmd)}")
                 proc = await asyncio.create_subprocess_exec(
