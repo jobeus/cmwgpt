@@ -39,7 +39,7 @@ class ImageCommands:
         )
         @app_commands.choices(
             model=[
-                Choice(name="gpt-image-1", value="gpt-image-1"),
+                Choice(name="gpt-image-1.5", value="gpt-image-1.5"),
                 Choice(name="dall-e-2", value="dall-e-2"),
                 Choice(name="dall-e-3", value="dall-e-3"),
             ]

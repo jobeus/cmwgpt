@@ -59,7 +59,7 @@ The bot is configured through environment variables defined in a `.env` file. Co
 - **Required**: No
 - **Description**: Default model for image generation
 - **Example**: `DEFAULT_IMAGE_MODEL=dall-e-3`
-- **Default**: `gpt-image-1`
+- **Default**: `gpt-image-1.5`
 - **Available Options**:
   - `dall-e-2` - DALL-E 2 model
   - `dall-e-3` - DALL-E 3 model (higher quality)

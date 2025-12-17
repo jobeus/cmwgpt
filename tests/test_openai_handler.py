@@ -128,7 +128,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, b"dalle3_image_data")
 
     async def test_generate_image_custom_model_without_edit(self):
-        """Test image generation with custom model (gpt-image-1) without editing."""
+        """Test image generation with custom model (gpt-image-1.5) without editing."""
         # Mock response
         mock_data = MagicMock()
         mock_data.b64_json = base64.b64encode(b"custom_image_data").decode()
@@ -138,7 +138,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
         # Test parameters
         prompt = "A custom generated image"
-        model = "gpt-image-1"
+        model = "gpt-image-1.5"
 
         # Call function
         result = await openai_service.generate_image(prompt, model)
@@ -165,7 +165,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
         # Test parameters
         prompt = "Make it more colorful"
-        model = "gpt-image-1"
+        model = "gpt-image-1.5"
 
         # Call function
         result = await openai_service.generate_image(prompt, model, edit_image=mock_attachment)

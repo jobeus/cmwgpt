@@ -72,7 +72,7 @@ Generate or edit images using AI.
 **Available Models:**
 - `dall-e-2` - DALL-E 2 (faster, lower cost)
 - `dall-e-3` - DALL-E 3 (higher quality, more detailed)
-- `gpt-image-1` - GPT Image model
+- `gpt-image-1.5` - GPT Image model
 
 **Examples:**
 ```

@@ -698,7 +698,7 @@ class OpenAIService:
                     result = await client.images.generate(
                         model=model, prompt=prompt, n=1, response_format="b64_json"
                     )
-                else:  # assume gpt-image-1 or similar custom model
+                else:  # assume gpt-image-1.5 or similar custom model
                     if edit_image:
                         file_obj = edit_image.to_file()
                         result = await client.images.edit(
