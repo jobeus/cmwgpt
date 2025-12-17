@@ -703,7 +703,7 @@ class OpenAIService:
                         file_obj = await edit_image.read()
                         result = await client.images.edit(
                             model=model,
-                            image=[file_obj],
+                            image=[(edit_image.filename or "image", file_obj, edit_image.content_type)],
                             # image expects a list of file-like objects
                             prompt=prompt,
                         )
