@@ -700,7 +700,7 @@ class OpenAIService:
                     )
                 else:  # assume gpt-image-1.5 or similar custom model
                     if edit_image:
-                        file_obj = await edit_image.to_file()
+                        file_obj = await edit_image.read()
                         result = await client.images.edit(
                             model=model,
                             image=[file_obj],
