@@ -182,7 +182,7 @@ class OpenAIService:
                 # --write-auto-sub: grab the auto-generated subtitles if no manual ones exist
                 # --sub-lang en    : request English subtitles
                 # --sub-format vtt : force output format to WebVTT
-                # -o {tmpdir}/transcript.%(ext)s : write to a predictable filename with .vtt extension
+                # -o {tmpdir}/transcript : write to a predictable filename with .vtt extension
                 # --proxy          : use proxy if PROXY_ADDRESS is configured
                 yt_cmd = [
                     "yt-dlp",
@@ -194,7 +194,7 @@ class OpenAIService:
                     "--sub-format",
                     "vtt",
                     "-o",
-                    os.path.join(tmpdir, "transcript.%(ext)s"),
+                    os.path.join(tmpdir, "transcript"),
                 ]
 
                 # Add proxy if configured
@@ -238,7 +238,7 @@ class OpenAIService:
                     return f"yt-dlp failed to fetch subtitles: {err_output}"
 
                 # Locate the downloaded .vtt file in the temporary directory
-                vtt_files = glob.glob(os.path.join(tmpdir, "*.vtt"))
+                vtt_files = glob.glob(os.path.join(tmpdir, "transcript.*"))
                 if not vtt_files:
                     return "No English subtitles found for this video."
                 vtt_path = vtt_files[0]
