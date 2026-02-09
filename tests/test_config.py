@@ -52,7 +52,7 @@ class TestConfig(unittest.TestCase):
             importlib.reload(config)
 
             self.assertEqual(config.DEFAULT_MODEL, 'gpt-5-mini')
-            self.assertEqual(config.DEFAULT_IMAGE_MODEL, 'gpt-image-1')
+            self.assertEqual(config.DEFAULT_IMAGE_MODEL, 'gpt-image-1.5')
             self.assertTrue(config.INCLUDE_USERNAMES)
             self.assertTrue(config.REPLY_TO_MENTIONS)
             self.assertEqual(config.INCLUDE_NUM_CHATLINES, 100)

@@ -27,46 +27,36 @@ class TestImageGenerationTool(unittest.TestCase):
         fake_b64_data = base64.b64encode(fake_image_data).decode()
 
         # Mock image generation call response
-        mock_image_gen_call = Mock()
-        mock_image_gen_call.result = fake_b64_data
-
         mock_response_output = Mock()
-        mock_response_output.image_generation_call = mock_image_gen_call
+        mock_response_output.result = fake_b64_data
 
         # Test the method
         description, files = asyncio.run(self.openai_service._handle_image_generation_output(mock_response_output))
 
         # Verify the result
-        self.assertIsNotNone(description)
-        self.assertIn("🎨 **Generated 1 image:**", description)
+        self.assertIsNone(description)
         self.assertEqual(len(files), 1)
         self.assertIsInstance(files[0], discord.File)
 
     def test_handle_image_generation_output_with_empty_result(self):
         """Test handling image generation output with empty base64 result."""
         # Mock image generation call response with empty result
-        mock_image_gen_call = Mock()
-        mock_image_gen_call.result = ""
-
         mock_response_output = Mock()
-        mock_response_output.image_generation_call = mock_image_gen_call
+        mock_response_output.result = ""
 
         # Test the method
         description, files = asyncio.run(self.openai_service._handle_image_generation_output(mock_response_output))
 
         # Verify the result
         self.assertIsNotNone(description)
-        self.assertEqual(description, "🎨 **Image Generation:** No images were generated.")
+        self.assertEqual(description, "🎨 error w/ image generation: no images were generated.")
         self.assertEqual(len(files), 0)
 
     def test_handle_image_generation_output_decode_error(self):
         """Test handling image generation output with invalid base64 data."""
         # Mock image generation call response with invalid base64
-        mock_image_gen_call = Mock()
-        mock_image_gen_call.result = "invalid_base64_data"
-
         mock_response_output = Mock()
-        mock_response_output.image_generation_call = mock_image_gen_call
+        mock_response_output.result = "invalid_base64_data"
 
         # Test the method
         description, files = asyncio.run(self.openai_service._handle_image_generation_output(mock_response_output))
@@ -77,16 +67,17 @@ class TestImageGenerationTool(unittest.TestCase):
         self.assertEqual(len(files), 0)
 
     def test_handle_image_generation_output_missing_attribute(self):
-        """Test handling image generation output with missing image_generation_call attribute."""
+        """Test handling image generation output with missing result attribute."""
         mock_response_output = Mock()
-        # Don't set image_generation_call attribute - Mock will return another Mock when accessed
-        del mock_response_output.image_generation_call  # Ensure the attribute doesn't exist
+        # Don't set result attribute - Mock will return another Mock when accessed
+        # But base64.b64decode will fail on a Mock, which catches the exception
+        del mock_response_output.result
 
         # Test the method
         description, files = asyncio.run(self.openai_service._handle_image_generation_output(mock_response_output))
 
         # Verify the result
-        self.assertEqual(description, "🎨 **Image Generation:** Missing image generation data.")
+        self.assertEqual(description, "🎨 **Image Generation:** Error processing generated images.")
         self.assertEqual(len(files), 0)
 
 
@@ -102,12 +93,9 @@ class TestImageGenerationTool(unittest.TestCase):
         fake_image_data = b"fake_image_data"
         fake_b64_data = base64.b64encode(fake_image_data).decode()
 
-        mock_image_gen_call = Mock()
-        mock_image_gen_call.result = fake_b64_data
-
         mock_response_output = Mock()
         mock_response_output.type = "image_generation_call"
-        mock_response_output.image_generation_call = mock_image_gen_call
+        mock_response_output.result = fake_b64_data
 
         mock_response = Mock()
         mock_response.output = [mock_response_output]
@@ -130,7 +118,7 @@ class TestImageGenerationTool(unittest.TestCase):
         self.assertIsInstance(result, dict)
         self.assertIn("text", result)
         self.assertIn("files", result)
-        self.assertIn("🎨 **Generated 1 image:**", result["text"])
+        self.assertEqual(result["text"], "Here are the generated images:")
         self.assertEqual(len(result["files"]), 1)
         self.assertIsInstance(result["files"][0], discord.File)
 

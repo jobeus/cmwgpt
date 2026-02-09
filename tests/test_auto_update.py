@@ -113,7 +113,7 @@ class TestStateServicePersistence(unittest.TestCase):
         self.assertTrue(success)
 
         # Verify state was restored
-        self.assertEqual(self.state_service.get_model(channel_id), "gpt-4o-mini")
+        self.assertEqual(self.state_service.get_model(channel_id), "gpt-5-mini")
         self.assertEqual(self.state_service.get_system_prompt(channel_id), "Test prompt")
         conversation = self.state_service.get_conversation(channel_id)
         self.assertEqual(len(conversation), 1)
