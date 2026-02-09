@@ -39,6 +39,7 @@ class MentionHandler:
                 state_service.mark_channel_active(message.channel.id)
 
                 chat_msgs, system_prompt = await self._prepare_mention_context(message, bot_user)
+                logger.info(f"Context prepared for mention by {message.author}, sending to OpenAI...")
                 reply_content = await openai_service.get_chat_completion(
                     model=model, messages=chat_msgs, system_prompt=system_prompt
                 )

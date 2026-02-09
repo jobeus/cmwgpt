@@ -418,6 +418,8 @@ class OpenAIService:
                 json.dumps(
                     api_params,
                     indent=2)}\n\n")
+        
+        logger.info(f"Sending request to OpenAI model: {model}...")
         response = await client.responses.create(**api_params)
 
         # Process all response outputs and collect results
