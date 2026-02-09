@@ -92,6 +92,9 @@ def setup_signal_handlers(bot_client):
 
                 print("✅ Shutdown complete, exiting...")
 
+            except asyncio.CancelledError:
+                pass  # Clean exit on cancellation
+
             except Exception as e:
                 logger.error(f"Error during complete shutdown: {e}")
                 print(f"⚠️  Error during shutdown: {e}")
