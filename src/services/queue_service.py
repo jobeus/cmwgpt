@@ -10,6 +10,7 @@ This service provides a queue-based message processing system to ensure:
 
 import asyncio
 import logging
+import os
 from typing import Dict, Any, Callable, Awaitable, Optional
 from dataclasses import dataclass
 from enum import Enum
@@ -267,6 +268,9 @@ class QueueService:
             except asyncio.CancelledError:
                 logger.info("Message processing loop cancelled")
                 break
+            except SystemExit as e:
+                logger.info(f"Queue service received SystemExit signal (code {e.code}). Exiting process immediately.")
+                os._exit(e.code)
             except (RuntimeError, OSError, ValueError) as e:
                 logger.error(f"Error in message processing loop: {e}", exc_info=True)
                 self._stats["messages_failed"] += 1
