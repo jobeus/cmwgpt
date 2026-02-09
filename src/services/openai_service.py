@@ -30,6 +30,7 @@ from src.utils.message_utils import clean_openai_response
 
 logger = logging.getLogger(__name__)
 
+
 def clean_subtitle_text(subtitle_text: str) -> str:
     # Remove SRT/VTT timestamps (e.g., "00:00:10,500 --> 00:00:12,000")
     text = re.sub(
@@ -41,7 +42,8 @@ def clean_subtitle_text(subtitle_text: str) -> str:
     # Remove alignment/position metadata (e.g., "align:start position:0%")
     text = re.sub(r"align:start position:\d+%.*", "", text)
 
-    # Remove ASS dialogue timing (e.g., "Dialogue: 0,0:00:01.00,0:00:02.00,Default,...")
+    # Remove ASS dialogue timing (e.g., "Dialogue:
+    # 0,0:00:01.00,0:00:02.00,Default,...")
     text = re.sub(
         r"^Dialogue:.*?,\d+:\d{2}:\d{2}\.\d+,\d+:\d{2}:\d{2}\.\d+.*?,",
         "",
@@ -72,10 +74,12 @@ def clean_subtitle_text(subtitle_text: str) -> str:
 
     return "\n".join(cleaned_lines)
 
+
 class OpenAIServiceError(Exception):
     """Custom exception for OpenAI service errors."""
 
     pass
+
 
 class OpenAIService:
     """Service for handling OpenAI API interactions."""
@@ -131,7 +135,7 @@ class OpenAIService:
                 context_data = response.text
                 logger.debug(
                     f"""Successfully fetched user context ({
-                    len(context_data)} characters)"""
+                        len(context_data)} characters)"""
                 )
                 return context_data
         except httpx.TimeoutException:
@@ -140,7 +144,7 @@ class OpenAIService:
         except httpx.HTTPStatusError as e:
             logger.warning(
                 f"""HTTP error while fetching user context: {
-                e.response.status_code}"""
+                    e.response.status_code}"""
             )
             return f"""User context fetch failed with HTTP {
                 e.response.status_code}."""
@@ -160,7 +164,7 @@ class OpenAIService:
             The transcript (.vtt) as a string, or an error description if something goes wrong.
         """
         # Ensure yt-dlp is available on PATH
-        cmd = ["yt-dlp", "--version"]
+        cmd = ["/usr/bin/yt-dlp", "--version"]
         try:
             proc_check = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -185,7 +189,7 @@ class OpenAIService:
                 # -o {tmpdir}/transcript : write to a predictable filename with .vtt extension
                 # --proxy          : use proxy if PROXY_ADDRESS is configured
                 yt_cmd = [
-                    "yt-dlp",
+                    "/usr/bin/yt-dlp",
                     "--skip-download",
                     "--write-sub",
                     "--write-auto-sub",
@@ -206,7 +210,8 @@ class OpenAIService:
                         host, port, username, password = parts
                         proxy_url = f"http://{username}:{password}@{host}:{port}"
                     else:
-                        # If not in expected format, assume it's already formatted correctly
+                        # If not in expected format, assume it's already
+                        # formatted correctly
                         proxy_url = f"http://{PROXY_ADDRESS}"
 
                     yt_cmd.extend(["--proxy", proxy_url])
@@ -214,7 +219,8 @@ class OpenAIService:
 
                 yt_cmd.append(video_url)
 
-                logger.debug(f"Running yt-dlp to fetch subtitles: {' '.join(yt_cmd)}")
+                logger.debug(
+                    f"Running yt-dlp to fetch subtitles: {' '.join(yt_cmd)}")
                 proc = await asyncio.create_subprocess_exec(
                     *yt_cmd,
                     stdout=asyncio.subprocess.PIPE,
@@ -247,7 +253,9 @@ class OpenAIService:
                 with open(vtt_path, "r", encoding="utf-8") as f:
                     transcript_text = f.read()
 
-                logger.debug(f"Fetched transcript ({len(transcript_text)} characters)")
+                logger.debug(
+                    f"Fetched transcript ({
+                        len(transcript_text)} characters)")
                 cleaned_subtitle_text = clean_subtitle_text(transcript_text)
                 return cleaned_subtitle_text
 
@@ -255,7 +263,11 @@ class OpenAIService:
             logger.error(f"Error while fetching YouTube transcript: {e}")
             return f"Failed to fetch transcript: {e}"
 
-    def _extract_response_text_and_store_id(self, response, channel_id: int, state_service: Any) -> Optional[str]:
+    def _extract_response_text_and_store_id(
+            self,
+            response,
+            channel_id: int,
+            state_service: Any) -> Optional[str]:
         """
         Extract response text and store response ID in one operation.
 
@@ -268,10 +280,13 @@ class OpenAIService:
             Extracted response text or None if not found
         """
         # Store response ID first
-        if response and hasattr(response, 'id') and channel_id and state_service:
+        if response and hasattr(response,
+                                'id') and channel_id and state_service:
             try:
                 state_service.set_response_id(channel_id, response.id)
-                logger.debug(f"Stored response ID {response.id} for channel {channel_id}")
+                logger.debug(
+                    f"Stored response ID {
+                        response.id} for channel {channel_id}")
             except Exception as e:
                 logger.warning(f"Failed to store response ID: {e}")
 
@@ -282,12 +297,14 @@ class OpenAIService:
         for item in response.output:
             if hasattr(item, "type") and item.type == "message":
                 for content in item.content:
-                    if hasattr(content, "type") and content.type == "output_text":
+                    if hasattr(content,
+                               "type") and content.type == "output_text":
                         return clean_openai_response(content.text)
 
         return None
-    
-    async def _handle_image_generation_output(self, response_output) -> tuple[Optional[str], List[discord.File]]:
+
+    async def _handle_image_generation_output(
+            self, response_output) -> tuple[Optional[str], List[discord.File]]:
         """
         Handle image generation output from OpenAI response.
 
@@ -305,7 +322,8 @@ class OpenAIService:
             if image_data:
                 # Create Discord file
                 filename = f"generated_image.png"
-                discord_file = discord.File(io.BytesIO(image_data), filename=filename)
+                discord_file = discord.File(
+                    io.BytesIO(image_data), filename=filename)
                 files_to_upload.append(discord_file)
                 logger.info(f"Prepared generated image for upload: {filename}")
             else:
@@ -324,9 +342,15 @@ class OpenAIService:
             logger.error(f"Error processing image generation output: {e}")
             return "🎨 **Image Generation:** Error processing generated images.", []
 
-    def _prepare_api_params(self, model: str, api_input: List[Dict[str, Any]], instructions: str,
-                           tools: List[Dict[str, Any]],
-                           previous_response_id: Optional[str] = None) -> Dict[str, Any]:
+    def _prepare_api_params(self,
+                            model: str,
+                            api_input: List[Dict[str,
+                                                 Any]],
+                            instructions: str,
+                            tools: List[Dict[str,
+                                             Any]],
+                            previous_response_id: Optional[str] = None) -> Dict[str,
+                                                                                Any]:
         """
         Prepare API parameters for OpenAI responses.create call.
 
@@ -353,9 +377,16 @@ class OpenAIService:
 
         return params
 
-    async def _handle_openai_response_with_continuity(self, client, model: str, api_input: List[Dict[str, Any]],
-                                                     instructions: str, tools: List[Dict[str, Any]],
-                                                     channel_id: int, state_service: Any) -> str:
+    async def _handle_openai_response_with_continuity(self,
+                                                      client,
+                                                      model: str,
+                                                      api_input: List[Dict[str,
+                                                                           Any]],
+                                                      instructions: str,
+                                                      tools: List[Dict[str,
+                                                                       Any]],
+                                                      channel_id: int,
+                                                      state_service: Any) -> str:
         """
         Handle OpenAI API response with conversation continuity in one comprehensive operation.
 
@@ -376,11 +407,17 @@ class OpenAIService:
         if channel_id and state_service:
             previous_response_id = state_service.get_response_id(channel_id)
             if previous_response_id:
-                logger.debug(f"Using previous response ID for continuity: {previous_response_id}")
+                logger.debug(
+                    f"Using previous response ID for continuity: {previous_response_id}")
 
         # Make initial API call
-        api_params = self._prepare_api_params(model, api_input, instructions, tools, previous_response_id)
-        logger.debug(f"_handle_openai_response_with_continuity API call with params: \n{json.dumps(api_params, indent=2)}\n\n")
+        api_params = self._prepare_api_params(
+            model, api_input, instructions, tools, previous_response_id)
+        logger.debug(
+            f"_handle_openai_response_with_continuity API call with params: \n{
+                json.dumps(
+                    api_params,
+                    indent=2)}\n\n")
         response = await client.responses.create(**api_params)
 
         # Process all response outputs and collect results
@@ -402,14 +439,19 @@ class OpenAIService:
             elif response_output.type == "message":
                 # Handle regular text message
                 for content in response_output.content:
-                    if hasattr(content, "type") and content.type == "output_text":
-                        response_parts.append(clean_openai_response(content.text))
+                    if hasattr(content,
+                               "type") and content.type == "output_text":
+                        response_parts.append(
+                            clean_openai_response(content.text))
 
         # Store response ID
-        if response and hasattr(response, 'id') and channel_id and state_service:
+        if response and hasattr(response,
+                                'id') and channel_id and state_service:
             try:
                 state_service.set_response_id(channel_id, response.id)
-                logger.debug(f"Stored response ID {response.id} for channel {channel_id}")
+                logger.debug(
+                    f"Stored response ID {
+                        response.id} for channel {channel_id}")
             except Exception as e:
                 logger.warning(f"Failed to store response ID: {e}")
 
@@ -429,9 +471,20 @@ class OpenAIService:
         else:
             return final_text
 
-    async def _handle_tool_call(self, client, tool_call, model: str, api_input: List[Dict[str, Any]],
-                               instructions: str, tools: List[Dict[str, Any]], response_output: List[Dict[str, Any]],
-                               previous_response_id: Optional[str], channel_id: int, state_service: Any) -> str:
+    async def _handle_tool_call(self,
+                                client,
+                                tool_call,
+                                model: str,
+                                api_input: List[Dict[str,
+                                                     Any]],
+                                instructions: str,
+                                tools: List[Dict[str,
+                                                 Any]],
+                                response_output: List[Dict[str,
+                                                           Any]],
+                                previous_response_id: Optional[str],
+                                channel_id: int,
+                                state_service: Any) -> str:
         """
         Handle tool call execution and follow-up response.
 
@@ -456,7 +509,8 @@ class OpenAIService:
         if function_name == "get_user_context":
             context_data = await self._fetch_user_context()
         elif function_name == "get_youtube_transcript":
-            function_params = tool_call.arguments if hasattr(tool_call, "arguments") else "{}"
+            function_params = tool_call.arguments if hasattr(
+                tool_call, "arguments") else "{}"
             url = json.loads(function_params).get("url")
             logger.info(f"Fetching YouTube transcript for {url}")
             context_data = await self._fetch_youtube_transcript(url)
@@ -474,7 +528,9 @@ class OpenAIService:
 
         for response in response_output:
             if response.type == "reasoning":
-                tool_result_input.append(response.model_dump(exclude={"status"}))
+                tool_result_input.append(
+                    response.model_dump(
+                        exclude={"status"}))
             else:
                 tool_result_input.append(response.model_dump())
         tool_result_input.append(tool_result)
@@ -483,13 +539,19 @@ class OpenAIService:
 
         # Make follow-up request
         logger.debug("Making follow-up request with tool result")
-        follow_up_params = self._prepare_api_params(model, tool_result_input, instructions, tools, previous_response_id)
-        logger.debug(f"_handle_tool_call API call with params: \n{json.dumps(follow_up_params, indent=2)}\n\n")
+        follow_up_params = self._prepare_api_params(
+            model, tool_result_input, instructions, tools, previous_response_id)
+        logger.debug(
+            f"_handle_tool_call API call with params: \n{
+                json.dumps(
+                    follow_up_params,
+                    indent=2)}\n\n")
         follow_up_response = await client.responses.create(**follow_up_params)
 
         # Extract response and store ID
         logger.debug("Response creation with tool calling successful")
-        response_text = self._extract_response_text_and_store_id(follow_up_response, channel_id, state_service)
+        response_text = self._extract_response_text_and_store_id(
+            follow_up_response, channel_id, state_service)
         return response_text or "I received a response but couldn't extract the text content."
 
     async def get_chat_completion(
@@ -514,7 +576,9 @@ class OpenAIService:
         # Parse JSON content if needed (for complex payloads like attachments)
         for msg in api_input:
             content = msg.get("content", "")
-            if isinstance(content, str) and content.strip().startswith(("[", "{")):
+            if isinstance(
+                    content, str) and content.strip().startswith(
+                    ("[", "{")):
                 try:
                     # Try to parse as JSON - if successful, use parsed content
                     parsed_content = json.loads(content)
@@ -523,37 +587,31 @@ class OpenAIService:
                     # If parsing fails, keep original content
                     pass
 
-        # Convert messages to the new input format and add system prompt as instructions
+        # Convert messages to the new input format and add system prompt as
+        # instructions
         instructions = system_prompt if system_prompt else None
 
         # Define tools for the new responses API
-        tools = [
-            {
-                "type": "image_generation",
-                "moderation": "low",
-                "quality": "medium",
-                "size": "auto",
-                "background": "auto",
-            },
-            {"type": "web_search_preview"},
-            {
-                "type": "function",
-                "strict": True,
-                "name": "get_youtube_transcript",
-                "description": "Fetch the transcript of a YouTube video from its URL. Returns the transcript as a string.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "url": {
-                            "type": "string",
-                            "description": "The URL of the YouTube video to transcribe",
-                        }
-                    },
-                    "required": ["url"],
-                    "additionalProperties": False,
-                },
-            },
-        ]
+        tools = [{"type": "image_generation",
+                  "moderation": "low",
+                  "quality": "medium",
+                  "size": "auto",
+                  "background": "auto",
+                  },
+                 {"type": "web_search_preview"},
+                 {"type": "function",
+                  "strict": True,
+                  "name": "get_youtube_transcript",
+                  "description": "Fetch the transcript of a YouTube video from its URL. Returns the transcript as a string.",
+                  "parameters": {"type": "object",
+                                 "properties": {"url": {"type": "string",
+                                                        "description": "The URL of the YouTube video to transcribe",
+                                                        }},
+                                 "required": ["url"],
+                                 "additionalProperties": False,
+                                 },
+                  },
+                 ]
 
         if USER_CONTEXT_URL:
             tools.append(
@@ -569,8 +627,7 @@ class OpenAIService:
                         "required": [],
                         "additionalProperties": False,
                     },
-                }
-            )
+                })
 
         if VECTOR_STORE_ID:
             tools.append(
@@ -586,8 +643,7 @@ class OpenAIService:
             try:
                 logger.debug(
                     f"""Attempting response creation with tools for model {model} (attempt {
-                        attempt + 1}/{max_retries})"""
-                )
+                        attempt + 1}/{max_retries})""")
 
                 # Handle OpenAI response with conversation continuity
                 return await self._handle_openai_response_with_continuity(
@@ -615,7 +671,7 @@ class OpenAIService:
             except APIConnectionError as e:
                 logger.warning(
                     f"""Connection error on attempt {
-                    attempt + 1}: {e}"""
+                        attempt + 1}: {e}"""
                 )
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
@@ -631,8 +687,8 @@ class OpenAIService:
                 logger.error(f"Bad request error: {e}")
                 raise OpenAIServiceError(
                     f"""Invalid request: {
-                    e.message if hasattr(
-                        e, 'message') else str(e)}"""
+                        e.message if hasattr(
+                            e, 'message') else str(e)}"""
                 ) from e
 
             except APIError as e:
@@ -654,8 +710,7 @@ class OpenAIService:
 
             except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
                 logger.error(
-                    f"Unexpected error during chat completion with functions: {e}"
-                )
+                    f"Unexpected error during chat completion with functions: {e}")
                 raise OpenAIServiceError(f"Unexpected error: {str(e)}") from e
 
         # This should never be reached, but just in case
@@ -689,8 +744,7 @@ class OpenAIService:
             try:
                 logger.debug(
                     f"""Attempting image generation with model {model} (attempt {
-                        attempt + 1}/{max_retries})"""
-                )
+                        attempt + 1}/{max_retries})""")
                 b64_json_data = None
                 result = None
 
@@ -703,7 +757,8 @@ class OpenAIService:
                         file_obj = await edit_image.read()
                         result = await client.images.edit(
                             model=model,
-                            image=[(edit_image.filename or "image", file_obj, edit_image.content_type)],
+                            image=[
+                                (edit_image.filename or "image", file_obj, edit_image.content_type)],
                             # image expects a list of file-like objects
                             prompt=prompt,
                         )
@@ -748,7 +803,7 @@ class OpenAIService:
             except APIConnectionError as e:
                 logger.warning(
                     f"""Connection error on attempt {
-                    attempt + 1}: {e}"""
+                        attempt + 1}: {e}"""
                 )
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
@@ -766,8 +821,8 @@ class OpenAIService:
                 # don't retry
                 raise OpenAIServiceError(
                     f"""Request rejected: {
-                    e.message if hasattr(
-                        e, 'message') else str(e)}"""
+                        e.message if hasattr(
+                            e, 'message') else str(e)}"""
                 ) from e
 
             except APIError as e:
@@ -792,7 +847,8 @@ class OpenAIService:
                 raise OpenAIServiceError(f"Unexpected error: {str(e)}") from e
 
         # This should never be reached, but just in case
-        raise OpenAIServiceError("Failed to generate image after all retry attempts")
+        raise OpenAIServiceError(
+            "Failed to generate image after all retry attempts")
 
 
 # Global service instance
