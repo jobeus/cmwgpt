@@ -168,7 +168,7 @@ class MentionHandler:
             f"Each message is prefixed with its message ID and the sender's Discord ID (e.g. `[123456789] <@12345>: ...`). "
             f"Please respond naturally to the very last message in the conversation, as it mentions you. "
             f"You are expected to reply, but less metaphysics and more straight up answers like a user on a "
-            f"30 year old IRC board and not a talkative robot. Respond with ONLY the text content of your reply, "
+            f"30 year old IRC board and not a talkative robot. Respond with ONLY the text/image content of your reply, "
             f"without prefixing it with your own ID or message ID.\n\n"
             f"{legend_section}\n\n"
         )

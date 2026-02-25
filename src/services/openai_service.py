@@ -294,11 +294,12 @@ class OpenAIService:
         if not response or not hasattr(response, 'output'):
             return None
 
+        # Return the first text response found, or None if only images were returned here 
+        # (images are processed dynamically in `_handle_openai_response_with_continuity`)
         for item in response.output:
             if hasattr(item, "type") and item.type == "message":
                 for content in item.content:
-                    if hasattr(content,
-                               "type") and content.type == "output_text":
+                    if hasattr(content, "type") and content.type == "output_text":
                         return clean_openai_response(content.text)
 
         return None
@@ -439,12 +440,21 @@ class OpenAIService:
                 if image_files:
                     files_to_upload.extend(image_files)
             elif response_output.type == "message":
-                # Handle regular text message
+                # Handle regular text and image messages from assistant
                 for content in response_output.content:
-                    if hasattr(content,
-                               "type") and content.type == "output_text":
-                        response_parts.append(
-                            clean_openai_response(content.text))
+                    if hasattr(content, "type"):
+                        if content.type == "output_text":
+                            response_parts.append(clean_openai_response(content.text))
+                        elif content.type == "output_image" and hasattr(content, "image_base64"):
+                            try:
+                                # Decode the image and create a discord file
+                                image_data = base64.b64decode(content.image_base64)
+                                filename = f"response_image_{len(files_to_upload) + 1}.png"
+                                discord_file = discord.File(io.BytesIO(image_data), filename=filename)
+                                files_to_upload.append(discord_file)
+                                logger.info(f"Successfully extracted output_image from bot response: {filename}")
+                            except Exception as e:
+                                logger.error(f"Failed to decode output_image base64 string: {e}")
 
         # Store response ID
         if response and hasattr(response,
@@ -463,7 +473,7 @@ class OpenAIService:
         elif files_to_upload:
             # If we have files but no text, provide a minimal message
             # This prevents Discord's "Cannot send an empty message" error
-            final_text = "Here are the generated images:"
+            final_text = "Bot responded with only image(s):"
         else:
             final_text = "I received a response but couldn't extract the text content."
 
