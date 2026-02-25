@@ -122,7 +122,7 @@ class TestImageGenerationTool(unittest.TestCase):
         self.assertIsInstance(result, dict)
         self.assertIn("text", result)
         self.assertIn("files", result)
-        self.assertEqual(result["text"], "Here are the generated images:")
+        self.assertEqual(result["text"], "Bot responded with only image(s):")
         self.assertEqual(len(result["files"]), 1)
         self.assertIsInstance(result["files"][0], discord.File)
 

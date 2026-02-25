@@ -59,8 +59,8 @@ class TestDiscordHelper(unittest.TestCase):
                 "You are <@99999>!",
                 "@Alice = <@12345>",
                 "@Bob = <@67890>",
-                "Whenever you see a mention like <@USER_ID>, map it back to the corresponding handle. "
-                "If you want to @mention someone yourself use <@USER_ID> instead of @nickname for discord "
+                "Whenever you see a mention like <@discord_user_id>, map it back to the corresponding handle. "
+                "If you want to @mention someone yourself use <@discord_user_id> instead of @nickname for discord "
                 "to recoginize your intent.",
             ]
             expected = "\n".join(expected_lines)
@@ -90,8 +90,8 @@ class TestDiscordHelper(unittest.TestCase):
             expected_lines = [
                 "Here are all the users in this channel:",
                 "You are <@99999>!",
-                "Whenever you see a mention like <@USER_ID>, map it back to the corresponding handle. "
-                "If you want to @mention someone yourself use <@USER_ID> instead of @nickname for discord "
+                "Whenever you see a mention like <@discord_user_id>, map it back to the corresponding handle. "
+                "If you want to @mention someone yourself use <@discord_user_id> instead of @nickname for discord "
                 "to recoginize your intent.",
             ]
             expected = "\n".join(expected_lines)
@@ -172,7 +172,7 @@ class TestDiscordHelper(unittest.TestCase):
 
             # Verify structure
             self.assertIn("Here are all the users in this channel:", result)
-            self.assertIn("Whenever you see a mention like <@USER_ID>", result)
+            self.assertIn("Whenever you see a mention like <@discord_user_id>", result)
 
         self.loop.run_until_complete(run_test())
 

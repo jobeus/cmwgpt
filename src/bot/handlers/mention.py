@@ -10,7 +10,7 @@ import discord
 
 from src.config import get_system_prompt, INCLUDE_NUM_CHATLINES
 from src.services.state_service import state_service
-from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url
+from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url
 from src.services.openai_service import openai_service, OpenAIServiceError
 from src.services.message_service import message_service
 from src.services.queue_service import queue_service
@@ -244,6 +244,27 @@ class MentionHandler:
                     except Exception as e:
                         logger.error(f"Failed to convert image attachment context for msg {msg.id}: {e}")
                         
+            # 3. Add native embed image previews
+            for e in msg.embeds:
+                logger.debug(f"Checking embed for image previews: {e.title}")
+                embed_url = None
+                if e.image and e.image.url:
+                    embed_url = e.image.url
+                elif e.thumbnail and e.thumbnail.url:
+                    embed_url = e.thumbnail.url
+
+                if embed_url:
+                    try:
+                        logger.debug(f"Fetching embed preview image from: {embed_url}")
+                        image_data_url = await url_to_base64_data_url(embed_url)
+                        # We only natively embed images for 'user' roles to avoid issues
+                        if role == "user":
+                            content_payload.append(
+                                {"type": "input_image", "image_url": image_data_url}
+                            )
+                    except Exception as ex:
+                        logger.warning(f"Failed to fetch embed preview context for msg {msg.id}: {ex}")
+
             chat_context.append({"role": role, "content": content_payload})
 
         return chat_context, current_channel_system_prompt
