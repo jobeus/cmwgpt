@@ -99,7 +99,7 @@ class RunpodService:
     def is_configured(self) -> bool:
         return bool(self.api_key)
 
-    async def generate_image(self, prompt: str, model: str) -> bytes:
+    async def generate_image(self, prompt: str, model: str) -> tuple[bytes, Optional[float]]:
         if not self.is_configured():
             raise RunpodServiceError("Runpod API key is not configured.")
             
@@ -126,14 +126,17 @@ class RunpodService:
                 status = data.get("status")
                 if status == "COMPLETED":
                     output = data.get("output", {})
-                    image_url = output.get("image_url")
-                    if not image_url:
-                        raise RunpodServiceError(f"Runpod completed but no image_url found in output: {output}")
+                    # Some endpoints return "result" instead of "image_url"
+                    image_url = output.get("image_url") or output.get("result")
+                    cost = output.get("cost")
+                    
+                    if not image_url or not isinstance(image_url, str):
+                        raise RunpodServiceError(f"Runpod completed but no valid image URL found in output: {output}")
                     
                     logger.info(f"Downloading Runpod image from: {image_url}")
                     img_response = await client.get(image_url)
                     img_response.raise_for_status()
-                    return img_response.content
+                    return img_response.content, cost
                 elif status == "FAILED":
                     error_msg = data.get("error", "Unknown error")
                     raise RunpodServiceError(f"Runpod generation failed: {error_msg}")

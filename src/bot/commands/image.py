@@ -118,6 +118,7 @@ class ImageCommands:
                     logger.info(
                         f"[/draw] Channel {channel_id}: editing image {edit_image.filename}")
 
+                cost = None
                 # Generate the image
                 if runpod_service.has_model(active_model):
                     if edit_image:
@@ -125,7 +126,7 @@ class ImageCommands:
                             content="Sorry, the selected Runpod model does not support image editing.",
                         )
                         return
-                    img_bytes = await runpod_service.generate_image(prompt=prompt, model=active_model)
+                    img_bytes, cost = await runpod_service.generate_image(prompt=prompt, model=active_model)
                 else:
                     img_bytes = await openai_service.generate_image(prompt=prompt, model=active_model, edit_image=edit_image)
 
@@ -141,6 +142,10 @@ class ImageCommands:
                         edit_image, prompt)
                 else:
                     content = message_service.format_prompt_message(prompt)
+
+                if cost is not None:
+                    # prepend cost and model to the prompt text
+                    content = content.replace("> ", f"> [${cost:.3f} @ {active_model}] ", 1)
 
                 await interaction.followup.send(content=content, file=file)
 
