@@ -4,7 +4,7 @@ Message Service - Handles message formatting and sending
 
 import asyncio
 import logging
-from typing import List
+from typing import List, Union
 
 import discord
 from discord import HTTPException, Forbidden, NotFound
@@ -370,9 +370,9 @@ class MessageService:
     # Delegate to utility functions for message formatting
     def format_attachment_message(
             self,
-            attachment: discord.Attachment,
+            attachment: Union[discord.Attachment, List[discord.Attachment]],
             message: str) -> str:
-        """Format a message with an attachment URL."""
+        """Format a message with one or more attachment URLs."""
         return format_attachment_message(attachment, message)
 
     def format_prompt_message(self, message: str) -> str:

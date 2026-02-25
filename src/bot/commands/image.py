@@ -348,9 +348,10 @@ class ImageCommands:
                 embed.set_image(url="attachment://edited.png")
 
                 # Send the result
+                valid_images = [img for img in [edit_image, image2, image3, image4] if img]
                 cost_prefix = f"[${cost:.3f} @ {active_model}] " if cost is not None else ""
                 formatted_prompt = f"{cost_prefix}{prompt}"
-                content = message_service.format_attachment_message(edit_image, formatted_prompt)
+                content = message_service.format_attachment_message(valid_images, formatted_prompt)
                 await interaction.followup.send(content=content, file=file, embed=embed)
 
             except OpenAIServiceError as e:

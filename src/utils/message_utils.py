@@ -8,10 +8,15 @@ stateless utility functions from stateful service classes.
 import discord
 
 
+from typing import Union, List
+
 def format_attachment_message(
-        attachment: discord.Attachment,
+        attachment: Union[discord.Attachment, List[discord.Attachment]],
         message: str) -> str:
-    """Format a message with an attachment URL."""
+    """Format a message with one or more attachment URLs."""
+    if isinstance(attachment, list):
+        urls = "\n".join(f"> {att.url}" for att in attachment if att is not None)
+        return f"{urls}\n> {message}"
     return f"> {attachment.url}\n> {message}"
 
 
