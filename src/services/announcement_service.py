@@ -60,19 +60,21 @@ class AnnouncementService:
             from_sha: str,
             to_sha: str) -> Optional[str]:
         """
-        Get complete changelog between two git SHAs.
+        Get complete changelog between two git SHAs containing #announce.
 
         Args:
             from_sha: Starting git commit SHA
             to_sha: Ending git commit SHA
 
         Returns:
-            Complete changelog or None if unable to determine
+            Complete changelog or None if unable to determine or no matching commits
         """
         try:
             result = subprocess.run(["git",
                                      "log",
                                      f"{from_sha}..{to_sha}",
+                                     "--grep=#announce",
+                                     "-i",
                                      "--oneline"],
                                     capture_output=True,
                                     text=True,
@@ -131,38 +133,38 @@ class AnnouncementService:
         if previous_sha:
             changelog = self._get_complete_changelog(previous_sha, current_sha)
 
+        # Skip announcement if there is no changelog containing #announce
+        if not changelog:
+            logger.info("No commits with #announce found, skipping announcement")
+            state_service.set_last_git_sha(current_sha)
+            return
+
         # Prepare announcement message
         restart_type = "manual restart" if was_manual else "auto-update"
         current_sha_short = current_sha[:7]
         base_message = f"🤖 **Bot Updated** ({restart_type})\n📝 Now running commit `{current_sha_short}`"
 
-        if changelog:
-            # Check if message would be too long for Discord
-            full_message = f"{base_message} Changes:\n{changelog}"
+        # Check if message would be too long for Discord
+        full_message = f"{base_message} Changes:\n{changelog}"
 
-            if len(full_message) <= 2000:
-                message = full_message
-            else:
-                # Message too long, upload to paste service
-                try:
-                    paste_url = upload_to_pasters(changelog)
-                    message = f"{base_message} Changes:\n[View complete changelog]({paste_url})"
-                except Exception as e:
-                    logger.error(
-                        f"Failed to upload changelog to paste service: {e}")
-                    # Fallback to truncated message
-                    lines = changelog.split("\n")
-                    truncated_changelog = "\n".join(lines[:5])
-                    if len(lines) > 5:
-                        truncated_changelog += f"""\n• ... and {
-                            len(lines) - 5} more commits"""
-                    message = f"{base_message} Recent changes:\n{truncated_changelog}"
+        if len(full_message) <= 2000:
+            message = full_message
         else:
-            message = f"{base_message}"
+            # Message too long, upload to paste service
+            try:
+                paste_url = upload_to_pasters(changelog)
+                message = f"{base_message} Changes:\n[View complete changelog]({paste_url})"
+            except Exception as e:
+                logger.error(f"Failed to upload changelog to paste service: {e}")
+                # Fallback to truncated message
+                lines = changelog.split("\n")
+                truncated_changelog = "\n".join(lines[:5])
+                if len(lines) > 5:
+                    truncated_changelog += f"\n• ... and {len(lines) - 5} more commits"
+                message = f"{base_message} Recent changes:\n{truncated_changelog}"
 
         logger.info(
-            f"""Announcing update to {
-                len(active_channels)} channels: {current_sha_short}"""
+            f"Announcing update to {len(active_channels)} channels: {current_sha_short}"
         )
 
         # Send announcements to all active channels
