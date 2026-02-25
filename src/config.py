@@ -15,9 +15,13 @@ VECTOR_STORE_ID = os.getenv("VECTOR_STORE_ID", "")
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-5-mini")
 DEFAULT_IMAGE_MODEL = os.getenv("DEFAULT_IMAGE_MODEL", "gpt-image-1.5")
 DEFAULT_DRAW_MODEL = os.getenv("DEFAULT_DRAW_MODEL", "gpt-image-1.5")
+DEFAULT_EDIT_MODEL = os.getenv("DEFAULT_EDIT_MODEL", "gpt-image-1.5")
 
 if DEFAULT_DRAW_MODEL != "gpt-image-1.5" and not RUNPOD_IO_API_KEY:
     DEFAULT_DRAW_MODEL = "gpt-image-1.5"
+
+if DEFAULT_EDIT_MODEL != "gpt-image-1.5" and not RUNPOD_IO_API_KEY:
+    DEFAULT_EDIT_MODEL = "gpt-image-1.5"
 
 # Default system prompt (fallback if file doesn't exist)
 DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."

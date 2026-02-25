@@ -2,6 +2,7 @@
 Image Commands - Handles image generation Discord commands
 """
 
+import base64
 import io
 import logging
 from typing import Optional
@@ -10,7 +11,7 @@ import discord
 from discord import app_commands
 from discord.app_commands import Choice
 from discord.ext import commands
-from src.config import DEFAULT_IMAGE_MODEL, DEFAULT_DRAW_MODEL, RUNPOD_IO_API_KEY
+from src.config import DEFAULT_IMAGE_MODEL, DEFAULT_DRAW_MODEL, DEFAULT_EDIT_MODEL, RUNPOD_IO_API_KEY
 from src.services.openai_service import openai_service, OpenAIServiceError
 from src.services.runpod_service import runpod_service, RunpodServiceError
 from src.services.message_service import message_service
@@ -30,6 +31,8 @@ class ImageCommands:
         """Set up all image-related commands."""
         self.bot.tree.add_command(self._create_draw_command())
         self.bot.tree.add_command(self._create_drawmodel_command())
+        self.bot.tree.add_command(self._create_edit_command())
+        self.bot.tree.add_command(self._create_editmodel_command())
 
     def _create_draw_command(self) -> app_commands.Command:
         """Create the /draw command."""
@@ -52,7 +55,6 @@ class ImageCommands:
                               description="Generate an image from a prompt")
         @app_commands.describe(
             prompt="Prompt for image generation",
-            edit_image="Optional image to edit",
             model="Optional image model to use",
         )
         @app_commands.choices(
@@ -61,7 +63,6 @@ class ImageCommands:
         async def draw(
             interaction: discord.Interaction,
             prompt: str,
-            edit_image: Optional[discord.Attachment] = None,
             model: Optional[str] = None,
         ):
             # Immediately defer the interaction to avoid Discord's 3-second
@@ -70,7 +71,7 @@ class ImageCommands:
 
             # Queue the command for FIFO processing
             queued = await queue_service.queue_command(
-                interaction, self._handle_draw_command, prompt, edit_image, model
+                interaction, self._handle_draw_command, prompt, model
             )
 
             if not queued:
@@ -89,7 +90,6 @@ class ImageCommands:
         self,
         interaction: discord.Interaction,
         prompt: str,
-        edit_image: Optional[discord.Attachment] = None,
         model: Optional[str] = None,
     ) -> None:
         """
@@ -98,7 +98,6 @@ class ImageCommands:
         Args:
             interaction: The Discord interaction
             prompt: The image generation prompt
-            edit_image: Optional image to edit
             model: The model to use for generation
         """
         channel_id = interaction.channel.id
@@ -109,26 +108,17 @@ class ImageCommands:
         active_model = model or state_service.get_draw_model(channel_id) or DEFAULT_DRAW_MODEL
 
         logger.info(
-            f"[/draw] Channel {channel_id} Prompt: {prompt} Model: {active_model} Edit? {bool(edit_image)}")
+            f"[/draw] Channel {channel_id} Prompt: {prompt} Model: {active_model}")
 
         # Interaction already deferred in slash command handler
         async with interaction.channel.typing():
             try:
-                if edit_image:
-                    logger.info(
-                        f"[/draw] Channel {channel_id}: editing image {edit_image.filename}")
-
                 cost = None
                 # Generate the image
                 if runpod_service.has_model(active_model):
-                    if edit_image:
-                        await interaction.followup.send(
-                            content="Sorry, the selected Runpod model does not support image editing.",
-                        )
-                        return
                     img_bytes, cost = await runpod_service.generate_image(prompt=prompt, model=active_model)
                 else:
-                    img_bytes = await openai_service.generate_image(prompt=prompt, model=active_model, edit_image=edit_image)
+                    img_bytes = await openai_service.generate_image(prompt=prompt, model=active_model)
 
                 # Log success and create Discord file
                 logger.info(f"[/draw] Channel {channel_id}: image generated")
@@ -137,11 +127,7 @@ class ImageCommands:
                     filename="image.png")
 
                 # Send the result
-                if edit_image:
-                    content = message_service.format_attachment_message(
-                        edit_image, prompt)
-                else:
-                    content = message_service.format_prompt_message(prompt)
+                content = message_service.format_prompt_message(prompt)
 
                 if cost is not None:
                     # prepend cost and model to the prompt text
@@ -256,3 +242,195 @@ class ImageCommands:
         else:
             current_model = state_service.get_draw_model(channel_id) or DEFAULT_DRAW_MODEL
             await interaction.followup.send(f"Default draw model is `{current_model}`.", ephemeral=True)
+
+    def _create_edit_command(self) -> app_commands.Command:
+        """Create the /edit command."""
+
+        edit_model_choices = [
+            Choice(name="gpt-image-1.5", value="gpt-image-1.5"),
+        ]
+        
+        if RUNPOD_IO_API_KEY:
+            edit_model_choices.extend([
+                Choice(name="seedream", value="seedream"),
+                Choice(name="qwen", value="qwen"),
+                Choice(name="pruna", value="pruna"),
+            ])
+
+        @app_commands.command(name="edit",
+                              description="Edit an image with a prompt")
+        @app_commands.describe(
+            prompt="Prompt for image editing",
+            edit_image="Image to edit",
+            image2="Optional 2nd Image (seedream only)",
+            image3="Optional 3rd Image (seedream only)",
+            image4="Optional 4th Image (seedream only)",
+            model="Optional edit model to use",
+        )
+        @app_commands.choices(
+            model=edit_model_choices
+        )
+        async def edit(
+            interaction: discord.Interaction,
+            prompt: str,
+            edit_image: discord.Attachment,
+            image2: Optional[discord.Attachment] = None,
+            image3: Optional[discord.Attachment] = None,
+            image4: Optional[discord.Attachment] = None,
+            model: Optional[str] = None,
+        ):
+            await interaction.response.defer(ephemeral=False, thinking=True)
+            queued = await queue_service.queue_command(
+                interaction, self._handle_edit_command, prompt, edit_image, image2, image3, image4, model
+            )
+
+            if not queued:
+                logger.warning(
+                    f"Failed to queue edit command from {interaction.user} in #{interaction.channel} - queue may be full"
+                )
+                await interaction.followup.send(
+                    "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
+                )
+
+        return edit
+
+    async def _handle_edit_command(
+        self,
+        interaction: discord.Interaction,
+        prompt: str,
+        edit_image: discord.Attachment,
+        image2: Optional[discord.Attachment] = None,
+        image3: Optional[discord.Attachment] = None,
+        image4: Optional[discord.Attachment] = None,
+        model: Optional[str] = None,
+    ) -> None:
+        """Handle the /edit command."""
+        channel_id = interaction.channel.id
+        state_service.mark_channel_active(channel_id)
+        
+        active_model = model or state_service.get_edit_model(channel_id) or DEFAULT_EDIT_MODEL
+
+        logger.info(
+            f"[/edit] Channel {channel_id} Prompt: {prompt} Model: {active_model} Edit? True")
+
+        async with interaction.channel.typing():
+            try:
+                logger.info(
+                    f"[/edit] Channel {channel_id}: editing image {edit_image.filename}")
+
+                cost = None
+                if runpod_service.has_edit_model(active_model):
+                    # Gather base64 images
+                    images_b64 = []
+                    for img in [edit_image, image2, image3, image4]:
+                        if img:
+                            img_bytes = await img.read()
+                            images_b64.append(base64.b64encode(img_bytes).decode('utf-8'))
+                            
+                    img_bytes, cost = await runpod_service.edit_image(prompt=prompt, model=active_model, images=images_b64)
+                elif active_model == "gpt-image-1.5":
+                    # Generate the image using OpenAI
+                    if image2 or image3 or image4:
+                        await interaction.followup.send(content="Only Runpod `seedream` allows multiple edit images.")
+                        return
+                    img_bytes = await openai_service.generate_image(prompt=prompt, model=active_model, edit_image=edit_image)
+                else:
+                    await interaction.followup.send(content=f"Sorry, model {active_model} does not support editing.")
+                    return
+
+                # Log success and create Discord file
+                logger.info(f"[/edit] Channel {channel_id}: image generated")
+                file = discord.File(
+                    io.BytesIO(img_bytes),
+                    filename="image.png")
+
+                # Send the result
+                content = message_service.format_attachment_message(edit_image, prompt)
+                if cost is not None:
+                    content = content.replace("> ", f"> [${cost:.3f} @ {active_model}] ", 1)
+                await interaction.followup.send(content=content, file=file)
+
+            except OpenAIServiceError as e:
+                logger.error(f"OpenAI API error in edit command: {e}")
+                error_message = (
+                    f"{message_service.format_prompt_message(prompt)}\n\n"
+                    f"Sorry, I encountered an error while editing your image: {str(e)}"
+                )
+                try:
+                    await interaction.followup.send(content=error_message)
+                except Exception as discord_error:
+                    logger.error(
+                        f"Failed to send error message to Discord: {discord_error}")
+                    try:
+                        await interaction.followup.send(
+                            content="Sorry, I encountered an error editing your image. Please try again later."
+                        )
+                    except Exception:
+                        logger.error("Failed to send fallback error message")
+
+            except Exception as e:
+                logger.error(f"Unexpected error in edit command: {e}")
+                error_message = (
+                    f"{message_service.format_prompt_message(prompt)}\n\n"
+                    f"Sorry, there was an unexpected error editing your image. Please try again later."
+                )
+                try:
+                    await interaction.followup.send(content=error_message)
+                except Exception as discord_error:
+                    logger.error(
+                        f"Failed to send error message to Discord: {discord_error}")
+                    try:
+                        await interaction.followup.send(
+                            content="Sorry, I encountered an error editing your image. Please try again later."
+                        )
+                    except Exception:
+                        logger.error("Failed to send fallback error message")
+    
+    def _create_editmodel_command(self) -> app_commands.Command:
+        """Create the /editmodel command."""
+        
+        edit_model_choices = [
+            Choice(name="gpt-image-1.5", value="gpt-image-1.5"),
+        ]
+        
+        if RUNPOD_IO_API_KEY:
+            edit_model_choices.extend([
+                Choice(name="seedream", value="seedream"),
+                Choice(name="qwen", value="qwen"),
+                Choice(name="pruna", value="pruna"),
+            ])
+
+        @app_commands.command(name="editmodel",
+                              description="View or set the default drawing edit model")
+        @app_commands.describe(model="Model name to use")
+        @app_commands.choices(
+            model=edit_model_choices
+        )
+        async def editmodel_command(
+                interaction: discord.Interaction,
+                model: Optional[str] = None):
+            await interaction.response.defer(ephemeral=False, thinking=True)
+            queued = await queue_service.queue_command(interaction, self._handle_editmodel_command, model)
+            if not queued:
+                logger.warning(
+                    f"Failed to queue editmodel command from {interaction.user} in #{interaction.channel} - queue may be full"
+                )
+                await interaction.followup.send(
+                    "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
+                )
+        return editmodel_command
+
+    async def _handle_editmodel_command(self,
+                                        interaction: discord.Interaction,
+                                        model: Optional[str] = None) -> None:
+        """Handle the /editmodel command."""
+        channel_id = interaction.channel.id
+        state_service.mark_channel_active(channel_id)
+
+        if model:
+            state_service.set_edit_model(channel_id, model)
+            logger.info(f"[/editmodel] Channel {channel_id}: edit model set to {model}")
+            await interaction.followup.send(f"Default edit model set to `{model}`.", ephemeral=True)
+        else:
+            current_model = state_service.get_edit_model(channel_id) or DEFAULT_EDIT_MODEL
+            await interaction.followup.send(f"Default edit model is `{current_model}`.", ephemeral=True)

@@ -92,24 +92,58 @@ class RunpodService:
                 }
             }
         }
+        
+        self.edit_models = {
+            "seedream": {
+                "url": "https://api.runpod.ai/v2/seedream-v4-edit/runsync",
+                "payload": lambda prompt, images: {
+                    "input": {
+                        "prompt": prompt,
+                        "images": images,
+                        "size": "4096*4096",
+                        "enable_safety_checker": False
+                    }
+                }
+            },
+            "qwen": {
+                "url": "https://api.runpod.ai/v2/qwen-image-edit-2511/runsync",
+                "payload": lambda prompt, images: {
+                    "input": {
+                        "prompt": prompt,
+                        "images": images,
+                        "size": "1024*1024",
+                        "seed": -1,
+                        "output_format": "jpeg",
+                        "enable_base64_output": False,
+                        "enable_sync_mode": False
+                    }
+                }
+            },
+            "pruna": {
+                "url": "https://api.runpod.ai/v2/p-image-edit/runsync",
+                "payload": lambda prompt, images: {
+                    "input": {
+                        "prompt": prompt,
+                        "images": images,
+                        "aspect_ratio": "match_input_image",
+                        "seed": -1,
+                        "disable_safety_checker": False,
+                        "enable_sync_mode": False
+                    }
+                }
+            }
+        }
 
     def has_model(self, model: str) -> bool:
         return model in self.models
 
+    def has_edit_model(self, model: str) -> bool:
+        return model in self.edit_models
+
     def is_configured(self) -> bool:
         return bool(self.api_key)
 
-    async def generate_image(self, prompt: str, model: str) -> tuple[bytes, Optional[float]]:
-        if not self.is_configured():
-            raise RunpodServiceError("Runpod API key is not configured.")
-            
-        if not self.has_model(model):
-            raise RunpodServiceError(f"Model {model} is not supported by Runpod service.")
-            
-        model_config = self.models[model]
-        url = model_config["url"]
-        payload = model_config["payload"](prompt)
-        
+    async def _execute_request(self, url: str, payload: dict, operation: str) -> tuple[bytes, Optional[float]]:
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}"
@@ -118,7 +152,7 @@ class RunpodService:
         timeout = httpx.Timeout(90.0)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             try:
-                logger.info(f"Sending request to Runpod model: {model}...")
+                logger.info(f"Sending {operation} request to Runpod: {url}...")
                 response = await client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()
@@ -131,7 +165,7 @@ class RunpodService:
                     cost = output.get("cost")
                     
                     if not image_url or not isinstance(image_url, str):
-                        raise RunpodServiceError(f"Runpod completed but no valid image URL found in output: {output}")
+                        raise RunpodServiceError(f"Runpod {operation} completed but no valid image URL found in output: {output}")
                     
                     logger.info(f"Downloading Runpod image from: {image_url}")
                     img_response = await client.get(image_url)
@@ -139,7 +173,7 @@ class RunpodService:
                     return img_response.content, cost
                 elif status == "FAILED":
                     error_msg = data.get("error", "Unknown error")
-                    raise RunpodServiceError(f"Runpod generation failed: {error_msg}")
+                    raise RunpodServiceError(f"Runpod {operation} failed: {error_msg}")
                 else:
                     raise RunpodServiceError(f"Runpod returned unexpected status: {status} - request might have timed out.")
                     
@@ -151,5 +185,25 @@ class RunpodService:
             except Exception as e:
                 logger.error(f"Unexpected error in Runpod service: {e}")
                 raise RunpodServiceError(f"Unexpected error: {str(e)}")
+
+    async def generate_image(self, prompt: str, model: str) -> tuple[bytes, Optional[float]]:
+        if not self.is_configured():
+            raise RunpodServiceError("Runpod API key is not configured.")
+            
+        if not self.has_model(model):
+            raise RunpodServiceError(f"Model {model} is not supported by Runpod service.")
+            
+        model_config = self.models[model]
+        return await self._execute_request(model_config["url"], model_config["payload"](prompt), "generate")
+
+    async def edit_image(self, prompt: str, model: str, images: list[str]) -> tuple[bytes, Optional[float]]:
+        if not self.is_configured():
+            raise RunpodServiceError("Runpod API key is not configured.")
+            
+        if not self.has_edit_model(model):
+            raise RunpodServiceError(f"Model {model} is not supported for editing by Runpod service.")
+            
+        model_config = self.edit_models[model]
+        return await self._execute_request(model_config["url"], model_config["payload"](prompt, images), "edit")
 
 runpod_service = RunpodService()
