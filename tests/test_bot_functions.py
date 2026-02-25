@@ -100,8 +100,9 @@ class TestBotFunctions(unittest.TestCase):
             # Verify result structure
             self.assertIsInstance(result, list)
             self.assertIsInstance(system_prompt, str)
-            # Only user message with history (no system message in result)
-            self.assertEqual(len(result), 1)
+            
+            # Now we should have 3 messages in the result array (for the 3 mock messages)
+            self.assertEqual(len(result), 3)
 
             # Verify system prompt
             # The system prompt should contain the mocked legend and bot ID
@@ -111,32 +112,25 @@ class TestBotFunctions(unittest.TestCase):
             # Should contain some system prompt content (either default or from
             # file)
             self.assertTrue(len(system_prompt) > 0)
-
-            # Verify user message with history
-            self.assertEqual(result[0]["role"], "user")
-
-            # Parse the JSON content to verify history structure
-            content = result[0]["content"]
-            self.assertIsInstance(content, list)
             
-            text_content = content[0]["text"]
-            self.assertIn("Conversation lines are below", text_content)
-
-            # Extract JSON from content
-            json_start = text_content.find("[")
-            json_content = text_content[json_start:]
-            history_data = json.loads(json_content)
+            # The system prompt should contain the preamble about discord IDs
+            self.assertIn("prefixed with its message ID and the sender's Discord ID (e.g. `[123456789] <@12345>: ...`)", system_prompt)
 
             # Verify history is in correct order (oldest first)
-            self.assertEqual(len(history_data), 3)
-            self.assertEqual(history_data[0]["user"], "<@11111>")
-            self.assertEqual(history_data[0]["says"], "First message")
-            self.assertEqual(history_data[1]["user"], "<@22222>")
-            self.assertEqual(history_data[1]["says"], "Second message")
-            self.assertEqual(history_data[2]["user"], "<@12345>")
-            self.assertEqual(
-                history_data[2]["says"],
-                "Hey @bot, can you help me?")
+            # Msg 1
+            self.assertEqual(result[0]["role"], "user")
+            content1 = result[0]["content"]
+            self.assertEqual(content1[0]["text"], "[111111] <@11111>: First message")
+            
+            # Msg 2
+            self.assertEqual(result[1]["role"], "user")
+            content2 = result[1]["content"]
+            self.assertEqual(content2[0]["text"], "[222222] <@22222>: Second message")
+            
+            # Msg 3
+            self.assertEqual(result[2]["role"], "user")
+            content3 = result[2]["content"]
+            self.assertEqual(content3[0]["text"], "[33333] <@12345>: Hey @bot, can you help me?")
 
         self.loop.run_until_complete(run_test())
 

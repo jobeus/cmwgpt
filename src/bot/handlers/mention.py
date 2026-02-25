@@ -164,77 +164,87 @@ class MentionHandler:
 
         current_channel_system_prompt += (
             f"In the channel you are <@{bot_user.id}>!\n\n"
-            f"Here are the last {INCLUDE_NUM_CHATLINES} messages from the channel in JSON format. "
-            f"You can read all of these messages. You've been mentioned in the very last "
-            f"message in the JSON array (but you may have been asked things before, and "
-            f"answered things before, that's ok! just respond to the very last element in the JSON array "
-            f"please, you'll notice you were @mentioned by someone saying  <@{bot_user.id}>. "
-            f"You are expected to reply, but less "
-            f"metaphysics and more straight up answers like a user on a 30 year old IRC "
-            f"board and not a talkative robot. Respond with only your the content of your reply.\n\n"
+            f"You will receive a chat history containing user messages and your own assistant messages. "
+            f"Each message is prefixed with its message ID and the sender's Discord ID (e.g. `[123456789] <@12345>: ...`). "
+            f"Please respond naturally to the very last message in the conversation, as it mentions you. "
+            f"You are expected to reply, but less metaphysics and more straight up answers like a user on a "
+            f"30 year old IRC board and not a talkative robot. Respond with ONLY the text content of your reply, "
+            f"without prefixing it with your own ID or message ID.\n\n"
             f"{legend_section}\n\n"
         )
-
-        # Prepare conversation context
-        ask_preamble = (
-            "Conversation lines are below and represent the last "
-            f"{INCLUDE_NUM_CHATLINES} chat lines in the chat in order from oldest to newest. "
-            f"The newest one at the bottom mentions you "
-            f"but feel free to read all the context provided, then answer the very last line in the "
-            f"following array ONLY. Each line of history is provided in a json array format like this: "
-            "{ 'user':'<@ID>', 'says': '<content of message>' }"
-        )
-
-        # No system prompt in chat_context - will be passed separately
+        
+        # We will build a native messages array for OpenAI
         chat_context = []
 
         # Build chat history
-        chat_history = []
         for msg in history_msgs:
-            msg_data = {"id": msg.id, "user": f"<@{msg.author.id}>"}
+            # Determine role
+            role = "assistant" if msg.author.id == bot_user.id else "user"
             
-            # Use content if exists, or indicate empty
-            msg_data["says"] = msg.content if msg.content else ""
-                
+            content_payload = []
+            
+            # 1. Start with the text component
+            text_lines = []
+            # Prefix with message ID and discord ID for ALL messages so the bot knows who is speaking and can map replies
+            text_lines.append(f"[{msg.id}] <@{msg.author.id}>:")
+            
+            # Add message content if any exists
+            if msg.content:
+                text_lines.append(msg.content)
+            elif not msg.embeds and not msg.attachments:
+                # Edge case where a message somehow has no content, embed, or attachment
+                text_lines.append("[Empty Message]")
+            
+            # Note any replies
             if msg.reference and msg.reference.message_id:
-                msg_data["replying_to_id"] = msg.reference.message_id
-                
-            if msg.attachments:
-                msg_data["attachments"] = [
-                    {"filename": a.filename, "content_type": a.content_type, "url": a.url}
-                    for a in msg.attachments
-                ]
-                        
+                text_lines.append(f"[Replying to message ID: {msg.reference.message_id}]")
+            
+            # Note single-text representations for embeds
             if msg.embeds:
                 embeds_info = []
                 for e in msg.embeds:
-                    embed_data = {}
-                    if e.title: embed_data["title"] = e.title
-                    if e.description: embed_data["description"] = e.description
-                    if e.url: embed_data["url"] = e.url
-                    if embed_data: embeds_info.append(embed_data)
+                    embed_text = []
+                    if e.title: embed_text.append(f"Title: {e.title}")
+                    if e.description: embed_text.append(f"Description: {e.description}")
+                    if e.url: embed_text.append(f"URL: {e.url}")
+                    if embed_text: embeds_info.append(" | ".join(embed_text))
+                
                 if embeds_info:
-                    msg_data["embeds"] = embeds_info
+                    text_lines.append("\n[Embeds:\n- " + "\n- ".join(embeds_info) + "\n]")
+            
+            # Note textual attachments details (for non-supported file types or fallback)
+            textual_attachments = []
+            for a in msg.attachments:
+                # We will natively attach images (and optionally pdfs later), everything else is text
+                if not (a.content_type and a.content_type.startswith('image/')):
+                    textual_attachments.append(f"{a.filename} ({a.content_type}) URL: {a.url}")
                     
-            chat_history.append(msg_data)
-
-        text_content = ask_preamble + "\n\n" + json.dumps(chat_history)
-        content_payload = [{"type": "input_text", "text": text_content}]
-        
-        # Include images from the mentioning message directly in the payload
-        for attach in message.attachments:
-            if attach.content_type and attach.content_type.startswith('image/'):
-                try:
-                    image_data_url = await attachment_to_base64_data_url(attach)
-                    content_payload.append(
-                        {"type": "input_image", "image_url": image_data_url}
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to convert image attachment context: {e}")
-
-        chat_context.append(
-            {"role": "user", "content": content_payload}
-        )
+            if textual_attachments:
+                text_lines.append("\n[Attachments:\n- " + "\n- ".join(textual_attachments) + "\n]")
+                
+            # Compile the entire text block 
+            final_text = " ".join(text_lines).strip()
+            # No need for fallback handling here since we always prepend the sender prefix above
+                    
+            content_payload.append({"type": "input_text" if role == "user" else "output_text", "text": final_text})
+            
+            # 2. Add native image components 
+            for attach in msg.attachments:
+                # the model expects input_image for inputs and supposedly output_image for outputs, 
+                # but sending images as prior assistant inputs is not widely supported or needed for this bot normally.
+                # However, since users send images, let's attach them.
+                if attach.content_type and attach.content_type.startswith('image/'):
+                    try:
+                        image_data_url = await attachment_to_base64_data_url(attach)
+                        # We only natively embed images for 'user' roles to avoid issues with 'assistant' role types
+                        if role == "user":
+                            content_payload.append(
+                                {"type": "input_image", "image_url": image_data_url}
+                            )
+                    except Exception as e:
+                        logger.error(f"Failed to convert image attachment context for msg {msg.id}: {e}")
+                        
+            chat_context.append({"role": role, "content": content_payload})
 
         return chat_context, current_channel_system_prompt
 

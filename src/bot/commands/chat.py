@@ -103,8 +103,7 @@ class ChatCommands:
         legend_section = await get_mention_legend(interaction.channel, self.bot.user)
 
         # Add username if configured
-        if INCLUDE_USERNAMES:
-            message = f"<@{interaction.user.id}> says: {message}"
+        prefix_message = f"<@{interaction.user.id}>: {message}" if INCLUDE_USERNAMES else message
 
         # Initialize conversation if missing (no system prompt in conversation
         # array)
@@ -124,7 +123,7 @@ class ChatCommands:
                     # issues
                     image_data_url = await attachment_to_base64_data_url(attachment)
                     content_payload = [
-                        {"type": "input_text", "text": message},
+                        {"type": "input_text", "text": prefix_message},
                         {"type": "input_image", "image_url": image_data_url},
                     ]
                     logger.info(
@@ -137,7 +136,7 @@ class ChatCommands:
                     # Fall back to URL (will work for immediate request but may
                     # expire later)
                     content_payload = [
-                        {"type": "input_text", "text": message},
+                        {"type": "input_text", "text": prefix_message},
                         {"type": "input_image", "image_url": attachment.url},
                     ]
                     logger.warning(
@@ -147,11 +146,11 @@ class ChatCommands:
                 # Non-image attachment
                 attachment_info = f"\n\n[Attached File: {attachment.filename}, type: {attachment.content_type}]"
                 content_payload = [
-                    {"type": "input_text", "text": message + attachment_info}
+                    {"type": "input_text", "text": prefix_message + attachment_info}
                 ]
                 logger.info(f"[/chat] Channel {channel_id}: payload with text attachment info")
         else:
-            content_payload = [{"type": "input_text", "text": message}]
+            content_payload = [{"type": "input_text", "text": prefix_message}]
             logger.info(
                 f"[/chat] Channel {channel_id}: payload: {json.dumps(content_payload)}")
 
