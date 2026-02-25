@@ -48,6 +48,7 @@ class StateService:
             self._channel_data[channel_id] = {
                 'conversation': [],
                 'model': None,
+                'draw_model': None,
                 'system_prompt': None,
                 'response_id': None
             }
@@ -87,6 +88,7 @@ class StateService:
                 # Check if this is the only data for this channel
                 channel_data = self._channel_data[channel_id]
                 if not any([channel_data['model'],
+                            channel_data['draw_model'],
                             channel_data['system_prompt'],
                             channel_data['response_id']]):
                     # Remove the entire channel entry if no other data exists
@@ -149,6 +151,25 @@ class StateService:
             return {k: v['model']
                     for k, v in self._channel_data.items() if v['model']}
 
+    # Draw model management
+    def get_draw_model(self, channel_id: int) -> Optional[str]:
+        """Get the draw model setting for a channel."""
+        with self._channel_data_lock:
+            return self._channel_data.get(channel_id, {}).get('draw_model')
+
+    def set_draw_model(self, channel_id: int, model: str) -> None:
+        """Set the draw model for a channel."""
+        with self._channel_data_lock:
+            self._ensure_channel_data(channel_id)
+            self._channel_data[channel_id]['draw_model'] = model
+            logger.debug(f"Set draw model for channel {channel_id} to {model}")
+
+    def get_all_draw_models(self) -> Dict[int, str]:
+        """Get all draw model settings."""
+        with self._channel_data_lock:
+            return {k: v['draw_model']
+                    for k, v in self._channel_data.items() if v['draw_model']}
+
     # System prompt management
     def get_system_prompt(self, channel_id: int) -> Optional[str]:
         """Get the system prompt for a channel."""
@@ -188,6 +209,7 @@ class StateService:
                 return {
                     'conversation': None,
                     'model': None,
+                    'draw_model': None,
                     'system_prompt': None,
                     'response_id': None
                 }
@@ -208,6 +230,7 @@ class StateService:
                 if field in [
                     'conversation',
                     'model',
+                    'draw_model',
                     'system_prompt',
                         'response_id']:
                     if field == 'conversation' and isinstance(value, list):
@@ -247,6 +270,7 @@ class StateService:
             conversations = sum(
                 1 for v in self._channel_data.values() if v['conversation'])
             models = sum(1 for v in self._channel_data.values() if v['model'])
+            draw_models = sum(1 for v in self._channel_data.values() if v['draw_model'])
             system_prompts = sum(
                 1 for v in self._channel_data.values() if v['system_prompt'])
             response_ids = sum(
@@ -255,6 +279,7 @@ class StateService:
             return {
                 "conversations": conversations,
                 "models": models,
+                "draw_models": draw_models,
                 "system_prompts": system_prompts,
                 "response_ids": response_ids,
                 "active_channels": len(self._active_channels),
@@ -336,6 +361,8 @@ class StateService:
                     v in self._channel_data.items() if v['conversation']}
                 models = {k: v['model']
                           for k, v in self._channel_data.items() if v['model']}
+                draw_models = {k: v['draw_model']
+                               for k, v in self._channel_data.items() if v['draw_model']}
                 system_prompts = {
                     k: v['system_prompt'] for k,
                     v in self._channel_data.items() if v['system_prompt']}
@@ -346,6 +373,7 @@ class StateService:
                 state_data = {
                     "conversations": conversations,
                     "models": models,
+                    "draw_models": draw_models,
                     "system_prompts": system_prompts,
                     "response_ids": response_ids,
                     "active_channels": list(self._active_channels),
@@ -416,6 +444,7 @@ class StateService:
                         # Rebuild consolidated channel data structure
                         conversations = state_data.get("conversations", {})
                         models = state_data.get("models", {})
+                        draw_models = state_data.get("draw_models", {})
                         system_prompts = state_data.get("system_prompts", {})
                         response_ids = state_data.get("response_ids", {})
 
@@ -424,16 +453,17 @@ class StateService:
                         all_channel_ids.update(int(k)
                                                for k in conversations.keys())
                         all_channel_ids.update(int(k) for k in models.keys())
+                        all_channel_ids.update(int(k) for k in draw_models.keys())
                         all_channel_ids.update(int(k)
                                                for k in system_prompts.keys())
                         all_channel_ids.update(int(k)
                                                for k in response_ids.keys())
 
-                        # Rebuild channel data structure
                         for channel_id in all_channel_ids:
                             self._channel_data[channel_id] = {
                                 'conversation': conversations.get(
                                     str(channel_id), []), 'model': models.get(
+                                    str(channel_id)), 'draw_model': draw_models.get(
                                     str(channel_id)), 'system_prompt': system_prompts.get(
                                     str(channel_id)), 'response_id': response_ids.get(
                                     str(channel_id))}
@@ -460,13 +490,15 @@ class StateService:
                         1 for v in self._channel_data.values() if v['conversation'])
                     models_count = sum(
                         1 for v in self._channel_data.values() if v['model'])
+                    draw_models_count = sum(
+                        1 for v in self._channel_data.values() if v['draw_model'])
                     prompts_count = sum(
                         1 for v in self._channel_data.values() if v['system_prompt'])
                     response_ids_count = sum(
                         1 for v in self._channel_data.values() if v['response_id'])
 
                     logger.info(
-                        f"Restored {conversations_count} conversations, {models_count} models, "
+                        f"Restored {conversations_count} conversations, {models_count} models, {draw_models_count} draw_models, "
                         f"{prompts_count} system prompts, {len(self._active_channels)} active channels, "
                         f"{response_ids_count} response IDs{sha_info}"
                     )
