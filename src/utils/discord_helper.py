@@ -5,12 +5,16 @@ import discord
 logger = logging.getLogger(__name__)
 
 
+# Simple bounded caches for base64 conversions
+_url_base64_cache = {}
+_attachment_base64_cache = {}
+MAX_CACHE_SIZE = 100
+
+
 async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
     """
     Convert a Discord attachment to a base64 data URL.
-
-    This prevents issues with expired Discord CDN URLs by downloading
-    the image and encoding it as a data URL that can be stored in conversation history.
+    Results are cached in memory to avoid repetitive downloads.
 
     Args:
         attachment: Discord attachment to convert
@@ -21,6 +25,14 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
     Raises:
         Exception: If download or encoding fails
     """
+    # Use attachment ID as the unique cache key 
+    if attachment.id in _attachment_base64_cache:
+        cached_result = _attachment_base64_cache[attachment.id]
+        if cached_result is None:
+            raise Exception("Attachment previously failed to convert and is cached as a failure.")
+        logger.debug(f"Cache hit for attachment base64: {attachment.filename}")
+        return cached_result
+
     try:
         # Download the attachment
         image_bytes = await attachment.read()
@@ -38,16 +50,24 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
             f"Converted attachment {
                 attachment.filename} to base64 data URL ({
                 len(base64_data)} chars)")
+                
+        # Store in bounded cache
+        if len(_attachment_base64_cache) >= MAX_CACHE_SIZE:
+            oldest_key = next(iter(_attachment_base64_cache))
+            del _attachment_base64_cache[oldest_key]
+        
+        _attachment_base64_cache[attachment.id] = data_url
         return data_url
 
     except Exception as e:
-        logger.error(f"Failed to convert attachment to base64: {e}")
-        raise
+        logger.error(f"Failed to convert attachment {attachment.filename} to base64: {e}")
+        # Cache the failure state so we don't retry a completely broken attachment repeatedly
+        if len(_attachment_base64_cache) >= MAX_CACHE_SIZE:
+            oldest_key = next(iter(_attachment_base64_cache))
+            del _attachment_base64_cache[oldest_key]
+        _attachment_base64_cache[attachment.id] = None
+        raise e
 
-
-# Simple bounded cache for base64 URLs
-_url_base64_cache = {}
-MAX_CACHE_SIZE = 100
 
 async def url_to_base64_data_url(url: str) -> str:
     """
@@ -64,12 +84,23 @@ async def url_to_base64_data_url(url: str) -> str:
         Exception: If download or encoding fails
     """
     if url in _url_base64_cache:
+        cached_result = _url_base64_cache[url]
+        if cached_result is None:
+            raise Exception("URL previously failed to download and is cached as a failure.")
         logger.debug(f"Cache hit for URL base64: {url}")
-        return _url_base64_cache[url]
+        return cached_result
 
     import httpx
+    
+    def cache_failure(target_url: str):
+        if len(_url_base64_cache) >= MAX_CACHE_SIZE:
+            oldest_key = next(iter(_url_base64_cache))
+            del _url_base64_cache[oldest_key]
+        _url_base64_cache[target_url] = None
+
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        # Follow redirects in case embeds resolve through URL shorteners or edge network bounces
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
             response = await client.get(url)
             response.raise_for_status()
             image_bytes = response.content
@@ -96,14 +127,18 @@ async def url_to_base64_data_url(url: str) -> str:
             
             _url_base64_cache[url] = data_url
             return data_url
+            
     except httpx.TimeoutException as e:
         logger.warning(f"Timeout while fetching image URL '{url}': {e}")
+        cache_failure(url)
         raise e
     except httpx.HTTPError as e:
         logger.error(f"HTTP Error while fetching image URL '{url}': {e}")
+        cache_failure(url)
         raise e
     except Exception as e:
         logger.error(f"Failed to fetch embed URL to base64: {e}")
+        cache_failure(url)
         raise e
 
 
