@@ -160,14 +160,17 @@ class MentionHandler:
         
         if cache_entry and (current_time - cache_entry["timestamp"]) <= 600:
             oldest_message = cache_entry["oldest_message"]
-            history_msgs.append(oldest_message)
-            async for msg in message.channel.history(limit=1000, after=oldest_message, oldest_first=True):
+            async for msg in message.channel.history(limit=1000, after=oldest_message):
                 history_msgs.append(msg)
+            history_msgs.append(oldest_message)
+            history_msgs.reverse()
+
             # Update timestamp for this channel
             self._history_cache[channel_id]["timestamp"] = current_time
         else:
-            async for msg in message.channel.history(limit=INCLUDE_NUM_CHATLINES, oldest_first=True):
+            async for msg in message.channel.history(limit=INCLUDE_NUM_CHATLINES):
                 history_msgs.append(msg)
+            history_msgs.reverse()
             
             if history_msgs:
                 self._history_cache[channel_id] = {
