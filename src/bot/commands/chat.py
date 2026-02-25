@@ -118,31 +118,40 @@ class ChatCommands:
 
         # Construct content payload for OpenAI
         if attachment:
-            try:
-                # Convert attachment to base64 data URL to prevent expiration
-                # issues
-                image_data_url = await attachment_to_base64_data_url(attachment)
+            if attachment.content_type and attachment.content_type.startswith('image/'):
+                try:
+                    # Convert attachment to base64 data URL to prevent expiration
+                    # issues
+                    image_data_url = await attachment_to_base64_data_url(attachment)
+                    content_payload = [
+                        {"type": "input_text", "text": message},
+                        {"type": "input_image", "image_url": image_data_url},
+                    ]
+                    logger.info(
+                        f"[/chat] Channel {channel_id}: payload with base64 image ({len(image_data_url)} chars)"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"[/chat] Channel {channel_id}: Failed to convert attachment to base64: {e}"
+                    )
+                    # Fall back to URL (will work for immediate request but may
+                    # expire later)
+                    content_payload = [
+                        {"type": "input_text", "text": message},
+                        {"type": "input_image", "image_url": attachment.url},
+                    ]
+                    logger.warning(
+                        f"[/chat] Channel {channel_id}: Using attachment URL as fallback (may expire)"
+                    )
+            else:
+                # Non-image attachment
+                attachment_info = f"\n\n[Attached File: {attachment.filename}, type: {attachment.content_type}]"
                 content_payload = [
-                    {"type": "input_text", "text": message},
-                    {"type": "input_image", "image_url": image_data_url},
+                    {"type": "input_text", "text": message + attachment_info}
                 ]
-                logger.info(
-                    f"[/chat] Channel {channel_id}: payload with base64 image ({len(image_data_url)} chars)")
-            except Exception as e:
-                logger.error(
-                    f"[/chat] Channel {channel_id}: Failed to convert attachment to base64: {e}")
-                # Fall back to URL (will work for immediate request but may
-                # expire later)
-                content_payload = [
-                    {"type": "input_text", "text": message},
-                    {"type": "input_image", "image_url": attachment.url},
-                ]
-                logger.warning(
-                    f"[/chat] Channel {channel_id}: Using attachment URL as fallback (may expire)")
+                logger.info(f"[/chat] Channel {channel_id}: payload with text attachment info")
         else:
-            content_payload = [
-                {"type": "input_text", "text": message}
-            ]
+            content_payload = [{"type": "input_text", "text": message}]
             logger.info(
                 f"[/chat] Channel {channel_id}: payload: {json.dumps(content_payload)}")
 

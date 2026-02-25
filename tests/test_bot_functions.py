@@ -47,8 +47,12 @@ class TestBotFunctions(unittest.TestCase):
             mock_message = MagicMock()
             mock_message.author = MagicMock()
             mock_message.author.id = 12345
+            mock_message.id = 33333
             mock_message.content = "Hey @bot, can you help me?"
             mock_message.channel = MagicMock()
+            mock_message.reference = None
+            mock_message.attachments = []
+            mock_message.embeds = []
 
             mock_bot_user = MagicMock()
             mock_bot_user.id = 99999
@@ -56,11 +60,19 @@ class TestBotFunctions(unittest.TestCase):
             # Mock channel history
             mock_msg1 = MagicMock()
             mock_msg1.author.id = 11111
+            mock_msg1.id = 111111
             mock_msg1.content = "First message"
+            mock_msg1.reference = None
+            mock_msg1.attachments = []
+            mock_msg1.embeds = []
 
             mock_msg2 = MagicMock()
             mock_msg2.author.id = 22222
+            mock_msg2.id = 222222
             mock_msg2.content = "Second message"
+            mock_msg2.reference = None
+            mock_msg2.attachments = []
+            mock_msg2.embeds = []
 
             mock_msg3 = mock_message  # The mention message
 
@@ -105,11 +117,14 @@ class TestBotFunctions(unittest.TestCase):
 
             # Parse the JSON content to verify history structure
             content = result[0]["content"]
-            self.assertIn("Conversation lines are below", content)
+            self.assertIsInstance(content, list)
+            
+            text_content = content[0]["text"]
+            self.assertIn("Conversation lines are below", text_content)
 
             # Extract JSON from content
-            json_start = content.find("[")
-            json_content = content[json_start:]
+            json_start = text_content.find("[")
+            json_content = text_content[json_start:]
             history_data = json.loads(json_content)
 
             # Verify history is in correct order (oldest first)

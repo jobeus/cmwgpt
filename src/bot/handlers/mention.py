@@ -10,7 +10,7 @@ import discord
 
 from src.config import get_system_prompt, INCLUDE_NUM_CHATLINES
 from src.services.state_service import state_service
-from src.utils.discord_helper import get_mention_legend
+from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url
 from src.services.openai_service import openai_service, OpenAIServiceError
 from src.services.message_service import message_service
 from src.services.queue_service import queue_service
@@ -191,11 +191,50 @@ class MentionHandler:
         # Build chat history
         chat_history = []
         for msg in history_msgs:
-            chat_history.append(
-                {"user": f"<@{msg.author.id}>", "says": msg.content})
+            msg_data = {"id": msg.id, "user": f"<@{msg.author.id}>"}
+            
+            # Use content if exists, or indicate empty
+            msg_data["says"] = msg.content if msg.content else ""
+                
+            if msg.reference and msg.reference.message_id:
+                msg_data["replying_to_id"] = msg.reference.message_id
+                
+            if msg.attachments:
+                msg_data["attachments"] = [
+                    {"filename": a.filename, "content_type": a.content_type, "url": a.url}
+                    for a in msg.attachments
+                ]
+                        
+            if msg.embeds:
+                embeds_info = []
+                for e in msg.embeds:
+                    embed_data = {}
+                    if e.title: embed_data["title"] = e.title
+                    if e.description: embed_data["description"] = e.description
+                    if e.url: embed_data["url"] = e.url
+                    if embed_data: embeds_info.append(embed_data)
+                if embeds_info:
+                    msg_data["embeds"] = embeds_info
+                    
+            chat_history.append(msg_data)
+
+        text_content = ask_preamble + "\n\n" + json.dumps(chat_history)
+        content_payload = [{"type": "input_text", "text": text_content}]
+        
+        # Include images from the mentioning message directly in the payload
+        for attach in message.attachments:
+            if attach.content_type and attach.content_type.startswith('image/'):
+                try:
+                    image_data_url = await attachment_to_base64_data_url(attach)
+                    content_payload.append(
+                        {"type": "input_image", "image_url": image_data_url}
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to convert image attachment context: {e}")
 
         chat_context.append(
-            {"role": "user", "content": ask_preamble + "\n\n" + json.dumps(chat_history)})
+            {"role": "user", "content": content_payload}
+        )
 
         return chat_context, current_channel_system_prompt
 
