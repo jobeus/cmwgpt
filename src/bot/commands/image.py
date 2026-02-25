@@ -342,13 +342,16 @@ class ImageCommands:
                 logger.info(f"[/edit] Channel {channel_id}: image generated")
                 file = discord.File(
                     io.BytesIO(img_bytes),
-                    filename="image.png")
+                    filename="edited.png")
+                
+                embed = discord.Embed()
+                embed.set_image(url="attachment://edited.png")
 
                 # Send the result
-                content = message_service.format_attachment_message(edit_image, prompt)
-                if cost is not None:
-                    content = content.replace("> ", f"> [${cost:.3f} @ {active_model}] ", 1)
-                await interaction.followup.send(content=content, file=file)
+                cost_prefix = f"[${cost:.3f} @ {active_model}] " if cost is not None else ""
+                formatted_prompt = f"{cost_prefix}{prompt}"
+                content = message_service.format_attachment_message(edit_image, formatted_prompt)
+                await interaction.followup.send(content=content, file=file, embed=embed)
 
             except OpenAIServiceError as e:
                 logger.error(f"OpenAI API error in edit command: {e}")

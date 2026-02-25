@@ -12,7 +12,7 @@ def format_attachment_message(
         attachment: discord.Attachment,
         message: str) -> str:
     """Format a message with an attachment URL."""
-    return f"{attachment.url}\n> {message}"
+    return f"> {attachment.url}\n> {message}"
 
 
 def format_prompt_message(message: str) -> str:
