@@ -25,6 +25,15 @@ The bot is configured through environment variables defined in a `.env` file. Co
   2. Create a new API key
   3. Copy the key (save it immediately as it won't be shown again)
 
+### `RUNPOD_IO_API_KEY`
+- **Required**: No
+- **Description**: Your Runpod API key for advanced image model access
+- **Example**: `RUNPOD_IO_API_KEY=your_runpod_api_key_here`
+- **How to get**:
+  1. Visit [Runpod Settings](https://console.runpod.io/user/settings)
+  2. Generate a new API Key
+  3. Add it to your `.env` file
+
 ### Optional Configuration
 
 #### `DISCORD_CHANNEL_ID`
@@ -55,13 +64,7 @@ The bot is configured through environment variables defined in a `.env` file. Co
   - `gpt-5-mini` - Balanced performance and cost (recommended)
   - `gpt-5-nano` - Fast and efficient for quick responses
 
-#### `DEFAULT_IMAGE_MODEL`
-- **Required**: No
-- **Description**: Default model for image generation
-- **Example**: `DEFAULT_IMAGE_MODEL=gpt-image-1.5`
-- **Default**: `gpt-image-1.5`
-- **Available Options**:
-  - `gpt-image-1.5` - GPT Image model
+
 
 #### `INCLUDE_USERNAMES`
 - **Required**: No
@@ -124,7 +127,7 @@ DISCORD_CHANNEL_ID=1234567890123456789
 
 # Optional - AI Behavior (system prompt now in system_prompt.txt file)
 DEFAULT_MODEL=gpt-5-mini
-DEFAULT_IMAGE_MODEL=gpt-image-1.5
+DEFAULT_MODEL=gpt-5-mini
 
 # Optional - Bot Behavior
 INCLUDE_USERNAMES=true

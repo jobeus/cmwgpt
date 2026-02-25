@@ -28,6 +28,7 @@ class SystemCommands:
         """Set up all system-related commands."""
         self.bot.tree.add_command(self._create_model_command())
         self.bot.tree.add_command(self._create_systemprompt_group())
+        self.bot.tree.add_command(self._create_help_command())
         self.bot.tree.add_command(self._create_restart_command())
 
     def _create_model_command(self) -> app_commands.Command:
@@ -236,8 +237,49 @@ class SystemCommands:
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
-
         return restart_command
+
+    def _create_help_command(self) -> app_commands.Command:
+        """Create the /help command."""
+
+        @app_commands.command(name="help",
+                              description="Get help with bot commands privately")
+        async def help_command(interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            queued = await queue_service.queue_command(interaction, self._handle_help_command)
+
+            if not queued:
+                logger.warning(
+                    f"Failed to queue help command from {interaction.user} in #{interaction.channel} - queue may be full"
+                )
+                await interaction.followup.send(
+                    "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
+                )
+        return help_command
+
+    async def _handle_help_command(self, interaction: discord.Interaction) -> None:
+        """Handle the /help command."""
+        logger.info(f"[/help] Help requested by {interaction.user} in #{interaction.channel}")
+
+        help_text = (
+            "**🤖 AI Bot Commands Help**\n\n"
+            "**Chat & Conversations:**\n"
+            "`/chat [message]` - Chat privately with the AI (can attach images)\n"
+            "`@BotName [message]` - Mention the bot for context-aware responses in the channel\n"
+            "`/reset` - Clear the conversation history for this channel\n\n"
+            "**Image Generation & Editing:**\n"
+            "`/draw [prompt]` - Generate an image with the AI\n"
+            "`/edit [prompt] [edit_image]` - Edit an existing image (supports up to 4 images for seedream/qwen/pruna)\n"
+            "`/drawmodel [model]` - View or set the default image generation model\n"
+            "`/editmodel [model]` - View or set the default image editing model\n\n"
+            "**System & Settings:**\n"
+            "`/model [model]` - View or set the AI language model (e.g., gpt-5-mini)\n"
+            "`/systemprompt set [prompt]` - Set a custom AI personality for this channel\n"
+            "`/systemprompt view` - View the current custom personality\n"
+            "`/systemprompt reset` - Return to the default personality\n\n"
+            "*Note: Commands may be queued if the bot is busy processing other requests.*"
+        )
+        await interaction.followup.send(help_text, ephemeral=True)
 
     async def _handle_restart_command(
             self, interaction: discord.Interaction) -> None:

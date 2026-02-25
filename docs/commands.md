@@ -60,32 +60,69 @@ Clear conversation history for the current channel.
 
 ## Image Commands
 
-### `/draw [prompt] [edit_image] [model]`
+### `/draw [prompt] [model]`
 
-Generate or edit images using AI.
+Generate images using AI.
 
 **Parameters:**
 - `prompt` (required): Description of the image you want
-- `edit_image` (optional): Existing image to modify
 - `model` (optional): AI model to use
 
 **Available Models:**
-- `gpt-image-1.5` - GPT Image model
+- `gpt-image-1.5` - Standard OpenAI Image model
+- *(If Runpod API is configured)*: `z-image`, `wan-2.6`, `pruna`, `seedream`, `qwen`, `flux`
 
 **Examples:**
 ```
 /draw A sunset over mountains with a lake
 /draw A cat wearing a space helmet model:gpt-image-1.5
-/draw Make this image more colorful [attach: original.jpg]
 ```
 
-**Features:**
-- High-quality image generation
-- Image editing and modification
-- Multiple model support
-- Automatic format handling
+### `/edit [prompt] [edit_image] [image2] [image3] [image4] [model]`
+
+Edit or modify existing images using AI.
+
+**Parameters:**
+- `prompt` (required): Instructions on how to edit the image
+- `edit_image` (required): The primary image to edit
+- `image2` to `image4` (optional): Additional reference images
+- `model` (optional): AI model to use
+
+**Available Models:**
+- `gpt-image-1.5` - Standard single-image edit (OpenAI)
+- *(If Runpod API is configured)*: `seedream`, `qwen`, `pruna` (supports up to 4 images)
+
+**Examples:**
+```
+/edit Make this image more colorful [attach: original.jpg]
+/edit Combine these images [attach: one.jpg] image2:[attach: two.jpg] model:seedream
+```
+
+### `/drawmodel [model]`
+
+View or set the default image generation model for the current channel.
+
+**Parameters:**
+- `model` (optional): Name of the model to set as default. If omitted, displays current model.
+
+### `/editmodel [model]`
+
+View or set the default image editing model for the current channel.
+
+**Parameters:**
+- `model` (optional): Name of the model to set as default. If omitted, displays current model.
 
 ## System Management Commands
+
+### `/help`
+
+Get help with bot commands privately.
+
+**Parameters:** None
+
+**Behavior:**
+- Opens an ephemeral message with a comprehensive commands list.
+- Only visible to the user who typed the command.
 
 ### `/model [model_name]`
 

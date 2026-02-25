@@ -11,7 +11,7 @@ import discord
 from discord import app_commands
 from discord.app_commands import Choice
 from discord.ext import commands
-from src.config import DEFAULT_IMAGE_MODEL, DEFAULT_DRAW_MODEL, DEFAULT_EDIT_MODEL, RUNPOD_IO_API_KEY
+from src.config import DEFAULT_DRAW_MODEL, DEFAULT_EDIT_MODEL, RUNPOD_IO_API_KEY
 from src.services.openai_service import openai_service, OpenAIServiceError
 from src.services.runpod_service import runpod_service, RunpodServiceError
 from src.services.message_service import message_service

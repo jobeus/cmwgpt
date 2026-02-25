@@ -93,6 +93,17 @@ DISCORD_BOT_TOKEN=your_discord_bot_token_here
 OPENAI_API_KEY=your_openai_api_key_here
 ```
 
+### 3. Runpod API Setup (Optional)
+
+1. Register an account and get your API key at [Runpod Settings](https://console.runpod.io/user/settings)
+2. Add your token to your `.env` file along with your Discord and OpenAI tokens:
+
+```env
+DISCORD_BOT_TOKEN=your_discord_bot_token_here
+OPENAI_API_KEY=your_openai_api_key_here
+RUNPOD_IO_API_KEY=your_runpod_api_key_here
+```
+
 ## 📖 Basic Commands
 
 ### Essential Commands
@@ -106,12 +117,20 @@ OPENAI_API_KEY=your_openai_api_key_here
   - Great for getting AI input on ongoing discussions
 
 - **`/draw [prompt]`** - Generate images with AI
-  - Uses the GPT-Image-1.5 model
+  - Uses the GPT-Image-1.5 model by default
+  - Supports Runpod models (`z-image`, `wan-2.6`, `pruna`, `seedream`, `qwen`, `flux`) if configured
+
+- **`/edit [prompt] [edit_image]`** - Edit existing images with AI
+  - Uses the GPT-Image-1.5 model by default
+  - Supports Runpod multi-image models (`seedream`, `qwen`, `pruna`) if configured
 
 ### Management Commands
 
+- **`/help`** - View all commands privately in the channel
 - **`/reset`** - Clear conversation history for the current channel
-- **`/model [name]`** - View or change AI model (gpt-5-mini, gpt-5-nano, gpt-4.1-mini, gpt-4.1-nano)
+- **`/model [name]`** - View or change AI model (gpt-5-mini, gpt-5-nano, gpt-5)
+- **`/drawmodel [name]`** - View or change AI image generation model
+- **`/editmodel [name]`** - View or change AI image editing model
 - **`/systemprompt set [prompt]`** - Set custom AI personality for the channel
 - **`/systemprompt view`** - View current system prompt
 - **`/systemprompt reset`** - Reset to default system prompt
