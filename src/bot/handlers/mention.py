@@ -4,6 +4,7 @@ Mention Handler - Handles bot mentions and context preparation
 
 import json
 import logging
+import time
 from typing import List, Dict, Any
 
 import discord
@@ -20,6 +21,11 @@ logger = logging.getLogger(__name__)
 
 class MentionHandler:
     """Handles bot mentions and context preparation."""
+
+    def __init__(self):
+        # Cache for history fetching optimization
+        # channel_id -> {"timestamp": float, "oldest_message": discord.Message}
+        self._history_cache = {}
 
     async def handle_mention(
             self,
@@ -147,9 +153,27 @@ class MentionHandler:
 
         # Gather message history
         history_msgs = []
-        async for msg in message.channel.history(limit=INCLUDE_NUM_CHATLINES):
-            history_msgs.append(msg)
-        history_msgs.reverse()  # oldest first
+        
+        current_time = time.time()
+        channel_id = message.channel.id
+        cache_entry = self._history_cache.get(channel_id)
+        
+        if cache_entry and (current_time - cache_entry["timestamp"]) <= 600:
+            oldest_message = cache_entry["oldest_message"]
+            history_msgs.append(oldest_message)
+            async for msg in message.channel.history(limit=1000, after=oldest_message, oldest_first=True):
+                history_msgs.append(msg)
+            # Update timestamp for this channel
+            self._history_cache[channel_id]["timestamp"] = current_time
+        else:
+            async for msg in message.channel.history(limit=INCLUDE_NUM_CHATLINES, oldest_first=True):
+                history_msgs.append(msg)
+            
+            if history_msgs:
+                self._history_cache[channel_id] = {
+                    "timestamp": current_time,
+                    "oldest_message": history_msgs[0]
+                }
 
         # Get user legend for the channel
         legend_section = await get_mention_legend(message.channel, bot_user)
@@ -165,7 +189,7 @@ class MentionHandler:
         current_channel_system_prompt += (
             f"In the channel you are <@{bot_user.id}>!\n\n"
             f"You will receive a chat history containing user messages and your own assistant messages. "
-            f"Each message is prefixed with its message ID and the sender's Discord ID (e.g. `[123456789] <@12345>: ...`). "
+            f"Each message is prefixed with its timestamp, message ID, and the sender's Discord ID (e.g. `[2024-01-01 12:00:00] [123456789] <@12345>: ...`). "
             f"Please respond naturally to the very last message in the conversation, as it mentions you. "
             f"You are expected to reply, but less metaphysics and more straight up answers like a user on a "
             f"30 year old IRC board and not a talkative robot. Respond with ONLY the text/image content of your reply, "
@@ -185,8 +209,9 @@ class MentionHandler:
             
             # 1. Start with the text component
             text_lines = []
-            # Prefix with message ID and discord ID for ALL messages so the bot knows who is speaking and can map replies
-            text_lines.append(f"[{msg.id}] <@{msg.author.id}>:")
+            # Prefix with timestamp, message ID and discord ID for ALL messages so the bot knows who is speaking and can map replies
+            timestamp_str = msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            text_lines.append(f"[{timestamp_str}] [{msg.id}] <@{msg.author.id}>:")
             
             # Add message content if any exists
             if msg.content:
