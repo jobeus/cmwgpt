@@ -31,9 +31,13 @@ class AutoUpdateService:
         self._max_consecutive_failures = 5
         self._last_known_commit: Optional[str] = None
 
-        logger.info(f"AutoUpdateService initialized with {check_interval}s check interval")
+        logger.info(
+            f"AutoUpdateService initialized with {check_interval}s check interval")
 
-    def set_restart_callback(self, callback: Callable[[], Awaitable[None]]) -> None:
+    def set_restart_callback(
+        self,
+        callback: Callable[[],
+                           Awaitable[None]]) -> None:
         """Set the callback function to call when a restart is needed."""
         self._restart_callback = callback
 
@@ -57,12 +61,14 @@ class AutoUpdateService:
         # Get initial commit hash
         self._last_known_commit = get_current_commit_hash()
         if self._last_known_commit:
-            logger.info(f"Starting auto-update monitoring from commit: {self._last_known_commit[:7]}")
+            logger.info(
+                f"Starting auto-update monitoring from commit: {self._last_known_commit[:7]}")
         else:
             logger.warning("Could not determine current commit hash")
 
         # Start monitoring thread
-        self._monitoring_thread = threading.Thread(target=self._monitor_git_updates, daemon=True)
+        self._monitoring_thread = threading.Thread(
+            target=self._monitor_git_updates, daemon=True)
         self._monitoring_thread.start()
 
         logger.info("AutoUpdateService started")
@@ -113,7 +119,8 @@ class AutoUpdateService:
                         # Schedule restart in the main event loop
                         try:
                             loop = asyncio.get_running_loop()
-                            asyncio.run_coroutine_threadsafe(self.trigger_restart(manual=False), loop)
+                            asyncio.run_coroutine_threadsafe(
+                                self.trigger_restart(manual=False), loop)
                         except RuntimeError:
                             # No running loop, create a new one
                             asyncio.run(self.trigger_restart(manual=False))
@@ -124,10 +131,12 @@ class AutoUpdateService:
                     self._consecutive_failures = 0
                 else:
                     self._consecutive_failures += 1
-                    logger.warning(f"Git fetch failed ({self._consecutive_failures}/{self._max_consecutive_failures})")
+                    logger.warning(
+                        f"Git fetch failed ({self._consecutive_failures}/{self._max_consecutive_failures})")
 
                     if self._consecutive_failures >= self._max_consecutive_failures:
-                        logger.error("Too many consecutive git failures, disabling auto-update")
+                        logger.error(
+                            "Too many consecutive git failures, disabling auto-update")
                         break
 
             except (OSError, RuntimeError, asyncio.TimeoutError) as e:
@@ -135,7 +144,8 @@ class AutoUpdateService:
                 logger.error(f"Error in git monitoring loop: {e}")
 
                 if self._consecutive_failures >= self._max_consecutive_failures:
-                    logger.error("Too many consecutive errors, disabling auto-update")
+                    logger.error(
+                        "Too many consecutive errors, disabling auto-update")
                     break
 
             # Wait for next check or stop signal

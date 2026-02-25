@@ -44,7 +44,8 @@ class AnnouncementService:
             Full git commit SHA or None if unable to determine
         """
         try:
-            result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 return result.stdout.strip()  # Full SHA
             else:
@@ -54,7 +55,10 @@ class AnnouncementService:
             logger.error(f"Error getting git SHA: {e}")
             return None
 
-    def _get_complete_changelog(self, from_sha: str, to_sha: str) -> Optional[str]:
+    def _get_complete_changelog(
+            self,
+            from_sha: str,
+            to_sha: str) -> Optional[str]:
         """
         Get complete changelog between two git SHAs.
 
@@ -66,9 +70,13 @@ class AnnouncementService:
             Complete changelog or None if unable to determine
         """
         try:
-            result = subprocess.run(
-                ["git", "log", f"{from_sha}..{to_sha}", "--oneline"], capture_output=True, text=True, timeout=30
-            )
+            result = subprocess.run(["git",
+                                     "log",
+                                     f"{from_sha}..{to_sha}",
+                                     "--oneline"],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=30)
             if result.returncode == 0 and result.stdout.strip():
                 lines = result.stdout.strip().split("\n")
                 return "\n".join(f"• {line}" for line in lines)
@@ -91,13 +99,15 @@ class AnnouncementService:
 
         # Check if quiet updates are enabled
         if QUIET_UPDATES:
-            logger.info("QUIET_UPDATES is enabled, skipping update announcement")
+            logger.info(
+                "QUIET_UPDATES is enabled, skipping update announcement")
             return
 
         # Get current git SHA
         current_sha = self._get_current_git_sha()
         if not current_sha:
-            logger.warning("Could not determine git SHA, skipping update announcement")
+            logger.warning(
+                "Could not determine git SHA, skipping update announcement")
             return
 
         # Get previous SHA from state
@@ -106,7 +116,8 @@ class AnnouncementService:
         # If we have a previous SHA and it's the same as current, skip
         # announcement
         if previous_sha and previous_sha == current_sha:
-            logger.info(f"Git SHA unchanged ({current_sha[:7]}), skipping duplicate update announcement")
+            logger.info(
+                f"Git SHA unchanged ({current_sha[:7]}), skipping duplicate update announcement")
             return
 
         # Get active channels
@@ -137,7 +148,8 @@ class AnnouncementService:
                     paste_url = upload_to_pasters(changelog)
                     message = f"{base_message} Changes:\n[View complete changelog]({paste_url})"
                 except Exception as e:
-                    logger.error(f"Failed to upload changelog to paste service: {e}")
+                    logger.error(
+                        f"Failed to upload changelog to paste service: {e}")
                     # Fallback to truncated message
                     lines = changelog.split("\n")
                     truncated_changelog = "\n".join(lines[:5])
@@ -150,7 +162,7 @@ class AnnouncementService:
 
         logger.info(
             f"""Announcing update to {
-            len(active_channels)} channels: {current_sha_short}"""
+                len(active_channels)} channels: {current_sha_short}"""
         )
 
         # Send announcements to all active channels
@@ -165,25 +177,30 @@ class AnnouncementService:
                     successful_announcements += 1
                     logger.debug(
                         f"""Sent update announcement to #{
-                        channel.name} ({channel_id})"""
+                            channel.name} ({channel_id})"""
                     )
 
                     # Small delay to avoid rate limiting
                     await asyncio.sleep(0.5)
                 else:
-                    logger.warning(f"Could not find or access channel {channel_id}")
+                    logger.warning(
+                        f"Could not find or access channel {channel_id}")
                     failed_announcements += 1
             except discord.Forbidden:
-                logger.warning(f"No permission to send message to channel {channel_id}")
+                logger.warning(
+                    f"No permission to send message to channel {channel_id}")
                 failed_announcements += 1
             except discord.HTTPException as e:
-                logger.error(f"HTTP error sending announcement to channel {channel_id}: {e}")
+                logger.error(
+                    f"HTTP error sending announcement to channel {channel_id}: {e}")
                 failed_announcements += 1
             except Exception as e:
-                logger.error(f"Unexpected error sending announcement to channel {channel_id}: {e}")
+                logger.error(
+                    f"Unexpected error sending announcement to channel {channel_id}: {e}")
                 failed_announcements += 1
 
-        logger.info(f"Update announcements sent: {successful_announcements} successful, {failed_announcements} failed")
+        logger.info(
+            f"Update announcements sent: {successful_announcements} successful, {failed_announcements} failed")
 
         # Update the git SHA in state now that we've announced the update
         state_service.set_last_git_sha(current_sha)

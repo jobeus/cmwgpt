@@ -100,7 +100,7 @@ security:
 	@echo "Running security scans..."
 	@pip install bandit safety
 	@echo "🔍 Running bandit security scan..."
-	@bandit -r . -f json -o bandit-report.json || true
+	@bandit -r src tests main.py -f json -o bandit-report.json || true
 	@echo "🔍 Checking for dependency vulnerabilities..."
 	@safety check || true
 	@echo "✅ Security scan complete. Check bandit-report.json for details."

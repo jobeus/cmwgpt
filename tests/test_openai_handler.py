@@ -13,7 +13,13 @@ import os
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Add src directory for new architecture
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(
+            os.path.dirname(
+                os.path.abspath(__file__))),
+        "src"))
 
 
 class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
@@ -50,11 +56,15 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         # Verify result
         self.assertEqual(result, "Hello! How can I help you today?")
 
-        # Verify API call - should use responses.create with input and instructions
+        # Verify API call - should use responses.create with input and
+        # instructions
         expected_input = [{"role": "user", "content": "Hello"}]
         self.mock_client.responses.create.assert_called_once_with(
-            model=model, input=expected_input, instructions=system_prompt, tools=unittest.mock.ANY, tool_choice="auto"
-        )
+            model=model,
+            input=expected_input,
+            instructions=system_prompt,
+            tools=unittest.mock.ANY,
+            tool_choice="auto")
 
     async def test_get_chat_completion_different_models(self):
         """Test chat completion with different models."""
@@ -147,13 +157,14 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, b"custom_image_data")
 
         # Verify API call
-        self.mock_client.images.generate.assert_called_once_with(model=model, prompt=prompt, n=1, moderation="low")
+        self.mock_client.images.generate.assert_called_once_with(
+            model=model, prompt=prompt, n=1, moderation="low")
 
     async def test_generate_image_with_edit(self):
         """Test image editing functionality."""
         # Mock Discord attachment
         mock_attachment = MagicMock()
-        mock_attachment.read = AsyncMock() # Fix: make read awaitable
+        mock_attachment.read = AsyncMock()  # Fix: make read awaitable
         mock_file = MagicMock()
         mock_attachment.to_file.return_value = mock_file
 
@@ -180,16 +191,17 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         args, kwargs = self.mock_client.images.edit.call_args
         self.assertEqual(kwargs['model'], model)
         self.assertEqual(kwargs['prompt'], prompt)
-        
+
         # Verify image parameter structure
         self.assertEqual(len(kwargs['image']), 1)
         video_tuple = kwargs['image'][0]
         self.assertEqual(len(video_tuple), 3)
-        # We can't easily assert equality on the readable content without reading it, 
-        # but we can verify it's the right object type if needed, or just trust the structure.
-        
+        # We can't easily assert equality on the readable content without reading it,
+        # but we can verify it's the right object type if needed, or just trust
+        # the structure.
+
         # Verify attachment was processed
-        mock_attachment.to_file.assert_not_called() # Code uses .read(), not .to_file()
+        mock_attachment.to_file.assert_not_called()  # Code uses .read(), not .to_file()
         mock_attachment.read.assert_called_once()
 
     async def test_generate_image_no_data_error(self):
@@ -209,7 +221,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(OpenAIServiceError) as context:
             await openai_service.generate_image(prompt, model)
 
-        self.assertEqual(str(context.exception), "Image generation failed, no image data returned.")
+        self.assertEqual(str(context.exception),
+                         "Image generation failed, no image data returned.")
 
     async def test_generate_image_no_result_error(self):
         """Test error handling when no result is returned."""
@@ -224,7 +237,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(OpenAIServiceError) as context:
             await openai_service.generate_image(prompt, model)
 
-        self.assertEqual(str(context.exception), "Image generation failed, no image data returned.")
+        self.assertEqual(str(context.exception),
+                         "Image generation failed, no image data returned.")
 
     async def test_generate_image_base64_decoding(self):
         """Test that base64 decoding works correctly."""
@@ -305,7 +319,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         # Verify it handles complex structure
         self.assertEqual(result, "Complex response")
 
-        # Expected input should exclude system messages (system prompt goes to instructions)
+        # Expected input should exclude system messages (system prompt goes to
+        # instructions)
         expected_input = [
             {
                 "role": "user",
@@ -318,8 +333,11 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
             {"role": "user", "content": [{"type": "input_text", "text": "What do you think?"}]},
         ]
         self.mock_client.responses.create.assert_called_once_with(
-            model="gpt-5-mini", input=expected_input, instructions=system_prompt, tools=unittest.mock.ANY, tool_choice="auto"
-        )
+            model="gpt-5-mini",
+            input=expected_input,
+            instructions=system_prompt,
+            tools=unittest.mock.ANY,
+            tool_choice="auto")
 
     async def test_conversation_continuity_with_previous_response_id(self):
         """Test that previous_response_id is included when available."""
@@ -347,7 +365,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
         # Test parameters
         model = "gpt-5-nano"
-        messages = [{"role": "user", "content": [{"type": "input_text", "text": "Follow up question"}]}]
+        messages = [{"role": "user", "content": [
+            {"type": "input_text", "text": "Follow up question"}]}]
         system_prompt = "You are a helpful assistant."
 
         # Call function
@@ -362,7 +381,9 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.mock_client.responses.create.assert_called_once()
         call_args = self.mock_client.responses.create.call_args
         self.assertIn('previous_response_id', call_args.kwargs)
-        self.assertEqual(call_args.kwargs['previous_response_id'], previous_response_id)
+        self.assertEqual(
+            call_args.kwargs['previous_response_id'],
+            previous_response_id)
 
         # Verify new response ID was stored
         stored_response_id = state_service.get_response_id(channel_id)
@@ -392,7 +413,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
         # Test parameters
         model = "gpt-5-nano"
-        messages = [{"role": "user", "content": [{"type": "input_text", "text": "First question"}]}]
+        messages = [{"role": "user", "content": [
+            {"type": "input_text", "text": "First question"}]}]
         system_prompt = "You are a helpful assistant."
 
         # Call function
@@ -434,7 +456,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         mock_response.output = [mock_message]
 
         # Test extracting response text and storing ID
-        result = openai_service._extract_response_text_and_store_id(mock_response, channel_id, state_service)
+        result = openai_service._extract_response_text_and_store_id(
+            mock_response, channel_id, state_service)
 
         # Verify response text was extracted
         self.assertEqual(result, "Test response text")
@@ -444,15 +467,18 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored_response_id, "resp_test123")
 
         # Test with None response (should not crash)
-        result = openai_service._extract_response_text_and_store_id(None, channel_id, state_service)
+        result = openai_service._extract_response_text_and_store_id(
+            None, channel_id, state_service)
         self.assertIsNone(result)
 
         # Test with None channel_id (should not crash)
-        result = openai_service._extract_response_text_and_store_id(mock_response, None, state_service)
+        result = openai_service._extract_response_text_and_store_id(
+            mock_response, None, state_service)
         self.assertEqual(result, "Test response text")
 
         # Test with None state_service (should not crash)
-        result = openai_service._extract_response_text_and_store_id(mock_response, channel_id, None)
+        result = openai_service._extract_response_text_and_store_id(
+            mock_response, channel_id, None)
         self.assertEqual(result, "Test response text")
 
 

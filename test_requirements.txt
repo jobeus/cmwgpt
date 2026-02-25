@@ -25,5 +25,5 @@ black>=26.1.0
 # All the main dependencies (for testing against real implementations)
 discord.py>=2.6.4
 python-dotenv>=1.2.1
-openai>=2.17.0
+openai>=2.24.0
 requests>=2.32.5

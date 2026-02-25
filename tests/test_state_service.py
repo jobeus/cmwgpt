@@ -110,8 +110,10 @@ class TestStateService(unittest.TestCase):
             try:
                 for i in range(operations_per_thread):
                     # Set conversation
-                    conversation = [{"role": "user", "content": f"Thread {thread_id}, message {i}"}]
-                    self.state_service.set_conversation(channel_id + thread_id, conversation)
+                    conversation = [
+                        {"role": "user", "content": f"Thread {thread_id}, message {i}"}]
+                    self.state_service.set_conversation(
+                        channel_id + thread_id, conversation)
 
                     # Set model
                     model = f"model-{thread_id}-{i}"
@@ -119,16 +121,21 @@ class TestStateService(unittest.TestCase):
 
                     # Set system prompt
                     prompt = f"Prompt for thread {thread_id}, iteration {i}"
-                    self.state_service.set_system_prompt(channel_id + thread_id, prompt)
+                    self.state_service.set_system_prompt(
+                        channel_id + thread_id, prompt)
 
                     # Read back values
-                    retrieved_conv = self.state_service.get_conversation(channel_id + thread_id)
-                    retrieved_model = self.state_service.get_model(channel_id + thread_id)
-                    retrieved_prompt = self.state_service.get_system_prompt(channel_id + thread_id)
+                    retrieved_conv = self.state_service.get_conversation(
+                        channel_id + thread_id)
+                    retrieved_model = self.state_service.get_model(
+                        channel_id + thread_id)
+                    retrieved_prompt = self.state_service.get_system_prompt(
+                        channel_id + thread_id)
 
                     # Verify values
                     if retrieved_conv != conversation:
-                        errors.append(f"Conversation mismatch in thread {thread_id}")
+                        errors.append(
+                            f"Conversation mismatch in thread {thread_id}")
                     if retrieved_model != model:
                         errors.append(f"Model mismatch in thread {thread_id}")
                     if retrieved_prompt != prompt:
@@ -151,7 +158,10 @@ class TestStateService(unittest.TestCase):
             thread.join()
 
         # Check results
-        self.assertEqual(len(results), num_threads, f"Not all threads completed. Errors: {errors}")
+        self.assertEqual(
+            len(results),
+            num_threads,
+            f"Not all threads completed. Errors: {errors}")
         self.assertEqual(len(errors), 0, f"Thread safety errors: {errors}")
 
     def test_stats_and_utilities(self):
@@ -163,7 +173,8 @@ class TestStateService(unittest.TestCase):
         self.assertEqual(stats["system_prompts"], 0)
 
         # Add some data
-        self.state_service.set_conversation(1, [{"role": "user", "content": "test"}])
+        self.state_service.set_conversation(
+            1, [{"role": "user", "content": "test"}])
         self.state_service.set_model(1, "test-model")
         self.state_service.set_system_prompt(1, "test-prompt")
 
@@ -185,7 +196,8 @@ class TestStateService(unittest.TestCase):
         # Add test data
         channels = [1, 2, 3]
         for i, channel_id in enumerate(channels):
-            self.state_service.set_conversation(channel_id, [{"role": "user", "content": f"conv {i}"}])
+            self.state_service.set_conversation(
+                channel_id, [{"role": "user", "content": f"conv {i}"}])
             self.state_service.set_model(channel_id, f"model-{i}")
             self.state_service.set_system_prompt(channel_id, f"prompt-{i}")
 
@@ -200,7 +212,9 @@ class TestStateService(unittest.TestCase):
 
         # Verify data integrity
         for i, channel_id in enumerate(channels):
-            self.assertEqual(all_conversations[channel_id][0]["content"], f"conv {i}")
+            self.assertEqual(
+                all_conversations[channel_id][0]["content"],
+                f"conv {i}")
             self.assertEqual(all_models[channel_id], f"model-{i}")
             self.assertEqual(all_prompts[channel_id], f"prompt-{i}")
 
@@ -255,13 +269,19 @@ class TestStateService(unittest.TestCase):
         self.state_service.set_response_id(channel2, response_id2)
 
         # Verify isolation
-        self.assertEqual(self.state_service.get_response_id(channel1), response_id1)
-        self.assertEqual(self.state_service.get_response_id(channel2), response_id2)
+        self.assertEqual(
+            self.state_service.get_response_id(channel1),
+            response_id1)
+        self.assertEqual(
+            self.state_service.get_response_id(channel2),
+            response_id2)
 
         # Clear one channel's response ID
         self.state_service.clear_response_id(channel1)
         self.assertIsNone(self.state_service.get_response_id(channel1))
-        self.assertEqual(self.state_service.get_response_id(channel2), response_id2)
+        self.assertEqual(
+            self.state_service.get_response_id(channel2),
+            response_id2)
 
     def test_get_all_response_ids(self):
         """Test getting all response IDs."""
@@ -282,7 +302,6 @@ class TestStateService(unittest.TestCase):
 
     def test_response_id_persistence(self):
         """Test that response IDs are included in state persistence."""
-        import tempfile
         import json
         import os
 
@@ -304,7 +323,8 @@ class TestStateService(unittest.TestCase):
                 state_data = json.load(f)
 
             self.assertIn('response_ids', state_data)
-            self.assertEqual(state_data['response_ids'][str(channel_id)], response_id)
+            self.assertEqual(state_data['response_ids']
+                             [str(channel_id)], response_id)
 
             # Create new state service and load from temp file
             new_state_service = StateService()
@@ -312,11 +332,13 @@ class TestStateService(unittest.TestCase):
             self.assertTrue(success)
 
             # Verify response ID was restored
-            restored_response_id = new_state_service.get_response_id(channel_id)
+            restored_response_id = new_state_service.get_response_id(
+                channel_id)
             self.assertEqual(restored_response_id, response_id)
 
             # Verify other data was also restored
-            restored_conversation = new_state_service.get_conversation(channel_id)
+            restored_conversation = new_state_service.get_conversation(
+                channel_id)
             self.assertEqual(restored_conversation, conversation)
 
         finally:

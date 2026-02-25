@@ -8,7 +8,9 @@ stateless utility functions from stateful service classes.
 import discord
 
 
-def format_attachment_message(attachment: discord.Attachment, message: str) -> str:
+def format_attachment_message(
+        attachment: discord.Attachment,
+        message: str) -> str:
     """Format a message with an attachment URL."""
     return f"{attachment.url}\n> {message}"
 

@@ -30,12 +30,15 @@ class PasteService:
             Exception: If upload fails
         """
         try:
-            response = requests.post(self.base_url, data=io.BytesIO(text.encode("utf-8")), timeout=10)
+            response = requests.post(
+                self.base_url, data=io.BytesIO(
+                    text.encode("utf-8")), timeout=10)
 
             if response.status_code == 201:
                 return response.text.strip() + ".md"
             else:
-                raise Exception(f"paste.rs error: {response.status_code} - {response.text}")
+                raise Exception(
+                    f"paste.rs error: {response.status_code} - {response.text}")
         except requests.RequestException as e:
             logger.error(f"Network error uploading to paste service: {e}")
             raise Exception(f"Failed to upload to paste service: {e}")

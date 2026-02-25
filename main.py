@@ -76,7 +76,8 @@ def setup_signal_handlers(bot_client):
                 try:
                     # Get all tasks except the current one
                     current_task = asyncio.current_task()
-                    tasks = [task for task in asyncio.all_tasks() if task != current_task]
+                    tasks = [
+                        task for task in asyncio.all_tasks() if task != current_task]
 
                     if tasks:
                         logger.info(f"Cancelling {len(tasks)} remaining tasks")

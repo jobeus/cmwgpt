@@ -3,10 +3,10 @@ Tests for OpenAI image generation tool functionality
 """
 
 import unittest
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from unittest.mock import Mock, AsyncMock, patch
 import asyncio
 import base64
-import io
+
 import discord
 
 from src.services.openai_service import OpenAIService
@@ -31,7 +31,8 @@ class TestImageGenerationTool(unittest.TestCase):
         mock_response_output.result = fake_b64_data
 
         # Test the method
-        description, files = asyncio.run(self.openai_service._handle_image_generation_output(mock_response_output))
+        description, files = asyncio.run(
+            self.openai_service._handle_image_generation_output(mock_response_output))
 
         # Verify the result
         self.assertIsNone(description)
@@ -45,11 +46,14 @@ class TestImageGenerationTool(unittest.TestCase):
         mock_response_output.result = ""
 
         # Test the method
-        description, files = asyncio.run(self.openai_service._handle_image_generation_output(mock_response_output))
+        description, files = asyncio.run(
+            self.openai_service._handle_image_generation_output(mock_response_output))
 
         # Verify the result
         self.assertIsNotNone(description)
-        self.assertEqual(description, "🎨 error w/ image generation: no images were generated.")
+        self.assertEqual(
+            description,
+            "🎨 error w/ image generation: no images were generated.")
         self.assertEqual(len(files), 0)
 
     def test_handle_image_generation_output_decode_error(self):
@@ -59,11 +63,14 @@ class TestImageGenerationTool(unittest.TestCase):
         mock_response_output.result = "invalid_base64_data"
 
         # Test the method
-        description, files = asyncio.run(self.openai_service._handle_image_generation_output(mock_response_output))
+        description, files = asyncio.run(
+            self.openai_service._handle_image_generation_output(mock_response_output))
 
         # Verify the result
         self.assertIsNotNone(description)
-        self.assertEqual(description, "🎨 **Image Generation:** Error processing generated images.")
+        self.assertEqual(
+            description,
+            "🎨 **Image Generation:** Error processing generated images.")
         self.assertEqual(len(files), 0)
 
     def test_handle_image_generation_output_missing_attribute(self):
@@ -74,13 +81,13 @@ class TestImageGenerationTool(unittest.TestCase):
         del mock_response_output.result
 
         # Test the method
-        description, files = asyncio.run(self.openai_service._handle_image_generation_output(mock_response_output))
+        description, files = asyncio.run(
+            self.openai_service._handle_image_generation_output(mock_response_output))
 
         # Verify the result
-        self.assertEqual(description, "🎨 **Image Generation:** Error processing generated images.")
-        self.assertEqual(len(files), 0)
-
-
+        self.assertEqual(
+            description,
+            "🎨 **Image Generation:** Error processing generated images.")
 
     @patch('src.services.openai_service.AsyncOpenAI')
     def test_response_with_only_image_generation(self, mock_openai_class):
@@ -108,11 +115,8 @@ class TestImageGenerationTool(unittest.TestCase):
         mock_state_service.get_response_id.return_value = None
 
         # Test the method
-        result = asyncio.run(
-            self.openai_service._handle_openai_response_with_continuity(
-                mock_client, "gpt-4", [], "test instructions", [], 12345, mock_state_service
-            )
-        )
+        result = asyncio.run(self.openai_service._handle_openai_response_with_continuity(
+            mock_client, "gpt-4", [], "test instructions", [], 12345, mock_state_service))
 
         # Verify the result
         self.assertIsInstance(result, dict)

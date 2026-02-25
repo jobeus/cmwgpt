@@ -31,7 +31,8 @@ class ImageCommands:
     def _create_draw_command(self) -> app_commands.Command:
         """Create the /draw command."""
 
-        @app_commands.command(name="draw", description="Generate an image from a prompt")
+        @app_commands.command(name="draw",
+                              description="Generate an image from a prompt")
         @app_commands.describe(
             prompt="Prompt for image generation",
             edit_image="Optional image to edit",
@@ -62,8 +63,8 @@ class ImageCommands:
             if not queued:
                 logger.warning(
                     f"""Failed to queue draw command from {
-                    interaction.user} in #{
-                    interaction.channel} - queue may be full"""
+                        interaction.user} in #{
+                        interaction.channel} - queue may be full"""
                 )
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
@@ -88,24 +89,29 @@ class ImageCommands:
             model: The model to use for generation
         """
         channel_id = interaction.channel.id
-        logger.info(f"[/draw] Channel {channel_id} Prompt: {prompt} Model: {model} Edit? {bool(edit_image)}")
+        logger.info(
+            f"[/draw] Channel {channel_id} Prompt: {prompt} Model: {model} Edit? {bool(edit_image)}")
 
         # Interaction already deferred in slash command handler
         async with interaction.channel.typing():
             try:
                 if edit_image:
-                    logger.info(f"[/draw] Channel {channel_id}: editing image {edit_image.filename}")
+                    logger.info(
+                        f"[/draw] Channel {channel_id}: editing image {edit_image.filename}")
 
                 # Generate the image
                 img_bytes = await openai_service.generate_image(prompt=prompt, model=model, edit_image=edit_image)
 
                 # Log success and create Discord file
                 logger.info(f"[/draw] Channel {channel_id}: image generated")
-                file = discord.File(io.BytesIO(img_bytes), filename="image.png")
+                file = discord.File(
+                    io.BytesIO(img_bytes),
+                    filename="image.png")
 
                 # Send the result
                 if edit_image:
-                    content = message_service.format_attachment_message(edit_image, prompt)
+                    content = message_service.format_attachment_message(
+                        edit_image, prompt)
                 else:
                     content = message_service.format_prompt_message(prompt)
 
@@ -120,7 +126,8 @@ class ImageCommands:
                 try:
                     await interaction.followup.send(content=error_message)
                 except Exception as discord_error:
-                    logger.error(f"Failed to send error message to Discord: {discord_error}")
+                    logger.error(
+                        f"Failed to send error message to Discord: {discord_error}")
                     # Try to send a simpler error message
                     try:
                         await interaction.followup.send(
@@ -138,7 +145,8 @@ class ImageCommands:
                 try:
                     await interaction.followup.send(content=error_message)
                 except Exception as discord_error:
-                    logger.error(f"Failed to send error message to Discord: {discord_error}")
+                    logger.error(
+                        f"Failed to send error message to Discord: {discord_error}")
                     # Try to send a simpler error message
                     try:
                         await interaction.followup.send(

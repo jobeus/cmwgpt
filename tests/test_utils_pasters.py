@@ -12,7 +12,13 @@ import os
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Add src directory for new architecture
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(
+            os.path.dirname(
+                os.path.abspath(__file__))),
+        "src"))
 
 
 class TestPasters(unittest.TestCase):
@@ -160,7 +166,9 @@ class TestPasters(unittest.TestCase):
         with self.assertRaises(Exception) as context:
             upload_to_pasters(test_text)
 
-        self.assertIn("Failed to upload to paste service", str(context.exception))
+        self.assertIn(
+            "Failed to upload to paste service", str(
+                context.exception))
 
 
 if __name__ == "__main__":

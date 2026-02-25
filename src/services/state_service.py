@@ -26,17 +26,20 @@ class StateService:
 
     def __init__(self):
         """Initialize the state service with thread-safe storage."""
-        # Consolidated channel data structure - all per-channel data in one dict
+        # Consolidated channel data structure - all per-channel data in one
+        # dict
         self._channel_data: Dict[int, Dict[str, Any]] = {}
         # Global data not tied to specific channels
         self._active_channels: set[int] = set()
         self._last_git_sha: Optional[str] = None
 
-        # Single lock for all channel data operations (simpler and more efficient)
+        # Single lock for all channel data operations (simpler and more
+        # efficient)
         self._channel_data_lock = threading.RLock()
         self._global_data_lock = threading.RLock()
 
-        logger.info("StateService initialized with optimized thread-safe storage")
+        logger.info(
+            "StateService initialized with optimized thread-safe storage")
 
     # Optimized channel data management - all operations in one place
     def _ensure_channel_data(self, channel_id: int) -> None:
@@ -49,7 +52,8 @@ class StateService:
                 'response_id': None
             }
 
-    def get_conversation(self, channel_id: int) -> Optional[List[Dict[str, Any]]]:
+    def get_conversation(
+            self, channel_id: int) -> Optional[List[Dict[str, Any]]]:
         """Get conversation history for a channel."""
         with self._channel_data_lock:
             if channel_id not in self._channel_data:
@@ -57,19 +61,24 @@ class StateService:
             conversation = self._channel_data[channel_id]['conversation']
             return conversation if conversation else None
 
-    def set_conversation(self, channel_id: int, conversation: List[Dict[str, Any]]) -> None:
+    def set_conversation(self, channel_id: int,
+                         conversation: List[Dict[str, Any]]) -> None:
         """Set conversation history for a channel."""
         with self._channel_data_lock:
             self._ensure_channel_data(channel_id)
             self._channel_data[channel_id]['conversation'] = conversation.copy()
-            logger.debug(f"Set conversation for channel {channel_id} with {len(conversation)} messages")
+            logger.debug(
+                f"Set conversation for channel {channel_id} with {
+                    len(conversation)} messages")
 
-    def add_message_to_conversation(self, channel_id: int, message: Dict[str, Any]) -> None:
+    def add_message_to_conversation(
+            self, channel_id: int, message: Dict[str, Any]) -> None:
         """Add a message to the conversation history for a channel."""
         with self._channel_data_lock:
             self._ensure_channel_data(channel_id)
             self._channel_data[channel_id]['conversation'].append(message)
-            logger.debug(f"Added message to conversation for channel {channel_id}")
+            logger.debug(
+                f"Added message to conversation for channel {channel_id}")
 
     def clear_conversation(self, channel_id: int) -> None:
         """Clear conversation history for a channel."""
@@ -77,7 +86,9 @@ class StateService:
             if channel_id in self._channel_data:
                 # Check if this is the only data for this channel
                 channel_data = self._channel_data[channel_id]
-                if not any([channel_data['model'], channel_data['system_prompt'], channel_data['response_id']]):
+                if not any([channel_data['model'],
+                            channel_data['system_prompt'],
+                            channel_data['response_id']]):
                     # Remove the entire channel entry if no other data exists
                     del self._channel_data[channel_id]
                 else:
@@ -89,7 +100,8 @@ class StateService:
     def get_all_conversations(self) -> Dict[int, List[Dict[str, Any]]]:
         """Get all conversation histories (for debugging/admin purposes)."""
         with self._channel_data_lock:
-            return {k: v['conversation'].copy() for k, v in self._channel_data.items() if v['conversation']}
+            return {k: v['conversation'].copy() for k,
+                    v in self._channel_data.items() if v['conversation']}
 
     # Response ID management for conversation continuity
     def get_response_id(self, channel_id: int) -> Optional[str]:
@@ -102,7 +114,8 @@ class StateService:
         with self._channel_data_lock:
             self._ensure_channel_data(channel_id)
             self._channel_data[channel_id]['response_id'] = response_id
-            logger.debug(f"Set response ID for channel {channel_id}: {response_id}")
+            logger.debug(
+                f"Set response ID for channel {channel_id}: {response_id}")
 
     def clear_response_id(self, channel_id: int) -> None:
         """Clear the OpenAI response ID for a channel."""
@@ -114,7 +127,8 @@ class StateService:
     def get_all_response_ids(self) -> Dict[int, str]:
         """Get all response IDs (for debugging/admin purposes)."""
         with self._channel_data_lock:
-            return {k: v['response_id'] for k, v in self._channel_data.items() if v['response_id']}
+            return {k: v['response_id']
+                    for k, v in self._channel_data.items() if v['response_id']}
 
     # Model management
     def get_model(self, channel_id: int) -> Optional[str]:
@@ -132,7 +146,8 @@ class StateService:
     def get_all_models(self) -> Dict[int, str]:
         """Get all model settings."""
         with self._channel_data_lock:
-            return {k: v['model'] for k, v in self._channel_data.items() if v['model']}
+            return {k: v['model']
+                    for k, v in self._channel_data.items() if v['model']}
 
     # System prompt management
     def get_system_prompt(self, channel_id: int) -> Optional[str]:
@@ -157,7 +172,8 @@ class StateService:
     def get_all_system_prompts(self) -> Dict[int, str]:
         """Get all system prompts."""
         with self._channel_data_lock:
-            return {k: v['system_prompt'] for k, v in self._channel_data.items() if v['system_prompt']}
+            return {k: v['system_prompt'] for k,
+                    v in self._channel_data.items() if v['system_prompt']}
 
     # Optimized batch operations
     def get_channel_context(self, channel_id: int) -> Dict[str, Any]:
@@ -189,14 +205,19 @@ class StateService:
             self._ensure_channel_data(channel_id)
 
             for field, value in updates.items():
-                if field in ['conversation', 'model', 'system_prompt', 'response_id']:
+                if field in [
+                    'conversation',
+                    'model',
+                    'system_prompt',
+                        'response_id']:
                     if field == 'conversation' and isinstance(value, list):
                         self._channel_data[channel_id][field] = value.copy()
                     else:
                         self._channel_data[channel_id][field] = value
                     logger.debug(f"Updated {field} for channel {channel_id}")
 
-    def add_message_and_update_response_id(self, channel_id: int, message: Dict[str, Any], response_id: str) -> None:
+    def add_message_and_update_response_id(
+            self, channel_id: int, message: Dict[str, Any], response_id: str) -> None:
         """
         Add a message to conversation and update response ID in one atomic operation.
 
@@ -209,7 +230,8 @@ class StateService:
             self._ensure_channel_data(channel_id)
             self._channel_data[channel_id]['conversation'].append(message)
             self._channel_data[channel_id]['response_id'] = response_id
-            logger.debug(f"Added message and updated response ID for channel {channel_id}: {response_id}")
+            logger.debug(
+                f"Added message and updated response ID for channel {channel_id}: {response_id}")
 
     # Utility methods
     def clear_all_data(self) -> None:
@@ -222,10 +244,13 @@ class StateService:
     def get_stats(self) -> Dict[str, int]:
         """Get statistics about stored data."""
         with self._channel_data_lock, self._global_data_lock:
-            conversations = sum(1 for v in self._channel_data.values() if v['conversation'])
+            conversations = sum(
+                1 for v in self._channel_data.values() if v['conversation'])
             models = sum(1 for v in self._channel_data.values() if v['model'])
-            system_prompts = sum(1 for v in self._channel_data.values() if v['system_prompt'])
-            response_ids = sum(1 for v in self._channel_data.values() if v['response_id'])
+            system_prompts = sum(
+                1 for v in self._channel_data.values() if v['system_prompt'])
+            response_ids = sum(
+                1 for v in self._channel_data.values() if v['response_id'])
 
             return {
                 "conversations": conversations,
@@ -285,7 +310,9 @@ class StateService:
             self._last_git_sha = sha
             logger.debug(f"Updated last git SHA to: {sha}")
 
-    def save_state_to_temp_file(self, restart_info: Optional[dict] = None) -> Optional[str]:
+    def save_state_to_temp_file(
+            self,
+            restart_info: Optional[dict] = None) -> Optional[str]:
         """
         Save current state to a secure temporary file.
 
@@ -304,10 +331,17 @@ class StateService:
             # Gather all state data under consolidated locks
             with self._channel_data_lock, self._global_data_lock:
                 # Extract data from consolidated structure
-                conversations = {k: v['conversation'] for k, v in self._channel_data.items() if v['conversation']}
-                models = {k: v['model'] for k, v in self._channel_data.items() if v['model']}
-                system_prompts = {k: v['system_prompt'] for k, v in self._channel_data.items() if v['system_prompt']}
-                response_ids = {k: v['response_id'] for k, v in self._channel_data.items() if v['response_id']}
+                conversations = {
+                    k: v['conversation'] for k,
+                    v in self._channel_data.items() if v['conversation']}
+                models = {k: v['model']
+                          for k, v in self._channel_data.items() if v['model']}
+                system_prompts = {
+                    k: v['system_prompt'] for k,
+                    v in self._channel_data.items() if v['system_prompt']}
+                response_ids = {
+                    k: v['response_id'] for k,
+                    v in self._channel_data.items() if v['response_id']}
 
                 state_data = {
                     "conversations": conversations,
@@ -365,8 +399,13 @@ class StateService:
                         state_data = json.load(f)
 
                     # Validate the data structure
-                    if not all(key in state_data for key in ["conversations", "models", "system_prompts"]):
-                        logger.warning(f"Invalid state file format: {temp_file}")
+                    if not all(
+                        key in state_data for key in [
+                            "conversations",
+                            "models",
+                            "system_prompts"]):
+                        logger.warning(
+                            f"Invalid state file format: {temp_file}")
                         continue
 
                     # Load the state under consolidated locks
@@ -382,23 +421,27 @@ class StateService:
 
                         # Get all channel IDs from all data sources
                         all_channel_ids = set()
-                        all_channel_ids.update(int(k) for k in conversations.keys())
+                        all_channel_ids.update(int(k)
+                                               for k in conversations.keys())
                         all_channel_ids.update(int(k) for k in models.keys())
-                        all_channel_ids.update(int(k) for k in system_prompts.keys())
-                        all_channel_ids.update(int(k) for k in response_ids.keys())
+                        all_channel_ids.update(int(k)
+                                               for k in system_prompts.keys())
+                        all_channel_ids.update(int(k)
+                                               for k in response_ids.keys())
 
                         # Rebuild channel data structure
                         for channel_id in all_channel_ids:
                             self._channel_data[channel_id] = {
-                                'conversation': conversations.get(str(channel_id), []),
-                                'model': models.get(str(channel_id)),
-                                'system_prompt': system_prompts.get(str(channel_id)),
-                                'response_id': response_ids.get(str(channel_id))
-                            }
+                                'conversation': conversations.get(
+                                    str(channel_id), []), 'model': models.get(
+                                    str(channel_id)), 'system_prompt': system_prompts.get(
+                                    str(channel_id)), 'response_id': response_ids.get(
+                                    str(channel_id))}
 
                         # Load active channels
                         if "active_channels" in state_data:
-                            self._active_channels = set(state_data["active_channels"])
+                            self._active_channels = set(
+                                state_data["active_channels"])
                         else:
                             # Derive from existing data
                             self._active_channels = all_channel_ids
@@ -407,15 +450,20 @@ class StateService:
                         # files)
                         self._last_git_sha = state_data.get("last_git_sha")
 
-                    logger.debug(f"Successfully loaded state from: {temp_file}")
+                    logger.debug(
+                        f"Successfully loaded state from: {temp_file}")
                     sha_info = ""
                     if self._last_git_sha:
                         sha_info = f", last git SHA: {self._last_git_sha}"
                     # Count restored data
-                    conversations_count = sum(1 for v in self._channel_data.values() if v['conversation'])
-                    models_count = sum(1 for v in self._channel_data.values() if v['model'])
-                    prompts_count = sum(1 for v in self._channel_data.values() if v['system_prompt'])
-                    response_ids_count = sum(1 for v in self._channel_data.values() if v['response_id'])
+                    conversations_count = sum(
+                        1 for v in self._channel_data.values() if v['conversation'])
+                    models_count = sum(
+                        1 for v in self._channel_data.values() if v['model'])
+                    prompts_count = sum(
+                        1 for v in self._channel_data.values() if v['system_prompt'])
+                    response_ids_count = sum(
+                        1 for v in self._channel_data.values() if v['response_id'])
 
                     logger.info(
                         f"Restored {conversations_count} conversations, {models_count} models, "
@@ -437,7 +485,8 @@ class StateService:
                     os.remove(temp_file)
                     logger.debug(f"Cleaned up temporary file: {temp_file}")
                 except OSError as e:
-                    logger.error(f"Failed to clean up temporary file {temp_file}: {e}")
+                    logger.error(
+                        f"Failed to clean up temporary file {temp_file}: {e}")
 
             return True
 
@@ -458,9 +507,11 @@ class StateService:
             for temp_file in temp_files:
                 try:
                     os.remove(temp_file)
-                    logger.info(f"Cleaned up leftover temporary file: {temp_file}")
+                    logger.info(
+                        f"Cleaned up leftover temporary file: {temp_file}")
                 except OSError as e:
-                    logger.error(f"Failed to clean up temporary file {temp_file}: {e}")
+                    logger.error(
+                        f"Failed to clean up temporary file {temp_file}: {e}")
 
         except (OSError, ValueError) as e:
             logger.error(f"Error during temp file cleanup: {e}")

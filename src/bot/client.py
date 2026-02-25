@@ -22,7 +22,9 @@ from src.services.restart_handler import restart_handler
 from src.services.announcement_service import announcement_service
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
 logger = logging.getLogger("discord_bot")
 
 
@@ -72,13 +74,16 @@ class DiscordBotClient:
             current_sha = self._get_current_git_sha()
             if current_sha:
                 # Only update if we don't already have a SHA (from loaded state)
-                # This preserves the previous SHA for comparison by the announcement service
+                # This preserves the previous SHA for comparison by the
+                # announcement service
                 if not state_service.get_last_git_sha():
                     state_service.set_last_git_sha(current_sha)
                     logger.info(f"Set initial git SHA: {current_sha[:7]}")
                 else:
-                    # Don't update - let the announcement service handle the comparison and update
-                    logger.debug(f"Current git SHA: {current_sha[:7]}, preserving previous SHA for comparison")
+                    # Don't update - let the announcement service handle the
+                    # comparison and update
+                    logger.debug(
+                        f"Current git SHA: {current_sha[:7]}, preserving previous SHA for comparison")
             else:
                 logger.warning("Could not determine current git SHA")
         except Exception as e:
@@ -92,7 +97,8 @@ class DiscordBotClient:
             Git commit SHA or None if unable to determine
         """
         try:
-            result = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 return result.stdout.strip()
             else:
@@ -106,7 +112,8 @@ class DiscordBotClient:
         """Set up the auto-update service."""
         try:
             # Set the restart callback
-            auto_update_service.set_restart_callback(restart_handler.perform_restart)
+            auto_update_service.set_restart_callback(
+                restart_handler.perform_restart)
             logger.info("Auto-update service configured")
         except Exception as e:
             logger.error(f"Error setting up auto-update service: {e}")
@@ -117,7 +124,8 @@ class DiscordBotClient:
             # Check if we have active channels and this looks like a restart
             active_channels = state_service.get_active_channels()
             if not active_channels:
-                logger.info("No active channels found, skipping update announcement")
+                logger.info(
+                    "No active channels found, skipping update announcement")
                 return
 
             # Small delay to ensure bot is fully ready
@@ -128,7 +136,8 @@ class DiscordBotClient:
 
             # Send announcement
             await announcement_service.announce_update(was_manual=was_manual)
-            logger.info(f"Sent update announcements to active channels (manual: {was_manual})")
+            logger.info(
+                f"Sent update announcements to active channels (manual: {was_manual})")
 
         except Exception as e:
             logger.error(f"Error sending update announcement: {e}")
@@ -143,7 +152,6 @@ class DiscordBotClient:
         try:
             import glob
             import json
-            import os
 
             # Look for state files that might contain restart info
             pattern = "/tmp/cmwgpt_state_backup_*.json"
@@ -159,11 +167,13 @@ class DiscordBotClient:
                     restart_info = state_data.get("restart_info", {})
                     if restart_info:
                         was_manual = restart_info.get("manual_restart", False)
-                        logger.info(f"Found restart info in state: manual={was_manual}")
+                        logger.info(
+                            f"Found restart info in state: manual={was_manual}")
                         break
 
                 except Exception as e:
-                    logger.warning(f"Error reading state file {state_file}: {e}")
+                    logger.warning(
+                        f"Error reading state file {state_file}: {e}")
 
             return was_manual
 
@@ -193,7 +203,8 @@ class DiscordBotClient:
             # Log auto-update status
             status = auto_update_service.get_status()
             if status["enabled"]:
-                print(f"🔄 Auto-update enabled (checking every {status['check_interval']}s)")
+                print(
+                    f"🔄 Auto-update enabled (checking every {status['check_interval']}s)")
             else:
                 print("🔄 Auto-update disabled")
 
@@ -204,7 +215,8 @@ class DiscordBotClient:
 
         @self.bot.event
         async def on_disconnect():
-            logger.warning("Disconnected from Discord, attempting to reconnect")
+            logger.warning(
+                "Disconnected from Discord, attempting to reconnect")
 
         @self.bot.event
         async def on_message(message: discord.Message):
@@ -229,12 +241,14 @@ class DiscordBotClient:
             message: The Discord message to handle
         """
         # Ignore bots and DMs
-        if message.author.bot or not isinstance(message.channel, discord.TextChannel):
+        if message.author.bot or not isinstance(
+                message.channel, discord.TextChannel):
             return
 
         # Handle bot mentions
         if self.bot.user and self.bot.user in message.mentions and REPLY_TO_MENTIONS:
-            model = state_service.get_model(message.channel.id) or DEFAULT_MODEL
+            model = state_service.get_model(
+                message.channel.id) or DEFAULT_MODEL
 
             # Queue the mention for FIFO processing
             queued = await mention_handler.queue_mention(message, self.bot.user, model)
@@ -242,8 +256,8 @@ class DiscordBotClient:
             if not queued:
                 logger.warning(
                     f"""Failed to queue mention from {
-                    message.author} in #{
-                    message.channel} - queue may be full"""
+                        message.author} in #{
+                        message.channel} - queue may be full"""
                 )
                 # Optionally, you could fall back to immediate processing:
                 # await mention_handler.handle_mention(message, self.bot.user,
@@ -262,7 +276,8 @@ class DiscordBotClient:
             raise
         finally:
             # Only perform cleanup if not already handled by signal handler
-            # The signal handler sets skip_cleanup flag to prevent duplicate cleanup
+            # The signal handler sets skip_cleanup flag to prevent duplicate
+            # cleanup
             if not restart_handler.should_skip_cleanup():
                 logger.info("Performing bot shutdown cleanup...")
 
@@ -274,7 +289,8 @@ class DiscordBotClient:
                     auto_update_service.stop()
                     logger.info("Auto-update service stopped")
                 except Exception as e:
-                    logger.error(f"Error shutting down auto-update service: {e}")
+                    logger.error(
+                        f"Error shutting down auto-update service: {e}")
 
                 try:
                     loop = asyncio.get_event_loop()
@@ -293,7 +309,8 @@ class DiscordBotClient:
                     "Skipping temp file cleanup during shutdown - files will be cleaned up on next startup after loading"
                 )
             else:
-                logger.info("Skipping bot cleanup - already handled by signal handler")
+                logger.info(
+                    "Skipping bot cleanup - already handled by signal handler")
 
             logger.info("Bot shutdown.")
 

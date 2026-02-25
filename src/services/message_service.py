@@ -4,7 +4,7 @@ Message Service - Handles message formatting and sending
 
 import asyncio
 import logging
-from typing import List, Optional
+from typing import List
 
 import discord
 from discord import HTTPException, Forbidden, NotFound
@@ -20,7 +20,10 @@ class MessageService:
 
     DISCORD_MESSAGE_LIMIT = 2000
 
-    async def send_channel_reply(self, channel: discord.TextChannel, reply_text: str) -> None:
+    async def send_channel_reply(
+            self,
+            channel: discord.TextChannel,
+            reply_text: str) -> None:
         """
         Sends a reply to a channel, handling potential paste upload for long messages.
 
@@ -61,11 +64,12 @@ class MessageService:
                 if e.status == 429:  # Rate limited
                     logger.warning(
                         f"""Rate limited on attempt {
-                        attempt + 1}: {e}"""
+                            attempt + 1}: {e}"""
                     )
                     if attempt < max_retries - 1:
                         # Extract retry-after from headers if available
-                        retry_after = getattr(e.response, "headers", {}).get("Retry-After")
+                        retry_after = getattr(
+                            e.response, "headers", {}).get("Retry-After")
                         if retry_after:
                             delay = float(retry_after)
                         else:
@@ -85,13 +89,14 @@ class MessageService:
                 raise
 
             except NotFound as e:
-                logger.error(f"Discord NotFound error (channel/message not found): {e}")
+                logger.error(
+                    f"Discord NotFound error (channel/message not found): {e}")
                 raise
 
             except Exception as e:
                 logger.error(
                     f"""Unexpected error sending message on attempt {
-                    attempt + 1}: {e}"""
+                        attempt + 1}: {e}"""
                 )
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
@@ -102,8 +107,10 @@ class MessageService:
                 raise
 
     async def send_interaction_followup(
-        self, interaction: discord.Interaction, base_content: str, reply_text: str
-    ) -> None:
+            self,
+            interaction: discord.Interaction,
+            base_content: str,
+            reply_text: str) -> None:
         """
         Sends a followup to an interaction, handling potential paste upload for long replies.
 
@@ -128,9 +135,7 @@ class MessageService:
                 try:
                     logger.info(
                         "Reply for interaction followup exceeded %d characters with base_content, "
-                        "attempting to upload to paste service",
-                        self.DISCORD_MESSAGE_LIMIT,
-                    )
+                        "attempting to upload to paste service", self.DISCORD_MESSAGE_LIMIT, )
                     pasted_url = paste_service.upload_markdown(reply_text)
                     final_content = (
                         f"{base_content}\n\n"
@@ -139,7 +144,8 @@ class MessageService:
                     await interaction.followup.send(content=final_content, suppress_embeds=True)
                     return
                 except Exception as e:
-                    logger.error(f"Error uploading to paste service for interaction: {e}")
+                    logger.error(
+                        f"Error uploading to paste service for interaction: {e}")
                     error_content = (
                         f"{base_content}\n\n"
                         f"The content of my response was over {self.DISCORD_MESSAGE_LIMIT} characters, "
@@ -156,7 +162,8 @@ class MessageService:
                     )
                     if attempt < max_retries - 1:
                         # Extract retry-after from headers if available
-                        retry_after = getattr(e.response, "headers", {}).get("Retry-After")
+                        retry_after = getattr(
+                            e.response, "headers", {}).get("Retry-After")
                         if retry_after:
                             delay = float(retry_after)
                         else:
@@ -168,22 +175,24 @@ class MessageService:
                     logger.error("Max retries exceeded for rate limit")
                     raise
                 else:
-                    logger.error(f"Discord HTTP error on interaction followup: {e}")
+                    logger.error(
+                        f"Discord HTTP error on interaction followup: {e}")
                     raise
 
             except Forbidden as e:
-                logger.error(f"Discord Forbidden error on interaction followup (no permission): {e}")
+                logger.error(
+                    f"Discord Forbidden error on interaction followup (no permission): {e}")
                 raise
 
             except NotFound as e:
-                logger.error(f"Discord NotFound error on interaction followup (interaction not found): {e}")
+                logger.error(
+                    f"Discord NotFound error on interaction followup (interaction not found): {e}")
                 raise
 
             except Exception as e:
                 logger.error(
                     f"""Unexpected error sending interaction followup on attempt {
-                        attempt + 1}: {e}"""
-                )
+                        attempt + 1}: {e}""")
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
                     logger.info(f"Retrying in {delay} seconds...")
@@ -192,9 +201,11 @@ class MessageService:
                 logger.error("Max retries exceeded for unexpected error")
                 raise
 
-    async def send_interaction_followup_with_files(
-        self, interaction: discord.Interaction, base_content: str, reply_text: str, files: List[discord.File] = None
-    ) -> None:
+    async def send_interaction_followup_with_files(self,
+                                                   interaction: discord.Interaction,
+                                                   base_content: str,
+                                                   reply_text: str,
+                                                   files: List[discord.File] = None) -> None:
         """
         Sends a followup to an interaction with optional file attachments.
 
@@ -223,9 +234,7 @@ class MessageService:
                 try:
                     logger.info(
                         "Reply for interaction followup with files exceeded %d characters with base_content, "
-                        "attempting to upload to paste service",
-                        self.DISCORD_MESSAGE_LIMIT,
-                    )
+                        "attempting to upload to paste service", self.DISCORD_MESSAGE_LIMIT, )
                     pasted_url = paste_service.upload_markdown(reply_text)
                     final_content = (
                         f"{base_content}\n\n"
@@ -253,29 +262,36 @@ class MessageService:
                 elif e.status == 429:  # Rate limited
                     if attempt < max_retries - 1:
                         delay = base_delay * (2**attempt)
-                        logger.warning(f"Rate limited, retrying in {delay} seconds...")
+                        logger.warning(
+                            f"Rate limited, retrying in {delay} seconds...")
                         await asyncio.sleep(delay)
                         continue
                     logger.error("Max retries exceeded for rate limit")
                     raise
                 else:
-                    logger.error(f"HTTP error during interaction followup with files: {e}")
+                    logger.error(
+                        f"HTTP error during interaction followup with files: {e}")
                     raise
 
             except (Forbidden, NotFound) as e:
-                logger.error(f"Permission or channel error during interaction followup with files: {e}")
+                logger.error(
+                    f"Permission or channel error during interaction followup with files: {e}")
                 raise
 
             except Exception as e:
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
-                    logger.warning(f"Unexpected error during interaction followup with files, retrying in {delay} seconds: {e}")
+                    logger.warning(
+                        f"Unexpected error during interaction followup with files, retrying in {delay} seconds: {e}")
                     await asyncio.sleep(delay)
                     continue
                 logger.error("Max retries exceeded for unexpected error")
                 raise
 
-    async def send_channel_reply_with_files(self, channel: discord.TextChannel, reply_text: str, files: List[discord.File] = None) -> None:
+    async def send_channel_reply_with_files(self,
+                                            channel: discord.TextChannel,
+                                            reply_text: str,
+                                            files: List[discord.File] = None) -> None:
         """
         Sends a reply to a channel with optional file attachments.
 
@@ -325,30 +341,37 @@ class MessageService:
                 elif e.status == 429:  # Rate limited
                     if attempt < max_retries - 1:
                         delay = base_delay * (2**attempt)
-                        logger.warning(f"Rate limited, retrying in {delay} seconds...")
+                        logger.warning(
+                            f"Rate limited, retrying in {delay} seconds...")
                         await asyncio.sleep(delay)
                         continue
                     logger.error("Max retries exceeded for rate limit")
                     raise
                 else:
-                    logger.error(f"HTTP error during channel reply with files: {e}")
+                    logger.error(
+                        f"HTTP error during channel reply with files: {e}")
                     raise
 
             except (Forbidden, NotFound) as e:
-                logger.error(f"Permission or channel error during channel reply with files: {e}")
+                logger.error(
+                    f"Permission or channel error during channel reply with files: {e}")
                 raise
 
             except Exception as e:
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
-                    logger.warning(f"Unexpected error during channel reply with files, retrying in {delay} seconds: {e}")
+                    logger.warning(
+                        f"Unexpected error during channel reply with files, retrying in {delay} seconds: {e}")
                     await asyncio.sleep(delay)
                     continue
                 logger.error("Max retries exceeded for unexpected error")
                 raise
 
     # Delegate to utility functions for message formatting
-    def format_attachment_message(self, attachment: discord.Attachment, message: str) -> str:
+    def format_attachment_message(
+            self,
+            attachment: discord.Attachment,
+            message: str) -> str:
         """Format a message with an attachment URL."""
         return format_attachment_message(attachment, message)
 

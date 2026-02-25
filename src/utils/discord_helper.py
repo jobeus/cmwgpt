@@ -34,7 +34,10 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
         # Create data URL
         data_url = f"data:{content_type};base64,{base64_data}"
 
-        logger.debug(f"Converted attachment {attachment.filename} to base64 data URL ({len(base64_data)} chars)")
+        logger.debug(
+            f"Converted attachment {
+                attachment.filename} to base64 data URL ({
+                len(base64_data)} chars)")
         return data_url
 
     except Exception as e:
@@ -42,7 +45,9 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
         raise
 
 
-async def get_mention_legend(channel: discord.TextChannel, bot_user: discord.User) -> str:
+async def get_mention_legend(
+        channel: discord.TextChannel,
+        bot_user: discord.User) -> str:
     # channel.members is all members who can see this channel
     lines = [f"You are <@{bot_user.id}>!"]
 

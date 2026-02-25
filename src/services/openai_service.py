@@ -12,7 +12,7 @@ import glob
 import os
 import re
 import io
-from typing import List, Dict, Any, Optional, Tuple, Union
+from typing import List, Dict, Any, Optional
 
 from openai import (
     AsyncOpenAI,
@@ -321,13 +321,13 @@ class OpenAIService:
 
             if image_data:
                 # Create Discord file
-                filename = f"generated_image.png"
+                filename = "generated_image.png"
                 discord_file = discord.File(
                     io.BytesIO(image_data), filename=filename)
                 files_to_upload.append(discord_file)
                 logger.info(f"Prepared generated image for upload: {filename}")
             else:
-                logger.warning(f"No image data found for generated image")
+                logger.warning("No image data found for generated image")
 
             # Create description text
             image_count = len(files_to_upload)
@@ -418,7 +418,7 @@ class OpenAIService:
                 json.dumps(
                     api_params,
                     indent=2)}\n\n")
-        
+
         logger.info(f"Sending request to OpenAI model: {model}...")
         response = await client.responses.create(**api_params)
 

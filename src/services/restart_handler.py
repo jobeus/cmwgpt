@@ -13,7 +13,7 @@ import logging
 import sys
 
 from src.services.state_service import state_service
-from src.utils.git_utils import perform_git_pull, get_current_commit_hash
+from src.utils.git_utils import perform_git_pull
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,8 @@ class RestartHandler:
         4. Exiting with restart code
         """
         if self._restart_in_progress:
-            logger.warning("Restart already in progress, ignoring duplicate request")
+            logger.warning(
+                "Restart already in progress, ignoring duplicate request")
             return
 
         self._restart_in_progress = True
@@ -50,7 +51,8 @@ class RestartHandler:
 
         try:
             # Step 1: Save current state with restart info (don't update git SHA yet)
-            # The announcement service will handle git SHA comparison and update
+            # The announcement service will handle git SHA comparison and
+            # update
             print("💾 Saving bot state...")
             restart_info = {"manual_restart": manual}
             temp_file = state_service.save_state_to_temp_file(restart_info)
@@ -97,18 +99,23 @@ class RestartHandler:
         Used when the bot is killed with Ctrl-C or kill signal.
         """
         if self._restart_in_progress:
-            logger.warning("Restart already in progress, graceful shutdown will proceed anyway")
+            logger.warning(
+                "Restart already in progress, graceful shutdown will proceed anyway")
 
-        # Set skip cleanup flag to prevent temp file cleanup and duplicate service shutdown
+        # Set skip cleanup flag to prevent temp file cleanup and duplicate
+        # service shutdown
         self._skip_cleanup = True
 
         print("💾 Performing graceful shutdown...")
 
         try:
             # Step 1: Save current state with shutdown info (don't update git SHA)
-            # The announcement service will handle git SHA comparison on next startup
+            # The announcement service will handle git SHA comparison on next
+            # startup
             print("💾 Saving bot state...")
-            shutdown_info = {"manual_restart": False, "graceful_shutdown": True}
+            shutdown_info = {
+                "manual_restart": False,
+                "graceful_shutdown": True}
             temp_file = state_service.save_state_to_temp_file(shutdown_info)
             if temp_file:
                 print("✅ State saved")

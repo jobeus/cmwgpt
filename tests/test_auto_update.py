@@ -19,7 +19,8 @@ class TestAutoUpdateService(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
-        self.service = AutoUpdateService(check_interval=1)  # Short interval for testing
+        self.service = AutoUpdateService(
+            check_interval=1)  # Short interval for testing
 
     def tearDown(self):
         """Clean up after tests."""
@@ -42,7 +43,8 @@ class TestAutoUpdateService(unittest.TestCase):
 
     @patch("src.services.auto_update_service.KEEP_UP_TO_DATE_WITH_GIT", True)
     @patch("src.services.auto_update_service.is_git_repository", return_value=True)
-    @patch("src.services.auto_update_service.get_current_commit_hash", return_value="abc123")
+    @patch("src.services.auto_update_service.get_current_commit_hash",
+           return_value="abc123")
     def test_start_with_git_enabled(self, mock_commit, mock_git_repo):
         """Test starting service when git is enabled and available."""
         self.service.start()
@@ -92,7 +94,8 @@ class TestStateServicePersistence(unittest.TestCase):
         channel_id = 12345
         self.state_service.set_model(channel_id, "gpt-5-mini")
         self.state_service.set_system_prompt(channel_id, "Test prompt")
-        self.state_service.add_message_to_conversation(channel_id, {"role": "user", "content": "Hello"})
+        self.state_service.add_message_to_conversation(
+            channel_id, {"role": "user", "content": "Hello"})
 
         # Save state
         temp_file = self.state_service.save_state_to_temp_file()
@@ -113,8 +116,12 @@ class TestStateServicePersistence(unittest.TestCase):
         self.assertTrue(success)
 
         # Verify state was restored
-        self.assertEqual(self.state_service.get_model(channel_id), "gpt-5-mini")
-        self.assertEqual(self.state_service.get_system_prompt(channel_id), "Test prompt")
+        self.assertEqual(
+            self.state_service.get_model(channel_id),
+            "gpt-5-mini")
+        self.assertEqual(
+            self.state_service.get_system_prompt(channel_id),
+            "Test prompt")
         conversation = self.state_service.get_conversation(channel_id)
         self.assertEqual(len(conversation), 1)
         self.assertEqual(conversation[0]["content"], "Hello")
@@ -274,7 +281,9 @@ class TestAnnouncementService(unittest.TestCase):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(self.service.announce_update(was_manual=True))
+            loop.run_until_complete(
+                self.service.announce_update(
+                    was_manual=True))
         finally:
             loop.close()
 

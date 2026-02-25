@@ -33,7 +33,8 @@ class SystemCommands:
     def _create_model_command(self) -> app_commands.Command:
         """Create the /model command."""
 
-        @app_commands.command(name="model", description="View or set OpenAI model")
+        @app_commands.command(name="model",
+                              description="View or set OpenAI model")
         @app_commands.describe(model="Model name to use")
         @app_commands.choices(
             model=[
@@ -42,7 +43,9 @@ class SystemCommands:
                 Choice(name="gpt-5-nano", value="gpt-5-nano"),
             ]
         )
-        async def model_command(interaction: discord.Interaction, model: Optional[str] = None):
+        async def model_command(
+                interaction: discord.Interaction,
+                model: Optional[str] = None):
             # Immediately defer the interaction to avoid Discord's 3-second
             # timeout
             await interaction.response.defer(ephemeral=False, thinking=True)
@@ -53,8 +56,8 @@ class SystemCommands:
             if not queued:
                 logger.warning(
                     f"""Failed to queue model command from {
-                    interaction.user} in #{
-                    interaction.channel} - queue may be full"""
+                        interaction.user} in #{
+                        interaction.channel} - queue may be full"""
                 )
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
@@ -65,12 +68,16 @@ class SystemCommands:
     def _create_systemprompt_group(self) -> app_commands.Group:
         """Create the /systemprompt command group."""
         systemprompt_group = app_commands.Group(
-            name="systemprompt", description="Manage channel-specific system prompt"
-        )
+            name="systemprompt",
+            description="Manage channel-specific system prompt")
 
-        @systemprompt_group.command(name="set", description="View or set the system prompt for this channel")
-        @app_commands.describe(prompt_text="The new system prompt. Omit to view current prompt.")
-        async def systemprompt_set(interaction: discord.Interaction, prompt_text: Optional[str] = None):
+        @systemprompt_group.command(name="set",
+                                    description="View or set the system prompt for this channel")
+        @app_commands.describe(
+            prompt_text="The new system prompt. Omit to view current prompt.")
+        async def systemprompt_set(
+                interaction: discord.Interaction,
+                prompt_text: Optional[str] = None):
             # Immediately defer the interaction to avoid Discord's 3-second
             # timeout
             await interaction.response.defer(ephemeral=True, thinking=True)
@@ -88,7 +95,9 @@ class SystemCommands:
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
 
-        @systemprompt_group.command(name="reset", description="Reset the system prompt for this channel to the default")
+        @systemprompt_group.command(
+            name="reset",
+            description="Reset the system prompt for this channel to the default")
         async def systemprompt_reset(interaction: discord.Interaction):
             # Immediately defer the interaction to avoid Discord's 3-second
             # timeout
@@ -109,7 +118,9 @@ class SystemCommands:
 
         return systemprompt_group
 
-    async def _handle_model_command(self, interaction: discord.Interaction, model: Optional[str] = None) -> None:
+    async def _handle_model_command(self,
+                                    interaction: discord.Interaction,
+                                    model: Optional[str] = None) -> None:
         """
         Handle the /model command.
 
@@ -128,12 +139,14 @@ class SystemCommands:
             logger.info(f"[/model] Channel {channel_id}: model set to {model}")
             await interaction.followup.send(f"Model set to `{model}`.", ephemeral=True)
         else:
-            current_model = state_service.get_model(channel_id) or DEFAULT_MODEL
+            current_model = state_service.get_model(
+                channel_id) or DEFAULT_MODEL
             await interaction.followup.send(f"Model is `{current_model}`.", ephemeral=True)
 
     async def _handle_systemprompt_set(
-        self, interaction: discord.Interaction, prompt_text: Optional[str] = None
-    ) -> None:
+            self,
+            interaction: discord.Interaction,
+            prompt_text: Optional[str] = None) -> None:
         """
         Handle the /systemprompt set command.
 
@@ -153,7 +166,8 @@ class SystemCommands:
             # Set new system prompt (no longer stored in conversation arrays)
             state_service.set_system_prompt(channel_id, prompt_text)
 
-            logger.info(f"[/systemprompt set] Channel {channel_id}: system prompt updated.")
+            logger.info(
+                f"[/systemprompt set] Channel {channel_id}: system prompt updated.")
             await interaction.followup.send(
                 "System prompt updated for this channel. The new prompt will be used for future messages and context.",
                 ephemeral=True,
@@ -163,12 +177,14 @@ class SystemCommands:
             current_prompt = state_service.get_system_prompt(channel_id)
             if not current_prompt:
                 current_prompt = get_system_prompt() + "\n" + legend_section
-            logger.info(f"[/systemprompt set] Channel {channel_id}: displayed current system prompt.")
+            logger.info(
+                f"[/systemprompt set] Channel {channel_id}: displayed current system prompt.")
             await interaction.followup.send(
                 f"Current system prompt for this channel:\n```\n{current_prompt}\n```", ephemeral=True
             )
 
-    async def _handle_systemprompt_reset(self, interaction: discord.Interaction) -> None:
+    async def _handle_systemprompt_reset(
+            self, interaction: discord.Interaction) -> None:
         """
         Handle the /systemprompt reset command.
 
@@ -184,15 +200,18 @@ class SystemCommands:
         # Remove custom prompt (system prompts no longer stored in conversation
         # arrays)
         state_service.clear_system_prompt(channel_id)
-        logger.info(f"[/systemprompt reset] Channel {channel_id}: custom prompt removed, reverting to default.")
+        logger.info(
+            f"[/systemprompt reset] Channel {channel_id}: custom prompt removed, reverting to default.")
 
-        logger.info(f"[/systemprompt reset] Channel {channel_id}: system prompt reset to default.")
+        logger.info(
+            f"[/systemprompt reset] Channel {channel_id}: system prompt reset to default.")
         await interaction.followup.send("System prompt for this channel has been reset to the default.", ephemeral=True)
 
     def _create_restart_command(self) -> app_commands.Command:
         """Create the /restart command."""
 
-        @app_commands.command(name="restart", description="Restart the bot (admin only)")
+        @app_commands.command(name="restart",
+                              description="Restart the bot (admin only)")
         async def restart_command(interaction: discord.Interaction):
             # Check if user has administrator permissions
             if not interaction.user.guild_permissions.administrator:
@@ -211,8 +230,8 @@ class SystemCommands:
             if not queued:
                 logger.warning(
                     f"""Failed to queue restart command from {
-                    interaction.user} in #{
-                    interaction.channel} - queue may be full"""
+                        interaction.user} in #{
+                        interaction.channel} - queue may be full"""
                 )
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
@@ -220,7 +239,8 @@ class SystemCommands:
 
         return restart_command
 
-    async def _handle_restart_command(self, interaction: discord.Interaction) -> None:
+    async def _handle_restart_command(
+            self, interaction: discord.Interaction) -> None:
         """
         Handle the /restart command.
 
@@ -229,8 +249,8 @@ class SystemCommands:
         """
         logger.info(
             f"""[/restart] Manual restart requested by {
-            interaction.user} in #{
-            interaction.channel}"""
+                interaction.user} in #{
+                interaction.channel}"""
         )
 
         # Send confirmation message
