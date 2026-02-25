@@ -28,7 +28,7 @@ tests/
 ### `test_openai_handler.py`
 - ✅ Chat completion API calls
 - ✅ Multiple model support (GPT-5, GPT-5-mini, GPT-5-nano)
-- ✅ Image generation (DALL-E 2, DALL-E 3, GPT-Image-1)
+- ✅ Image generation (GPT-Image-1.5)
 - ✅ Image editing functionality
 - ✅ Base64 encoding/decoding
 - ✅ Error handling for API failures

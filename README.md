@@ -10,7 +10,7 @@ An intelligent Discord bot that brings OpenAI's powerful AI models directly to y
 
 - **Two Interaction Modes**: Use `/chat` for private conversations or `@mention` for contextual channel responses
 - **Multi-Model AI**: Switch between GPT-4.1-mini, GPT-4.1-nano, and GPT-4o-mini
-- **Image Generation**: Create images with DALL-E 2, DALL-E 3, and GPT-Image-1
+- **Image Generation**: Create images with GPT-Image-1.5
 - **🔍 Web Search**: AI can search the web in real-time for current information and answers
 - **🎨 AI Image Creation**: Generate images directly in conversations using OpenAI's latest tools
 - **Image Analysis**: Upload images for AI analysis and understanding
@@ -106,7 +106,7 @@ OPENAI_API_KEY=your_openai_api_key_here
   - Great for getting AI input on ongoing discussions
 
 - **`/draw [prompt]`** - Generate images with AI
-  - Choose from DALL-E 2, DALL-E 3, or GPT-Image-1 models
+  - Uses the GPT-Image-1.5 model
 
 ### Management Commands
 

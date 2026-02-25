@@ -52,8 +52,8 @@ Modular command system with separate files for different functionality:
 - Handles image attachments and conversation context
 
 #### Image Commands (`image.py`)
-- `/draw` - Generate images using DALL-E models
-- Supports multiple AI models (DALL-E 2, DALL-E 3, GPT-Image-1)
+- `/draw` - Generate images using AI models
+- Supports multiple AI models (GPT-Image-1.5)
 - Image editing capabilities
 
 #### System Commands (`system.py`)

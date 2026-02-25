@@ -750,27 +750,22 @@ class OpenAIService:
                 b64_json_data = None
                 result = None
 
-                if model == "dall-e-2" or model == "dall-e-3":
-                    result = await client.images.generate(
-                        model=model, prompt=prompt, n=1, response_format="b64_json"
+                if edit_image:
+                    file_obj = await edit_image.read()
+                    result = await client.images.edit(
+                        model=model,
+                        image=[
+                            (edit_image.filename or "image", file_obj, edit_image.content_type)],
+                        # image expects a list of file-like objects
+                        prompt=prompt,
                     )
-                else:  # assume gpt-image-1.5 or similar custom model
-                    if edit_image:
-                        file_obj = await edit_image.read()
-                        result = await client.images.edit(
-                            model=model,
-                            image=[
-                                (edit_image.filename or "image", file_obj, edit_image.content_type)],
-                            # image expects a list of file-like objects
-                            prompt=prompt,
-                        )
-                    else:
-                        result = await client.images.generate(
-                            model=model,
-                            prompt=prompt,
-                            n=1,
-                            moderation="low",
-                        )
+                else:
+                    result = await client.images.generate(
+                        model=model,
+                        prompt=prompt,
+                        n=1,
+                        moderation="low",
+                    )
 
                 if result and result.data and len(result.data) > 0:
                     b64_json_data = result.data[0].b64_json

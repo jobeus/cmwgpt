@@ -94,48 +94,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
                 # Verify result
                 self.assertEqual(result, f"Response from {model}")
 
-    async def test_generate_image_dalle2_success(self):
-        """Test successful image generation with DALL-E 2."""
-        # Mock response
-        mock_data = MagicMock()
-        mock_data.b64_json = base64.b64encode(b"fake_image_data").decode()
-        mock_response = MagicMock()
-        mock_response.data = [mock_data]
-        self.mock_client.images.generate.return_value = mock_response
 
-        # Test parameters
-        prompt = "A beautiful sunset"
-        model = "dall-e-2"
-
-        # Call function
-        result = await openai_service.generate_image(prompt, model)
-
-        # Verify result
-        self.assertEqual(result, b"fake_image_data")
-
-        # Verify API call
-        self.mock_client.images.generate.assert_called_once_with(
-            model=model, prompt=prompt, n=1, response_format="b64_json"
-        )
-
-    async def test_generate_image_dalle3_success(self):
-        """Test successful image generation with DALL-E 3."""
-        # Mock response
-        mock_data = MagicMock()
-        mock_data.b64_json = base64.b64encode(b"dalle3_image_data").decode()
-        mock_response = MagicMock()
-        mock_response.data = [mock_data]
-        self.mock_client.images.generate.return_value = mock_response
-
-        # Test parameters
-        prompt = "A futuristic city"
-        model = "dall-e-3"
-
-        # Call function
-        result = await openai_service.generate_image(prompt, model)
-
-        # Verify result
-        self.assertEqual(result, b"dalle3_image_data")
 
     async def test_generate_image_custom_model_without_edit(self):
         """Test image generation with custom model (gpt-image-1.5) without editing."""
@@ -215,7 +174,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
         # Test parameters
         prompt = "A test image"
-        model = "dall-e-2"
+        model = "gpt-image-1.5"
 
         # Call function and expect error
         with self.assertRaises(OpenAIServiceError) as context:
@@ -231,7 +190,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
         # Test parameters
         prompt = "A test image"
-        model = "dall-e-2"
+        model = "gpt-image-1.5"
 
         # Call function and expect error
         with self.assertRaises(OpenAIServiceError) as context:
@@ -255,7 +214,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
         # Test parameters
         prompt = "A test image"
-        model = "dall-e-2"
+        model = "gpt-image-1.5"
 
         # Call function
         result = await openai_service.generate_image(prompt, model)

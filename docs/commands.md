@@ -70,14 +70,12 @@ Generate or edit images using AI.
 - `model` (optional): AI model to use
 
 **Available Models:**
-- `dall-e-2` - DALL-E 2 (faster, lower cost)
-- `dall-e-3` - DALL-E 3 (higher quality, more detailed)
 - `gpt-image-1.5` - GPT Image model
 
 **Examples:**
 ```
 /draw A sunset over mountains with a lake
-/draw A cat wearing a space helmet model:dall-e-3
+/draw A cat wearing a space helmet model:gpt-image-1.5
 /draw Make this image more colorful [attach: original.jpg]
 ```
 

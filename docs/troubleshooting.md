@@ -124,9 +124,9 @@ sudo systemctl restart discord-bot
    - Ensure image isn't corrupted
 
 2. **Verify OpenAI Image Access**
-   - Check if your OpenAI plan includes DALL-E access
+   - Check if your OpenAI plan includes image model access
    - Some models require higher tier plans
-   - Try different model: `/draw prompt model:dall-e-2`
+   - Try checking model spelling: `/draw prompt model:gpt-image-1.5`
 
 3. **Check Image URL Access**
    - Bot needs internet access to fetch Discord image URLs

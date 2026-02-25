@@ -58,12 +58,10 @@ The bot is configured through environment variables defined in a `.env` file. Co
 #### `DEFAULT_IMAGE_MODEL`
 - **Required**: No
 - **Description**: Default model for image generation
-- **Example**: `DEFAULT_IMAGE_MODEL=dall-e-3`
+- **Example**: `DEFAULT_IMAGE_MODEL=gpt-image-1.5`
 - **Default**: `gpt-image-1.5`
 - **Available Options**:
-  - `dall-e-2` - DALL-E 2 model
-  - `dall-e-3` - DALL-E 3 model (higher quality)
-  - `gpt-image-1` - GPT Image model
+  - `gpt-image-1.5` - GPT Image model
 
 #### `INCLUDE_USERNAMES`
 - **Required**: No
@@ -126,7 +124,7 @@ DISCORD_CHANNEL_ID=1234567890123456789
 
 # Optional - AI Behavior (system prompt now in system_prompt.txt file)
 DEFAULT_MODEL=gpt-5-mini
-DEFAULT_IMAGE_MODEL=dall-e-3
+DEFAULT_IMAGE_MODEL=gpt-image-1.5
 
 # Optional - Bot Behavior
 INCLUDE_USERNAMES=true
@@ -230,7 +228,6 @@ Please be concise but thorough in your responses. If you're unsure about somethi
 Ensure your OpenAI account has access to the models you want to use:
 
 - **GPT Models**: Usually available with API access
-- **DALL-E Models**: May require separate access or higher tier
 - **Image Models**: Check model availability in your region
 
 ## Advanced Configuration
