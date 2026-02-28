@@ -49,7 +49,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
             {"role": "user", "content": "Hello"}
         ]
         self.mock_client.chat.completions.create.assert_called_once_with(
-            model=f"{model}:online",
+            model=model,
             messages=expected_input
         )
 

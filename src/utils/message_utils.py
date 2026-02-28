@@ -6,7 +6,7 @@ stateless utility functions from stateful service classes.
 """
 
 import discord
-
+import re
 
 from typing import Union, List
 
@@ -61,6 +61,22 @@ def clean_openai_response(response: str) -> str:
         # If there are only 2 unescaped quotes (start and end), remove them
         if quote_count == 2:
             cleaned = cleaned[1:-1]
+            
+    # Strip any bot identification prefixes that might have been generated
+    # Matches patterns like:
+    # [2024-01-01 12:00:00] [123456] <@12345>: 
+    # [123456] <@12345>:
+    # <@12345>:
+    prefix_pattern = r"^(?:\[.*?\]\s*)*<@[0-9]+>:\s*"
+    
+    # Also catch cases where it just spits out the timestamp and ID
+    # [2024-01-01 12:00:00] [123456] 
+    fallback_pattern = r"^(?:\[.*?\]\s*)*\[[0-9]+\]\s*"
+    
+    no_prefix = re.sub(prefix_pattern, "", cleaned.strip())
+    if no_prefix == cleaned.strip():
+        no_prefix = re.sub(fallback_pattern, "", no_prefix)
+    cleaned = no_prefix.strip()
 
     # Handle escaped characters that should be unescaped
     # Only unescape common cases that OpenAI might escape unnecessarily
