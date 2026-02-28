@@ -133,14 +133,6 @@ class OpenAIService:
                 logger.info(f"OPENROUTER PRE-FLIGHT - model={actual_model}, msg_len={len(api_input)}")
                 logger.info(f"API HEADERS USED: {client.default_headers}")
                 
-                try:
-                    import json
-                    with open("openrouter_debug_payload.json", "w") as f:
-                        json.dump({"model": actual_model, "messages": api_input}, f, indent=2)
-                    logger.info("Wrote debug payload to openrouter_debug_payload.json")
-                except Exception as e:
-                    logger.error(f"Failed to write debug payload: {e}")
-                
                 response = await client.chat.completions.create(
                     model=actual_model,
                     messages=api_input

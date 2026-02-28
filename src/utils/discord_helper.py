@@ -1,6 +1,8 @@
 import base64
 import logging
 import discord
+import io
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -9,6 +11,28 @@ logger = logging.getLogger(__name__)
 _url_base64_cache = {}
 _attachment_base64_cache = {}
 MAX_CACHE_SIZE = 100
+
+
+def compress_image(image_bytes: bytes, max_size: int = 768, quality: int = 85) -> bytes:
+    """Compress and resize image bytes using Pillow."""
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        
+        # Convert to RGB for JPEG compression to save maximum space
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+            
+        # Resize if dimensions exceed max_size while maintaining aspect ratio
+        if img.width > max_size or img.height > max_size:
+            img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            
+        # Save to bytes as JPEG
+        out_bytes = io.BytesIO()
+        img.save(out_bytes, format='JPEG', quality=quality)
+        return out_bytes.getvalue()
+    except Exception as e:
+        logger.warning(f"Image compression failed: {e}. Falling back to original bytes.")
+        return image_bytes
 
 
 async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
@@ -36,12 +60,15 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
     try:
         # Download the attachment
         image_bytes = await attachment.read()
+        
+        # Compress image to save token limit space on APIs
+        image_bytes = compress_image(image_bytes)
 
         # Encode to base64
         base64_data = base64.b64encode(image_bytes).decode('utf-8')
 
-        # Determine content type from filename or default to image/png
-        content_type = attachment.content_type or "image/png"
+        # Content type is now JPEG due to compression
+        content_type = "image/jpeg"
 
         # Create data URL
         data_url = f"data:{content_type};base64,{base64_data}"
@@ -105,11 +132,10 @@ async def url_to_base64_data_url(url: str) -> str:
             response.raise_for_status()
             image_bytes = response.content
 
-            # Attempt to determine content-type from headers
-            content_type = response.headers.get("Content-Type", "image/png")
-            # Fallback if the URL endpoint is dumb and didn't provide it
-            if not content_type.startswith("image/"):
-                content_type = "image/png"
+            # Compress image to save token limit space on APIs
+            image_bytes = compress_image(image_bytes)
+
+            content_type = "image/jpeg"
 
             # Encode to base64
             base64_data = base64.b64encode(image_bytes).decode('utf-8')
