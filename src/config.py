@@ -10,7 +10,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "test-key-for-ci")
 RUNPOD_IO_API_KEY = os.getenv("RUNPOD_IO_API_KEY", "")
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "test-token-for-ci")
 
-VECTOR_STORE_ID = os.getenv("VECTOR_STORE_ID", "")
+
 # Bot Configuration
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-5-mini")
 DEFAULT_DRAW_MODEL = os.getenv("DEFAULT_DRAW_MODEL", "seedream")
@@ -77,11 +77,6 @@ QUIET_UPDATES = os.getenv("QUIET_UPDATES", "False").lower() in ("true", "1")
 # Numeric Configuration
 INCLUDE_NUM_CHATLINES = int(os.getenv("INCLUDE_NUM_CHATLINES", 25))
 
-# User Context Configuration
-USER_CONTEXT_URL = os.getenv("USER_CONTEXT_URL", "")
-
-# Proxy Configuration for yt-dlp
-PROXY_ADDRESS = os.getenv("PROXY_ADDRESS", "")
 
 # Check if we're in a testing environment
 IS_TESTING = os.getenv("CI") == "true" or os.getenv("TESTING") == "true"

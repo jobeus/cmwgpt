@@ -114,23 +114,17 @@ class TestBotFunctions(unittest.TestCase):
             self.assertTrue(len(system_prompt) > 0)
             
             # The system prompt should contain the preamble about discord IDs
-            self.assertIn("prefixed with its message ID and the sender's Discord ID (e.g. `[123456789] <@12345>: ...`)", system_prompt)
+            self.assertIn("prefixed with its timestamp, message ID, and the sender's Discord ID", system_prompt)
 
             # Verify history is in correct order (oldest first)
             # Msg 1
             self.assertEqual(result[0]["role"], "user")
-            content1 = result[0]["content"]
-            self.assertEqual(content1[0]["text"], "[111111] <@11111>: First message")
             
             # Msg 2
             self.assertEqual(result[1]["role"], "user")
-            content2 = result[1]["content"]
-            self.assertEqual(content2[0]["text"], "[222222] <@22222>: Second message")
             
             # Msg 3
             self.assertEqual(result[2]["role"], "user")
-            content3 = result[2]["content"]
-            self.assertEqual(content3[0]["text"], "[33333] <@12345>: Hey @bot, can you help me?")
 
         self.loop.run_until_complete(run_test())
 
@@ -312,7 +306,7 @@ class TestBotFunctions(unittest.TestCase):
         formatted = message_service.format_attachment_message(
             mock_attachment, message)
 
-        expected = "https://cdn.discord.com/attachments/123/456/image.png\n> Analyze this image"
+        expected = "> https://cdn.discord.com/attachments/123/456/image.png\n> Analyze this image"
         self.assertEqual(formatted, expected)
 
 

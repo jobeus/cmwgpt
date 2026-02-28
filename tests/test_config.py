@@ -17,7 +17,7 @@ class TestConfig(unittest.TestCase):
         # Clear any existing environment variables
         self.env_vars_to_clear = [
             'OPENAI_API_KEY', 'DISCORD_BOT_TOKEN',
-            'DEFAULT_MODEL', 'DEFAULT_IMAGE_MODEL', 'INCLUDE_USERNAMES',
+            'DEFAULT_MODEL', 'DEFAULT_DRAW_MODEL', 'DEFAULT_EDIT_MODEL', 'INCLUDE_USERNAMES',
             'REPLY_TO_MENTIONS', 'INCLUDE_NUM_CHATLINES'
         ]
         self.original_env = {}
@@ -52,10 +52,11 @@ class TestConfig(unittest.TestCase):
             importlib.reload(config)
 
             self.assertEqual(config.DEFAULT_MODEL, 'gpt-5-mini')
-            self.assertEqual(config.DEFAULT_IMAGE_MODEL, 'gpt-image-1.5')
+            self.assertEqual(config.DEFAULT_DRAW_MODEL, 'seedream')
+            self.assertEqual(config.DEFAULT_EDIT_MODEL, 'seedream')
             self.assertTrue(config.INCLUDE_USERNAMES)
             self.assertTrue(config.REPLY_TO_MENTIONS)
-            self.assertEqual(config.INCLUDE_NUM_CHATLINES, 100)
+            self.assertEqual(config.INCLUDE_NUM_CHATLINES, 25)
 
     @patch('config.load_dotenv')
     @patch.dict(os.environ, {}, clear=True)
@@ -66,7 +67,8 @@ class TestConfig(unittest.TestCase):
             'OPENAI_API_KEY': 'test_openai_key',
             'DISCORD_BOT_TOKEN': 'test_discord_token',
             'DEFAULT_MODEL': 'gpt-4',
-            'DEFAULT_IMAGE_MODEL': 'dall-e-3',
+            'DEFAULT_DRAW_MODEL': 'dall-e-3',
+            'DEFAULT_EDIT_MODEL': 'dall-e-3',
             'INCLUDE_USERNAMES': 'false',
             'REPLY_TO_MENTIONS': 'false',
             'INCLUDE_NUM_CHATLINES': '50'
@@ -85,7 +87,8 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config.OPENAI_API_KEY, 'test_openai_key')
             self.assertEqual(config.DISCORD_BOT_TOKEN, 'test_discord_token')
             self.assertEqual(config.DEFAULT_MODEL, 'gpt-4')
-            self.assertEqual(config.DEFAULT_IMAGE_MODEL, 'dall-e-3')
+            self.assertEqual(config.DEFAULT_DRAW_MODEL, 'dall-e-3')
+            self.assertEqual(config.DEFAULT_EDIT_MODEL, 'dall-e-3')
             self.assertFalse(config.INCLUDE_USERNAMES)
             self.assertFalse(config.REPLY_TO_MENTIONS)
             self.assertEqual(config.INCLUDE_NUM_CHATLINES, 50)
