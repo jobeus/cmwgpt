@@ -50,7 +50,10 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         ]
         self.mock_client.chat.completions.create.assert_called_once_with(
             model=model,
-            messages=expected_input
+            messages=expected_input,
+            tools=[{
+                "googleSearch": {}
+            }]
         )
 
     async def test_get_chat_completion_different_models(self):
