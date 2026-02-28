@@ -130,14 +130,21 @@ class OpenAIService:
                 # actual_model = f"{model}:online" if not model.endswith(":online") else model
                 actual_model = model
                 
+                logger.info(f"OPENROUTER PRE-FLIGHT - model={actual_model}, msg_len={len(api_input)}")
+                logger.info(f"API HEADERS USED: {client.default_headers}")
+                
                 response = await client.chat.completions.create(
                     model=actual_model,
                     messages=api_input
                 )
                 
+                logger.info(f"OPENROUTER POST-FLIGHT - got response object! len={len(response.choices)}")
+                
                 if response and response.choices:
                     response_text = response.choices[0].message.content
-                    return clean_openai_response(response_text) if response_text else ""
+                    if not response_text:
+                        raise OpenAIServiceError("The model API returned an empty response.")
+                    return clean_openai_response(response_text)
                 
                 return "Failed to get a response from the model."
 
