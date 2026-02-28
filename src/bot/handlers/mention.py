@@ -238,38 +238,30 @@ class MentionHandler:
                 
                 if embeds_info:
                     text_lines.append("\n[Embeds:\n- " + "\n- ".join(embeds_info) + "\n]")
-            
-            # Note textual attachments details (for non-supported file types or fallback)
-            textual_attachments = []
-            for a in msg.attachments:
-                # We will natively attach images (and optionally pdfs later), everything else is text
-                if not (a.content_type and a.content_type.startswith('image/')):
-                    textual_attachments.append(f"{a.filename} ({a.content_type}) URL: {a.url}")
-                    
-            if textual_attachments:
-                text_lines.append("\n[Attachments:\n- " + "\n- ".join(textual_attachments) + "\n]")
                 
             # Compile the entire text block
             final_text = " ".join(text_lines).strip()
             # No need for fallback handling here since we always prepend the sender prefix above
                     
             text_payload = [{"type": "text", "text": final_text}]
-            image_payload = []
+            file_payloads = []
             
-            # 2. Add native image components 
+            # 2. Add native image and file components 
             for attach in msg.attachments:
-                # the model expects input_image for inputs and supposedly output_image for outputs, 
-                # but sending images as prior assistant inputs is not widely supported or needed for this bot normally.
-                # However, since users send images, let's attach them.
-                if attach.content_type and attach.content_type.startswith('image/'):
-                    try:
-                        image_data_url = await attachment_to_base64_data_url(attach)
-                        image_payload.append(
-                            {"type": "image_url", "image_url": {"url": image_data_url}}
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to convert image attachment context for msg {msg.id}: {e}")
-                        
+                try:
+                    # We only convert attachments for user messages
+                    if role == "user":
+                        file_data_url = await attachment_to_base64_data_url(attach)
+                        if attach.content_type and attach.content_type.startswith('image/'):
+                            file_payloads.append(
+                                {"type": "image_url", "image_url": {"url": file_data_url}}
+                            )
+                        else:
+                            file_payloads.append(
+                                {"type": "file", "file": {"url": file_data_url}}
+                            )
+                except Exception as e:
+                    logger.error(f"Failed to convert attachment context for msg {msg.id}: {e}")
             # 3. Add native embed image previews
             for e in msg.embeds:
                 logger.debug(f"Checking embed for image previews: {e.title}")
@@ -283,7 +275,7 @@ class MentionHandler:
                     try:
                         logger.debug(f"Fetching embed preview image from: {embed_url}")
                         image_data_url = await url_to_base64_data_url(embed_url)
-                        image_payload.append(
+                        file_payloads.append(
                             {"type": "image_url", "image_url": {"url": image_data_url}}
                         )
                     except Exception as ex:
@@ -291,14 +283,14 @@ class MentionHandler:
 
             # Chat completions API doesn't support image_url parts in the 'assistant' role natively.
             # So if it's an assistant message with images, send text as assistant and images as a follow-up 'user'.
-            if role == "assistant" and image_payload:
+            if role == "assistant" and file_payloads:
                 chat_context.append({"role": "assistant", "content": text_payload})
                 chat_context.append({
                     "role": "user", 
-                    "content": [{"type": "text", "text": f"[{timestamp_str}] [{msg.id}] <@{msg.author.id}>:"}] + image_payload
+                    "content": [{"type": "text", "text": f"[{timestamp_str}] [{msg.id}] <@{msg.author.id}>:"}] + file_payloads
                 })
             else:
-                chat_context.append({"role": role, "content": text_payload + image_payload})
+                chat_context.append({"role": role, "content": text_payload + file_payloads})
 
         return chat_context, current_channel_system_prompt
 
