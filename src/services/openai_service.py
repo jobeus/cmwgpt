@@ -136,9 +136,11 @@ class OpenAIService:
                 response = await client.chat.completions.create(
                     model=actual_model,
                     messages=api_input,
-                    tools=[{
-                        "googleSearch": {}
-                    }]
+                    extra_body={
+                        "tools":[{
+                            "googleSearch": {}
+                        }]
+                    }
                 )
                 
                 logger.info(f"OPENROUTER POST-FLIGHT - got response object! len={len(response.choices)}")
