@@ -52,8 +52,10 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
             model=model,
             messages=expected_input,
             extra_body={
-                "tools":[{
-                    "googleSearch": {}
+                "plugins":[{
+                    "id": "web",
+                    "max_results": 5,
+                    "search_prompt": "You may consider these web results if you believe them to be relevant to your response:"
                 }]
             }
         )
