@@ -249,11 +249,12 @@ class MentionHandler:
             if textual_attachments:
                 text_lines.append("\n[Attachments:\n- " + "\n- ".join(textual_attachments) + "\n]")
                 
-            # Compile the entire text block 
+            # Compile the entire text block
             final_text = " ".join(text_lines).strip()
             # No need for fallback handling here since we always prepend the sender prefix above
                     
-            content_payload.append({"type": "text", "text": final_text})
+            text_payload = [{"type": "text", "text": final_text}]
+            image_payload = []
             
             # 2. Add native image components 
             for attach in msg.attachments:
@@ -263,11 +264,9 @@ class MentionHandler:
                 if attach.content_type and attach.content_type.startswith('image/'):
                     try:
                         image_data_url = await attachment_to_base64_data_url(attach)
-                        # We only natively embed images for 'user' roles to avoid issues with 'assistant' role types
-                        if role == "user":
-                            content_payload.append(
-                                {"type": "image_url", "image_url": {"url": image_data_url}}
-                            )
+                        image_payload.append(
+                            {"type": "image_url", "image_url": {"url": image_data_url}}
+                        )
                     except Exception as e:
                         logger.error(f"Failed to convert image attachment context for msg {msg.id}: {e}")
                         
@@ -284,15 +283,22 @@ class MentionHandler:
                     try:
                         logger.debug(f"Fetching embed preview image from: {embed_url}")
                         image_data_url = await url_to_base64_data_url(embed_url)
-                        # We only natively embed images for 'user' roles to avoid issues
-                        if role == "user":
-                            content_payload.append(
-                                {"type": "image_url", "image_url": {"url": image_data_url}}
-                            )
+                        image_payload.append(
+                            {"type": "image_url", "image_url": {"url": image_data_url}}
+                        )
                     except Exception as ex:
                         logger.warning(f"Failed to fetch embed preview context for msg {msg.id}: {ex}")
 
-            chat_context.append({"role": role, "content": content_payload})
+            # Chat completions API doesn't support image_url parts in the 'assistant' role natively.
+            # So if it's an assistant message with images, send text as assistant and images as a follow-up 'user'.
+            if role == "assistant" and image_payload:
+                chat_context.append({"role": "assistant", "content": text_payload})
+                chat_context.append({
+                    "role": "user", 
+                    "content": [{"type": "text", "text": f"[{timestamp_str}] [{msg.id}] <@{msg.author.id}>:"}] + image_payload
+                })
+            else:
+                chat_context.append({"role": role, "content": text_payload + image_payload})
 
         return chat_context, current_channel_system_prompt
 
