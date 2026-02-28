@@ -253,7 +253,7 @@ class MentionHandler:
             final_text = " ".join(text_lines).strip()
             # No need for fallback handling here since we always prepend the sender prefix above
                     
-            content_payload.append({"type": "input_text" if role == "user" else "output_text", "text": final_text})
+            content_payload.append({"type": "text", "text": final_text})
             
             # 2. Add native image components 
             for attach in msg.attachments:
@@ -266,7 +266,7 @@ class MentionHandler:
                         # We only natively embed images for 'user' roles to avoid issues with 'assistant' role types
                         if role == "user":
                             content_payload.append(
-                                {"type": "input_image", "image_url": image_data_url}
+                                {"type": "image_url", "image_url": {"url": image_data_url}}
                             )
                     except Exception as e:
                         logger.error(f"Failed to convert image attachment context for msg {msg.id}: {e}")
@@ -287,7 +287,7 @@ class MentionHandler:
                         # We only natively embed images for 'user' roles to avoid issues
                         if role == "user":
                             content_payload.append(
-                                {"type": "input_image", "image_url": image_data_url}
+                                {"type": "image_url", "image_url": {"url": image_data_url}}
                             )
                     except Exception as ex:
                         logger.warning(f"Failed to fetch embed preview context for msg {msg.id}: {ex}")

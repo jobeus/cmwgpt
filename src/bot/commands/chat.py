@@ -123,8 +123,8 @@ class ChatCommands:
                     # issues
                     image_data_url = await attachment_to_base64_data_url(attachment)
                     content_payload = [
-                        {"type": "input_text", "text": prefix_message},
-                        {"type": "input_image", "image_url": image_data_url},
+                        {"type": "text", "text": prefix_message},
+                        {"type": "image_url", "image_url": {"url": image_data_url}},
                     ]
                     logger.info(
                         f"[/chat] Channel {channel_id}: payload with base64 image ({len(image_data_url)} chars)"
@@ -136,8 +136,8 @@ class ChatCommands:
                     # Fall back to URL (will work for immediate request but may
                     # expire later)
                     content_payload = [
-                        {"type": "input_text", "text": prefix_message},
-                        {"type": "input_image", "image_url": attachment.url},
+                        {"type": "text", "text": prefix_message},
+                        {"type": "image_url", "image_url": {"url": attachment.url}},
                     ]
                     logger.warning(
                         f"[/chat] Channel {channel_id}: Using attachment URL as fallback (may expire)"
@@ -145,14 +145,12 @@ class ChatCommands:
             else:
                 # Non-image attachment
                 attachment_info = f"\n\n[Attached File: {attachment.filename}, type: {attachment.content_type}]"
-                content_payload = [
-                    {"type": "input_text", "text": prefix_message + attachment_info}
-                ]
+                content_payload = prefix_message + attachment_info
                 logger.info(f"[/chat] Channel {channel_id}: payload with text attachment info")
         else:
-            content_payload = [{"type": "input_text", "text": prefix_message}]
+            content_payload = prefix_message
             logger.info(
-                f"[/chat] Channel {channel_id}: payload: {json.dumps(content_payload)}")
+                f"[/chat] Channel {channel_id}: text payload only")
 
         # Log user input and add to conversation
         logger.info(f"[/chat] Channel {channel_id} User: {message}")
@@ -194,9 +192,7 @@ class ChatCommands:
                 logger.info(
                     f"[/chat] Channel {channel_id} Assistant: {reply_text}")
                 state_service.add_message_to_conversation(
-                    channel_id, {"role": "assistant", "content": [
-                        {"type": "output_text", "text": reply_text}
-                    ]}
+                    channel_id, {"role": "assistant", "content": reply_text}
                 )
 
                 # Prepare base message content
