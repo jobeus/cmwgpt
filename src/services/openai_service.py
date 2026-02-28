@@ -60,7 +60,11 @@ class OpenAIService:
             else:
                 self._client = AsyncOpenAI(
                     base_url="https://openrouter.ai/api/v1",
-                    api_key=OPENROUTER_API_KEY
+                    api_key=OPENROUTER_API_KEY,
+                    default_headers={
+                        "HTTP-Referer": "https://github.com/jobeus/cmwgpt",
+                        "X-Title": "CMWGPT Discord Bot"
+                    }
                 )
         return self._client
 
@@ -123,7 +127,8 @@ class OpenAIService:
                     f"Attempting response creation for model {model} (attempt {attempt + 1}/{max_retries})"
                 )
 
-                actual_model = f"{model}:online" if not model.endswith(":online") else model
+                # actual_model = f"{model}:online" if not model.endswith(":online") else model
+                actual_model = model
                 
                 response = await client.chat.completions.create(
                     model=actual_model,
