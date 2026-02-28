@@ -123,10 +123,9 @@ sudo systemctl restart discord-bot
    - File size must be under Discord limits (8MB for most servers)
    - Ensure image isn't corrupted
 
-2. **Verify OpenAI Image Access**
-   - Check if your OpenAI plan includes image model access
-   - Some models require higher tier plans
-   - Try checking model spelling: `/draw prompt model:gpt-image-1.5`
+2. **Verify Image Access**
+   - Check if your Runpod plan includes image model access
+   - Try checking model spelling: `/draw prompt model:seedream`
 
 3. **Check Image URL Access**
    - Bot needs internet access to fetch Discord image URLs

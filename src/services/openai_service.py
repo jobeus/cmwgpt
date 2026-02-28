@@ -304,44 +304,7 @@ class OpenAIService:
 
         return None
 
-    async def _handle_image_generation_output(
-            self, response_output) -> tuple[Optional[str], List[discord.File]]:
-        """
-        Handle image generation output from OpenAI response.
 
-        Args:
-            response_output: Image generation response output object
-
-        Returns:
-            Tuple of (description text, list of Discord File objects)
-        """
-        try:
-            files_to_upload = []
-
-            image_data = base64.b64decode(response_output.result)
-
-            if image_data:
-                # Create Discord file
-                filename = "generated_image.png"
-                discord_file = discord.File(
-                    io.BytesIO(image_data), filename=filename)
-                files_to_upload.append(discord_file)
-                logger.info(f"Prepared generated image for upload: {filename}")
-            else:
-                logger.warning("No image data found for generated image")
-
-            # Create description text
-            image_count = len(files_to_upload)
-            if image_count > 0:
-                description = None
-            else:
-                description = "🎨 error w/ image generation: no images were generated."
-
-            return description, files_to_upload
-
-        except Exception as e:
-            logger.error(f"Error processing image generation output: {e}")
-            return "🎨 **Image Generation:** Error processing generated images.", []
 
     def _prepare_api_params(self,
                             model: str,
@@ -432,13 +395,6 @@ class OpenAIService:
                 # Handle traditional function calling
                 return await self._handle_tool_call(client, response_output, model, api_input, instructions,
                                                     tools, response.output, previous_response_id, channel_id, state_service)
-            elif response_output.type == "image_generation_call":
-                # Handle image generation results
-                image_text, image_files = await self._handle_image_generation_output(response_output)
-                if image_text is not None:  # More explicit check - empty string is still valid
-                    response_parts.append(image_text)
-                if image_files:
-                    files_to_upload.extend(image_files)
             elif response_output.type == "message":
                 # Handle regular text and image messages from assistant
                 for content in response_output.content:
@@ -604,13 +560,7 @@ class OpenAIService:
         instructions = system_prompt if system_prompt else None
 
         # Define tools for the new responses API
-        tools = [{"type": "image_generation",
-                  "moderation": "low",
-                  "quality": "medium",
-                  "size": "auto",
-                  "background": "auto",
-                  },
-                 {"type": "web_search_preview"},
+        tools = [{"type": "web_search_preview"},
                  {"type": "function",
                   "strict": True,
                   "name": "get_youtube_transcript",
@@ -730,132 +680,8 @@ class OpenAIService:
             "Failed to get chat completion with functions after all retry attempts"
         )
 
-    async def generate_image(
-        self, prompt: str, model: str, edit_image: Optional[Attachment] = None
-    ) -> bytes:
-        """
-        Generates an image using the OpenAI API.
 
-        Args:
-            prompt: The text prompt for image generation
-            model: The model to use for generation
-            edit_image: Optional image to edit instead of generating new
 
-        Returns:
-            The raw image bytes
-
-        Raises:
-            OpenAIServiceError: If image generation fails
-        """
-        client = self.get_client()
-
-        max_retries = 3
-        base_delay = 1.0
-
-        for attempt in range(max_retries):
-            try:
-                logger.debug(
-                    f"""Attempting image generation with model {model} (attempt {
-                        attempt + 1}/{max_retries})""")
-                b64_json_data = None
-                result = None
-
-                if edit_image:
-                    file_obj = await edit_image.read()
-                    result = await client.images.edit(
-                        model=model,
-                        image=[
-                            (edit_image.filename or "image", file_obj, edit_image.content_type)],
-                        # image expects a list of file-like objects
-                        prompt=prompt,
-                    )
-                else:
-                    result = await client.images.generate(
-                        model=model,
-                        prompt=prompt,
-                        n=1,
-                        moderation="low",
-                    )
-
-                if result and result.data and len(result.data) > 0:
-                    b64_json_data = result.data[0].b64_json
-
-                if not b64_json_data:
-                    raise OpenAIServiceError(
-                        "Image generation failed, no image data returned."
-                    )
-
-                img_bytes = base64.b64decode(b64_json_data)
-                logger.debug("Image generation successful")
-                return img_bytes
-
-            except RateLimitError as e:
-                logger.warning(f"Rate limit hit on attempt {attempt + 1}: {e}")
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2**attempt)  # Exponential backoff
-                    logger.info(f"Retrying in {delay} seconds...")
-                    await asyncio.sleep(delay)
-                    continue
-                logger.error("Max retries exceeded for rate limit")
-                raise OpenAIServiceError(
-                    f"Rate limit exceeded after {max_retries} attempts. Please try again later."
-                ) from e
-
-            except AuthenticationError as e:
-                logger.error(f"Authentication error: {e}")
-                raise OpenAIServiceError(
-                    "Authentication failed. Please check API key configuration."
-                ) from e
-
-            except APIConnectionError as e:
-                logger.warning(
-                    f"""Connection error on attempt {
-                        attempt + 1}: {e}"""
-                )
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2**attempt)
-                    logger.info(f"Retrying in {delay} seconds...")
-                    await asyncio.sleep(delay)
-                    continue
-                logger.error("Max retries exceeded for connection error")
-                raise OpenAIServiceError(
-                    f"Connection failed after {max_retries} attempts. Please try again later."
-                ) from e
-
-            except BadRequestError as e:
-                logger.error(f"Bad request error: {e}")
-                # BadRequestError is often due to content policy violations,
-                # don't retry
-                raise OpenAIServiceError(
-                    f"""Request rejected: {
-                        e.message if hasattr(
-                            e, 'message') else str(e)}"""
-                ) from e
-
-            except APIError as e:
-                logger.error(f"OpenAI API error on attempt {attempt + 1}: {e}")
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2**attempt)
-                    logger.info(f"Retrying in {delay} seconds...")
-                    await asyncio.sleep(delay)
-                    continue
-                logger.error("Max retries exceeded for API error")
-                raise OpenAIServiceError(
-                    f"""OpenAI API error after {max_retries} attempts: {
-                        str(e)}"""
-                ) from e
-
-            except OpenAIServiceError:
-                # Re-raise our own exceptions without modification
-                raise
-
-            except (httpx.HTTPError, ValueError, TypeError) as e:
-                logger.error(f"Unexpected error during image generation: {e}")
-                raise OpenAIServiceError(f"Unexpected error: {str(e)}") from e
-
-        # This should never be reached, but just in case
-        raise OpenAIServiceError(
-            "Failed to generate image after all retry attempts")
 
 
 # Global service instance

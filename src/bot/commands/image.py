@@ -38,7 +38,7 @@ class ImageCommands:
         """Create the /draw command."""
 
         model_choices = [
-            Choice(name="gpt-image-1.5", value="gpt-image-1.5"),
+            Choice(name="seedream", value="seedream"),
         ]
         
         if RUNPOD_IO_API_KEY:
@@ -46,7 +46,6 @@ class ImageCommands:
                 Choice(name="z-image", value="z-image"),
                 Choice(name="wan-2.6", value="wan-2.6"),
                 Choice(name="pruna", value="pruna"),
-                Choice(name="seedream", value="seedream"),
                 Choice(name="qwen", value="qwen"),
                 Choice(name="flux", value="flux"),
             ])
@@ -118,7 +117,7 @@ class ImageCommands:
                 if runpod_service.has_model(active_model):
                     img_bytes, cost = await runpod_service.generate_image(prompt=prompt, model=active_model)
                 else:
-                    img_bytes = await openai_service.generate_image(prompt=prompt, model=active_model)
+                    raise Exception(f"Model {active_model} is not supported or not configured via Runpod.")
 
                 # Log success and create Discord file
                 logger.info(f"[/draw] Channel {channel_id}: image generated")
@@ -195,7 +194,7 @@ class ImageCommands:
         """Create the /drawmodel command."""
         
         model_choices = [
-            Choice(name="gpt-image-1.5", value="gpt-image-1.5"),
+            Choice(name="seedream", value="seedream"),
         ]
         
         if RUNPOD_IO_API_KEY:
@@ -203,7 +202,6 @@ class ImageCommands:
                 Choice(name="z-image", value="z-image"),
                 Choice(name="wan-2.6", value="wan-2.6"),
                 Choice(name="pruna", value="pruna"),
-                Choice(name="seedream", value="seedream"),
                 Choice(name="qwen", value="qwen"),
                 Choice(name="flux", value="flux"),
             ])
@@ -247,12 +245,11 @@ class ImageCommands:
         """Create the /edit command."""
 
         edit_model_choices = [
-            Choice(name="gpt-image-1.5", value="gpt-image-1.5"),
+            Choice(name="seedream", value="seedream"),
         ]
         
         if RUNPOD_IO_API_KEY:
             edit_model_choices.extend([
-                Choice(name="seedream", value="seedream"),
                 Choice(name="qwen", value="qwen"),
                 Choice(name="pruna", value="pruna"),
             ])
@@ -328,12 +325,6 @@ class ImageCommands:
                             images_b64.append(base64.b64encode(img_bytes).decode('utf-8'))
                             
                     img_bytes, cost = await runpod_service.edit_image(prompt=prompt, model=active_model, images=images_b64)
-                elif active_model == "gpt-image-1.5":
-                    # Generate the image using OpenAI
-                    if image2 or image3 or image4:
-                        await interaction.followup.send(content="Only Runpod `seedream` allows multiple edit images.")
-                        return
-                    img_bytes = await openai_service.generate_image(prompt=prompt, model=active_model, edit_image=edit_image)
                 else:
                     await interaction.followup.send(content=f"Sorry, model {active_model} does not support editing.")
                     return
@@ -394,12 +385,11 @@ class ImageCommands:
         """Create the /editmodel command."""
         
         edit_model_choices = [
-            Choice(name="gpt-image-1.5", value="gpt-image-1.5"),
+            Choice(name="seedream", value="seedream"),
         ]
         
         if RUNPOD_IO_API_KEY:
             edit_model_choices.extend([
-                Choice(name="seedream", value="seedream"),
                 Choice(name="qwen", value="qwen"),
                 Choice(name="pruna", value="pruna"),
             ])

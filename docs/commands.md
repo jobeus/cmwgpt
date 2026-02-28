@@ -69,13 +69,13 @@ Generate images using AI.
 - `model` (optional): AI model to use
 
 **Available Models:**
-- `gpt-image-1.5` - Standard OpenAI Image model
-- *(If Runpod API is configured)*: `z-image`, `wan-2.6`, `pruna`, `seedream`, `qwen`, `flux`
+- `seedream` - Standard Image model
+- *(If Runpod API is configured)*: `z-image`, `wan-2.6`, `pruna`, `qwen`, `flux`
 
 **Examples:**
 ```
 /draw A sunset over mountains with a lake
-/draw A cat wearing a space helmet model:gpt-image-1.5
+/draw A cat wearing a space helmet model:seedream
 ```
 
 ### `/edit [prompt] [edit_image] [image2] [image3] [image4] [model]`
@@ -89,8 +89,8 @@ Edit or modify existing images using AI.
 - `model` (optional): AI model to use
 
 **Available Models:**
-- `gpt-image-1.5` - Standard single-image edit (OpenAI)
-- *(If Runpod API is configured)*: `seedream`, `qwen`, `pruna` (supports up to 4 images)
+- `seedream` - Standard multi-image edit
+- *(If Runpod API is configured)*: `qwen`, `pruna` (supports up to 4 images)
 
 **Examples:**
 ```

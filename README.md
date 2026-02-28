@@ -10,7 +10,7 @@ An intelligent Discord bot that brings OpenAI's powerful AI models directly to y
 
 - **Two Interaction Modes**: Use `/chat` for private conversations or `@mention` for contextual channel responses
 - **Multi-Model AI**: Switch between GPT-4.1-mini, GPT-4.1-nano, and GPT-4o-mini
-- **Image Generation**: Create images with GPT-Image-1.5
+- **Image Generation**: Create images with Seedream
 - **🔍 Web Search**: AI can search the web in real-time for current information and answers
 - **🎨 AI Image Creation**: Generate images directly in conversations using OpenAI's latest tools
 - **Image Analysis**: Upload images for AI analysis and understanding
@@ -117,12 +117,12 @@ RUNPOD_IO_API_KEY=your_runpod_api_key_here
   - Great for getting AI input on ongoing discussions
 
 - **`/draw [prompt]`** - Generate images with AI
-  - Uses the GPT-Image-1.5 model by default
-  - Supports Runpod models (`z-image`, `wan-2.6`, `pruna`, `seedream`, `qwen`, `flux`) if configured
+  - Uses the seedream model by default
+  - Supports other Runpod models (`z-image`, `wan-2.6`, `pruna`, `qwen`, `flux`) if configured
 
 - **`/edit [prompt] [edit_image]`** - Edit existing images with AI
-  - Uses the GPT-Image-1.5 model by default
-  - Supports Runpod multi-image models (`seedream`, `qwen`, `pruna`) if configured
+  - Uses the seedream model by default
+  - Supports other Runpod multi-image models (`qwen`, `pruna`) if configured
 
 ### Management Commands
 
