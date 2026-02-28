@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class AutoUpdateService:
     """Service for automatic git-based updates and restarts."""
 
-    def __init__(self, check_interval: int = 300):
+    def __init__(self, check_interval: int = 60):
         """Initialize the auto-update service."""
         self.check_interval = check_interval
         self._monitoring_thread: Optional[threading.Thread] = None

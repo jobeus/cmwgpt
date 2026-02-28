@@ -4,19 +4,19 @@
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-An intelligent Discord bot that brings OpenAI's powerful AI models directly to your Discord server. Chat with AI, generate images, and get contextual responses - all through simple Discord commands and mentions.
+An intelligent Discord bot that brings OpenRouter's powerful AI models directly to your Discord server. Chat with AI, generate images, and get contextual responses - all through simple Discord commands and mentions.
 
 ## ✨ Key Features
 
 - **Two Interaction Modes**: Use `/chat` for private conversations or `@mention` for contextual channel responses
-- **Multi-Model AI**: Switch between GPT-4.1-mini, GPT-4.1-nano, and GPT-4o-mini
+- **Multi-Model AI**: Uses Google's Gemini Flash model locally and multiple others available via OpenRouter
 - **Image Generation**: Create images with Seedream
 - **🔍 Web Search**: AI can search the web in real-time for current information and answers
-- **🎨 AI Image Creation**: Generate images directly in conversations using OpenAI's latest tools
+- **🎨 AI Image Creation**: Generate images directly in conversations using the latest tools
 - **Image Analysis**: Upload images for AI analysis and understanding
 - **Channel-Specific Personalities**: Set custom AI behavior per channel
 - **Smart Context**: Bot understands channel history when mentioned
-- **Conversation Continuity**: Maintains conversation flow across interactions using OpenAI's response tracking
+- **Conversation Continuity**: Maintains conversation flow across interactions using API response tracking
 - **Auto-Update**: Automatically updates from git and restarts with state preservation
 - **Smart Restart**: Built-in restart script with automatic recovery and clean console output
 
@@ -41,7 +41,7 @@ The bot operates in two distinct modes:
 ### Prerequisites
 - **Python 3.9 or later**
 - **Discord Bot Token** (from Discord Developer Portal)
-- **OpenAI API Key** (from OpenAI Platform)
+- **OpenRouter API Key** (from OpenRouter Platform)
 
 ### Installation
 
@@ -55,7 +55,7 @@ The bot operates in two distinct modes:
 2. **Environment Configuration**
    ```bash
    cp env.example .env
-   # Edit .env with your Discord bot token and OpenAI API key
+   # Edit .env with your Discord bot token and OpenRouter API key
 
    # Optional: Customize the AI system prompt
    cp system_prompt.txt.example system_prompt.txt
@@ -83,14 +83,14 @@ The bot operates in two distinct modes:
 6. Use OAuth2 URL Generator to invite the bot to your server
    - Required permissions: Send Messages, Use Slash Commands, Read Message History
 
-### 2. OpenAI API Setup
+### 2. OpenRouter API Setup
 
-1. Get your API key from [OpenAI Platform](https://platform.openai.com/api-keys)
+1. Get your API key from [OpenRouter](https://openrouter.ai/keys)
 2. Add both tokens to your `.env` file:
 
 ```env
 DISCORD_BOT_TOKEN=your_discord_bot_token_here
-OPENAI_API_KEY=your_openai_api_key_here
+OPENROUTER_API_KEY=your_openrouter_api_key_here
 ```
 
 ### 3. Runpod API Setup (Optional)
@@ -100,7 +100,7 @@ OPENAI_API_KEY=your_openai_api_key_here
 
 ```env
 DISCORD_BOT_TOKEN=your_discord_bot_token_here
-OPENAI_API_KEY=your_openai_api_key_here
+OPENROUTER_API_KEY=your_openrouter_api_key_here
 RUNPOD_IO_API_KEY=your_runpod_api_key_here
 ```
 
@@ -128,7 +128,7 @@ RUNPOD_IO_API_KEY=your_runpod_api_key_here
 
 - **`/help`** - View all commands privately in the channel
 - **`/reset`** - Clear conversation history for the current channel
-- **`/model [name]`** - View or change AI model (gpt-5-mini, gpt-5-nano, gpt-5)
+- **`/model [name]`** - View or change AI model (google/gemini-2.5-flash)
 - **`/drawmodel [name]`** - View or change AI image generation model
 - **`/editmodel [name]`** - View or change AI image editing model
 - **`/systemprompt set [prompt]`** - Set custom AI personality for the channel

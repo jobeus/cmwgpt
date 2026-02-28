@@ -172,13 +172,6 @@ Sophisticated mention handling that:
 
 ## Advanced Features
 
-### OpenAI Function Calling
-- Dynamic user context fetching when OpenAI determines it's helpful
-- HTTP-based context API integration for personalized responses
-- Automatic fallback to legacy API when function calling is disabled
-- Intelligent context injection without overwhelming token usage
-- Configurable context URL endpoint for external data sources
-
 ### Auto-Update System
 - Background git repository monitoring with configurable intervals
 - Automatic restart triggering when new commits are detected

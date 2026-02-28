@@ -16,12 +16,12 @@ The bot is configured through environment variables defined in a `.env` file. Co
   3. Go to "Bot" section
   4. Copy the token
 
-#### `OPENAI_API_KEY`
+#### `OPENROUTER_API_KEY`
 - **Required**: Yes
-- **Description**: Your OpenAI API key for AI model access
-- **Example**: `OPENAI_API_KEY=sk-1234567890abcdef1234567890abcdef12345678`
+- **Description**: Your OpenRouter API key for AI model access
+- **Example**: `OPENROUTER_API_KEY=sk-or-v1-abcdef12345678`
 - **How to get**:
-  1. Visit [OpenAI Platform](https://platform.openai.com/api-keys)
+  1. Visit [OpenRouter](https://openrouter.ai/keys)
   2. Create a new API key
   3. Copy the key (save it immediately as it won't be shown again)
 
@@ -56,13 +56,12 @@ The bot is configured through environment variables defined in a `.env` file. Co
 
 #### `DEFAULT_MODEL`
 - **Required**: No
-- **Description**: Default OpenAI model to use for chat
-- **Example**: `DEFAULT_MODEL=gpt-5-mini`
-- **Default**: `gpt-5-mini`
+- **Description**: Default OpenRouter model to use for chat
+- **Example**: `DEFAULT_MODEL=google/gemini-2.5-flash`
+- **Default**: `google/gemini-2.5-flash`
 - **Available Options**:
-  - `gpt-5` - Latest GPT-5 model with best performance
-  - `gpt-5-mini` - Balanced performance and cost (recommended)
-  - `gpt-5-nano` - Fast and efficient for quick responses
+  - `google/gemini-2.5-flash` - Fast and efficient latest Gemini model
+  - *Plus any other OpenRouter models configured later*
 
 
 
@@ -118,16 +117,15 @@ The bot is configured through environment variables defined in a `.env` file. Co
 ## Complete Example Configuration
 
 ```env
-# Required - Get these from Discord Developer Portal and OpenAI Platform
+# Required - Get these from Discord Developer Portal and OpenRouter
 DISCORD_BOT_TOKEN=1234567890abcdef1234567890abcdef12345678
-OPENAI_API_KEY=sk-1234567890abcdef1234567890abcdef12345678
+OPENROUTER_API_KEY=sk-or-v1-abcdef12345678
 
 # Optional - Channel restriction (remove to work in all channels)
 DISCORD_CHANNEL_ID=1234567890123456789
 
 # Optional - AI Behavior (system prompt now in system_prompt.txt file)
-DEFAULT_MODEL=gpt-5-mini
-DEFAULT_MODEL=gpt-5-mini
+DEFAULT_MODEL=google/gemini-2.5-flash
 
 # Optional - Bot Behavior
 INCLUDE_USERNAMES=true
@@ -207,30 +205,30 @@ Please be concise but thorough in your responses. If you're unsure about somethi
    - Select your server
    - Authorize the bot
 
-## OpenAI API Setup
+## OpenRouter API Setup
 
 ### Getting API Key
 
-1. **Create OpenAI Account**
-   - Visit https://platform.openai.com/
+1. **Create OpenRouter Account**
+   - Visit https://openrouter.ai/
    - Sign up or log in
 
 2. **Generate API Key**
-   - Go to https://platform.openai.com/api-keys
+   - Go to https://openrouter.ai/keys
    - Click "Create new secret key"
    - Copy the key immediately (it won't be shown again)
-   - Add to `.env` file as `OPENAI_API_KEY`
+   - Add to `.env` file as `OPENROUTER_API_KEY`
 
 3. **Set Up Billing**
-   - Add payment method in OpenAI dashboard
+   - Add payment method in OpenRouter dashboard
    - Set usage limits to control costs
    - Monitor usage regularly
 
 ### Model Availability
 
-Ensure your OpenAI account has access to the models you want to use:
+Ensure your OpenRouter account has access to the models you want to use:
 
-- **GPT Models**: Usually available with API access
+- **Text Models**: Check model availability in your region
 - **Image Models**: Check model availability in your region
 
 ## Advanced Configuration
@@ -265,11 +263,11 @@ Some settings can be changed without restarting the bot:
 ```env
 # Use separate bot for development
 DISCORD_BOT_TOKEN=your_dev_bot_token
-OPENAI_API_KEY=your_openai_key
+OPENROUTER_API_KEY=your_openrouter_key
 
 # More verbose for debugging
 SYSTEM_PROMPT="You are a helpful assistant in development mode"
-DEFAULT_MODEL=gpt-5-nano  # Faster for testing
+DEFAULT_MODEL=google/gemini-2.5-flash  # Faster for testing
 INCLUDE_NUM_CHATLINES=20    # Fewer lines for testing
 ```
 
@@ -277,11 +275,11 @@ INCLUDE_NUM_CHATLINES=20    # Fewer lines for testing
 ```env
 # Production bot token
 DISCORD_BOT_TOKEN=your_prod_bot_token
-OPENAI_API_KEY=your_openai_key
+OPENROUTER_API_KEY=your_openrouter_key
 
 # Optimized for production
 SYSTEM_PROMPT="You are a helpful assistant"
-DEFAULT_MODEL=gpt-5-mini
+DEFAULT_MODEL=google/gemini-2.5-flash
 INCLUDE_NUM_CHATLINES=100
 INCLUDE_USERNAMES=true
 REPLY_TO_MENTIONS=true
@@ -293,16 +291,16 @@ The bot validates configuration on startup:
 
 ### Startup Checks
 - ✅ Discord bot token format
-- ✅ OpenAI API key format
+- ✅ OpenRouter API key format
 - ✅ Model availability
 - ✅ Discord connection
 - ✅ Required permissions
 
 ### Error Messages
 - **Invalid Discord Token**: Check token format and validity
-- **Invalid OpenAI Key**: Verify API key and billing setup
+- **Invalid OpenRouter Key**: Verify API key and billing setup
 - **Missing Permissions**: Check bot permissions in Discord server
-- **Model Not Available**: Verify model access in OpenAI account
+- **Model Not Available**: Verify model access and balance in OpenRouter account
 
 ## Security Best Practices
 
@@ -313,7 +311,7 @@ The bot validates configuration on startup:
 - ✅ Restrict file permissions: `chmod 600 .env`
 
 ### API Key Management
-- ✅ Set usage limits in OpenAI dashboard
+- ✅ Set usage limits in OpenRouter dashboard
 - ✅ Monitor API usage regularly
 - ✅ Use separate keys for different environments
 - ✅ Revoke unused keys
@@ -333,8 +331,8 @@ The bot validates configuration on startup:
    - Verify MESSAGE CONTENT INTENT is enabled
    - Ensure bot has required permissions
 
-2. **OpenAI Errors**
-   - Verify `OPENAI_API_KEY` is valid
+2. **OpenRouter Errors**
+   - Verify `OPENROUTER_API_KEY` is valid
    - Check billing and usage limits
    - Confirm model availability
 
@@ -353,7 +351,7 @@ The bot validates configuration on startup:
 ```bash
 # Check environment variables
 env | grep DISCORD
-env | grep OPENAI
+env | grep OPENROUTER
 
 # Test bot token (be careful with this)
 # Don't run this in production or shared environments

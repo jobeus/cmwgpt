@@ -138,7 +138,7 @@ docker run -d \
   --name discord-bot \
   --restart unless-stopped \
   -e DISCORD_BOT_TOKEN=your_token \
-  -e OPENAI_API_KEY=your_key \
+  -e OPENROUTER_API_KEY=your_key \
   discord-bot
 
 # Run with environment file
@@ -200,7 +200,7 @@ docker run -d \
 2. **Set environment variables**:
    ```bash
    heroku config:set DISCORD_BOT_TOKEN=your_token
-   heroku config:set OPENAI_API_KEY=your_key
+   heroku config:set OPENROUTER_API_KEY=your_key
    ```
 
 3. **Deploy**:

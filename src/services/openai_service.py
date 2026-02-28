@@ -25,7 +25,7 @@ from openai import (
 from discord import Attachment
 import discord
 
-from src.config import OPENAI_API_KEY, IS_TESTING
+from src.config import OPENROUTER_API_KEY, IS_TESTING
 from src.utils.message_utils import clean_openai_response
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,10 @@ class OpenAIService:
 
                 self._client = MockClient()
             else:
-                self._client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+                self._client = AsyncOpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=OPENROUTER_API_KEY
+                )
         return self._client
 
     async def close(self) -> None:
@@ -120,8 +123,10 @@ class OpenAIService:
                     f"Attempting response creation for model {model} (attempt {attempt + 1}/{max_retries})"
                 )
 
+                actual_model = f"{model}:online" if not model.endswith(":online") else model
+                
                 response = await client.chat.completions.create(
-                    model=model,
+                    model=actual_model,
                     messages=api_input
                 )
                 

@@ -5,8 +5,8 @@
 ### Prerequisites
 - **Python 3.9 or later**
 - **Git**
-- **Discord Bot Token** (for testing)
-- **OpenAI API Key** (for testing)
+- **Discord Bot Token**
+- **OpenRouter API Key**
 
 ### Initial Setup
 
@@ -72,7 +72,8 @@ pip install -r test_requirements.txt
 **Current Test Coverage:**
 - ✅ Configuration loading and validation
 - ✅ Bot state management (conversations, models, prompts)
-- ✅ OpenAI API integration (chat, image generation)
+- ✅ OpenAI API integration (chat)
+- ✅ Runpod.io integration (images)
 - ✅ Discord utilities (mention handling, member mapping)
 - ✅ Paste service integration
 - ✅ Message handling and formatting

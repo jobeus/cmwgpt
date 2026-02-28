@@ -6,13 +6,13 @@ from zoneinfo import ZoneInfo
 load_dotenv()
 
 # API Keys with test-friendly defaults
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "test-key-for-ci")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "test-key-for-ci")
 RUNPOD_IO_API_KEY = os.getenv("RUNPOD_IO_API_KEY", "")
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "test-token-for-ci")
 
 
 # Bot Configuration
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-5-mini")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "google/gemini-2.5-flash")
 DEFAULT_DRAW_MODEL = os.getenv("DEFAULT_DRAW_MODEL", "seedream")
 DEFAULT_EDIT_MODEL = os.getenv("DEFAULT_EDIT_MODEL", "seedream")
 

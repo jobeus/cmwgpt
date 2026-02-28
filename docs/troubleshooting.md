@@ -43,40 +43,40 @@ sudo systemctl restart discord-bot
 pm2 restart discord-bot
 ```
 
-### OpenAI API Errors
+### OpenRouter API Errors
 
 #### Symptoms
-- "OpenAI API error" messages
+- "OpenRouter API error" messages
 - Commands timeout or fail
 - Image generation not working
 
 #### Common Error Messages and Solutions
 
 1. **"Invalid API Key"**
-   - Verify `OPENAI_API_KEY` in `.env` file
+   - Verify `OPENROUTER_API_KEY` in `.env` file
    - Check for typos or extra characters
    - Ensure API key hasn't been revoked
 
 2. **"Insufficient Credits"**
-   - Check OpenAI billing dashboard
+   - Check OpenRouter billing dashboard
    - Add payment method or increase limits
    - Monitor usage to avoid overages
 
 3. **"Rate Limit Exceeded"**
    - Wait for rate limit to reset (usually 1 minute)
-   - Consider upgrading OpenAI plan for higher limits
+   - Consider upgrading OpenRouter plan for higher limits
    - Reduce concurrent usage
 
 4. **"Model Not Available"**
    - Check if model exists and is accessible
-   - Verify your OpenAI plan includes the model
-   - Try switching to a different model: `/model gpt-4.1-nano`
+   - Verify your OpenRouter plan includes the model
+   - Try switching to a different model: `/model google/gemini-2.5-flash`
 
-#### Debug OpenAI Issues
+#### Debug OpenRouter Issues
 ```bash
 # Test API key manually
-curl -H "Authorization: Bearer $OPENAI_API_KEY" \
-     https://api.openai.com/v1/models
+curl -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+     https://openrouter.ai/api/v1/models
 ```
 
 ### Slash Commands Not Appearing
@@ -161,7 +161,7 @@ sudo systemctl restart discord-bot
    INCLUDE_NUM_CHATLINES=50
 
    # Use more efficient model
-   DEFAULT_MODEL=gpt-5-nano
+   DEFAULT_MODEL=google/gemini-2.5-flash
    ```
 
 ### Configuration Issues
@@ -234,8 +234,8 @@ sudo systemctl restart discord-bot
    # Test Discord connectivity
    ping discord.com
    
-   # Test OpenAI connectivity
-   ping api.openai.com
+   # Test OpenRouter connectivity
+   ping openrouter.ai
    ```
 
 2. **Verify Firewall Settings**
@@ -247,7 +247,7 @@ sudo systemctl restart discord-bot
    ```bash
    # Test DNS resolution
    nslookup discord.com
-   nslookup api.openai.com
+   nslookup openrouter.ai
    ```
 
 ## Debugging Tools
@@ -305,7 +305,7 @@ pip list | grep openai
 
 # Check environment variables
 env | grep DISCORD
-env | grep OPENAI
+env | grep OPENROUTER
 
 # Test imports
 python -c "import discord; print('Discord.py version:', discord.__version__)"
@@ -321,9 +321,9 @@ python -c "import openai; print('OpenAI version:', openai.__version__)"
 - **"Invalid Form Body"**: Malformed command parameters
 - **"Rate Limited"**: Too many requests to Discord API
 
-### OpenAI Errors
+### OpenRouter Errors
 
-- **"Invalid API Key"**: Wrong or expired OpenAI API key
+- **"Invalid API Key"**: Wrong or expired OpenRouter API key
 - **"Insufficient Quota"**: No credits or exceeded usage limits
 - **"Model Not Found"**: Requested model doesn't exist or isn't accessible
 - **"Content Policy Violation"**: Request violates OpenAI usage policies
@@ -333,7 +333,7 @@ python -c "import openai; print('OpenAI version:', openai.__version__)"
 - **"Queue is full"**: Too many concurrent commands
 - **"Command timeout"**: Operation took too long to complete
 - **"Configuration error"**: Missing or invalid environment variables
-- **"Service unavailable"**: External service (OpenAI/Discord) is down
+- **"Service unavailable"**: External service (OpenRouter/Discord) is down
 
 ## Getting Help
 
@@ -361,7 +361,7 @@ When reporting issues, include:
 - **GitHub Issues**: https://github.com/jobeus/cmwgpt/issues
 - **Documentation**: Check other files in `docs/` folder
 - **Discord API Documentation**: https://discord.com/developers/docs
-- **OpenAI API Documentation**: https://platform.openai.com/docs
+- **OpenRouter API Documentation**: https://openrouter.ai/docs
 
 ### Self-Help Resources
 

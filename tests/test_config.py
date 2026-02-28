@@ -16,7 +16,7 @@ class TestConfig(unittest.TestCase):
         """Set up test environment."""
         # Clear any existing environment variables
         self.env_vars_to_clear = [
-            'OPENAI_API_KEY', 'DISCORD_BOT_TOKEN',
+            'OPENROUTER_API_KEY', 'DISCORD_BOT_TOKEN',
             'DEFAULT_MODEL', 'DEFAULT_DRAW_MODEL', 'DEFAULT_EDIT_MODEL', 'INCLUDE_USERNAMES',
             'REPLY_TO_MENTIONS', 'INCLUDE_NUM_CHATLINES'
         ]
@@ -51,7 +51,7 @@ class TestConfig(unittest.TestCase):
             import config
             importlib.reload(config)
 
-            self.assertEqual(config.DEFAULT_MODEL, 'gpt-5-mini')
+            self.assertEqual(config.DEFAULT_MODEL, 'google/gemini-2.5-flash')
             self.assertEqual(config.DEFAULT_DRAW_MODEL, 'seedream')
             self.assertEqual(config.DEFAULT_EDIT_MODEL, 'seedream')
             self.assertTrue(config.INCLUDE_USERNAMES)
@@ -64,7 +64,7 @@ class TestConfig(unittest.TestCase):
         """Test that environment variables are loaded correctly."""
         # Mock os.getenv to return specific test values
         test_env_values = {
-            'OPENAI_API_KEY': 'test_openai_key',
+            'OPENROUTER_API_KEY': 'test_openrouter_key',
             'DISCORD_BOT_TOKEN': 'test_discord_token',
             'DEFAULT_MODEL': 'gpt-4',
             'DEFAULT_DRAW_MODEL': 'dall-e-3',
@@ -84,7 +84,7 @@ class TestConfig(unittest.TestCase):
             import config
             importlib.reload(config)
 
-            self.assertEqual(config.OPENAI_API_KEY, 'test_openai_key')
+            self.assertEqual(config.OPENROUTER_API_KEY, 'test_openrouter_key')
             self.assertEqual(config.DISCORD_BOT_TOKEN, 'test_discord_token')
             self.assertEqual(config.DEFAULT_MODEL, 'gpt-4')
             self.assertEqual(config.DEFAULT_DRAW_MODEL, 'dall-e-3')

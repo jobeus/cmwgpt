@@ -49,7 +49,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
             {"role": "user", "content": "Hello"}
         ]
         self.mock_client.chat.completions.create.assert_called_once_with(
-            model=model,
+            model=f"{model}:online",
             messages=expected_input
         )
 
@@ -79,7 +79,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         mock_response.choices = [mock_choice]
         self.mock_client.chat.completions.create.return_value = mock_response
 
-        result = await openai_service.get_chat_completion("gpt-5-nano", [])
+        result = await openai_service.get_chat_completion("google/gemini-2.5-flash", [])
         self.assertEqual(result, "I'm ready to help!")
 
     async def test_chat_completion_complex_messages(self):
@@ -100,7 +100,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         ]
         system_prompt = "You are a helpful assistant."
 
-        result = await openai_service.get_chat_completion("gpt-5-mini", messages, system_prompt)
+        result = await openai_service.get_chat_completion("google/gemini-2.5-flash", messages, system_prompt)
 
         self.assertEqual(result, "Complex response")
 
