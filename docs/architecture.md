@@ -53,7 +53,7 @@ Modular command system with separate files for different functionality:
 
 #### Image Commands (`image.py`)
 - `/draw` - Generate images using AI models
-- Supports multiple AI models (GPT-Image-1.5)
+- Supports multiple AI models (Seedream default, Runpod models)
 - Image editing capabilities
 
 #### System Commands (`system.py`)

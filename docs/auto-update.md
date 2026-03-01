@@ -65,11 +65,11 @@ Use the `/restart` command to manually trigger an update:
 
 ## Update Announcements
 
-After a successful restart, the bot automatically announces the update to all channels where it has been used. The announcement includes:
+After a successful restart, the bot automatically announces the update to all channels where it has been used, **provided there are commits with the `#announce` tag**. The announcement includes:
 
 - **Update Type**: Whether it was an automatic update or manual restart
 - **Git Commit**: The current git commit SHA (short form)
-- **Recent Changes**: Brief summary of recent commits (up to 3)
+- **Recent Changes**: Complete changelog of commits containing the `#announce` tag since the last update
 - **Ready Message**: Confirmation that the bot is ready to assist
 
 ### Example Announcement

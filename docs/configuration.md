@@ -247,7 +247,7 @@ Some settings can be changed without restarting the bot:
 
 ```bash
 # Change AI model for current channel
-/model gpt-5-nano
+/model anthropic/claude-haiku-4.5
 
 # Set custom personality for current channel
 /systemprompt set You are a creative writing assistant

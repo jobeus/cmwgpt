@@ -132,15 +132,17 @@ View or change the AI model for the current channel.
 - `model_name` (optional): Model to switch to
 
 **Available Models:**
-- `gpt-5` - Latest GPT-5 model with best performance
-- `gpt-5-mini` - Balanced performance and cost (recommended)
-- `gpt-5-nano` - Fast and efficient (good for quick responses)
+- `google/gemini-2.5-flash` - Fast and capable Google model
+- `bytedance-seed/seed-2.0-mini` - Efficient Seed model
+- `minimax/minimax-m2-her` - MiniMax M2 model
+- `qwen/qwen3.5-flash-02-23` - Qwen 3.5 Flash model
+- `anthropic/claude-haiku-4.5` - Fast and efficient latest model (recommended, with web search)
 
 **Examples:**
 ```
-/model                    # View current model
-/model gpt-5-mini        # Switch to GPT-5-mini
-/model gpt-5-nano        # Switch to GPT-5-nano
+/model                            # View current model
+/model anthropic/claude-haiku-4.5 # Switch to Claude Haiku
+/model google/gemini-2.5-flash    # Switch to Gemini Flash
 ```
 
 **Behavior:**
@@ -329,9 +331,9 @@ Visual feedback during processing:
 
 ### Multi-Model Strategies
 
-- **Quick responses**: Use `gpt-5-nano` for fast, simple queries
-- **Complex reasoning**: Use `gpt-5-mini` for detailed analysis
-- **Best performance**: Use `gpt-5` for the most complex tasks
+- **Quick responses**: Use `google/gemini-2.5-flash` for fast, simple queries
+- **Web-aware reasoning**: Use `anthropic/claude-haiku-4.5` for current information and detailed analysis
+- **Alternative perspectives**: Switch between `qwen` and `minimax` models for varied responses
 
 ### Context Management
 
