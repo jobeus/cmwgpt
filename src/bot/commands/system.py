@@ -44,6 +44,7 @@ class SystemCommands:
                 Choice(name="bytedance-seed/seed-1.6-flash", value="bytedance-seed/seed-1.6-flash"),
                 Choice(name="minimax/minimax-m2-her", value="minimax/minimax-m2-her"),
                 Choice(name="qwen/qwen3.5-flash-02-23", value="qwen/qwen3.5-flash-02-23"),
+                Choice(name="anthropic/claude-haiku-4.5", value="anthropic/claude-haiku-4.5"),
             ]
         )
         async def model_command(
