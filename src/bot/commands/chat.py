@@ -14,6 +14,8 @@ from src.services.openai_service import openai_service, OpenAIServiceError
 from src.services.message_service import message_service
 from src.services.queue_service import queue_service
 from src.services.state_service import state_service
+import asyncio
+from src.utils.youtube_utils import extract_video_ids, get_transcript
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +106,24 @@ class ChatCommands:
         # Add username if configured
         prefix_message = f"<@{
             interaction.user.id}>: {message}" if INCLUDE_USERNAMES else message
+
+        # Look for YouTube links and append transcripts
+        video_ids = extract_video_ids(message)
+        if video_ids:
+            transcripts = []
+            for vid_id in video_ids:
+                try:
+                    transcript_text = await asyncio.to_thread(get_transcript, vid_id)
+                    if transcript_text:
+                        transcripts.append(
+                            f"Target Video ID {vid_id} Transcript:\n{transcript_text}")
+                except Exception as e:
+                    logger.warning(
+                        f"[/chat] Failed to fetch transcript for {vid_id}: {e}")
+
+            if transcripts:
+                prefix_message += "\n\n------\nIncluded youtube link transcript follows:\n\n" + \
+                    "\n\n".join(transcripts)
 
         # Initialize conversation if missing (no system prompt in conversation
         # array)

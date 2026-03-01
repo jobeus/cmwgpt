@@ -14,6 +14,8 @@ from src.utils.discord_helper import get_mention_legend, attachment_to_base64_da
 from src.services.openai_service import openai_service, OpenAIServiceError
 from src.services.message_service import message_service
 from src.services.queue_service import queue_service
+import asyncio
+from src.utils.youtube_utils import extract_video_ids, get_transcript
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +252,26 @@ class MentionHandler:
 
             # Compile the entire text block
             final_text = " ".join(text_lines).strip()
+
+            # YouTube transcript extraction
+            if role == "user":
+                video_ids = extract_video_ids(final_text)
+                if video_ids:
+                    transcripts = []
+                    for vid_id in video_ids:
+                        try:
+                            transcript_text = await asyncio.to_thread(get_transcript, vid_id)
+                            if transcript_text:
+                                transcripts.append(
+                                    f"Target Video ID {vid_id} Transcript:\n{transcript_text}")
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to fetch transcript for {vid_id}: {e}")
+
+                    if transcripts:
+                        final_text += "\n\n------\nIncluded youtube link transcript follows:\n\n" + \
+                            "\n\n".join(transcripts)
+
             # No need for fallback handling here since we always prepend the
             # sender prefix above
 
