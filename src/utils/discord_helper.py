@@ -13,7 +13,7 @@ _attachment_base64_cache = {}
 MAX_CACHE_SIZE = 100
 
 
-def compress_image(image_bytes: bytes, max_size: int = 768, quality: int = 85) -> bytes:
+def compress_image(image_bytes: bytes, max_size: int = 1024, quality: int = 75) -> bytes:
     """Compress and resize image bytes using Pillow."""
     try:
         img = Image.open(io.BytesIO(image_bytes))
