@@ -70,8 +70,7 @@ class StateService:
             self._ensure_channel_data(channel_id)
             self._channel_data[channel_id]['conversation'] = conversation.copy()
             logger.debug(
-                f"Set conversation for channel {channel_id} with {
-                    len(conversation)} messages")
+                f"Set conversation for channel {channel_id} with {len(conversation)} messages")
 
     def add_message_to_conversation(
             self, channel_id: int, message: Dict[str, Any]) -> None:
@@ -293,8 +292,10 @@ class StateService:
             conversations = sum(
                 1 for v in self._channel_data.values() if v['conversation'])
             models = sum(1 for v in self._channel_data.values() if v['model'])
-            draw_models = sum(1 for v in self._channel_data.values() if v['draw_model'])
-            edit_models = sum(1 for v in self._channel_data.values() if v['edit_model'])
+            draw_models = sum(
+                1 for v in self._channel_data.values() if v['draw_model'])
+            edit_models = sum(
+                1 for v in self._channel_data.values() if v['edit_model'])
             system_prompts = sum(
                 1 for v in self._channel_data.values() if v['system_prompt'])
             response_ids = sum(
@@ -386,10 +387,12 @@ class StateService:
                     v in self._channel_data.items() if v['conversation']}
                 models = {k: v['model']
                           for k, v in self._channel_data.items() if v['model']}
-                draw_models = {k: v['draw_model']
-                               for k, v in self._channel_data.items() if v['draw_model']}
-                edit_models = {k: v['edit_model']
-                               for k, v in self._channel_data.items() if v['edit_model']}
+                draw_models = {
+                    k: v['draw_model'] for k,
+                    v in self._channel_data.items() if v['draw_model']}
+                edit_models = {
+                    k: v['edit_model'] for k,
+                    v in self._channel_data.items() if v['edit_model']}
                 system_prompts = {
                     k: v['system_prompt'] for k,
                     v in self._channel_data.items() if v['system_prompt']}
@@ -482,8 +485,10 @@ class StateService:
                         all_channel_ids.update(int(k)
                                                for k in conversations.keys())
                         all_channel_ids.update(int(k) for k in models.keys())
-                        all_channel_ids.update(int(k) for k in draw_models.keys())
-                        all_channel_ids.update(int(k) for k in edit_models.keys())
+                        all_channel_ids.update(int(k)
+                                               for k in draw_models.keys())
+                        all_channel_ids.update(int(k)
+                                               for k in edit_models.keys())
                         all_channel_ids.update(int(k)
                                                for k in system_prompts.keys())
                         all_channel_ids.update(int(k)
@@ -531,7 +536,7 @@ class StateService:
                         1 for v in self._channel_data.values() if v['response_id'])
 
                     logger.info(
-                        f"Restored {conversations_count} conversations, {models_count} models, {draw_models_count} draw_models, "
+                        f"Restored {conversations_count} conversations, {models_count} models, {draw_models_count} draw_models, {edit_models_count} edit_models, "
                         f"{prompts_count} system prompts, {len(self._active_channels)} active channels, "
                         f"{response_ids_count} response IDs{sha_info}"
                     )

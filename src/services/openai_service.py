@@ -3,15 +3,9 @@ OpenAI Service - Handles all OpenAI API interactions
 """
 
 import asyncio
-import tempfile
-import base64
 import json
 import logging
 import httpx
-import glob
-import os
-import re
-import io
 from typing import List, Dict, Any, Optional
 
 from openai import (
@@ -22,8 +16,7 @@ from openai import (
     AuthenticationError,
     BadRequestError,
 )
-from discord import Attachment
-import discord
+
 
 from src.config import OPENROUTER_API_KEY, IS_TESTING
 from src.utils.message_utils import clean_openai_response
@@ -97,22 +90,25 @@ class OpenAIService:
         if system_prompt:
             api_input.append({"role": "system", "content": system_prompt})
 
-        # Remove any existing system messages from the conversation if duplicate
+        # Remove any existing system messages from the conversation if
+        # duplicate
         for msg in messages:
             if msg.get("role") != "system":
-                # Parse JSON content if needed (for complex payloads like attachments)
+                # Parse JSON content if needed (for complex payloads like
+                # attachments)
                 content = msg.get("content", "")
                 parsed_content = content
                 if isinstance(
                         content, str) and content.strip().startswith(
                         ("[", "{")):
                     try:
-                        # Try to parse as JSON - if successful, use parsed content
+                        # Try to parse as JSON - if successful, use parsed
+                        # content
                         parsed_content = json.loads(content)
                     except (json.JSONDecodeError, ValueError):
                         # If parsing fails, keep original content
                         pass
-                
+
                 api_input.append({
                     "role": msg.get("role"),
                     "content": parsed_content
@@ -124,15 +120,16 @@ class OpenAIService:
         for attempt in range(max_retries):
             try:
                 logger.debug(
-                    f"Attempting response creation for model {model} (attempt {attempt + 1}/{max_retries})"
-                )
+                    f"Attempting response creation for model {model} (attempt {
+                        attempt + 1}/{max_retries})")
 
                 # actual_model = f"{model}:online" if not model.endswith(":online") else model
                 actual_model = model
-                
-                logger.info(f"OPENROUTER PRE-FLIGHT - model={actual_model}, msg_len={len(api_input)}")
+
+                logger.info(
+                    f"OPENROUTER PRE-FLIGHT - model={actual_model}, msg_len={len(api_input)}")
                 logger.info(f"API HEADERS USED: {client.default_headers}")
-                
+
                 kwargs = {
                     "model": actual_model,
                     "messages": api_input,
@@ -150,15 +147,17 @@ class OpenAIService:
                     }]
 
                 response = await client.chat.completions.create(**kwargs)
-                
-                logger.info(f"OPENROUTER POST-FLIGHT - got response object! len={len(response.choices)}")
-                
+
+                logger.info(
+                    f"OPENROUTER POST-FLIGHT - got response object! len={len(response.choices)}")
+
                 if response and response.choices:
                     response_text = response.choices[0].message.content
                     if not response_text:
-                        raise OpenAIServiceError("The model API returned an empty response.")
+                        raise OpenAIServiceError(
+                            "The model API returned an empty response.")
                     return clean_openai_response(response_text)
-                
+
                 return "Failed to get a response from the model."
 
             except RateLimitError as e:
@@ -196,8 +195,9 @@ class OpenAIService:
             except BadRequestError as e:
                 logger.error(f"Bad request error: {e}")
                 raise OpenAIServiceError(
-                    f"Invalid request: {e.message if hasattr(e, 'message') else str(e)}"
-                ) from e
+                    f"Invalid request: {
+                        e.message if hasattr(
+                            e, 'message') else str(e)}") from e
 
             except APIError as e:
                 logger.error(f"OpenAI API error on attempt {attempt + 1}: {e}")

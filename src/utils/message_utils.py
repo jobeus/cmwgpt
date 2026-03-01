@@ -10,12 +10,15 @@ import re
 
 from typing import Union, List
 
+
 def format_attachment_message(
         attachment: Union[discord.Attachment, List[discord.Attachment]],
         message: str) -> str:
     """Format a message with one or more attachment URLs."""
     if isinstance(attachment, list):
-        urls = "\n".join(f"> {att.url}" for att in attachment if att is not None)
+        urls = "\n".join(
+            f"> {
+                att.url}" for att in attachment if att is not None)
         return f"{urls}\n> {message}"
     return f"> {attachment.url}\n> {message}"
 
@@ -61,18 +64,18 @@ def clean_openai_response(response: str) -> str:
         # If there are only 2 unescaped quotes (start and end), remove them
         if quote_count == 2:
             cleaned = cleaned[1:-1]
-            
+
     # Strip any bot identification prefixes that might have been generated
     # Matches patterns like:
-    # [2024-01-01 12:00:00] [123456] <@12345>: 
+    # [2024-01-01 12:00:00] [123456] <@12345>:
     # [123456] <@12345>:
     # <@12345>:
     prefix_pattern = r"^(?:\[.*?\]\s*)*<@[0-9]+>:\s*"
-    
+
     # Also catch cases where it just spits out the timestamp and ID
-    # [2024-01-01 12:00:00] [123456] 
+    # [2024-01-01 12:00:00] [123456]
     fallback_pattern = r"^(?:\[.*?\]\s*)*\[[0-9]+\]\s*"
-    
+
     no_prefix = re.sub(prefix_pattern, "", cleaned.strip())
     if no_prefix == cleaned.strip():
         no_prefix = re.sub(fallback_pattern, "", no_prefix)

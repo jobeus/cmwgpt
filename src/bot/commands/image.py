@@ -12,7 +12,7 @@ from discord import app_commands
 from discord.app_commands import Choice
 from discord.ext import commands
 from src.config import DEFAULT_DRAW_MODEL, DEFAULT_EDIT_MODEL, RUNPOD_IO_API_KEY
-from src.services.openai_service import openai_service, OpenAIServiceError
+from src.services.openai_service import OpenAIServiceError
 from src.services.runpod_service import runpod_service, RunpodServiceError
 from src.services.message_service import message_service
 from src.services.queue_service import queue_service
@@ -40,7 +40,7 @@ class ImageCommands:
         model_choices = [
             Choice(name="seedream", value="seedream"),
         ]
-        
+
         if RUNPOD_IO_API_KEY:
             model_choices.extend([
                 Choice(name="z-image", value="z-image"),
@@ -100,11 +100,12 @@ class ImageCommands:
             model: The model to use for generation
         """
         channel_id = interaction.channel.id
-        
+
         state_service.mark_channel_active(channel_id)
-        
+
         # Use provided model, or channel default, or global default
-        active_model = model or state_service.get_draw_model(channel_id) or DEFAULT_DRAW_MODEL
+        active_model = model or state_service.get_draw_model(
+            channel_id) or DEFAULT_DRAW_MODEL
 
         logger.info(
             f"[/draw] Channel {channel_id} Prompt: {prompt} Model: {active_model}")
@@ -117,7 +118,8 @@ class ImageCommands:
                 if runpod_service.has_model(active_model):
                     img_bytes, cost = await runpod_service.generate_image(prompt=prompt, model=active_model)
                 else:
-                    raise Exception(f"Model {active_model} is not supported or not configured via Runpod.")
+                    raise Exception(
+                        f"Model {active_model} is not supported or not configured via Runpod.")
 
                 # Log success and create Discord file
                 logger.info(f"[/draw] Channel {channel_id}: image generated")
@@ -130,7 +132,8 @@ class ImageCommands:
 
                 if cost is not None:
                     # prepend cost and model to the prompt text
-                    content = content.replace("> ", f"> [${cost:.3f} @ {active_model}] ", 1)
+                    content = content.replace(
+                        "> ", f"> [${cost:.3f} @ {active_model}] ", 1)
 
                 await interaction.followup.send(content=content, file=file)
 
@@ -189,14 +192,14 @@ class ImageCommands:
                         )
                     except Exception:
                         logger.error("Failed to send fallback error message")
-    
+
     def _create_drawmodel_command(self) -> app_commands.Command:
         """Create the /drawmodel command."""
-        
+
         model_choices = [
             Choice(name="seedream", value="seedream"),
         ]
-        
+
         if RUNPOD_IO_API_KEY:
             model_choices.extend([
                 Choice(name="z-image", value="z-image"),
@@ -219,8 +222,9 @@ class ImageCommands:
             queued = await queue_service.queue_command(interaction, self._handle_drawmodel_command, model)
             if not queued:
                 logger.warning(
-                    f"Failed to queue drawmodel command from {interaction.user} in #{interaction.channel} - queue may be full"
-                )
+                    f"Failed to queue drawmodel command from {
+                        interaction.user} in #{
+                        interaction.channel} - queue may be full")
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
@@ -235,10 +239,12 @@ class ImageCommands:
 
         if model:
             state_service.set_draw_model(channel_id, model)
-            logger.info(f"[/drawmodel] Channel {channel_id}: draw model set to {model}")
+            logger.info(
+                f"[/drawmodel] Channel {channel_id}: draw model set to {model}")
             await interaction.followup.send(f"Default draw model set to `{model}`.", ephemeral=True)
         else:
-            current_model = state_service.get_draw_model(channel_id) or DEFAULT_DRAW_MODEL
+            current_model = state_service.get_draw_model(
+                channel_id) or DEFAULT_DRAW_MODEL
             await interaction.followup.send(f"Default draw model is `{current_model}`.", ephemeral=True)
 
     def _create_edit_command(self) -> app_commands.Command:
@@ -247,7 +253,7 @@ class ImageCommands:
         edit_model_choices = [
             Choice(name="seedream", value="seedream"),
         ]
-        
+
         if RUNPOD_IO_API_KEY:
             edit_model_choices.extend([
                 Choice(name="qwen", value="qwen"),
@@ -283,8 +289,9 @@ class ImageCommands:
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue edit command from {interaction.user} in #{interaction.channel} - queue may be full"
-                )
+                    f"Failed to queue edit command from {
+                        interaction.user} in #{
+                        interaction.channel} - queue may be full")
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
@@ -304,8 +311,9 @@ class ImageCommands:
         """Handle the /edit command."""
         channel_id = interaction.channel.id
         state_service.mark_channel_active(channel_id)
-        
-        active_model = model or state_service.get_edit_model(channel_id) or DEFAULT_EDIT_MODEL
+
+        active_model = model or state_service.get_edit_model(
+            channel_id) or DEFAULT_EDIT_MODEL
 
         logger.info(
             f"[/edit] Channel {channel_id} Prompt: {prompt} Model: {active_model} Edit? True")
@@ -322,8 +330,9 @@ class ImageCommands:
                     for img in [edit_image, image2, image3, image4]:
                         if img:
                             img_bytes = await img.read()
-                            images_b64.append(base64.b64encode(img_bytes).decode('utf-8'))
-                            
+                            images_b64.append(
+                                base64.b64encode(img_bytes).decode('utf-8'))
+
                     img_bytes, cost = await runpod_service.edit_image(prompt=prompt, model=active_model, images=images_b64)
                 else:
                     await interaction.followup.send(content=f"Sorry, model {active_model} does not support editing.")
@@ -334,15 +343,22 @@ class ImageCommands:
                 file = discord.File(
                     io.BytesIO(img_bytes),
                     filename="edited.png")
-                
+
                 embed = discord.Embed()
                 embed.set_image(url="attachment://edited.png")
 
                 # Send the result
-                valid_images = [img for img in [edit_image, image2, image3, image4] if img]
-                cost_prefix = f"[${cost:.3f} @ {active_model}] " if cost is not None else ""
+                valid_images = [
+                    img for img in [
+                        edit_image,
+                        image2,
+                        image3,
+                        image4] if img]
+                cost_prefix = f"[${
+                    cost:.3f} @ {active_model}] " if cost is not None else ""
                 formatted_prompt = f"{cost_prefix}{prompt}"
-                content = message_service.format_attachment_message(valid_images, formatted_prompt)
+                content = message_service.format_attachment_message(
+                    valid_images, formatted_prompt)
                 await interaction.followup.send(content=content, file=file, embed=embed)
 
             except OpenAIServiceError as e:
@@ -380,14 +396,14 @@ class ImageCommands:
                         )
                     except Exception:
                         logger.error("Failed to send fallback error message")
-    
+
     def _create_editmodel_command(self) -> app_commands.Command:
         """Create the /editmodel command."""
-        
+
         edit_model_choices = [
             Choice(name="seedream", value="seedream"),
         ]
-        
+
         if RUNPOD_IO_API_KEY:
             edit_model_choices.extend([
                 Choice(name="qwen", value="qwen"),
@@ -407,8 +423,9 @@ class ImageCommands:
             queued = await queue_service.queue_command(interaction, self._handle_editmodel_command, model)
             if not queued:
                 logger.warning(
-                    f"Failed to queue editmodel command from {interaction.user} in #{interaction.channel} - queue may be full"
-                )
+                    f"Failed to queue editmodel command from {
+                        interaction.user} in #{
+                        interaction.channel} - queue may be full")
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
@@ -423,8 +440,10 @@ class ImageCommands:
 
         if model:
             state_service.set_edit_model(channel_id, model)
-            logger.info(f"[/editmodel] Channel {channel_id}: edit model set to {model}")
+            logger.info(
+                f"[/editmodel] Channel {channel_id}: edit model set to {model}")
             await interaction.followup.send(f"Default edit model set to `{model}`.", ephemeral=True)
         else:
-            current_model = state_service.get_edit_model(channel_id) or DEFAULT_EDIT_MODEL
+            current_model = state_service.get_edit_model(
+                channel_id) or DEFAULT_EDIT_MODEL
             await interaction.followup.send(f"Default edit model is `{current_model}`.", ephemeral=True)

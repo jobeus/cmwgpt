@@ -172,7 +172,9 @@ class TestDiscordHelper(unittest.TestCase):
 
             # Verify structure
             self.assertIn("Here are all the users in this channel:", result)
-            self.assertIn("Whenever you see a mention like <@discord_user_id>", result)
+            self.assertIn(
+                "Whenever you see a mention like <@discord_user_id>",
+                result)
 
         self.loop.run_until_complete(run_test())
 

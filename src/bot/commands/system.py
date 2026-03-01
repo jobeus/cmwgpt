@@ -39,13 +39,22 @@ class SystemCommands:
         @app_commands.describe(model="Model name to use")
         @app_commands.choices(
             model=[
-                Choice(name="google/gemini-2.5-flash", value="google/gemini-2.5-flash"),
-                Choice(name="bytedance-seed/seed-2.0-mini", value="bytedance-seed/seed-2.0-mini"),
-                Choice(name="bytedance-seed/seed-1.6-flash", value="bytedance-seed/seed-1.6-flash"),
-                Choice(name="qwen/qwen3.5-flash-02-23", value="qwen/qwen3.5-flash-02-23"),
-                Choice(name="anthropic/claude-haiku-4.5 (search, web aware)", value="anthropic/claude-haiku-4.5"),
-            ]
-        )
+                Choice(
+                    name="google/gemini-2.5-flash",
+                    value="google/gemini-2.5-flash"),
+                Choice(
+                    name="bytedance-seed/seed-2.0-mini",
+                    value="bytedance-seed/seed-2.0-mini"),
+                Choice(
+                    name="bytedance-seed/seed-1.6-flash",
+                    value="bytedance-seed/seed-1.6-flash"),
+                Choice(
+                    name="qwen/qwen3.5-flash-02-23",
+                    value="qwen/qwen3.5-flash-02-23"),
+                Choice(
+                    name="anthropic/claude-haiku-4.5 (search, web aware)",
+                    value="anthropic/claude-haiku-4.5"),
+            ])
         async def model_command(
                 interaction: discord.Interaction,
                 model: Optional[str] = None):
@@ -252,16 +261,19 @@ class SystemCommands:
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue help command from {interaction.user} in #{interaction.channel} - queue may be full"
-                )
+                    f"Failed to queue help command from {
+                        interaction.user} in #{
+                        interaction.channel} - queue may be full")
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
         return help_command
 
-    async def _handle_help_command(self, interaction: discord.Interaction) -> None:
+    async def _handle_help_command(
+            self, interaction: discord.Interaction) -> None:
         """Handle the /help command."""
-        logger.info(f"[/help] Help requested by {interaction.user} in #{interaction.channel}")
+        logger.info(
+            f"[/help] Help requested by {interaction.user} in #{interaction.channel}")
 
         help_text = (
             "**🤖 AI Bot Commands Help**\n\n"
@@ -279,8 +291,7 @@ class SystemCommands:
             "`/systemprompt set [prompt]` - Set a custom AI personality for this channel\n"
             "`/systemprompt view` - View the current custom personality\n"
             "`/systemprompt reset` - Return to the default personality\n\n"
-            "*Note: Commands may be queued if the bot is busy processing other requests.*"
-        )
+            "*Note: Commands may be queued if the bot is busy processing other requests.*")
         await interaction.followup.send(help_text, ephemeral=True)
 
     async def _handle_restart_command(

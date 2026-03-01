@@ -2,7 +2,6 @@
 Chat Commands - Handles chat-related Discord commands
 """
 
-import json
 import logging
 from typing import Optional
 
@@ -103,7 +102,8 @@ class ChatCommands:
         legend_section = await get_mention_legend(interaction.channel, self.bot.user)
 
         # Add username if configured
-        prefix_message = f"<@{interaction.user.id}>: {message}" if INCLUDE_USERNAMES else message
+        prefix_message = f"<@{
+            interaction.user.id}>: {message}" if INCLUDE_USERNAMES else message
 
         # Initialize conversation if missing (no system prompt in conversation
         # array)
@@ -120,8 +120,9 @@ class ChatCommands:
         if attachment:
             try:
                 base64_data_url = await attachment_to_base64_data_url(attachment)
-                
-                if attachment.content_type and attachment.content_type.startswith('image/'):
+
+                if attachment.content_type and attachment.content_type.startswith(
+                        'image/'):
                     # Image attachment
                     file_payloads = [
                         {"type": "image_url", "image_url": {"url": base64_data_url}},
@@ -139,28 +140,28 @@ class ChatCommands:
                     )
             except Exception as e:
                 logger.error(
-                    f"[/chat] Channel {channel_id}: Failed to convert attachment to base64: {e}"
-                )
-                
+                    f"[/chat] Channel {channel_id}: Failed to convert attachment to base64: {e}")
+
                 # Fallbacks using URLs
-                if attachment.content_type and attachment.content_type.startswith('image/'):
-                    file_payloads = [
-                        {"type": "image_url", "image_url": {"url": attachment.url}},
-                    ]
+                if attachment.content_type and attachment.content_type.startswith(
+                        'image/'):
+                    file_payloads = [{"type": "image_url",
+                                      "image_url": {"url": attachment.url}}, ]
                     logger.warning(
-                        f"[/chat] Channel {channel_id}: Using image attachment URL as fallback (may expire)"
-                    )
+                        f"[/chat] Channel {channel_id}: Using image attachment URL as fallback (may expire)")
                 else:
                     # Non-image attachment fallback
-                    attachment_info = f"\n\n[Attached File: {attachment.filename}, type: {attachment.content_type}]"
+                    attachment_info = f"\n\n[Attached File: {
+                        attachment.filename}, type: {
+                        attachment.content_type}]"
                     prefix_message += attachment_info
                     logger.warning(
-                        f"[/chat] Channel {channel_id}: Using textual file reference as fallback"
-                    )
+                        f"[/chat] Channel {channel_id}: Using textual file reference as fallback")
 
         # Construct the final content payload
         if file_payloads:
-            content_payload = [{"type": "text", "text": prefix_message}] + file_payloads
+            content_payload = [
+                {"type": "text", "text": prefix_message}] + file_payloads
         else:
             content_payload = prefix_message
             logger.info(

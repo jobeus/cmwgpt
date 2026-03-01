@@ -153,17 +153,13 @@ class QueueService:
             # Use put_nowait to immediately fail if queue is full
             self._queue.put_nowait(queued_msg)
             logger.debug(
-                f"""Queued mention from {
-                    message.author} in #{
-                    message.channel}"""
+                f"Queued mention from {message.author} in #{message.channel}"
             )
             return True
         except asyncio.QueueFull:
             self._stats["queue_overflows"] += 1
             logger.warning(
-                f"""Queue full, dropping message from {
-                    message.author} in #{
-                    message.channel}"""
+                f"Queue full, dropping message from {message.author} in #{message.channel}"
             )
             return False
 
@@ -202,17 +198,13 @@ class QueueService:
             # Use put_nowait to immediately fail if queue is full
             self._queue.put_nowait(queued_msg)
             logger.debug(
-                f"""Queued command from {
-                    interaction.user} in #{
-                    interaction.channel}"""
+                f"Queued command from {interaction.user} in #{interaction.channel}"
             )
             return True
         except asyncio.QueueFull:
             self._stats["queue_overflows"] += 1
             logger.warning(
-                f"""Queue full, dropping command from {
-                    interaction.user} in #{
-                    interaction.channel}"""
+                f"Queue full, dropping command from {interaction.user} in #{interaction.channel}"
             )
             return False
 
@@ -282,8 +274,7 @@ class QueueService:
                 break
             except SystemExit as e:
                 logger.info(
-                    f"Queue service received SystemExit signal (code {
-                        e.code}). Exiting process immediately.")
+                    f"Queue service received SystemExit signal (code {e.code}). Exiting process immediately.")
                 os._exit(e.code)
             except (RuntimeError, OSError, ValueError) as e:
                 logger.error(
@@ -306,20 +297,15 @@ class QueueService:
             # Log processing start
             if queued_msg.message_type == MessageType.MENTION:
                 logger.debug(
-                    f"""Processing {
-                        queued_msg.message_type.value} message from {
-                        queued_msg.discord_message.author}"""
+                    f"Processing {queued_msg.message_type.value} message from {queued_msg.discord_message.author}"
                 )
             elif queued_msg.message_type == MessageType.COMMAND:
                 logger.debug(
-                    f"""Processing {
-                        queued_msg.message_type.value} from {
-                        queued_msg.interaction.user}"""
+                    f"Processing {queued_msg.message_type.value} from {queued_msg.interaction.user}"
                 )
             elif queued_msg.message_type == MessageType.RESTART:
                 logger.debug(
-                    f"""Processing {
-                        queued_msg.message_type.value} signal"""
+                    f"Processing {queued_msg.message_type.value} signal"
                 )
 
             # Call the appropriate handler directly - they should be properly
@@ -348,8 +334,7 @@ class QueueService:
                 user_info = "unknown"
 
             logger.error(
-                f"""Error processing {
-                    queued_msg.message_type.value} from {user_info}: {e}""",
+                f"Error processing {queued_msg.message_type.value} from {user_info}: {e}",
                 exc_info=True,
             )
 

@@ -6,7 +6,6 @@ Tests helper functions and logic that can be tested without Discord integration.
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 import asyncio
-import json
 import sys
 import os
 
@@ -100,8 +99,9 @@ class TestBotFunctions(unittest.TestCase):
             # Verify result structure
             self.assertIsInstance(result, list)
             self.assertIsInstance(system_prompt, str)
-            
-            # Now we should have 3 messages in the result array (for the 3 mock messages)
+
+            # Now we should have 3 messages in the result array (for the 3 mock
+            # messages)
             self.assertEqual(len(result), 3)
 
             # Verify system prompt
@@ -112,17 +112,19 @@ class TestBotFunctions(unittest.TestCase):
             # Should contain some system prompt content (either default or from
             # file)
             self.assertTrue(len(system_prompt) > 0)
-            
+
             # The system prompt should contain the preamble about discord IDs
-            self.assertIn("prefixed with its timestamp, message ID, and the sender's Discord ID", system_prompt)
+            self.assertIn(
+                "prefixed with its timestamp, message ID, and the sender's Discord ID",
+                system_prompt)
 
             # Verify history is in correct order (oldest first)
             # Msg 1
             self.assertEqual(result[0]["role"], "user")
-            
+
             # Msg 2
             self.assertEqual(result[1]["role"], "user")
-            
+
             # Msg 3
             self.assertEqual(result[2]["role"], "user")
 

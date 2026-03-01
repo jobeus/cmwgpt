@@ -13,25 +13,29 @@ _attachment_base64_cache = {}
 MAX_CACHE_SIZE = 100
 
 
-def compress_image(image_bytes: bytes, max_size: int = 1024, quality: int = 75) -> bytes:
+def compress_image(
+        image_bytes: bytes,
+        max_size: int = 1024,
+        quality: int = 75) -> bytes:
     """Compress and resize image bytes using Pillow."""
     try:
         img = Image.open(io.BytesIO(image_bytes))
-        
+
         # Convert to RGB for JPEG compression to save maximum space
         if img.mode != 'RGB':
             img = img.convert('RGB')
-            
+
         # Resize if dimensions exceed max_size while maintaining aspect ratio
         if img.width > max_size or img.height > max_size:
             img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-            
+
         # Save to bytes as JPEG
         out_bytes = io.BytesIO()
         img.save(out_bytes, format='JPEG', quality=quality)
         return out_bytes.getvalue()
     except Exception as e:
-        logger.warning(f"Image compression failed: {e}. Falling back to original bytes.")
+        logger.warning(
+            f"Image compression failed: {e}. Falling back to original bytes.")
         return image_bytes
 
 
@@ -49,18 +53,19 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
     Raises:
         Exception: If download or encoding fails
     """
-    # Use attachment ID as the unique cache key 
+    # Use attachment ID as the unique cache key
     if attachment.id in _attachment_base64_cache:
         cached_result = _attachment_base64_cache[attachment.id]
         if cached_result is None:
-            raise Exception("Attachment previously failed to convert and is cached as a failure.")
+            raise Exception(
+                "Attachment previously failed to convert and is cached as a failure.")
         logger.debug(f"Cache hit for attachment base64: {attachment.filename}")
         return cached_result
 
     try:
         # Download the attachment
         image_bytes = await attachment.read()
-        
+
         # Compress image to save token limit space on APIs
         image_bytes = compress_image(image_bytes)
 
@@ -74,21 +79,21 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
         data_url = f"data:{content_type};base64,{base64_data}"
 
         logger.debug(
-            f"Converted attachment {
-                attachment.filename} to base64 data URL ({
-                len(base64_data)} chars)")
-                
+            f"Converted attachment {attachment.filename} to base64 data URL ({len(base64_data)} chars)")
+
         # Store in bounded cache
         if len(_attachment_base64_cache) >= MAX_CACHE_SIZE:
             oldest_key = next(iter(_attachment_base64_cache))
             del _attachment_base64_cache[oldest_key]
-        
+
         _attachment_base64_cache[attachment.id] = data_url
         return data_url
 
     except Exception as e:
-        logger.error(f"Failed to convert attachment {attachment.filename} to base64: {e}")
-        # Cache the failure state so we don't retry a completely broken attachment repeatedly
+        logger.error(
+            f"Failed to convert attachment {attachment.filename} to base64: {e}")
+        # Cache the failure state so we don't retry a completely broken
+        # attachment repeatedly
         if len(_attachment_base64_cache) >= MAX_CACHE_SIZE:
             oldest_key = next(iter(_attachment_base64_cache))
             del _attachment_base64_cache[oldest_key]
@@ -113,12 +118,13 @@ async def url_to_base64_data_url(url: str) -> str:
     if url in _url_base64_cache:
         cached_result = _url_base64_cache[url]
         if cached_result is None:
-            raise Exception("URL previously failed to download and is cached as a failure.")
+            raise Exception(
+                "URL previously failed to download and is cached as a failure.")
         logger.debug(f"Cache hit for URL base64: {url}")
         return cached_result
 
     import httpx
-    
+
     def cache_failure(target_url: str):
         if len(_url_base64_cache) >= MAX_CACHE_SIZE:
             oldest_key = next(iter(_url_base64_cache))
@@ -126,7 +132,8 @@ async def url_to_base64_data_url(url: str) -> str:
         _url_base64_cache[target_url] = None
 
     try:
-        # Follow redirects in case embeds resolve through URL shorteners or edge network bounces
+        # Follow redirects in case embeds resolve through URL shorteners or
+        # edge network bounces
         async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
             response = await client.get(url)
             response.raise_for_status()
@@ -142,18 +149,19 @@ async def url_to_base64_data_url(url: str) -> str:
 
             # Create data URL
             data_url = f"data:{content_type};base64,{base64_data}"
-            
-            logger.debug(f"Converted embed URL to base64 data URL ({len(base64_data)} chars)")
+
+            logger.debug(
+                f"Converted embed URL to base64 data URL ({len(base64_data)} chars)")
 
             # Store in bounded cache
             if len(_url_base64_cache) >= MAX_CACHE_SIZE:
                 # Remove oldest item (Python dicts maintain insertion order)
                 oldest_key = next(iter(_url_base64_cache))
                 del _url_base64_cache[oldest_key]
-            
+
             _url_base64_cache[url] = data_url
             return data_url
-            
+
     except httpx.TimeoutException as e:
         logger.warning(f"Timeout while fetching image URL '{url}': {e}")
         cache_failure(url)

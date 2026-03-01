@@ -16,10 +16,14 @@ class TestConfig(unittest.TestCase):
         """Set up test environment."""
         # Clear any existing environment variables
         self.env_vars_to_clear = [
-            'OPENROUTER_API_KEY', 'DISCORD_BOT_TOKEN',
-            'DEFAULT_MODEL', 'DEFAULT_DRAW_MODEL', 'DEFAULT_EDIT_MODEL', 'INCLUDE_USERNAMES',
-            'REPLY_TO_MENTIONS', 'INCLUDE_NUM_CHATLINES'
-        ]
+            'OPENROUTER_API_KEY',
+            'DISCORD_BOT_TOKEN',
+            'DEFAULT_MODEL',
+            'DEFAULT_DRAW_MODEL',
+            'DEFAULT_EDIT_MODEL',
+            'INCLUDE_USERNAMES',
+            'REPLY_TO_MENTIONS',
+            'INCLUDE_NUM_CHATLINES']
         self.original_env = {}
         for var in self.env_vars_to_clear:
             self.original_env[var] = os.environ.get(var)
@@ -51,7 +55,9 @@ class TestConfig(unittest.TestCase):
             import config
             importlib.reload(config)
 
-            self.assertEqual(config.DEFAULT_MODEL, 'anthropic/claude-haiku-4.5')
+            self.assertEqual(
+                config.DEFAULT_MODEL,
+                'anthropic/claude-haiku-4.5')
             self.assertEqual(config.DEFAULT_DRAW_MODEL, 'seedream')
             self.assertEqual(config.DEFAULT_EDIT_MODEL, 'seedream')
             self.assertTrue(config.INCLUDE_USERNAMES)

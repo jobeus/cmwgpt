@@ -3,7 +3,7 @@ Unit tests for OpenAI service module.
 Tests OpenAI API integration functionality.
 """
 
-from src.services.openai_service import openai_service, OpenAIServiceError
+from src.services.openai_service import openai_service
 import unittest
 from unittest.mock import MagicMock, AsyncMock
 import sys
@@ -43,7 +43,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         result = await openai_service.get_chat_completion(model, messages, system_prompt)
 
         self.assertEqual(result, "Hello! How can I help you today?")
-        
+
         expected_input = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": "Hello"}

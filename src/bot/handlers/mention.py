@@ -2,7 +2,6 @@
 Mention Handler - Handles bot mentions and context preparation
 """
 
-import json
 import logging
 import time
 from typing import List, Dict, Any
@@ -153,11 +152,11 @@ class MentionHandler:
 
         # Gather message history
         history_msgs = []
-        
+
         current_time = time.time()
         channel_id = message.channel.id
         cache_entry = self._history_cache.get(channel_id)
-        
+
         if cache_entry and (current_time - cache_entry["timestamp"]) <= 600:
             oldest_message = cache_entry["oldest_message"]
             history_msgs.append(oldest_message)
@@ -170,7 +169,7 @@ class MentionHandler:
             async for msg in message.channel.history(limit=INCLUDE_NUM_CHATLINES):
                 history_msgs.append(msg)
             history_msgs.reverse()
-            
+
             if history_msgs:
                 self._history_cache[channel_id] = {
                     "timestamp": current_time,
@@ -200,7 +199,7 @@ class MentionHandler:
             f"CRITICAL INSTRUCTION: When @mentioning other users in your reply, use THEIR Discord ID from the chat history — never use your own ID <@{bot_user.id}> to mention someone else.\n\n"
             f"{legend_section}\n\n"
         )
-        
+
         # We will build a native messages array for OpenAI
         chat_context = []
 
@@ -208,53 +207,63 @@ class MentionHandler:
         for msg in history_msgs:
             # Determine role
             role = "assistant" if msg.author.id == bot_user.id else "user"
-            
-            content_payload = []
-            
+
             # 1. Start with the text component
             text_lines = []
-            # Prefix with timestamp, message ID and discord ID for ALL messages so the bot knows who is speaking and can map replies
+            # Prefix with timestamp, message ID and discord ID for ALL messages
+            # so the bot knows who is speaking and can map replies
             timestamp_str = msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
-            text_lines.append(f"[{timestamp_str}] [{msg.id}] <@{msg.author.id}>:")
-            
+            text_lines.append(
+                f"[{timestamp_str}] [{msg.id}] <@{msg.author.id}>:")
+
             # Add message content if any exists
             if msg.content:
                 text_lines.append(msg.content)
             elif not msg.embeds and not msg.attachments:
-                # Edge case where a message somehow has no content, embed, or attachment
+                # Edge case where a message somehow has no content, embed, or
+                # attachment
                 text_lines.append("[Empty Message]")
-            
+
             # Note any replies
             if msg.reference and msg.reference.message_id:
-                text_lines.append(f"[Replying to message ID: {msg.reference.message_id}]")
-            
+                text_lines.append(
+                    f"[Replying to message ID: {
+                        msg.reference.message_id}]")
+
             # Note single-text representations for embeds
             if msg.embeds:
                 embeds_info = []
                 for e in msg.embeds:
                     embed_text = []
-                    if e.title: embed_text.append(f"Title: {e.title}")
-                    if e.description: embed_text.append(f"Description: {e.description}")
-                    if e.url: embed_text.append(f"URL: {e.url}")
-                    if embed_text: embeds_info.append(" | ".join(embed_text))
-                
+                    if e.title:
+                        embed_text.append(f"Title: {e.title}")
+                    if e.description:
+                        embed_text.append(f"Description: {e.description}")
+                    if e.url:
+                        embed_text.append(f"URL: {e.url}")
+                    if embed_text:
+                        embeds_info.append(" | ".join(embed_text))
+
                 if embeds_info:
-                    text_lines.append("\n[Embeds:\n- " + "\n- ".join(embeds_info) + "\n]")
-                
+                    text_lines.append(
+                        "\n[Embeds:\n- " + "\n- ".join(embeds_info) + "\n]")
+
             # Compile the entire text block
             final_text = " ".join(text_lines).strip()
-            # No need for fallback handling here since we always prepend the sender prefix above
-                    
+            # No need for fallback handling here since we always prepend the
+            # sender prefix above
+
             text_payload = [{"type": "text", "text": final_text}]
             file_payloads = []
-            
-            # 2. Add native image and file components 
+
+            # 2. Add native image and file components
             for attach in msg.attachments:
                 try:
                     # We only convert attachments for user messages
                     if role == "user":
                         file_data_url = await attachment_to_base64_data_url(attach)
-                        if attach.content_type and attach.content_type.startswith('image/'):
+                        if attach.content_type and attach.content_type.startswith(
+                                'image/'):
                             file_payloads.append(
                                 {"type": "image_url", "image_url": {"url": file_data_url}}
                             )
@@ -263,7 +272,9 @@ class MentionHandler:
                                 {"type": "file", "file": {"url": file_data_url}}
                             )
                 except Exception as e:
-                    logger.error(f"Failed to convert attachment context for msg {msg.id}: {e}")
+                    logger.error(
+                        f"Failed to convert attachment context for msg {
+                            msg.id}: {e}")
             # 3. Add native embed image previews
             for e in msg.embeds:
                 logger.debug(f"Checking embed for image previews: {e.title}")
@@ -275,24 +286,30 @@ class MentionHandler:
 
                 if embed_url:
                     try:
-                        logger.debug(f"Fetching embed preview image from: {embed_url}")
+                        logger.debug(
+                            f"Fetching embed preview image from: {embed_url}")
                         image_data_url = await url_to_base64_data_url(embed_url)
                         file_payloads.append(
                             {"type": "image_url", "image_url": {"url": image_data_url}}
                         )
                     except Exception as ex:
-                        logger.warning(f"Failed to fetch embed preview context for msg {msg.id}: {ex}")
+                        logger.warning(
+                            f"Failed to fetch embed preview context for msg {
+                                msg.id}: {ex}")
 
             # Chat completions API doesn't support image_url parts in the 'assistant' role natively.
-            # So if it's an assistant message with images, send text as assistant and images as a follow-up 'user'.
+            # So if it's an assistant message with images, send text as
+            # assistant and images as a follow-up 'user'.
             if role == "assistant" and file_payloads:
-                chat_context.append({"role": "assistant", "content": text_payload})
+                chat_context.append(
+                    {"role": "assistant", "content": text_payload})
                 chat_context.append({
-                    "role": "user", 
+                    "role": "user",
                     "content": [{"type": "text", "text": f"[{timestamp_str}] [{msg.id}] <@{msg.author.id}>:"}] + file_payloads
                 })
             else:
-                chat_context.append({"role": role, "content": text_payload + file_payloads})
+                chat_context.append(
+                    {"role": role, "content": text_payload + file_payloads})
 
         return chat_context, current_channel_system_prompt
 

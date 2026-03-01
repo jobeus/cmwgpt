@@ -135,7 +135,8 @@ class AnnouncementService:
 
         # Skip announcement if there is no changelog containing #announce
         if not changelog:
-            logger.info("No commits with #announce found, skipping announcement")
+            logger.info(
+                "No commits with #announce found, skipping announcement")
             state_service.set_last_git_sha(current_sha)
             return
 
@@ -155,17 +156,19 @@ class AnnouncementService:
                 paste_url = upload_to_pasters(changelog)
                 message = f"{base_message} Changes:\n[View complete changelog]({paste_url})"
             except Exception as e:
-                logger.error(f"Failed to upload changelog to paste service: {e}")
+                logger.error(
+                    f"Failed to upload changelog to paste service: {e}")
                 # Fallback to truncated message
                 lines = changelog.split("\n")
                 truncated_changelog = "\n".join(lines[:5])
                 if len(lines) > 5:
-                    truncated_changelog += f"\n• ... and {len(lines) - 5} more commits"
+                    truncated_changelog += f"\n• ... and {
+                        len(lines) - 5} more commits"
                 message = f"{base_message} Recent changes:\n{truncated_changelog}"
 
         logger.info(
-            f"Announcing update to {len(active_channels)} channels: {current_sha_short}"
-        )
+            f"Announcing update to {
+                len(active_channels)} channels: {current_sha_short}")
 
         # Send announcements to all active channels
         successful_announcements = 0
