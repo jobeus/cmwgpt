@@ -70,7 +70,7 @@ pm2 restart discord-bot
 4. **"Model Not Available"**
    - Check if model exists and is accessible
    - Verify your OpenRouter plan includes the model
-   - Try switching to a different model: `/model google/gemini-2.5-flash`
+   - Try switching to a different model: `/model anthropic/claude-haiku-4.5`
 
 #### Debug OpenRouter Issues
 ```bash

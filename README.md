@@ -128,7 +128,7 @@ RUNPOD_IO_API_KEY=your_runpod_api_key_here
 
 - **`/help`** - View all commands privately in the channel
 - **`/reset`** - Clear conversation history for the current channel
-- **`/model [name]`** - View or change AI model (google/gemini-2.5-flash)
+- **`/model [name]`** - View or change AI model (anthropic/claude-haiku-4.5)
 - **`/drawmodel [name]`** - View or change AI image generation model
 - **`/editmodel [name]`** - View or change AI image editing model
 - **`/systemprompt set [prompt]`** - Set custom AI personality for the channel

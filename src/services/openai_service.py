@@ -133,17 +133,20 @@ class OpenAIService:
                 logger.info(f"OPENROUTER PRE-FLIGHT - model={actual_model}, msg_len={len(api_input)}")
                 logger.info(f"API HEADERS USED: {client.default_headers}")
                 
-                response = await client.chat.completions.create(
-                    model=actual_model,
-                    messages=api_input,
-                    extra_body={
-                        "plugins":[{
+                kwargs = {
+                    "model": actual_model,
+                    "messages": api_input
+                }
+
+                if actual_model == "anthropic/claude-haiku-4.5":
+                    kwargs["extra_body"] = {
+                        "plugins": [{
                             "id": "web",
-                            "max_results": 5,
-                            "search_prompt": "You may consider these web results if you believe them to be relevant to your response:"
+                            "engine": "native"
                         }]
                     }
-                )
+
+                response = await client.chat.completions.create(**kwargs)
                 
                 logger.info(f"OPENROUTER POST-FLIGHT - got response object! len={len(response.choices)}")
                 

@@ -57,10 +57,10 @@ The bot is configured through environment variables defined in a `.env` file. Co
 #### `DEFAULT_MODEL`
 - **Required**: No
 - **Description**: Default OpenRouter model to use for chat
-- **Example**: `DEFAULT_MODEL=google/gemini-2.5-flash`
-- **Default**: `google/gemini-2.5-flash`
+- **Example**: `DEFAULT_MODEL=anthropic/claude-haiku-4.5`
+- **Default**: `anthropic/claude-haiku-4.5`
 - **Available Options**:
-  - `google/gemini-2.5-flash` - Fast and efficient latest Gemini model
+  - `anthropic/claude-haiku-4.5` - Fast and efficient latest Gemini model
   - *Plus any other OpenRouter models configured later*
 
 
@@ -125,7 +125,7 @@ OPENROUTER_API_KEY=sk-or-v1-abcdef12345678
 DISCORD_CHANNEL_ID=1234567890123456789
 
 # Optional - AI Behavior (system prompt now in system_prompt.txt file)
-DEFAULT_MODEL=google/gemini-2.5-flash
+DEFAULT_MODEL=anthropic/claude-haiku-4.5
 
 # Optional - Bot Behavior
 INCLUDE_USERNAMES=true
@@ -267,7 +267,7 @@ OPENROUTER_API_KEY=your_openrouter_key
 
 # More verbose for debugging
 SYSTEM_PROMPT="You are a helpful assistant in development mode"
-DEFAULT_MODEL=google/gemini-2.5-flash  # Faster for testing
+DEFAULT_MODEL=anthropic/claude-haiku-4.5  # Faster for testing
 INCLUDE_NUM_CHATLINES=20    # Fewer lines for testing
 ```
 
@@ -279,7 +279,7 @@ OPENROUTER_API_KEY=your_openrouter_key
 
 # Optimized for production
 SYSTEM_PROMPT="You are a helpful assistant"
-DEFAULT_MODEL=google/gemini-2.5-flash
+DEFAULT_MODEL=anthropic/claude-haiku-4.5
 INCLUDE_NUM_CHATLINES=100
 INCLUDE_USERNAMES=true
 REPLY_TO_MENTIONS=true

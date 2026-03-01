@@ -36,7 +36,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         mock_response.choices = [mock_choice]
         self.mock_client.chat.completions.create.return_value = mock_response
 
-        model = "gpt-5-nano"
+        model = "anthropic/claude-haiku-4.5"
         messages = [{"role": "user", "content": "Hello"}]
         system_prompt = "You are a helpful assistant."
 
@@ -52,10 +52,9 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
             model=model,
             messages=expected_input,
             extra_body={
-                "plugins":[{
+                "plugins": [{
                     "id": "web",
-                    "max_results": 5,
-                    "search_prompt": "You may consider these web results if you believe them to be relevant to your response:"
+                    "engine": "native"
                 }]
             }
         )

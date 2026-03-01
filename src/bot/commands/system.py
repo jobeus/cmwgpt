@@ -44,7 +44,7 @@ class SystemCommands:
                 Choice(name="bytedance-seed/seed-1.6-flash", value="bytedance-seed/seed-1.6-flash"),
                 Choice(name="minimax/minimax-m2-her", value="minimax/minimax-m2-her"),
                 Choice(name="qwen/qwen3.5-flash-02-23", value="qwen/qwen3.5-flash-02-23"),
-                Choice(name="anthropic/claude-haiku-4.5", value="anthropic/claude-haiku-4.5"),
+                Choice(name="anthropic/claude-haiku-4.5 (search, web aware)", value="anthropic/claude-haiku-4.5"),
             ]
         )
         async def model_command(
@@ -276,7 +276,7 @@ class SystemCommands:
             "`/drawmodel [model]` - View or set the default image generation model\n"
             "`/editmodel [model]` - View or set the default image editing model\n\n"
             "**System & Settings:**\n"
-            "`/model [model]` - View or set the AI language model (e.g., google/gemini-2.5-flash)\n"
+            "`/model [model]` - View or set the AI language model (e.g., anthropic/claude-haiku-4.5)\n"
             "`/systemprompt set [prompt]` - Set a custom AI personality for this channel\n"
             "`/systemprompt view` - View the current custom personality\n"
             "`/systemprompt reset` - Return to the default personality\n\n"

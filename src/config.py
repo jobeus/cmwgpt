@@ -12,7 +12,7 @@ DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "test-token-for-ci")
 
 
 # Bot Configuration
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "google/gemini-2.5-flash")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "anthropic/claude-haiku-4.5")
 DEFAULT_DRAW_MODEL = os.getenv("DEFAULT_DRAW_MODEL", "seedream")
 DEFAULT_EDIT_MODEL = os.getenv("DEFAULT_EDIT_MODEL", "seedream")
 
