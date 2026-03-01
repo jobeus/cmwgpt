@@ -42,7 +42,6 @@ class SystemCommands:
                 Choice(name="google/gemini-2.5-flash", value="google/gemini-2.5-flash"),
                 Choice(name="bytedance-seed/seed-2.0-mini", value="bytedance-seed/seed-2.0-mini"),
                 Choice(name="bytedance-seed/seed-1.6-flash", value="bytedance-seed/seed-1.6-flash"),
-                Choice(name="minimax/minimax-m2-her", value="minimax/minimax-m2-her"),
                 Choice(name="qwen/qwen3.5-flash-02-23", value="qwen/qwen3.5-flash-02-23"),
                 Choice(name="anthropic/claude-haiku-4.5 (search, web aware)", value="anthropic/claude-haiku-4.5"),
             ]

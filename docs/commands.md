@@ -134,7 +134,6 @@ View or change the AI model for the current channel.
 **Available Models:**
 - `google/gemini-2.5-flash` - Fast and capable Google model
 - `bytedance-seed/seed-2.0-mini` - Efficient Seed model
-- `minimax/minimax-m2-her` - MiniMax M2 model
 - `qwen/qwen3.5-flash-02-23` - Qwen 3.5 Flash model
 - `anthropic/claude-haiku-4.5` - Fast and efficient latest model (recommended, with web search)
 
