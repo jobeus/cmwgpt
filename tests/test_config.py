@@ -51,7 +51,7 @@ class TestConfig(unittest.TestCase):
             import config
             importlib.reload(config)
 
-            self.assertEqual(config.DEFAULT_MODEL, 'google/gemini-2.5-flash')
+            self.assertEqual(config.DEFAULT_MODEL, 'anthropic/claude-haiku-4.5')
             self.assertEqual(config.DEFAULT_DRAW_MODEL, 'seedream')
             self.assertEqual(config.DEFAULT_EDIT_MODEL, 'seedream')
             self.assertTrue(config.INCLUDE_USERNAMES)

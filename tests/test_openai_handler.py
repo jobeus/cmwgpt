@@ -52,6 +52,9 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
             model=model,
             messages=expected_input,
             extra_body={
+                "provider": {
+                    "sort": "price"
+                },
                 "plugins": [{
                     "id": "web",
                     "engine": "native"

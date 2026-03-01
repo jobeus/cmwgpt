@@ -135,16 +135,19 @@ class OpenAIService:
                 
                 kwargs = {
                     "model": actual_model,
-                    "messages": api_input
+                    "messages": api_input,
+                    "extra_body": {
+                        "provider": {
+                            "sort": "price"
+                        }
+                    }
                 }
 
                 if actual_model == "anthropic/claude-haiku-4.5":
-                    kwargs["extra_body"] = {
-                        "plugins": [{
-                            "id": "web",
-                            "engine": "native"
-                        }]
-                    }
+                    kwargs["extra_body"]["plugins"] = [{
+                        "id": "web",
+                        "engine": "native"
+                    }]
 
                 response = await client.chat.completions.create(**kwargs)
                 
