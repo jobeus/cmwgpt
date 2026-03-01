@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 _transcript_cache = {}
 MAX_CACHE_SIZE = 100
 
+
 def extract_video_ids(text: str) -> List[str]:
     """
     Extract YouTube video IDs from a block of text.
@@ -53,14 +54,19 @@ def get_transcript(video_id: str) -> Optional[str]:
         _transcript_cache[vid_id] = None
 
     try:
-        kwargs = {}
         if HTTPS_PROXY:
-            kwargs['proxies'] = {"https": HTTPS_PROXY}
+            from youtube_transcript_api.proxies import GenericProxyConfig
+            proxy_config = GenericProxyConfig(https_url=HTTPS_PROXY)
+            api = YouTubeTranscriptApi(proxy_config=proxy_config)
+        else:
+            api = YouTubeTranscriptApi()
 
         logger.info(f"Fetching transcript for video ID: {video_id}")
-        transcript_list = YouTubeTranscriptApi.get_transcript(
-            video_id, **kwargs)
-        transcript_text = " ".join([t['text'] for t in transcript_list])
+
+        # In youtube-transcript-api 1.2.4 fetch() returns an iterable of
+        # FetchedTranscriptSnippet
+        snippets = api.fetch(video_id)
+        transcript_text = " ".join([snippet.text for snippet in snippets])
 
         # Store in bounded cache
         if len(_transcript_cache) >= MAX_CACHE_SIZE:
