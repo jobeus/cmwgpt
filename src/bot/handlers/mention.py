@@ -196,7 +196,8 @@ class MentionHandler:
             f"You are expected to reply, but less metaphysics and more straight up answers like a user on a "
             f"30 year old IRC board and not a talkative robot. Respond with ONLY the text/image content of your reply, "
             f"without prefixing it with your own ID or message ID.\n"
-            f"CRITICAL INSTRUCTION: DO NOT start your own messages with a `[timestamp] [message ID]` prefix. Just write your text directly as a speaker.\n\n"
+            f"CRITICAL INSTRUCTION: DO NOT start your own messages with a `[timestamp] [message ID]` prefix. Just write your text directly as a speaker.\n"
+            f"CRITICAL INSTRUCTION: When @mentioning other users in your reply, use THEIR Discord ID from the chat history — never use your own ID <@{bot_user.id}> to mention someone else.\n\n"
             f"{legend_section}\n\n"
         )
         
