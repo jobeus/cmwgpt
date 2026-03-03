@@ -9,6 +9,7 @@ load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "test-key-for-ci")
 RUNPOD_IO_API_KEY = os.getenv("RUNPOD_IO_API_KEY", "")
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "test-token-for-ci")
+DISCORD_GUILD_ID = os.getenv("DISCORD_GUILD_ID", "")
 
 # Proxies
 YT_TRANSCRIPT_PROXY = os.getenv("YT_TRANSCRIPT_PROXY", "")

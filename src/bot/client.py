@@ -10,7 +10,7 @@ from typing import Optional
 import discord
 from discord.ext import commands
 
-from src.config import DISCORD_BOT_TOKEN, DEFAULT_MODEL, REPLY_TO_MENTIONS
+from src.config import DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, DEFAULT_MODEL, REPLY_TO_MENTIONS
 from src.bot.handlers.mention import mention_handler
 from src.bot.commands.chat import ChatCommands
 from src.bot.commands.image import ImageCommands
@@ -191,6 +191,13 @@ class DiscordBotClient:
         @self.bot.event
         async def on_ready():
             await self.bot.tree.sync()
+
+            # If a guild ID is configured, also sync instantly to that guild
+            if DISCORD_GUILD_ID:
+                guild = discord.Object(id=int(DISCORD_GUILD_ID))
+                self.bot.tree.copy_global_to(guild=guild)
+                await self.bot.tree.sync(guild=guild)
+                logger.info(f"Commands synced instantly to guild {DISCORD_GUILD_ID}")
 
             # Start the message queue service
             await queue_service.start()
