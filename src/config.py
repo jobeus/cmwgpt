@@ -77,7 +77,7 @@ KEEP_UP_TO_DATE_WITH_GIT = os.getenv(
 QUIET_UPDATES = os.getenv("QUIET_UPDATES", "False").lower() in ("true", "1")
 
 # Numeric Configuration
-INCLUDE_NUM_CHATLINES = int(os.getenv("INCLUDE_NUM_CHATLINES", 25))
+INCLUDE_NUM_CHATLINES = int(os.getenv("INCLUDE_NUM_CHATLINES", 10))
 
 
 # Check if we're in a testing environment

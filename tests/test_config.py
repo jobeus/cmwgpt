@@ -63,7 +63,7 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config.DEFAULT_EDIT_MODEL, 'seedream')
             self.assertTrue(config.INCLUDE_USERNAMES)
             self.assertTrue(config.REPLY_TO_MENTIONS)
-            self.assertEqual(config.INCLUDE_NUM_CHATLINES, 25)
+            self.assertEqual(config.INCLUDE_NUM_CHATLINES, 10)
 
     @patch('src.config.load_dotenv')
     @patch.dict(os.environ, {}, clear=True)

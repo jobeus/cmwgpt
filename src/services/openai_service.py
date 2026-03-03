@@ -194,7 +194,19 @@ class OpenAIService:
                         raise OpenAIServiceError(
                             "The model API returned an empty response.")
                     
-                    cleaned_text = clean_openai_response(response_text)
+                    # Attempt to get the bot_id from state_service if it exists, or from message_service
+                    bot_id = None
+                    try:
+                        if state_service and hasattr(state_service, 'bot_id'):
+                            bot_id = state_service.bot_id
+                        else:
+                            from src.services.message_service import message_service
+                            if message_service and hasattr(message_service, 'bot') and message_service.bot and hasattr(message_service.bot, 'user'):
+                                bot_id = message_service.bot.user.id
+                    except Exception as e:
+                        logger.warning(f"Failed to get bot_id for cleaning: {e}")
+                    
+                    cleaned_text = clean_openai_response(response_text, bot_id=bot_id)
                     
                     try:
                         cost = 0.0

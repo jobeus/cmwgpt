@@ -274,7 +274,7 @@ OPENROUTER_API_KEY=your_openrouter_key
 # More verbose for debugging
 SYSTEM_PROMPT="You are a helpful assistant in development mode"
 DEFAULT_MODEL=anthropic/claude-haiku-4.5  # Faster for testing
-INCLUDE_NUM_CHATLINES=20    # Fewer lines for testing
+INCLUDE_NUM_CHATLINES=10    # Fewer lines for testing
 ```
 
 #### Production Environment
@@ -286,7 +286,7 @@ OPENROUTER_API_KEY=your_openrouter_key
 # Optimized for production
 SYSTEM_PROMPT="You are a helpful assistant"
 DEFAULT_MODEL=anthropic/claude-haiku-4.5
-INCLUDE_NUM_CHATLINES=100
+INCLUDE_NUM_CHATLINES=10
 INCLUDE_USERNAMES=true
 REPLY_TO_MENTIONS=true
 ```

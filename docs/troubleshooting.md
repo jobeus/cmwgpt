@@ -158,7 +158,7 @@ sudo systemctl restart discord-bot
 3. **Optimize Configuration**
    ```env
    # Reduce context size for mentions
-   INCLUDE_NUM_CHATLINES=50
+   INCLUDE_NUM_CHATLINES=10
 
    # Use more efficient model
    DEFAULT_MODEL=google/gemini-2.5-flash
