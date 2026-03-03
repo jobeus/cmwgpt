@@ -190,14 +190,19 @@ class DiscordBotClient:
 
         @self.bot.event
         async def on_ready():
-            await self.bot.tree.sync()
-
-            # If a guild ID is configured, also sync instantly to that guild
+            # Sync commands - guild-specific if configured (instant),
+            # otherwise global (can take up to 1 hour)
             if DISCORD_GUILD_ID:
                 guild = discord.Object(id=int(DISCORD_GUILD_ID))
                 self.bot.tree.copy_global_to(guild=guild)
                 await self.bot.tree.sync(guild=guild)
+                # Clear any stale global commands to avoid duplicates
+                self.bot.tree.clear_commands(guild=None)
+                await self.bot.tree.sync()
                 logger.info(f"Commands synced instantly to guild {DISCORD_GUILD_ID}")
+            else:
+                await self.bot.tree.sync()
+                logger.info("Commands synced globally (may take up to 1 hour to propagate)")
 
             # Start the message queue service
             await queue_service.start()
