@@ -185,7 +185,7 @@ class SystemCommands:
         # Mark channel as active
         state_service.mark_channel_active(channel_id)
 
-        legend_section = await get_mention_legend(interaction.channel)
+        legend_section = await get_mention_legend(interaction.channel, self.bot.user)
 
         if prompt_text:
             # Set new system prompt (no longer stored in conversation arrays)
