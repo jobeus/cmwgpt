@@ -3,6 +3,7 @@ Mention Handler - Handles bot mentions and context preparation
 """
 
 import logging
+import re
 import time
 from typing import List, Dict, Any
 
@@ -16,6 +17,9 @@ from src.services.message_service import message_service
 from src.services.queue_service import queue_service
 import asyncio
 from src.utils.youtube_utils import extract_video_ids, get_transcript
+
+# Pattern to strip cost prefixes like [$0.011] from the start of bot messages
+COST_PREFIX_PATTERN = re.compile(r'^\[\$[\d.]+\]\s*')
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +58,8 @@ class MentionHandler:
                     f"Context prepared for mention by {
                         message.author}, sending to OpenRouter...")
                 reply_content = await openai_service.get_chat_completion(
-                    model=model, messages=chat_msgs, system_prompt=system_prompt
+                    model=model, messages=chat_msgs, system_prompt=system_prompt,
+                    bot_id=bot_user.id,
                 )
 
                 if reply_content is None:
@@ -259,6 +264,10 @@ class MentionHandler:
 
             # Compile the entire text block
             final_text = " ".join(text_lines).strip()
+
+            # Strip cost prefixes from bot messages so the model doesn't parrot them
+            if role == "assistant":
+                final_text = COST_PREFIX_PATTERN.sub("", final_text)
 
             # YouTube transcript extraction
             if role == "user":

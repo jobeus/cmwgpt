@@ -3,6 +3,7 @@ Chat Commands - Handles chat-related Discord commands
 """
 
 import logging
+import re
 from typing import Optional
 
 import discord
@@ -18,6 +19,9 @@ import asyncio
 from src.utils.youtube_utils import extract_video_ids, get_transcript
 
 logger = logging.getLogger(__name__)
+
+# Pattern to strip cost prefixes like [$0.011] from bot messages
+COST_PREFIX_PATTERN = re.compile(r'^\[\$[\d.]+\]\s*')
 
 
 class ChatCommands:
@@ -210,7 +214,9 @@ class ChatCommands:
                     system_prompt = get_system_prompt() + "\n" + legend_section
 
                 reply = await openai_service.get_chat_completion(
-                    model=current_model, messages=current_conversation, system_prompt=system_prompt, channel_id=channel_id, state_service=state_service
+                    model=current_model, messages=current_conversation, system_prompt=system_prompt,
+                    channel_id=channel_id, state_service=state_service,
+                    bot_id=self.bot.user.id if self.bot.user else None,
                 )
 
                 # Handle different response formats
@@ -226,8 +232,10 @@ class ChatCommands:
                 # Log and store assistant reply
                 logger.info(
                     f"[/chat] Channel {channel_id} Assistant: {reply_text}")
+                # Store reply without cost prefix in conversation history
+                history_text = COST_PREFIX_PATTERN.sub('', reply_text)
                 state_service.add_message_to_conversation(
-                    channel_id, {"role": "assistant", "content": reply_text}
+                    channel_id, {"role": "assistant", "content": history_text}
                 )
 
                 # Prepare base message content

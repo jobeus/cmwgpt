@@ -113,6 +113,7 @@ class OpenAIService:
         system_prompt: str = None,
         channel_id: int = None,
         state_service: Any = None,
+        bot_id: int = None,
     ) -> str:
         """
         Gets a chat completion using the standard Chat Completions API.
@@ -173,8 +174,8 @@ class OpenAIService:
                          last_msg_snippet = last_msg_ptr.replace("\n", " ")
                 
                 snippet_trunc = last_msg_snippet[:150] + ("..." if len(last_msg_snippet) > 150 else "")
-                logger.info(f"OPENROUTER PRE-FLIGHT [{actual_model}] Prompt Snippet: {snippet_trunc}")
-                logger.info(f"API HEADERS USED: {client.default_headers}")
+                logger.info(f"[{actual_model}] Prompt Snippet: {snippet_trunc}")
+                logger.info(f"api headers: {client.default_headers}")
 
                 kwargs = {
                     "model": actual_model,
@@ -215,33 +216,34 @@ class OpenAIService:
                 # Safely inspect choices to avoid "object of type NoneType has no len()"
                 num_choices = len(response.choices) if getattr(response, 'choices', None) else 0
                 logger.info(
-                    f"OPENROUTER POST-FLIGHT - got response object! len={num_choices}")
+                    f"[{actual_model}] got response object! number of choices={num_choices}")
 
                 if getattr(response, 'choices', None):
                     response_text = response.choices[0].message.content
                     
                     # Print response snippet
                     text_snippet = response_text.strip().replace("\n", " ")[:150] if response_text else "(empty)"
-                    logger.info(f"OPENROUTER SUCCESS SNIPPET: {text_snippet}{'...' if len(response_text or '') > 150 else ''}")
+                    logger.info(f"[{actual_model}] response snippet: {text_snippet}{'...' if len(response_text or '') > 150 else ''}")
                     
                     if not response_text:
                         logger.error(f"⚠️ OpenAI response text was empty! Raw response object: {response}")
                         raise ValueError("The model API returned an empty response.") # Changed from OpenAIServiceError to allow caught retry
 
                     
-                    # Attempt to get the bot_id from state_service if it exists, or from message_service
-                    bot_id = None
-                    try:
-                        if state_service and hasattr(state_service, 'bot_id'):
-                            bot_id = state_service.bot_id
-                        else:
-                            from src.services.message_service import message_service
-                            if message_service and hasattr(message_service, 'bot') and message_service.bot and hasattr(message_service.bot, 'user'):
-                                bot_id = message_service.bot.user.id
-                    except Exception as e:
-                        logger.warning(f"Failed to get bot_id for cleaning: {e}")
+                    # Attempt to get the bot_id if not explicitly provided
+                    effective_bot_id = bot_id
+                    if not effective_bot_id:
+                        try:
+                            if state_service and hasattr(state_service, 'bot_id'):
+                                effective_bot_id = state_service.bot_id
+                            else:
+                                from src.services.message_service import message_service
+                                if message_service and hasattr(message_service, 'bot') and message_service.bot and hasattr(message_service.bot, 'user'):
+                                    effective_bot_id = message_service.bot.user.id
+                        except Exception as e:
+                            logger.warning(f"Failed to get bot_id for cleaning: {e}")
                     
-                    cleaned_text = clean_openai_response(response_text, bot_id=bot_id)
+                    cleaned_text = clean_openai_response(response_text, bot_id=effective_bot_id)
                     
                     try:
                         cost = 0.0
