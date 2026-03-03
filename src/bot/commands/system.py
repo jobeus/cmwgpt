@@ -130,6 +130,17 @@ class SystemCommands:
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
                 )
 
+        @systemprompt_group.command(
+            name="view",
+            description="View the full system prompt for this channel (as used by /chat)")
+        async def systemprompt_view(interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True, thinking=True)
+
+            # Fire-and-forget: read-only, no state mutation
+            asyncio.create_task(
+                safe_run(interaction, self._handle_systemprompt_view, interaction)
+            )
+
         return systemprompt_group
 
     async def _handle_model_command(self,
@@ -196,6 +207,38 @@ class SystemCommands:
             await interaction.followup.send(
                 f"Current system prompt for this channel:\n```\n{current_prompt}\n```", ephemeral=True
             )
+
+    async def _handle_systemprompt_view(
+            self, interaction: discord.Interaction) -> None:
+        """
+        Handle the /systemprompt view command.
+        Shows the full composed system prompt exactly as /chat would use it.
+
+        Args:
+            interaction: The Discord interaction
+        """
+        channel_id = interaction.channel.id
+
+        legend_section = await get_mention_legend(interaction.channel, self.bot.user)
+
+        # Compose exactly as /chat does
+        channel_system_prompt = state_service.get_system_prompt(channel_id)
+        if channel_system_prompt:
+            full_prompt = channel_system_prompt + "\n" + legend_section
+        else:
+            full_prompt = get_system_prompt() + "\n" + legend_section
+
+        logger.info(
+            f"[/systemprompt view] Channel {channel_id}: displayed full composed system prompt.")
+
+        # Discord has a 2000-char message limit; use a code block
+        content = f"**Full system prompt for this channel (as sent to the model):**\n```\n{full_prompt}\n```"
+        if len(content) > 2000:
+            # Truncate if too long for Discord
+            max_prompt_len = 2000 - len("**Full system prompt for this channel (as sent to the model):**\n```\n\n```\n*[truncated]*")
+            content = f"**Full system prompt for this channel (as sent to the model):**\n```\n{full_prompt[:max_prompt_len]}\n```\n*[truncated]*"
+
+        await interaction.followup.send(content, ephemeral=True)
 
     async def _handle_systemprompt_reset(
             self, interaction: discord.Interaction) -> None:
