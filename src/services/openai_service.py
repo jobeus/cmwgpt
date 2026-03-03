@@ -201,6 +201,9 @@ class OpenAIService:
                         error_message = error_data.get('message', 'Unknown Error')
                         
                         logger.error(f"Captured Soft-Error Payload in HTTP 200: {error_code} - {error_message}")
+                        logger.error(f"Full soft-error data: {json.dumps(error_data, indent=2, default=str)}")
+                        logger.error(f"Full raw response object: {response}")
+                        self._dump_bad_request(kwargs, client)
                         
                         if error_code in [429, 500, 502, 503, 504]:
                            from openai import APIError
