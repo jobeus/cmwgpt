@@ -2,6 +2,7 @@
 System Commands - Handles system/admin Discord commands
 """
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -14,6 +15,7 @@ from src.utils.discord_helper import get_mention_legend
 from src.services.queue_service import queue_service
 from src.services.state_service import state_service
 from src.services.auto_update_service import auto_update_service
+from src.utils.async_utils import safe_run
 
 logger = logging.getLogger(__name__)
 
@@ -257,16 +259,11 @@ class SystemCommands:
                               description="Get help with bot commands privately")
         async def help_command(interaction: discord.Interaction):
             await interaction.response.defer(ephemeral=True, thinking=True)
-            queued = await queue_service.queue_command(interaction, self._handle_help_command)
 
-            if not queued:
-                logger.warning(
-                    f"Failed to queue help command from {
-                        interaction.user} in #{
-                        interaction.channel} - queue may be full")
-                await interaction.followup.send(
-                    "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
-                )
+            # Fire-and-forget: help is stateless, no need to queue
+            asyncio.create_task(
+                safe_run(interaction, self._handle_help_command, interaction)
+            )
         return help_command
 
     async def _handle_help_command(
@@ -310,7 +307,7 @@ class SystemCommands:
 
         # Send confirmation message
         await interaction.followup.send(
-            "🔄 Restarting bot... I'll be back shortly with any available updates!", ephemeral=False
+            "\U0001f504 Restarting bot... I'll be back shortly with any available updates!", ephemeral=False
         )
 
         # Trigger restart through auto-update service
@@ -318,4 +315,4 @@ class SystemCommands:
 
         if not success:
             logger.error("Failed to trigger restart")
-            await interaction.followup.send("❌ Failed to trigger restart. Please check the logs.", ephemeral=True)
+            await interaction.followup.send("\u274c Failed to trigger restart. Please check the logs.", ephemeral=True)

@@ -1,9 +1,10 @@
 """
-FIFO message queue service for the Discord bot.
+Per-channel FIFO message queue service for the Discord bot.
 
 This service provides a queue-based message processing system to ensure:
-- Messages are processed one at a time (FIFO order)
-- No race conditions between concurrent requests
+- Messages are processed one at a time *per channel* (FIFO order)
+- Different channels process concurrently (not blocked by each other)
+- No race conditions between concurrent requests in the same channel
 - Proper error handling and logging
 - Graceful shutdown capabilities
 """
@@ -35,6 +36,7 @@ class QueuedMessage:
     message_type: MessageType
     handler: Callable[..., Awaitable[None]]
     timestamp: float
+    channel_id: int = 0
     # Additional data for different message types
     discord_message: discord.Message = None
     bot_user: discord.User = None
@@ -45,18 +47,18 @@ class QueuedMessage:
 
 
 class QueueService:
-    """FIFO message queue service for processing bot messages."""
+    """Per-channel FIFO message queue service for processing bot messages."""
 
     def __init__(self, max_queue_size: int = 100):
         """
         Initialize the queue service.
 
         Args:
-            max_queue_size: Maximum number of messages to queue
+            max_queue_size: Maximum number of messages to queue per channel
         """
-        self._queue: asyncio.Queue[QueuedMessage] = asyncio.Queue(
-            maxsize=max_queue_size)
-        self._processing_task: Optional[asyncio.Task] = None
+        self._max_queue_size = max_queue_size
+        self._channel_queues: Dict[int, asyncio.Queue[QueuedMessage]] = {}
+        self._channel_workers: Dict[int, asyncio.Task] = {}
         self._is_running = False
         self._stats = {
             "messages_processed": 0,
@@ -64,58 +66,78 @@ class QueueService:
             "queue_overflows": 0}
 
         logger.info(
-            f"QueueService initialized with max queue size: {max_queue_size}")
+            f"QueueService initialized with max queue size per channel: {max_queue_size}")
 
     async def start(self) -> None:
-        """Start the message processing loop."""
+        """Start the queue service (enables accepting messages)."""
         if self._is_running:
             logger.warning("QueueService is already running")
             return
 
         self._is_running = True
-
-        # Create the processing task but don't await it - let it run
-        # concurrently
-        self._processing_task = asyncio.create_task(self._process_messages())
         logger.info("QueueService started")
 
     async def stop(self) -> None:
-        """Stop the message processing loop gracefully."""
+        """Stop all channel workers gracefully."""
         if not self._is_running:
             logger.warning("QueueService is not running")
             return
 
         logger.info("Stopping QueueService...")
+        self._is_running = False
 
-        # Add shutdown message to queue
-        try:
-            shutdown_msg = QueuedMessage(
-                message_type=MessageType.SHUTDOWN,
-                discord_message=None,
-                bot_user=None,
-                model="",
-                handler=None,
-                timestamp=asyncio.get_event_loop().time(),
-            )
-            await self._queue.put(shutdown_msg)
-        except asyncio.QueueFull:
-            logger.warning("Queue full, forcing shutdown")
-
-        # Wait for processing task to complete
-        if self._processing_task:
+        # Send shutdown signal to all active channel queues
+        for channel_id, queue in self._channel_queues.items():
             try:
-                await asyncio.wait_for(self._processing_task, timeout=10.0)
+                shutdown_msg = QueuedMessage(
+                    message_type=MessageType.SHUTDOWN,
+                    handler=None,
+                    timestamp=asyncio.get_event_loop().time(),
+                    channel_id=channel_id,
+                )
+                queue.put_nowait(shutdown_msg)
+            except asyncio.QueueFull:
+                logger.warning(
+                    f"Queue full for channel {channel_id}, forcing shutdown")
+
+        # Wait for all channel workers to complete
+        if self._channel_workers:
+            workers = list(self._channel_workers.values())
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*workers, return_exceptions=True),
+                    timeout=10.0
+                )
             except asyncio.TimeoutError:
                 logger.warning(
-                    "Processing task did not complete within timeout, cancelling")
-                self._processing_task.cancel()
-                try:
-                    await self._processing_task
-                except asyncio.CancelledError:
-                    pass
+                    "Channel workers did not complete within timeout, cancelling")
+                for task in workers:
+                    task.cancel()
+                await asyncio.gather(*workers, return_exceptions=True)
 
-        self._is_running = False
+        self._channel_queues.clear()
+        self._channel_workers.clear()
         logger.info("QueueService stopped")
+
+    def _ensure_channel_worker(self, channel_id: int) -> asyncio.Queue:
+        """
+        Ensure a queue and worker exist for the given channel.
+
+        Args:
+            channel_id: The Discord channel ID
+
+        Returns:
+            The asyncio.Queue for the channel
+        """
+        if channel_id not in self._channel_queues:
+            self._channel_queues[channel_id] = asyncio.Queue(
+                maxsize=self._max_queue_size)
+            self._channel_workers[channel_id] = asyncio.create_task(
+                self._process_channel_messages(channel_id))
+            logger.debug(
+                f"Created queue and worker for channel {channel_id}")
+
+        return self._channel_queues[channel_id]
 
     async def queue_mention(
         self,
@@ -125,7 +147,7 @@ class QueueService:
         handler: Callable[[discord.Message, discord.User, str], Awaitable[None]],
     ) -> bool:
         """
-        Queue a mention message for processing.
+        Queue a mention message for per-channel processing.
 
         Args:
             message: Discord message containing the mention
@@ -140,26 +162,29 @@ class QueueService:
             logger.error("Cannot queue message: QueueService is not running")
             return False
 
+        channel_id = message.channel.id
+        queue = self._ensure_channel_worker(channel_id)
+
         queued_msg = QueuedMessage(
             message_type=MessageType.MENTION,
             handler=handler,
             timestamp=asyncio.get_event_loop().time(),
+            channel_id=channel_id,
             discord_message=message,
             bot_user=bot_user,
             model=model,
         )
 
         try:
-            # Use put_nowait to immediately fail if queue is full
-            self._queue.put_nowait(queued_msg)
+            queue.put_nowait(queued_msg)
             logger.debug(
-                f"Queued mention from {message.author} in #{message.channel}"
+                f"Queued mention from {message.author} in #{message.channel} (channel queue {channel_id})"
             )
             return True
         except asyncio.QueueFull:
             self._stats["queue_overflows"] += 1
             logger.warning(
-                f"Queue full, dropping message from {message.author} in #{message.channel}"
+                f"Channel {channel_id} queue full, dropping message from {message.author}"
             )
             return False
 
@@ -170,7 +195,7 @@ class QueueService:
                             *args,
                             **kwargs) -> bool:
         """
-        Queue a command for processing.
+        Queue a command for per-channel processing.
 
         Args:
             interaction: Discord interaction object
@@ -185,26 +210,29 @@ class QueueService:
             logger.error("Cannot queue command: QueueService is not running")
             return False
 
+        channel_id = interaction.channel.id
+        queue = self._ensure_channel_worker(channel_id)
+
         queued_msg = QueuedMessage(
             message_type=MessageType.COMMAND,
             handler=handler,
             timestamp=asyncio.get_event_loop().time(),
+            channel_id=channel_id,
             interaction=interaction,
             args=args,
             kwargs=kwargs,
         )
 
         try:
-            # Use put_nowait to immediately fail if queue is full
-            self._queue.put_nowait(queued_msg)
+            queue.put_nowait(queued_msg)
             logger.debug(
-                f"Queued command from {interaction.user} in #{interaction.channel}"
+                f"Queued command from {interaction.user} in #{interaction.channel} (channel queue {channel_id})"
             )
             return True
         except asyncio.QueueFull:
             self._stats["queue_overflows"] += 1
             logger.warning(
-                f"Queue full, dropping command from {interaction.user} in #{interaction.channel}"
+                f"Channel {channel_id} queue full, dropping command from {interaction.user}"
             )
             return False
 
@@ -214,6 +242,8 @@ class QueueService:
                           Awaitable[None]]) -> bool:
         """
         Queue a restart signal for processing.
+
+        Restart is broadcast to all active channel workers.
 
         Args:
             handler: Async handler function to process the restart
@@ -225,15 +255,18 @@ class QueueService:
             logger.error("Cannot queue restart: QueueService is not running")
             return False
 
+        # Use channel_id 0 for system-level operations
+        queue = self._ensure_channel_worker(0)
+
         queued_msg = QueuedMessage(
             message_type=MessageType.RESTART,
             handler=handler,
             timestamp=asyncio.get_event_loop().time(),
+            channel_id=0,
         )
 
         try:
-            # Use put_nowait to immediately fail if queue is full
-            self._queue.put_nowait(queued_msg)
+            queue.put_nowait(queued_msg)
             logger.info("Queued restart signal")
             return True
         except asyncio.QueueFull:
@@ -241,36 +274,44 @@ class QueueService:
             logger.warning("Queue full, dropping restart signal")
             return False
 
-    async def _process_messages(self) -> None:
-        """Main message processing loop."""
-        logger.info("Message processing loop started")
+    async def _process_channel_messages(self, channel_id: int) -> None:
+        """
+        Message processing loop for a single channel.
+
+        Args:
+            channel_id: The channel ID this worker processes
+        """
+        logger.debug(f"Channel {channel_id} processing loop started")
+        queue = self._channel_queues[channel_id]
 
         while self._is_running:
             try:
-                # Get next message from queue
-                queued_msg = await self._queue.get()
+                # Get next message from this channel's queue
+                queued_msg = await queue.get()
 
                 # Check for shutdown signal
                 if queued_msg.message_type == MessageType.SHUTDOWN:
-                    logger.info("Received shutdown signal")
+                    logger.debug(
+                        f"Channel {channel_id} received shutdown signal")
+                    queue.task_done()
                     break
 
                 # Check for restart signal
                 if queued_msg.message_type == MessageType.RESTART:
                     logger.info("Received restart signal")
                     await queued_msg.handler()
-                    # Mark task as done for restart
-                    self._queue.task_done()
+                    queue.task_done()
                     continue
 
                 # Process the message
                 await self._handle_queued_message(queued_msg)
 
                 # Mark task as done
-                self._queue.task_done()
+                queue.task_done()
 
             except asyncio.CancelledError:
-                logger.info("Message processing loop cancelled")
+                logger.debug(
+                    f"Channel {channel_id} processing loop cancelled")
                 break
             except SystemExit as e:
                 logger.info(
@@ -278,11 +319,11 @@ class QueueService:
                 os._exit(e.code)
             except (RuntimeError, OSError, ValueError) as e:
                 logger.error(
-                    f"Error in message processing loop: {e}",
+                    f"Error in channel {channel_id} processing loop: {e}",
                     exc_info=True)
                 self._stats["messages_failed"] += 1
 
-        logger.info("Message processing loop ended")
+        logger.debug(f"Channel {channel_id} processing loop ended")
 
     async def _handle_queued_message(self, queued_msg: QueuedMessage) -> None:
         """
@@ -339,8 +380,14 @@ class QueueService:
             )
 
     def get_queue_size(self) -> int:
-        """Get current queue size."""
-        return self._queue.qsize()
+        """Get total queue size across all channels."""
+        return sum(q.qsize() for q in self._channel_queues.values())
+
+    def get_channel_queue_size(self, channel_id: int) -> int:
+        """Get queue size for a specific channel."""
+        if channel_id in self._channel_queues:
+            return self._channel_queues[channel_id].qsize()
+        return 0
 
     def get_stats(self) -> Dict[str, Any]:
         """
@@ -351,8 +398,9 @@ class QueueService:
         """
         return {
             "is_running": self._is_running,
-            "queue_size": self._queue.qsize(),
-            "max_queue_size": self._queue.maxsize,
+            "total_queue_size": self.get_queue_size(),
+            "active_channels": len(self._channel_queues),
+            "max_queue_size_per_channel": self._max_queue_size,
             **self._stats,
         }
 

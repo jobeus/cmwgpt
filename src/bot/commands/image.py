@@ -2,6 +2,7 @@
 Image Commands - Handles image generation Discord commands
 """
 
+import asyncio
 import base64
 import io
 import logging
@@ -15,8 +16,8 @@ from src.config import DEFAULT_DRAW_MODEL, DEFAULT_EDIT_MODEL, RUNPOD_IO_API_KEY
 from src.services.openai_service import OpenAIServiceError
 from src.services.runpod_service import runpod_service, RunpodServiceError
 from src.services.message_service import message_service
-from src.services.queue_service import queue_service
 from src.services.state_service import state_service
+from src.utils.async_utils import safe_run
 
 logger = logging.getLogger(__name__)
 
@@ -68,20 +69,10 @@ class ImageCommands:
             # timeout
             await interaction.response.defer(ephemeral=False, thinking=True)
 
-            # Queue the command for FIFO processing
-            queued = await queue_service.queue_command(
-                interaction, self._handle_draw_command, prompt, model
+            # Fire-and-forget: image commands run async, not queued
+            asyncio.create_task(
+                safe_run(interaction, self._handle_draw_command, interaction, prompt, model)
             )
-
-            if not queued:
-                logger.warning(
-                    f"""Failed to queue draw command from {
-                        interaction.user} in #{
-                        interaction.channel} - queue may be full"""
-                )
-                await interaction.followup.send(
-                    "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
-                )
 
         return draw
 
@@ -219,15 +210,11 @@ class ImageCommands:
                 interaction: discord.Interaction,
                 model: Optional[str] = None):
             await interaction.response.defer(ephemeral=False, thinking=True)
-            queued = await queue_service.queue_command(interaction, self._handle_drawmodel_command, model)
-            if not queued:
-                logger.warning(
-                    f"Failed to queue drawmodel command from {
-                        interaction.user} in #{
-                        interaction.channel} - queue may be full")
-                await interaction.followup.send(
-                    "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
-                )
+
+            # Fire-and-forget: model config commands run async, not queued
+            asyncio.create_task(
+                safe_run(interaction, self._handle_drawmodel_command, interaction, model)
+            )
         return drawmodel_command
 
     async def _handle_drawmodel_command(self,
@@ -283,18 +270,11 @@ class ImageCommands:
             model: Optional[str] = None,
         ):
             await interaction.response.defer(ephemeral=False, thinking=True)
-            queued = await queue_service.queue_command(
-                interaction, self._handle_edit_command, prompt, edit_image, image2, image3, image4, model
-            )
 
-            if not queued:
-                logger.warning(
-                    f"Failed to queue edit command from {
-                        interaction.user} in #{
-                        interaction.channel} - queue may be full")
-                await interaction.followup.send(
-                    "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
-                )
+            # Fire-and-forget: image commands run async, not queued
+            asyncio.create_task(
+                safe_run(interaction, self._handle_edit_command, interaction, prompt, edit_image, image2, image3, image4, model)
+            )
 
         return edit
 
@@ -420,15 +400,11 @@ class ImageCommands:
                 interaction: discord.Interaction,
                 model: Optional[str] = None):
             await interaction.response.defer(ephemeral=False, thinking=True)
-            queued = await queue_service.queue_command(interaction, self._handle_editmodel_command, model)
-            if not queued:
-                logger.warning(
-                    f"Failed to queue editmodel command from {
-                        interaction.user} in #{
-                        interaction.channel} - queue may be full")
-                await interaction.followup.send(
-                    "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
-                )
+
+            # Fire-and-forget: model config commands run async, not queued
+            asyncio.create_task(
+                safe_run(interaction, self._handle_editmodel_command, interaction, model)
+            )
         return editmodel_command
 
     async def _handle_editmodel_command(self,

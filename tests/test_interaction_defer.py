@@ -122,7 +122,7 @@ class TestInteractionDefer(unittest.TestCase):
         self.loop.run_until_complete(run_test())
 
     def test_draw_command_defers_interaction(self):
-        """Test that /draw command properly defers the interaction."""
+        """Test that /draw command properly defers the interaction (async, no queue)."""
 
         async def run_test():
             # Create mock interaction
@@ -135,27 +135,19 @@ class TestInteractionDefer(unittest.TestCase):
             mock_interaction.channel.__str__ = MagicMock(
                 return_value="TestChannel")
 
-            # Mock the queue service to return False (queue full)
-            with patch("src.bot.commands.image.queue_service") as mock_queue_service:
-                mock_queue_service.queue_command = AsyncMock(
-                    return_value=False)
+            # Create the draw command
+            draw_command = self.image_commands._create_draw_command()
 
-                # Create the draw command
-                draw_command = self.image_commands._create_draw_command()
+            # Execute the command — /draw is fire-and-forget (no queue)
+            await draw_command.callback(mock_interaction, "test prompt")
 
-                # Execute the command
-                await draw_command.callback(mock_interaction, "test prompt")
+            # Verify interaction was deferred first
+            mock_interaction.response.defer.assert_called_once_with(
+                ephemeral=False, thinking=True)
 
-                # Verify interaction was deferred first
-                mock_interaction.response.defer.assert_called_once_with(
-                    ephemeral=False, thinking=True)
-
-                # Verify queue_command was called
-                mock_queue_service.queue_command.assert_called_once()
-
-                # Verify followup was used (not response.send_message)
-                mock_interaction.followup.send.assert_called_once()
-                mock_interaction.response.send_message.assert_not_called()
+            # No queue_service call — draw runs async directly
+            # No followup error since it's not queue-based anymore
+            mock_interaction.response.send_message.assert_not_called()
 
         self.loop.run_until_complete(run_test())
 
