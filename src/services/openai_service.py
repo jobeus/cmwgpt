@@ -160,8 +160,20 @@ class OpenAIService:
                 # actual_model = f"{model}:online" if not model.endswith(":online") else model
                 actual_model = model
 
-                logger.info(
-                    f"OPENROUTER PRE-FLIGHT - model={actual_model}, msg_len={len(api_input)}")
+                # Generate a snippet of the latest message
+                last_msg_snippet = "(empty prompt)"
+                if api_input:
+                    last_msg_ptr = api_input[-1].get('content', '')
+                    if isinstance(last_msg_ptr, list):
+                        for part in last_msg_ptr:
+                            if part.get('type') == 'text':
+                                last_msg_snippet = part.get('text', '').replace("\n", " ")
+                                break
+                    elif isinstance(last_msg_ptr, str):
+                         last_msg_snippet = last_msg_ptr.replace("\n", " ")
+                
+                snippet_trunc = last_msg_snippet[:150] + ("..." if len(last_msg_snippet) > 150 else "")
+                logger.info(f"OPENROUTER PRE-FLIGHT [{actual_model}] Prompt Snippet: {snippet_trunc}")
                 logger.info(f"API HEADERS USED: {client.default_headers}")
 
                 kwargs = {
@@ -182,6 +194,21 @@ class OpenAIService:
 
                 response = await client.chat.completions.create(**kwargs)
 
+                if hasattr(response, 'error') and response.error is not None:
+                    error_data = response.error
+                    if isinstance(error_data, dict):
+                        error_code = error_data.get('code')
+                        error_message = error_data.get('message', 'Unknown Error')
+                        
+                        logger.error(f"Captured Soft-Error Payload in HTTP 200: {error_code} - {error_message}")
+                        
+                        if error_code in [429, 500, 502, 503, 504]:
+                           from openai import APIError
+                           # Force this up to the retry loop catcher
+                           raise APIError(message=f"Upstream provider error: {error_code}", request=None, body=error_data)
+                           
+                        raise OpenAIServiceError(f"Non-retryable soft-error {error_code}: {error_message}")
+
                 # Safely inspect choices to avoid "object of type NoneType has no len()"
                 num_choices = len(response.choices) if getattr(response, 'choices', None) else 0
                 logger.info(
@@ -189,10 +216,15 @@ class OpenAIService:
 
                 if getattr(response, 'choices', None):
                     response_text = response.choices[0].message.content
+                    
+                    # Print response snippet
+                    text_snippet = response_text.strip().replace("\n", " ")[:150] if response_text else "(empty)"
+                    logger.info(f"OPENROUTER SUCCESS SNIPPET: {text_snippet}{'...' if len(response_text or '') > 150 else ''}")
+                    
                     if not response_text:
                         logger.error(f"⚠️ OpenAI response text was empty! Raw response object: {response}")
-                        raise OpenAIServiceError(
-                            "The model API returned an empty response.")
+                        raise ValueError("The model API returned an empty response.") # Changed from OpenAIServiceError to allow caught retry
+
                     
                     # Attempt to get the bot_id from state_service if it exists, or from message_service
                     bot_id = None
@@ -285,8 +317,12 @@ class OpenAIService:
                 raise
 
             except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
-                logger.error(
-                    f"Unexpected error during chat completion: {e}")
+                logger.error(f"Parsing/HTTP error on attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2**attempt)
+                    logger.info(f"Retrying in {delay} seconds...")
+                    await asyncio.sleep(delay)
+                    continue
                 self._dump_bad_request(kwargs, client)
                 raise OpenAIServiceError(f"Unexpected error: {str(e)}") from e
 

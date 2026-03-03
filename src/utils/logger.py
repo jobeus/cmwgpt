@@ -51,7 +51,15 @@ def setup_logger():
     # Set base level
     root.setLevel(logging.DEBUG) # Let handlers filter
 
-    file_format = logging.Formatter('%(asctime)s - %(levelname)s - [%(name)s] - %(message)s')
+    import re
+    class ANSIStripperFormatter(logging.Formatter):
+        """Removes ANSI color codes for file logging"""
+        def format(self, record):
+            msg = super().format(record)
+            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+            return ansi_escape.sub('', msg)
+
+    file_format = ANSIStripperFormatter('%(asctime)s - %(levelname)s - [%(name)s] - %(message)s')
     
     # Console handler with colors
     console_handler = logging.StreamHandler(sys.stdout)
@@ -60,9 +68,11 @@ def setup_logger():
     root.addHandler(console_handler)
 
     # File handler
+    import datetime
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
-    file_handler = logging.FileHandler("logs/bot.log", encoding="utf-8")
+    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    file_handler = logging.FileHandler(f"logs/{today_str}.log", encoding="utf-8")
     file_handler.setLevel(logging.DEBUG) # Keep full history in file
     file_handler.setFormatter(file_format)
     root.addHandler(file_handler)
