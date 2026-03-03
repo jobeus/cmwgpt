@@ -71,26 +71,7 @@ def setup_signal_handlers(bot_client):
                     logger.error(f"Error closing Discord bot: {e}")
                     print(f"⚠️  Error closing Discord bot: {e}")
 
-                # Step 4: Cancel any remaining tasks
-                print("🧹 Cleaning up remaining tasks...")
-                try:
-                    # Get all tasks except the current one
-                    current_task = asyncio.current_task()
-                    tasks = [
-                        task for task in asyncio.all_tasks() if task != current_task]
-
-                    if tasks:
-                        logger.info(f"Cancelling {len(tasks)} remaining tasks")
-                        for task in tasks:
-                            task.cancel()
-
-                        # Wait for tasks to complete cancellation
-                        await asyncio.gather(*tasks, return_exceptions=True)
-                        logger.info("All tasks cancelled")
-
-                except Exception as e:
-                    logger.error(f"Error during task cleanup: {e}")
-
+                # We rely on asyncio.run() to natively cancel remaining tasks upon returning!
                 print("✅ Shutdown complete, exiting...")
 
             except asyncio.CancelledError:
@@ -101,10 +82,9 @@ def setup_signal_handlers(bot_client):
                 print(f"⚠️  Error during shutdown: {e}")
 
             finally:
-                # Force exit after cleanup
-                import sys
-                sys.exit(0)
-
+                # We do not call sys.exit(0) here because it raises a SystemExit exception
+                # inside the asyncio event loop, causing a messy stack trace during cleanup!
+                pass
         try:
             # Get or create event loop
             try:
@@ -124,9 +104,6 @@ def setup_signal_handlers(bot_client):
         except Exception as e:
             logger.error(f"Error during signal handler execution: {e}")
             print(f"⚠️  Critical error during shutdown: {e}")
-            # Force exit if something goes wrong
-            import sys
-            sys.exit(1)
 
     # Register signal handlers
     signal.signal(signal.SIGINT, signal_handler)
