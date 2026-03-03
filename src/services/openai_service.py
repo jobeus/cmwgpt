@@ -61,6 +61,41 @@ class OpenAIService:
                 )
         return self._client
 
+    def _dump_bad_request(self, kwargs_dict: Dict[str, Any], client: AsyncOpenAI) -> None:
+        """Dumps the request payload to /tmp/bad_request.json and a curl command to /tmp/bad_request.sh"""
+        import os
+        import shlex
+        try:
+            with open('/tmp/bad_request.json', 'w') as f:
+                json.dump(kwargs_dict, f, indent=2)
+                
+            curl_cmd = f"curl https://openrouter.ai/api/v1/chat/completions \\\n"
+            
+            # Extract headers
+            headers_dict = dict(client.default_headers) if hasattr(client, 'default_headers') else {}
+            # Ensure Auth is present
+            if hasattr(client, 'api_key') and client.api_key:
+                headers_dict['Authorization'] = f"Bearer {client.api_key}"
+            elif OPENROUTER_API_KEY:
+                headers_dict['Authorization'] = f"Bearer {OPENROUTER_API_KEY}"
+                
+            for k, v in headers_dict.items():
+                if 'Omit' in str(type(v)):
+                    continue
+                header_str = f"{k}: {v}"
+                curl_cmd += f"  -H {shlex.quote(header_str)} \\\n"
+                
+            body_str = json.dumps(kwargs_dict)
+            curl_cmd += f"  -d {shlex.quote(body_str)}\n"
+            
+            with open('/tmp/bad_request.sh', 'w') as f:
+                f.write("#!/bin/bash\n\n" + curl_cmd)
+                
+            os.chmod('/tmp/bad_request.sh', 0o755)
+            logger.info("Saved bad request dump to /tmp/bad_request.json and /tmp/bad_request.sh")
+        except Exception as e:
+            logger.error(f"Failed to dump bad request: {e}")
+
     async def close(self) -> None:
         """Close the OpenAI client and clean up resources."""
         if self._client is not None and hasattr(self._client, 'close'):
@@ -162,6 +197,7 @@ class OpenAIService:
                     return clean_openai_response(response_text)
                 
                 logger.error(f"❌ Failed to get a proper response from the model. Raw response: {response}")
+                self._dump_bad_request(kwargs, client)
                 return "Failed to get a response from the model."
 
             except RateLimitError as e:
@@ -198,6 +234,7 @@ class OpenAIService:
 
             except BadRequestError as e:
                 logger.error(f"Bad request error: {e}")
+                self._dump_bad_request(kwargs, client)
                 raise OpenAIServiceError(
                     f"Invalid request: {
                         e.message if hasattr(
@@ -211,6 +248,7 @@ class OpenAIService:
                     await asyncio.sleep(delay)
                     continue
                 logger.error("Max retries exceeded for API error")
+                self._dump_bad_request(kwargs, client)
                 raise OpenAIServiceError(
                     f"OpenAI API error after {max_retries} attempts: {str(e)}"
                 ) from e
@@ -222,6 +260,7 @@ class OpenAIService:
             except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
                 logger.error(
                     f"Unexpected error during chat completion: {e}")
+                self._dump_bad_request(kwargs, client)
                 raise OpenAIServiceError(f"Unexpected error: {str(e)}") from e
 
         # This should never be reached, but just in case
