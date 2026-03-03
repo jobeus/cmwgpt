@@ -245,7 +245,7 @@ class ChatCommands:
                     await message_service.send_interaction_followup(interaction, base_content, reply_text)
 
             except OpenAIServiceError as e:
-                logger.error(f"OpenAI API error in chat command: {e}")
+                logger.error(f"❌ OpenAI API error in /chat command:\\n{e}")
                 # Prepare base message content for error response
                 if attachment:
                     base_content = message_service.format_attachment_message(
@@ -272,7 +272,9 @@ class ChatCommands:
                         logger.error("Failed to send fallback error message")
 
             except Exception as e:
-                logger.error(f"Unexpected error in chat command: {e}")
+                import traceback
+                error_dump = traceback.format_exc()
+                logger.error(f"🚨 Unexpected error in /chat command! Pretty-formatted dump:\\n====== ERROR DUMP ======\\n{error_dump}\\n========================")
                 # Prepare base message content for error response
                 if attachment:
                     base_content = message_service.format_attachment_message(

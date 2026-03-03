@@ -148,16 +148,20 @@ class OpenAIService:
 
                 response = await client.chat.completions.create(**kwargs)
 
+                # Safely inspect choices to avoid "object of type NoneType has no len()"
+                num_choices = len(response.choices) if getattr(response, 'choices', None) else 0
                 logger.info(
-                    f"OPENROUTER POST-FLIGHT - got response object! len={len(response.choices)}")
+                    f"OPENROUTER POST-FLIGHT - got response object! len={num_choices}")
 
-                if response and response.choices:
+                if getattr(response, 'choices', None):
                     response_text = response.choices[0].message.content
                     if not response_text:
+                        logger.error(f"⚠️ OpenAI response text was empty! Raw response object: {response}")
                         raise OpenAIServiceError(
                             "The model API returned an empty response.")
                     return clean_openai_response(response_text)
-
+                
+                logger.error(f"❌ Failed to get a proper response from the model. Raw response: {response}")
                 return "Failed to get a response from the model."
 
             except RateLimitError as e:

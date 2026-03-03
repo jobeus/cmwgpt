@@ -21,10 +21,10 @@ from src.services.auto_update_service import auto_update_service
 from src.services.restart_handler import restart_handler
 from src.services.announcement_service import announcement_service
 
+from src.utils.logger import setup_logger
+
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
+root_logger = setup_logger()
 logger = logging.getLogger("discord_bot")
 
 

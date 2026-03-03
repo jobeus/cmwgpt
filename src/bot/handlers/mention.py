@@ -57,6 +57,14 @@ class MentionHandler:
                     model=model, messages=chat_msgs, system_prompt=system_prompt
                 )
 
+                if reply_content is None:
+                    logger.error(f"❌ Received None from get_chat_completion for model {model}.")
+                    await message_service.send_channel_reply(
+                        message.channel, 
+                        f"I'm sorry, I failed to get a response from the model '{model}'. It returned an empty result."
+                    )
+                    return
+
                 # Handle different response formats
                 if isinstance(reply_content, dict) and "text" in reply_content:
                     # Response includes files (from image generation or other
@@ -73,15 +81,13 @@ class MentionHandler:
                     await message_service.send_channel_reply(message.channel, reply_content)
 
             except OpenAIServiceError as e:
-                logger.error(f"OpenAI API error in mention handler: {e}")
-                error_message = f"""Sorry, I encountered an error while processing your mention: {
-                    str(e)}"""
+                logger.error(f"❌ OpenAI API error in mention handler:\\n{e}")
+                error_message = f"Sorry, I encountered an error while processing your mention: {str(e)}"
 
                 try:
                     await message_service.send_channel_reply(message.channel, error_message)
                 except Exception as discord_error:
-                    logger.error(
-                        f"Failed to send error message to Discord: {discord_error}")
+                    logger.error(f"⚠️ Failed to send error message to Discord: {discord_error}")
                     # Try to send a simpler error message
                     try:
                         await message.channel.send(
@@ -91,7 +97,9 @@ class MentionHandler:
                         logger.error("Failed to send fallback error message")
 
             except Exception as e:
-                logger.error(f"Unexpected error in mention handler: {e}")
+                import traceback
+                error_dump = traceback.format_exc()
+                logger.error(f"🚨 Unexpected error in mention handler! Pretty-formatted dump:\\n====== ERROR DUMP ======\\n{error_dump}\\n========================")
                 error_message = (
                     "Sorry, I encountered an unexpected error while processing your mention. Please try again later."
                 )
@@ -99,8 +107,7 @@ class MentionHandler:
                 try:
                     await message_service.send_channel_reply(message.channel, error_message)
                 except Exception as discord_error:
-                    logger.error(
-                        f"Failed to send error message to Discord: {discord_error}")
+                    logger.error(f"⚠️ Failed to send error message to Discord: {discord_error}")
                     # Try to send a simpler error message
                     try:
                         await message.channel.send(
