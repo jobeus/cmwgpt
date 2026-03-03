@@ -23,7 +23,8 @@ class TestConfig(unittest.TestCase):
             'DEFAULT_EDIT_MODEL',
             'INCLUDE_USERNAMES',
             'REPLY_TO_MENTIONS',
-            'INCLUDE_NUM_CHATLINES']
+            'INCLUDE_NUM_CHATLINES',
+            'YT_TRANSCRIPT_PROXY']
         self.original_env = {}
         for var in self.env_vars_to_clear:
             self.original_env[var] = os.environ.get(var)
@@ -39,20 +40,20 @@ class TestConfig(unittest.TestCase):
             elif var in os.environ:
                 del os.environ[var]
 
-    @patch('config.load_dotenv')
+    @patch('src.config.load_dotenv')
     @patch.dict(os.environ, {}, clear=True)
     def test_default_values(self, mock_load_dotenv):
         """Test that default values are set correctly when env vars are missing."""
         # Mock os.getenv to return None for all calls (simulating missing env
         # vars)
-        with patch('config.os.getenv') as mock_getenv:
+        with patch('src.config.os.getenv') as mock_getenv:
             def mock_getenv_side_effect(key, default=None):
                 return default
             mock_getenv.side_effect = mock_getenv_side_effect
 
             # Reload config module to test defaults
             import importlib
-            import config
+            import src.config as config
             importlib.reload(config)
 
             self.assertEqual(
@@ -64,7 +65,7 @@ class TestConfig(unittest.TestCase):
             self.assertTrue(config.REPLY_TO_MENTIONS)
             self.assertEqual(config.INCLUDE_NUM_CHATLINES, 25)
 
-    @patch('config.load_dotenv')
+    @patch('src.config.load_dotenv')
     @patch.dict(os.environ, {}, clear=True)
     def test_environment_variable_loading(self, mock_load_dotenv):
         """Test that environment variables are loaded correctly."""
@@ -77,17 +78,18 @@ class TestConfig(unittest.TestCase):
             'DEFAULT_EDIT_MODEL': 'dall-e-3',
             'INCLUDE_USERNAMES': 'false',
             'REPLY_TO_MENTIONS': 'false',
-            'INCLUDE_NUM_CHATLINES': '50'
+            'INCLUDE_NUM_CHATLINES': '50',
+            'YT_TRANSCRIPT_PROXY': 'http://proxy.example.com'
         }
 
-        with patch('config.os.getenv') as mock_getenv:
+        with patch('src.config.os.getenv') as mock_getenv:
             def mock_getenv_side_effect(key, default=None):
                 return test_env_values.get(key, default)
             mock_getenv.side_effect = mock_getenv_side_effect
 
             # Reload config module
             import importlib
-            import config
+            import src.config as config
             importlib.reload(config)
 
             self.assertEqual(config.OPENROUTER_API_KEY, 'test_openrouter_key')
@@ -98,8 +100,9 @@ class TestConfig(unittest.TestCase):
             self.assertFalse(config.INCLUDE_USERNAMES)
             self.assertFalse(config.REPLY_TO_MENTIONS)
             self.assertEqual(config.INCLUDE_NUM_CHATLINES, 50)
+            self.assertEqual(config.YT_TRANSCRIPT_PROXY, 'http://proxy.example.com')
 
-    @patch('config.load_dotenv')
+    @patch('src.config.load_dotenv')
     @patch.dict(os.environ, {}, clear=True)
     def test_boolean_parsing(self, mock_load_dotenv):
         """Test boolean environment variable parsing."""
@@ -118,7 +121,7 @@ class TestConfig(unittest.TestCase):
 
         for env_value, expected in test_cases:
             with self.subTest(env_value=env_value, expected=expected):
-                with patch('config.os.getenv') as mock_getenv:
+                with patch('src.config.os.getenv') as mock_getenv:
                     def mock_getenv_side_effect(key, default=None):
                         if key == 'INCLUDE_USERNAMES':
                             return env_value
@@ -126,16 +129,16 @@ class TestConfig(unittest.TestCase):
                     mock_getenv.side_effect = mock_getenv_side_effect
 
                     import importlib
-                    import config
+                    import src.config as config
                     importlib.reload(config)
 
                     self.assertEqual(config.INCLUDE_USERNAMES, expected)
 
-    @patch('config.load_dotenv')
+    @patch('src.config.load_dotenv')
     @patch.dict(os.environ, {}, clear=True)
     def test_integer_parsing(self, mock_load_dotenv):
         """Test integer environment variable parsing."""
-        with patch('config.os.getenv') as mock_getenv:
+        with patch('src.config.os.getenv') as mock_getenv:
             def mock_getenv_side_effect(key, default=None):
                 if key == 'INCLUDE_NUM_CHATLINES':
                     return '250'
@@ -143,17 +146,17 @@ class TestConfig(unittest.TestCase):
             mock_getenv.side_effect = mock_getenv_side_effect
 
             import importlib
-            import config
+            import src.config as config
             importlib.reload(config)
 
             self.assertEqual(config.INCLUDE_NUM_CHATLINES, 250)
             self.assertIsInstance(config.INCLUDE_NUM_CHATLINES, int)
 
-    @patch('config.load_dotenv')
+    @patch('src.config.load_dotenv')
     @patch.dict(os.environ, {}, clear=True)
     def test_invalid_integer_fallback(self, mock_load_dotenv):
         """Test that invalid integer values fall back to default."""
-        with patch('config.os.getenv') as mock_getenv:
+        with patch('src.config.os.getenv') as mock_getenv:
             def mock_getenv_side_effect(key, default=None):
                 if key == 'INCLUDE_NUM_CHATLINES':
                     return 'invalid_number'
@@ -161,7 +164,7 @@ class TestConfig(unittest.TestCase):
             mock_getenv.side_effect = mock_getenv_side_effect
 
             import importlib
-            import config
+            import src.config as config
 
             # This should raise ValueError, but we want to test graceful
             # handling

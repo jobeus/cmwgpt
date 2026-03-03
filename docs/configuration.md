@@ -34,6 +34,12 @@ The bot is configured through environment variables defined in a `.env` file. Co
   2. Generate a new API Key
   3. Add it to your `.env` file
 
+### `YT_TRANSCRIPT_PROXY`
+- **Required**: No
+- **Description**: HTTP/HTTPS proxy URL specifically for fetching YouTube transcripts (avoids routing all bot traffic through the proxy)
+- **Example**: `YT_TRANSCRIPT_PROXY=http://your-proxy-server:8080`
+- **Default**: None
+
 ### Optional Configuration
 
 #### `DISCORD_CHANNEL_ID`
