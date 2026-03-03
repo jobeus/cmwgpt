@@ -85,8 +85,7 @@ class OpenAIService:
                 header_str = f"{k}: {v}"
                 curl_cmd += f"  -H {shlex.quote(header_str)} \\\n"
                 
-            body_str = json.dumps(kwargs_dict)
-            curl_cmd += f"  -d {shlex.quote(body_str)}\n"
+            curl_cmd += f"  -d @/tmp/bad_request.json\n"
             
             with open('/tmp/bad_request.sh', 'w') as f:
                 f.write("#!/bin/bash\n\n" + curl_cmd)
@@ -194,7 +193,23 @@ class OpenAIService:
                         logger.error(f"⚠️ OpenAI response text was empty! Raw response object: {response}")
                         raise OpenAIServiceError(
                             "The model API returned an empty response.")
-                    return clean_openai_response(response_text)
+                    
+                    cleaned_text = clean_openai_response(response_text)
+                    
+                    try:
+                        cost = 0.0
+                        if hasattr(response, 'usage') and response.usage:
+                            model_extra = getattr(response.usage, 'model_extra', None)
+                            if isinstance(model_extra, dict):
+                                cost_details = model_extra.get('cost_details', {})
+                                if isinstance(cost_details, dict):
+                                    cost = cost_details.get('upstream_inference_cost', 0.0)
+                        if cost > 0:
+                            cleaned_text = f"[${cost:.3f}] {cleaned_text}"
+                    except Exception as e:
+                        logger.warning(f"Failed to parse cost: {e}")
+                        
+                    return cleaned_text
                 
                 logger.error(f"❌ Failed to get a proper response from the model. Raw response: {response}")
                 self._dump_bad_request(kwargs, client)
