@@ -11,7 +11,7 @@ RUNPOD_IO_API_KEY = os.getenv("RUNPOD_IO_API_KEY", "")
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "test-token-for-ci")
 
 # Proxies
-HTTPS_PROXY = os.getenv("HTTPS_PROXY", "")
+YT_TRANSCRIPT_PROXY = os.getenv("YT_TRANSCRIPT_PROXY", "")
 
 # Bot Configuration
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "anthropic/claude-haiku-4.5")
