@@ -12,7 +12,7 @@ import random
 import re
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Any
 
 import discord
 from discord.ext import commands
@@ -136,7 +136,8 @@ class InterjectService:
                     return
 
                 # Roll the dice
-                if not self._roll_chance():
+                chance = self._get_setting(channel_id, "chance", INTERJECT_CHANCE_PERCENT)
+                if not self._roll_chance(chance):
                     logger.debug(
                         f"Interject roll failed for #{channel.name}, applying cooldown"
                     )
@@ -162,7 +163,9 @@ class InterjectService:
 
         Returns True if conditions are met for interjection.
         """
-        fetch_limit = MIN_MESSAGES + 1
+        min_messages = self._get_setting(channel.id, "min_messages", MIN_MESSAGES)
+        
+        fetch_limit = min_messages + 1
         cutoff = time.time() - (ACTIVITY_WINDOW_MINUTES * 60)
         unique_authors: set[int] = set()
         qualifying_count = 0
@@ -198,7 +201,7 @@ class InterjectService:
             qualifying_count += 1
 
         # Need at least MIN_MESSAGES qualifying messages
-        if qualifying_count < MIN_MESSAGES:
+        if qualifying_count < min_messages:
             return False
 
         # Need enough unique authors
@@ -301,6 +304,13 @@ class InterjectService:
     # Helpers
     # ------------------------------------------------------------------
 
+    def _get_setting(self, channel_id: int, key: str, default: Any) -> Any:
+        """Helper to get a channel-specific interject setting or default."""
+        settings = state_service.get_interject_settings(channel_id)
+        if settings and key in settings:
+            return settings[key]
+        return default
+
     def _is_on_cooldown(self, channel_id: int) -> bool:
         """Check if a channel is currently on interjection cooldown."""
         expires = self._cooldowns.get(channel_id, 0)
@@ -308,7 +318,8 @@ class InterjectService:
 
     def _apply_cooldown(self, channel_id: int) -> None:
         """Put a channel on cooldown."""
-        self._cooldowns[channel_id] = time.time() + (COOLDOWN_MINUTES * 60)
+        cooldown = self._get_setting(channel_id, "cooldown", COOLDOWN_MINUTES)
+        self._cooldowns[channel_id] = time.time() + (cooldown * 60)
 
     def _is_daily_cap_reached(self) -> bool:
         """Check if the daily interjection cap has been reached."""
@@ -327,9 +338,9 @@ class InterjectService:
             self._daily_tracker["count"] += 1
 
     @staticmethod
-    def _roll_chance() -> bool:
+    def _roll_chance(chance: int) -> bool:
         """Roll a random number and return True if we should interject."""
-        return random.randint(1, 100) <= INTERJECT_CHANCE_PERCENT
+        return random.randint(1, 100) <= chance
 
 
 # Global service instance

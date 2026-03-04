@@ -17,7 +17,7 @@ import os
 import re
 from datetime import datetime, timezone
 from html.parser import HTMLParser
-from typing import Optional, Set, Tuple
+from typing import Optional, Set, Tuple, Any
 from urllib.parse import unquote
 
 import aiohttp
@@ -25,6 +25,7 @@ import discord
 from discord.ext import commands
 
 from src.config import DEATH_CHANNEL_ID
+from src.services.state_service import state_service
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,13 @@ class DeathService:
         # Try to load persisted state
         self._load_state()
 
+    def _get_setting(self, key: str, default: Any) -> Any:
+        """Helper to get a global death setting or default."""
+        settings = state_service.get_death_settings()
+        if settings and key in settings:
+            return settings[key]
+        return default
+
     # -- lifecycle ----------------------------------------------------------
 
     def set_bot(self, bot: commands.Bot) -> None:
@@ -204,8 +212,9 @@ class DeathService:
                     raise
                 except Exception:
                     logger.exception("Error during death-page poll")
-
-                await asyncio.sleep(POLL_INTERVAL_SECONDS)
+                
+                interval = self._get_setting("interval", POLL_INTERVAL_SECONDS)
+                await asyncio.sleep(interval)
         except asyncio.CancelledError:
             pass
         finally:
@@ -245,8 +254,9 @@ class DeathService:
 
         for display_name, article_title in new_names:
             try:
+                min_views = self._get_setting("min_views", MIN_AVG_MONTHLY_VIEWS)
                 avg_views = await self._get_avg_monthly_views(article_title, session)
-                if avg_views is not None and avg_views >= MIN_AVG_MONTHLY_VIEWS:
+                if avg_views is not None and avg_views >= min_views:
                     await self._announce(display_name, article_title, avg_views)
                 else:
                     logger.debug(
@@ -266,6 +276,8 @@ class DeathService:
         last PAGEVIEW_MONTHS months, or None on failure.
         """
         now = datetime.now(timezone.utc)
+        months = self._get_setting("pageview_months", PAGEVIEW_MONTHS)
+        
         # End = last full month
         end_year = now.year
         end_month = now.month - 1
@@ -273,8 +285,8 @@ class DeathService:
             end_month = 12
             end_year -= 1
 
-        # Start = PAGEVIEW_MONTHS before end
-        start_month = end_month - PAGEVIEW_MONTHS + 1
+        # Start = months before end
+        start_month = end_month - months + 1
         start_year = end_year
         while start_month < 1:
             start_month += 12

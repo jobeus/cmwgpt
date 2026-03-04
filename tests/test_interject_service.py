@@ -85,17 +85,15 @@ class TestInterjectService(unittest.TestCase):
 
     # ----- Chance roll tests -----
 
-    @patch("src.services.interject_service.INTERJECT_CHANCE_PERCENT", 100)
     def test_roll_chance_always_passes_at_100(self):
         """Roll should always pass at 100%."""
         for _ in range(50):
-            self.assertTrue(self.service._roll_chance())
+            self.assertTrue(self.service._roll_chance(100))
 
-    @patch("src.services.interject_service.INTERJECT_CHANCE_PERCENT", 0)
     def test_roll_chance_always_fails_at_0(self):
         """Roll should always fail at 0%."""
         for _ in range(50):
-            self.assertFalse(self.service._roll_chance())
+            self.assertFalse(self.service._roll_chance(0))
 
     # ----- Activity check tests -----
 

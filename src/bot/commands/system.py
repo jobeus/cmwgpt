@@ -331,6 +331,9 @@ class SystemCommands:
             "`/systemprompt set [prompt]` - Set a custom AI personality for this channel\n"
             "`/systemprompt view` - View the current custom personality\n"
             "`/systemprompt reset` - Return to the default personality\n\n"
+            "**Server Features:**\n"
+            "`/interject set|view|reset` - Manage bot interjections for this channel\n"
+            "`/death set|view|reset` - Manage global death announcements (death channel only)\n\n"
             "*Note: Commands may be queued if the bot is busy processing other requests.*")
         await interaction.followup.send(help_text, ephemeral=True)
 

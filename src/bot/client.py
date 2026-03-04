@@ -15,6 +15,8 @@ from src.bot.handlers.mention import mention_handler
 from src.bot.commands.chat import ChatCommands
 from src.bot.commands.image import ImageCommands
 from src.bot.commands.system import SystemCommands
+from src.bot.commands.interject import InterjectCommands
+from src.bot.commands.death import DeathCommands
 from src.services.queue_service import queue_service
 from src.services.state_service import state_service
 from src.services.auto_update_service import auto_update_service
@@ -255,6 +257,12 @@ class DiscordBotClient:
 
         system_commands = SystemCommands(self.bot)
         system_commands.setup_commands()
+
+        interject_commands = InterjectCommands(self.bot)
+        interject_commands.setup_commands()
+
+        death_commands = DeathCommands(self.bot)
+        death_commands.setup_commands()
 
     async def _handle_message(self, message: discord.Message) -> None:
         """

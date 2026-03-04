@@ -32,6 +32,7 @@ class StateService:
         # Global data not tied to specific channels
         self._active_channels: set[int] = set()
         self._last_git_sha: Optional[str] = None
+        self._death_settings: Optional[Dict[str, Any]] = None
 
         # Single lock for all channel data operations (simpler and more
         # efficient)
@@ -51,7 +52,8 @@ class StateService:
                 'draw_model': None,
                 'edit_model': None,
                 'system_prompt': None,
-                'response_id': None
+                'response_id': None,
+                'interject_settings': None
             }
 
     def get_conversation(
@@ -91,7 +93,8 @@ class StateService:
                             channel_data['draw_model'],
                             channel_data['edit_model'],
                             channel_data['system_prompt'],
-                            channel_data['response_id']]):
+                            channel_data['response_id'],
+                            channel_data.get('interject_settings')]):
                     # Remove the entire channel entry if no other data exists
                     del self._channel_data[channel_id]
                 else:
@@ -216,6 +219,44 @@ class StateService:
             return {k: v['system_prompt'] for k,
                     v in self._channel_data.items() if v['system_prompt']}
 
+    # Interject settings management
+    def get_interject_settings(self, channel_id: int) -> Optional[Dict[str, Any]]:
+        """Get the interject settings for a channel."""
+        with self._channel_data_lock:
+            return self._channel_data.get(channel_id, {}).get('interject_settings')
+
+    def set_interject_settings(self, channel_id: int, settings: Dict[str, Any]) -> None:
+        """Set the interject settings for a channel."""
+        with self._channel_data_lock:
+            self._ensure_channel_data(channel_id)
+            self._channel_data[channel_id]['interject_settings'] = settings.copy()
+            logger.debug(f"Set interject settings for channel {channel_id}")
+
+    def clear_interject_settings(self, channel_id: int) -> None:
+        """Clear the interject settings for a channel."""
+        with self._channel_data_lock:
+            if channel_id in self._channel_data:
+                self._channel_data[channel_id]['interject_settings'] = None
+                logger.debug(f"Cleared interject settings for channel {channel_id}")
+                
+    # Death settings management (global)
+    def get_death_settings(self) -> Optional[Dict[str, Any]]:
+        """Get the global death settings."""
+        with self._global_data_lock:
+            return self._death_settings
+
+    def set_death_settings(self, settings: Dict[str, Any]) -> None:
+        """Set the global death settings."""
+        with self._global_data_lock:
+            self._death_settings = settings.copy()
+            logger.debug("Set global death settings")
+
+    def clear_death_settings(self) -> None:
+        """Clear the global death settings."""
+        with self._global_data_lock:
+            self._death_settings = None
+            logger.debug("Cleared global death settings")
+
     # Optimized batch operations
     def get_channel_context(self, channel_id: int) -> Dict[str, Any]:
         """
@@ -232,7 +273,8 @@ class StateService:
                     'draw_model': None,
                     'edit_model': None,
                     'system_prompt': None,
-                    'response_id': None
+                    'response_id': None,
+                    'interject_settings': None
                 }
             return self._channel_data[channel_id].copy()
 
@@ -254,9 +296,10 @@ class StateService:
                     'draw_model',
                     'edit_model',
                     'system_prompt',
-                        'response_id']:
-                    if field == 'conversation' and isinstance(value, list):
-                        self._channel_data[channel_id][field] = value.copy()
+                    'response_id',
+                    'interject_settings']:
+                    if field in ['conversation', 'interject_settings'] and isinstance(value, (list, dict)):
+                        self._channel_data[channel_id][field] = value.copy() if value is not None else None
                     else:
                         self._channel_data[channel_id][field] = value
                     logger.debug(f"Updated {field} for channel {channel_id}")
@@ -399,6 +442,9 @@ class StateService:
                 response_ids = {
                     k: v['response_id'] for k,
                     v in self._channel_data.items() if v['response_id']}
+                interject_settings = {
+                    k: v['interject_settings'] for k,
+                    v in self._channel_data.items() if v.get('interject_settings')}
 
                 state_data = {
                     "conversations": conversations,
@@ -407,6 +453,8 @@ class StateService:
                     "edit_models": edit_models,
                     "system_prompts": system_prompts,
                     "response_ids": response_ids,
+                    "interject_settings": interject_settings,
+                    "death_settings": self._death_settings,
                     "active_channels": list(self._active_channels),
                     "last_git_sha": self._last_git_sha,
                     "timestamp": timestamp,
@@ -479,6 +527,8 @@ class StateService:
                         edit_models = state_data.get("edit_models", {})
                         system_prompts = state_data.get("system_prompts", {})
                         response_ids = state_data.get("response_ids", {})
+                        interject_settings = state_data.get("interject_settings", {})
+                        self._death_settings = state_data.get("death_settings", None)
 
                         # Get all channel IDs from all data sources
                         all_channel_ids = set()
@@ -493,6 +543,8 @@ class StateService:
                                                for k in system_prompts.keys())
                         all_channel_ids.update(int(k)
                                                for k in response_ids.keys())
+                        all_channel_ids.update(int(k)
+                                               for k in interject_settings.keys())
 
                         for channel_id in all_channel_ids:
                             self._channel_data[channel_id] = {
@@ -502,6 +554,7 @@ class StateService:
                                     str(channel_id)), 'edit_model': edit_models.get(
                                     str(channel_id)), 'system_prompt': system_prompts.get(
                                     str(channel_id)), 'response_id': response_ids.get(
+                                    str(channel_id)), 'interject_settings': interject_settings.get(
                                     str(channel_id))}
 
                         # Load active channels
