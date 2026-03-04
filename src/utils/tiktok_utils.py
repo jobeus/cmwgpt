@@ -6,12 +6,13 @@ from typing import List, Optional
 from groq import Groq
 
 from src.config import TRANSCRIPT_PROXY, GROQ_API_KEY
+from src.utils.cache_utils import PersistentCache
 
 logger = logging.getLogger(__name__)
 
-# Bounded in-memory cache for TikTok transcripts: url -> transcript text or None
-_tiktok_cache = {}
 MAX_CACHE_SIZE = 100
+# Bounded persistent cache for TikTok transcripts: url -> transcript text or None
+_tiktok_cache = PersistentCache('tiktok_transcripts', MAX_CACHE_SIZE)
 
 def extract_tiktok_urls(text: str) -> List[str]:
     """
@@ -37,7 +38,7 @@ def extract_tiktok_urls(text: str) -> List[str]:
 def get_tiktok_transcript(url: str) -> Optional[str]:
     """
     Fetch the transcript for a TikTok video by downloading audio and processing with Groq.
-    Results are cached in memory.
+    Results are cached to persistent disk.
     """
     if url in _tiktok_cache:
         cached_result = _tiktok_cache[url]
@@ -48,9 +49,6 @@ def get_tiktok_transcript(url: str) -> Optional[str]:
         return cached_result
 
     def cache_failure(u: str):
-        if len(_tiktok_cache) >= MAX_CACHE_SIZE:
-            oldest_key = next(iter(_tiktok_cache))
-            del _tiktok_cache[oldest_key]
         _tiktok_cache[u] = None
 
     if not GROQ_API_KEY:
@@ -127,11 +125,6 @@ def get_tiktok_transcript(url: str) -> Optional[str]:
             logger.warning(f"Groq returned an empty transcript for {url}")
             cache_failure(url)
             return None
-
-        # Store in bounded cache
-        if len(_tiktok_cache) >= MAX_CACHE_SIZE:
-            oldest_key = next(iter(_tiktok_cache))
-            del _tiktok_cache[oldest_key]
 
         _tiktok_cache[url] = transcript_text
         return transcript_text

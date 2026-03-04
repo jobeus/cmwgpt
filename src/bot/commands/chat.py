@@ -16,9 +16,7 @@ from src.services.message_service import message_service
 from src.services.queue_service import queue_service
 from src.services.state_service import state_service
 import asyncio
-from src.utils.youtube_utils import extract_video_ids, get_transcript
-from src.utils.url_utils import extract_target_urls, get_article_text
-from src.utils.tiktok_utils import extract_tiktok_urls, get_tiktok_transcript
+from src.utils.downloader_utils import fetch_all_url_content
 
 logger = logging.getLogger(__name__)
 
@@ -113,56 +111,10 @@ class ChatCommands:
         prefix_message = f"<@{
             interaction.user.id}>: {message}" if INCLUDE_USERNAMES else message
 
-        # Look for YouTube links and append transcripts
-        video_ids = extract_video_ids(message)
-        if video_ids:
-            transcripts = []
-            for vid_id in video_ids:
-                try:
-                    transcript_text = await asyncio.to_thread(get_transcript, vid_id)
-                    if transcript_text:
-                        transcripts.append(
-                            f"Target Video ID {vid_id} Transcript:\n{transcript_text}")
-                except Exception as e:
-                    logger.warning(
-                        f"[/chat] Failed to fetch transcript for {vid_id}: {e}")
-
-            if transcripts:
-                prefix_message += "\n\n------\nIncluded youtube link transcript follows:\n\n" + \
-                    "\n\n".join(transcripts)
-
-        # Look for TikTok links and append transcripts
-        tiktok_urls = extract_tiktok_urls(message)
-        if tiktok_urls:
-            tiktok_transcripts = []
-            for t_url in tiktok_urls:
-                try:
-                    transcript_text = await asyncio.to_thread(get_tiktok_transcript, t_url)
-                    if transcript_text:
-                        tiktok_transcripts.append(
-                            f"Target TikTok Video {t_url} Transcript:\n{transcript_text}")
-                except Exception as e:
-                    logger.warning(
-                        f"[/chat] Failed to fetch TikTok transcript for {t_url}: {e}")
-
-            if tiktok_transcripts:
-                prefix_message += "\n\n------\nIncluded TikTok video transcript follows:\n\n" + \
-                    "\n\n".join(tiktok_transcripts)
-
-        target_urls = extract_target_urls(message)
-        if target_urls:
-            articles = []
-            for t_url in target_urls:
-                try:
-                    article_text = await asyncio.to_thread(get_article_text, t_url)
-                    if article_text:
-                        articles.append(f"URL content:\n{article_text}")
-                except Exception as e:
-                    logger.warning(
-                        f"[/chat] Failed to fetch article for {t_url}: {e}")
-
-            if articles:
-                prefix_message = "\n\n".join(articles) + "\n\n" + prefix_message
+        # Fetch all supported URLs in the message automatically
+        url_content = await fetch_all_url_content(message)
+        if url_content:
+            prefix_message = url_content + prefix_message
 
         # Initialize conversation if missing (no system prompt in conversation
         # array)

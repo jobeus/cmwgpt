@@ -16,9 +16,7 @@ from src.services.openai_service import openai_service, OpenAIServiceError
 from src.services.message_service import message_service
 from src.services.queue_service import queue_service
 import asyncio
-from src.utils.youtube_utils import extract_video_ids, get_transcript
-from src.utils.url_utils import extract_target_urls, get_article_text
-from src.utils.tiktok_utils import extract_tiktok_urls, get_tiktok_transcript
+from src.utils.downloader_utils import fetch_all_url_content
 
 # Pattern to strip cost prefixes like [$0.011] or [$0.005 @ z-image] from the start of bot messages
 COST_PREFIX_PATTERN = re.compile(r'^\[\$[\d.]+(?:\s*@\s*[^\]]+)?\]\s*')
@@ -271,57 +269,11 @@ class MentionHandler:
             if role == "assistant":
                 final_text = COST_PREFIX_PATTERN.sub("", final_text)
 
-            # YouTube transcript extraction
+            # Fetch all supported URLs automatically
             if role == "user":
-                video_ids = extract_video_ids(final_text)
-                if video_ids:
-                    transcripts = []
-                    for vid_id in video_ids:
-                        try:
-                            transcript_text = await asyncio.to_thread(get_transcript, vid_id)
-                            if transcript_text:
-                                transcripts.append(
-                                    f"Target Video ID {vid_id} Transcript:\n{transcript_text}")
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to fetch transcript for {vid_id}: {e}")
-
-                    if transcripts:
-                        final_text += "\n\n------\nIncluded youtube link transcript follows:\n\n" + \
-                            "\n\n".join(transcripts)
-
-                # TikTok transcript extraction
-                tiktok_urls = extract_tiktok_urls(final_text)
-                if tiktok_urls:
-                    tiktok_transcripts = []
-                    for t_url in tiktok_urls:
-                        try:
-                            transcript_text = await asyncio.to_thread(get_tiktok_transcript, t_url)
-                            if transcript_text:
-                                tiktok_transcripts.append(
-                                    f"Target TikTok Video {t_url} Transcript:\n{transcript_text}")
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to fetch TikTok transcript for {t_url}: {e}")
-
-                    if tiktok_transcripts:
-                        final_text += "\n\n------\nIncluded TikTok video transcript follows:\n\n" + \
-                            "\n\n".join(tiktok_transcripts)
-
-                if msg.content:
-                    target_urls = extract_target_urls(msg.content)
-                    if target_urls:
-                        articles = []
-                        for t_url in target_urls:
-                            try:
-                                article_text = await asyncio.to_thread(get_article_text, t_url)
-                                if article_text:
-                                    articles.append(f"URL content:\n{article_text}")
-                            except Exception as e:
-                                logger.warning(f"Failed to fetch article for {t_url}: {e}")
-                        
-                        if articles:
-                            final_text = "\n\n".join(articles) + "\n\n" + final_text
+                url_content = await fetch_all_url_content(final_text)
+                if url_content:
+                    final_text = url_content + final_text
 
             # No need for fallback handling here since we always prepend the
             # sender prefix above

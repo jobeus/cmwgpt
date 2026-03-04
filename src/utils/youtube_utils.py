@@ -3,12 +3,13 @@ import logging
 from typing import List, Optional
 from youtube_transcript_api import YouTubeTranscriptApi
 from src.config import TRANSCRIPT_PROXY
+from src.utils.cache_utils import PersistentCache
 
 logger = logging.getLogger(__name__)
 
-# Bounded in-memory cache for transcripts: video_id -> transcript text or None
-_transcript_cache = {}
 MAX_CACHE_SIZE = 100
+# Bounded persistent cache for transcripts: video_id -> transcript text or None
+_transcript_cache = PersistentCache('youtube_transcripts', MAX_CACHE_SIZE)
 
 
 def extract_video_ids(text: str) -> List[str]:
@@ -36,7 +37,7 @@ def extract_video_ids(text: str) -> List[str]:
 def get_transcript(video_id: str) -> Optional[str]:
     """
     Fetch the transcript for a YouTube video.
-    Results are cached in memory to avoid redundant API calls.
+    Results are cached to persistent disk to avoid redundant API calls.
     Returns the transcript as a single string, or None if it fails.
     """
     if video_id in _transcript_cache:
@@ -48,9 +49,6 @@ def get_transcript(video_id: str) -> Optional[str]:
         return cached_result
 
     def cache_failure(vid_id: str):
-        if len(_transcript_cache) >= MAX_CACHE_SIZE:
-            oldest_key = next(iter(_transcript_cache))
-            del _transcript_cache[oldest_key]
         _transcript_cache[vid_id] = None
 
     try:
@@ -67,11 +65,6 @@ def get_transcript(video_id: str) -> Optional[str]:
         # FetchedTranscriptSnippet
         snippets = api.fetch(video_id)
         transcript_text = " ".join([snippet.text for snippet in snippets])
-
-        # Store in bounded cache
-        if len(_transcript_cache) >= MAX_CACHE_SIZE:
-            oldest_key = next(iter(_transcript_cache))
-            del _transcript_cache[oldest_key]
 
         _transcript_cache[video_id] = transcript_text
         return transcript_text

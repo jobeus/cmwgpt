@@ -8,12 +8,13 @@ import trafilatura
 from newspaper import Article
 
 from src.config import TRANSCRIPT_PROXY
+from src.utils.cache_utils import PersistentCache
 
 logger = logging.getLogger(__name__)
 
-# Bounded in-memory cache for articles: url -> text or None
-_article_cache = {}
 MAX_CACHE_SIZE = 100
+# Bounded persistent cache for articles: url -> text or None
+_article_cache = PersistentCache('articles', MAX_CACHE_SIZE)
 
 EXCLUDED_DOMAINS = {
     'youtube.com', 'youtu.be',
@@ -58,17 +59,13 @@ def inject_article_cache(url: str, text: str) -> None:
     Directly inject text into the article cache for a given URL.
     Useful for immediately caching content we just generated (like from paste services).
     """
-    if len(_article_cache) >= MAX_CACHE_SIZE:
-        oldest_key = next(iter(_article_cache))
-        del _article_cache[oldest_key]
-        
     _article_cache[url] = text
     logger.debug(f"Directly injected cache for article: {url}")
 
 def get_article_text(url: str) -> Optional[str]:
     """
     Fetch the text content for a URL, falling back from trafilatura to newspaper3k.
-    Results are cached in memory.
+    Results are cached to persistent disk.
     """
     if url in _article_cache:
         cached_result = _article_cache[url]
@@ -79,9 +76,6 @@ def get_article_text(url: str) -> Optional[str]:
         return cached_result
         
     def cache_failure(u: str):
-        if len(_article_cache) >= MAX_CACHE_SIZE:
-            oldest_key = next(iter(_article_cache))
-            del _article_cache[oldest_key]
         _article_cache[u] = None
 
     try:
@@ -117,11 +111,6 @@ def get_article_text(url: str) -> Optional[str]:
             cache_failure(url)
             return None
 
-        # Store in bounded cache
-        if len(_article_cache) >= MAX_CACHE_SIZE:
-            oldest_key = next(iter(_article_cache))
-            del _article_cache[oldest_key]
-            
         _article_cache[url] = text
         return text
 
