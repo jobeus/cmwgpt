@@ -30,6 +30,7 @@ class AutoUpdateService:
         self._consecutive_failures = 0
         self._max_consecutive_failures = 5
         self._last_known_commit: Optional[str] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
         logger.info(
             f"AutoUpdateService initialized with {check_interval}s check interval")
@@ -57,6 +58,11 @@ class AutoUpdateService:
 
         self._is_running = True
         self._stop_monitoring.clear()
+
+        # Capture the main event loop so the background thread can schedule
+        # coroutines on it (asyncio.run() from a thread creates a throwaway
+        # loop that tears down before sys.exit can fire).
+        self._loop = asyncio.get_running_loop()
 
         # Get initial commit hash
         self._last_known_commit = get_current_commit_hash()
@@ -116,14 +122,9 @@ class AutoUpdateService:
                     # Check for new commits
                     if check_for_new_commits():
                         logger.info("New commits detected, triggering restart")
-                        # Schedule restart in the main event loop
-                        try:
-                            loop = asyncio.get_running_loop()
-                            asyncio.run_coroutine_threadsafe(
-                                self.trigger_restart(manual=False), loop)
-                        except RuntimeError:
-                            # No running loop, create a new one
-                            asyncio.run(self.trigger_restart(manual=False))
+                        # Schedule restart on the main event loop
+                        asyncio.run_coroutine_threadsafe(
+                            self.trigger_restart(manual=False), self._loop)
                         # Exit monitoring loop after triggering restart
                         break
 

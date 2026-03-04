@@ -45,7 +45,9 @@ class TestAutoUpdateService(unittest.TestCase):
     @patch("src.services.auto_update_service.is_git_repository", return_value=True)
     @patch("src.services.auto_update_service.get_current_commit_hash",
            return_value="abc123")
-    def test_start_with_git_enabled(self, mock_commit, mock_git_repo):
+    @patch("asyncio.get_running_loop")
+    def test_start_with_git_enabled(
+            self, mock_loop, mock_commit, mock_git_repo):
         """Test starting service when git is enabled and available."""
         self.service.start()
         self.assertTrue(self.service._is_running)
