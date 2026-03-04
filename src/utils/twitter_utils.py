@@ -41,16 +41,13 @@ def extract_video_url(result):
     try:
         media = result['legacy']['extended_entities']['media']
         for m in media:
-            if m['type'] == 'video':
+            if m['type'] in ('video', 'amplify_video') or m.get('video_info'):
                 variants = m['video_info']['variants']
-                # filter to mp4 only, grab lowest bitrate (audio quality fine for whisper)
                 mp4s = [v for v in variants if v.get('content_type') == 'video/mp4']
                 if mp4s:
-                    lowest = min(mp4s, key=lambda v: v.get('bitrate', 0))
-                    return lowest['url']
+                    return min(mp4s, key=lambda v: v.get('bitrate', 999999))['url']
     except (KeyError, TypeError):
         return None
-    return None
 
 
 def get_tweet_context(tweet_url: str) -> Optional[str]:
