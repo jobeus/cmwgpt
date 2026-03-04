@@ -37,16 +37,18 @@ def extract_twitter_urls(text: str) -> List[str]:
     return urls
 
 
-def extract_video_url(result):
+def extract_video_url(data):
     try:
+        entries = data['data']['threaded_conversation_with_injections_v2']['instructions'][1]['entries']
+        result = entries[0]['content']['itemContent']['tweet_results']['result']
         media = result['legacy']['extended_entities']['media']
         for m in media:
-            if m['type'] in ('video', 'amplify_video') or m.get('video_info'):
+            if m.get('video_info'):
                 variants = m['video_info']['variants']
                 mp4s = [v for v in variants if v.get('content_type') == 'video/mp4']
                 if mp4s:
                     return min(mp4s, key=lambda v: v.get('bitrate', 999999))['url']
-    except (KeyError, TypeError):
+    except (KeyError, TypeError, IndexError):
         return None
 
 
