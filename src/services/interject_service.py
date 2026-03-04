@@ -33,10 +33,10 @@ logger = logging.getLogger(__name__)
 MIN_UNIQUE_AUTHORS = 2
 
 # Minimum qualifying (text-only, no bot mention) messages in the streak
-MIN_MESSAGES = 3
+MIN_MESSAGES = 10
 
 # Only messages within this many minutes from *now* count
-ACTIVITY_WINDOW_MINUTES = 10
+ACTIVITY_WINDOW_MINUTES = 15
 
 # Percentage chance (0-100) to interject when conditions are met
 INTERJECT_CHANCE_PERCENT = 100  # 100 for testing, reduce after
@@ -48,7 +48,7 @@ COOLDOWN_MINUTES = 30
 CONTEXT_LINES = 20
 
 # Maximum interjections per calendar day (UTC). Resets at midnight.
-MAX_INTERJECTIONS_PER_DAY = 5
+MAX_INTERJECTIONS_PER_DAY = 10
 
 # If True, messages with embeds or attachments break the streak even if they
 # also contain text.

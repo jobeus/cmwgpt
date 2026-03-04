@@ -21,6 +21,7 @@ from src.services.auto_update_service import auto_update_service
 from src.services.restart_handler import restart_handler
 from src.services.announcement_service import announcement_service
 from src.services.interject_service import interject_service
+from src.services.death_service import death_service
 
 from src.utils.logger import setup_logger
 
@@ -53,6 +54,9 @@ class DiscordBotClient:
 
         # Set up interject service
         interject_service.set_bot(self.bot)
+
+        # Set up death service
+        death_service.set_bot(self.bot)
 
         # Set up event handlers
         self._setup_events()
@@ -214,6 +218,9 @@ class DiscordBotClient:
             # Start the interject service
             interject_service.start()
 
+            # Start the death service
+            death_service.start()
+
             print(f"🤖 Logged in as {self.bot.user}")
 
             # Log auto-update status
@@ -310,6 +317,13 @@ class DiscordBotClient:
                 except Exception as e:
                     logger.error(
                         f"Error shutting down auto-update service: {e}")
+
+                try:
+                    death_service.stop()
+                    logger.info("Death service stopped")
+                except Exception as e:
+                    logger.error(
+                        f"Error shutting down death service: {e}")
 
                 try:
                     loop = asyncio.get_event_loop()
