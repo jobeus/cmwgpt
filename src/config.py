@@ -8,6 +8,7 @@ load_dotenv()
 # API Keys with test-friendly defaults
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "test-key-for-ci")
 RUNPOD_IO_API_KEY = os.getenv("RUNPOD_IO_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "test-token-for-ci")
 DISCORD_GUILD_ID = os.getenv("DISCORD_GUILD_ID", "")
 DEATH_CHANNEL_ID = os.getenv("DEATH_CHANNEL_ID", "")

@@ -18,6 +18,7 @@ from src.services.state_service import state_service
 import asyncio
 from src.utils.youtube_utils import extract_video_ids, get_transcript
 from src.utils.url_utils import extract_target_urls, get_article_text
+from src.utils.tiktok_utils import extract_tiktok_urls, get_tiktok_transcript
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,24 @@ class ChatCommands:
             if transcripts:
                 prefix_message += "\n\n------\nIncluded youtube link transcript follows:\n\n" + \
                     "\n\n".join(transcripts)
+
+        # Look for TikTok links and append transcripts
+        tiktok_urls = extract_tiktok_urls(message)
+        if tiktok_urls:
+            tiktok_transcripts = []
+            for t_url in tiktok_urls:
+                try:
+                    transcript_text = await asyncio.to_thread(get_tiktok_transcript, t_url)
+                    if transcript_text:
+                        tiktok_transcripts.append(
+                            f"Target TikTok Video {t_url} Transcript:\n{transcript_text}")
+                except Exception as e:
+                    logger.warning(
+                        f"[/chat] Failed to fetch TikTok transcript for {t_url}: {e}")
+
+            if tiktok_transcripts:
+                prefix_message += "\n\n------\nIncluded TikTok video transcript follows:\n\n" + \
+                    "\n\n".join(tiktok_transcripts)
 
         target_urls = extract_target_urls(message)
         if target_urls:

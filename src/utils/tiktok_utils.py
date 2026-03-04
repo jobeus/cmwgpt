@@ -1,0 +1,126 @@
+import os
+import re
+import logging
+import yt_dlp
+from typing import List, Optional
+from groq import Groq
+
+from src.config import TRANSCRIPT_PROXY, GROQ_API_KEY
+
+logger = logging.getLogger(__name__)
+
+# Bounded in-memory cache for TikTok transcripts: url -> transcript text or None
+_tiktok_cache = {}
+MAX_CACHE_SIZE = 100
+
+def extract_tiktok_urls(text: str) -> List[str]:
+    """
+    Extract TikTok video URLs from a block of text.
+    Handles vt.tiktok.com and www.tiktok.com links.
+    """
+    if not text:
+        return []
+
+    # Regex to match TikTok video URLs
+    pattern = r'(https?://(?:vt\.tiktok\.com/[a-zA-Z0-9]+/?|www\.tiktok\.com/@[a-zA-Z0-9_.]+/video/\d+/?))'
+
+    matches = re.finditer(pattern, text)
+    urls = []
+
+    for match in matches:
+        url = match.group(1)
+        if url not in urls:
+            urls.append(url)
+
+    return urls
+
+def get_tiktok_transcript(url: str) -> Optional[str]:
+    """
+    Fetch the transcript for a TikTok video by downloading audio and processing with Groq.
+    Results are cached in memory.
+    """
+    if url in _tiktok_cache:
+        cached_result = _tiktok_cache[url]
+        if cached_result is None:
+            logger.debug(f"Cache hit for TikTok transcript failure: {url}")
+            return None
+        logger.debug(f"Cache hit for TikTok transcript: {url}")
+        return cached_result
+
+    def cache_failure(u: str):
+        if len(_tiktok_cache) >= MAX_CACHE_SIZE:
+            oldest_key = next(iter(_tiktok_cache))
+            del _tiktok_cache[oldest_key]
+        _tiktok_cache[u] = None
+
+    if not GROQ_API_KEY:
+        logger.error("GROQ_API_KEY is not set. Cannot transcribe TikTok videos.")
+        return None
+
+    logger.info(f"Fetching TikTok transcript for URL: {url}")
+    
+    # yt-dlp options
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': '/tmp/tiktok_%(id)s.%(ext)s',
+        'quiet': True,
+        'no_warnings': True,
+    }
+
+    if TRANSCRIPT_PROXY:
+        ydl_opts['proxy'] = TRANSCRIPT_PROXY
+
+    audio_file = None
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            audio_file = ydl.prepare_filename(info)
+
+        if not audio_file or not os.path.exists(audio_file):
+            logger.error(f"Failed to download audio for TikTok URL: {url}")
+            cache_failure(url)
+            return None
+
+        # Groq client transcription
+        groq_client = Groq(api_key=GROQ_API_KEY)
+        
+        logger.info(f"Transcribing {audio_file} using Groq...")
+        with open(audio_file, "rb") as file:
+            transcription = groq_client.audio.transcriptions.create(
+                file=(os.path.basename(audio_file), file.read()),
+                model="whisper-large-v3-turbo",
+                temperature=0,
+                response_format="text",
+            )
+            
+        transcript_text = transcription.strip()
+        
+        if not transcript_text:
+            logger.warning(f"Groq returned an empty transcript for {url}")
+            cache_failure(url)
+            return None
+
+        # Store in bounded cache
+        if len(_tiktok_cache) >= MAX_CACHE_SIZE:
+            oldest_key = next(iter(_tiktok_cache))
+            del _tiktok_cache[oldest_key]
+
+        _tiktok_cache[url] = transcript_text
+        return transcript_text
+
+    except yt_dlp.utils.DownloadError as e:
+        logger.warning(f"Failed to download TikTok audio for {url}: {e}")
+        cache_failure(url)
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error processing TikTok video {url}: {e}")
+        cache_failure(url)
+        return None
+    finally:
+        # Cleanup
+        if audio_file and os.path.exists(audio_file):
+            try:
+                os.remove(audio_file)
+                logger.debug(f"Removed temporary audio file: {audio_file}")
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary file {audio_file}: {e}")
