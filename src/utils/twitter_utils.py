@@ -1,9 +1,13 @@
+import os
 import re
+import uuid
 import logging
 import requests
+import subprocess
 from typing import List, Optional
+from groq import Groq
 
-from src.config import RAPIDAPI_KEY
+from src.config import RAPIDAPI_KEY, GROQ_API_KEY
 from src.utils.cache_utils import PersistentCache
 
 logger = logging.getLogger(__name__)
@@ -31,6 +35,22 @@ def extract_twitter_urls(text: str) -> List[str]:
             urls.append(url)
 
     return urls
+
+
+def extract_video_url(result):
+    try:
+        media = result['legacy']['extended_entities']['media']
+        for m in media:
+            if m['type'] == 'video':
+                variants = m['video_info']['variants']
+                # filter to mp4 only, grab lowest bitrate (audio quality fine for whisper)
+                mp4s = [v for v in variants if v.get('content_type') == 'video/mp4']
+                if mp4s:
+                    lowest = min(mp4s, key=lambda v: v.get('bitrate', 0))
+                    return lowest['url']
+    except (KeyError, TypeError):
+        return None
+    return None
 
 
 def get_tweet_context(tweet_url: str) -> Optional[str]:
@@ -64,7 +84,7 @@ def get_tweet_context(tweet_url: str) -> Optional[str]:
         }
         
         response = requests.get(
-            "https://x-com2.p.rapidapi.com/tweet",
+            "https://x-com2.p.rapidapi.com/v2/TweetDetail/",
             headers=headers,
             params={"id": tweet_id},
             timeout=15
@@ -90,6 +110,57 @@ def get_tweet_context(tweet_url: str) -> Optional[str]:
         main_author = extract_author(main_result)
         main_text = extract_tweet_text(main_result)
         
+        # Check for video and transcribe
+        video_url = extract_video_url(main_result)
+        video_transcript = None
+        if video_url and GROQ_API_KEY:
+            try:
+                tmp_id = uuid.uuid4().hex
+                mp4_path = f"/tmp/twit_vid_{tmp_id}.mp4"
+                mp3_path = f"/tmp/twit_aud_{tmp_id}.mp3"
+                
+                logger.info(f"Downloading Twitter video: {video_url}")
+                r = requests.get(video_url, stream=True, timeout=30)
+                r.raise_for_status()
+                with open(mp4_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                
+                logger.info("Converting to mp3 with ffmpeg...")
+                subprocess.run([
+                    "ffmpeg", "-y", "-i", mp4_path,
+                    "-vn", "-ar", "44100", "-ac", "2", "-b:a", "64k",
+                    mp3_path
+                ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+                if os.path.exists(mp3_path):
+                    groq_client = Groq(api_key=GROQ_API_KEY)
+                    logger.info(f"Transcribing {mp3_path} using Groq...")
+                    with open(mp3_path, "rb") as file:
+                        transcription = groq_client.audio.transcriptions.create(
+                            file=(os.path.basename(mp3_path), file.read()),
+                            model="whisper-large-v3-turbo",
+                            temperature=0,
+                            response_format="text",
+                        )
+
+                    transcript_text = transcription.strip()
+                    if transcript_text:
+                        video_transcript = transcript_text
+            except Exception as e:
+                logger.warning(f"Failed to process video for tweet {tweet_url}: {e}")
+            finally:
+                if 'mp4_path' in locals() and os.path.exists(mp4_path):
+                    try:
+                        os.remove(mp4_path)
+                    except Exception:
+                        pass
+                if 'mp3_path' in locals() and os.path.exists(mp3_path):
+                    try:
+                        os.remove(mp3_path)
+                    except Exception:
+                        pass
+        
         # Top replies - grab first 5
         replies = []
         for entry in entries[1:6]:  # skip cursor entries at the end
@@ -108,6 +179,10 @@ def get_tweet_context(tweet_url: str) -> Optional[str]:
                 continue
         
         context = f"Tweet by {main_author}:\n{main_text}"
+        
+        if video_transcript:
+            context += f"\ntranscript of video: {video_transcript}"
+            
         if replies:
             context += "\n\nTop replies:\n" + "\n".join(replies)
         
