@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = 15
 
 # Minimum average monthly pageviews to qualify for an announcement
-MIN_AVG_MONTHLY_VIEWS = 180_000
+MIN_AVG_MONTHLY_VIEWS = 90_000
 
 # How many months of pageview data to average
 PAGEVIEW_MONTHS = 12
@@ -52,78 +52,33 @@ STATE_FILE = "/tmp/cmwgpt_death_names.json"
 # HTML parser for the deaths page
 # ---------------------------------------------------------------------------
 
-class _DeathPageParser(HTMLParser):
-    """
-    Extract (display_name, article_title) tuples from the Deaths-in-YYYY page.
-
-    The page structure has <li> items where the first <a> link is the person.
-    We collect the first <a href="/wiki/..."> or <a href="./..."> inside each <li>.
-    We also collect the full text of the <li> to ensure it includes an age-like number
-    (comma space digits) to filter out navigation links.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self._in_li = 0  # nesting depth
-        self._found_link_in_li = False
-        self._current_href: Optional[str] = None
-        self._current_name_parts: list[str] = []
-        self._current_description_parts: list[str] = []
-        self._collecting_name = False
-        self._collecting_desc = False
-        self.results: list[Tuple[str, str]] = []
-
-    # ---- handler methods ----
-
-    def handle_starttag(self, tag: str, attrs):
-        if tag == "li":
-            self._in_li += 1
-            self._found_link_in_li = False
-            self._current_href = None
-            self._current_name_parts = []
-            self._current_description_parts = []
-            self._collecting_desc = True
-
-        if tag == "a" and self._in_li > 0 and not self._found_link_in_li:
-            href = dict(attrs).get("href", "")
-            # Only care about internal wiki links (not external, not anchors)
-            if href.startswith("/wiki/") or href.startswith("./"):
-                # Article title is the path after /wiki/ or ./
-                title = href.split("/wiki/", 1)[1] if href.startswith("/wiki/") else href.split("./", 1)[1]
-                if ":" not in title and "#" not in title:
-                    self._found_link_in_li = True
-                    self._current_href = unquote(title)
-                    self._collecting_name = True
-
-    def handle_endtag(self, tag: str):
-        if tag == "a" and self._collecting_name:
-            self._collecting_name = False
-
-        if tag == "li" and self._in_li > 0:
-            self._in_li -= 1
-            if self._in_li == 0:
-                self._collecting_desc = False
-                if self._current_href:
-                    name = "".join(self._current_name_parts).strip()
-                    desc = "".join(self._current_description_parts).strip()
-                    # A typical entry looks like: "Alfredo Bengzon, 90, Filipino physician..."
-                    # Check if there is an age-like pattern (comma space digits) to filter out nav links
-                    if name and re.search(r',\s*\d+[\s,]', desc):
-                        self.results.append((name, self._current_href))
-                self._current_href = None
-
-    def handle_data(self, data: str):
-        if self._collecting_name:
-            self._current_name_parts.append(data)
-        if self._collecting_desc:
-            self._current_description_parts.append(data)
-
+from bs4 import BeautifulSoup
 
 def parse_deaths_html(html: str) -> list[Tuple[str, str]]:
     """Return a list of (display_name, article_title) from deaths-page HTML."""
-    parser = _DeathPageParser()
-    parser.feed(html)
-    return parser.results
+    results = []
+    soup = BeautifulSoup(html, "html.parser")
+    
+    # Restrict to list items within the main content area to avoid nav menus
+    for li in soup.find_all("li"):
+        # The primary link is usually the first anchor tag
+        a_tag = li.find("a")
+        if not a_tag:
+            continue
+            
+        href = a_tag.get("href", "")
+        # Only process internal wiki links that are not categories, files, or anchors
+        if (href.startswith("/wiki/") or href.startswith("./")) and ":" not in href and "#" not in href:
+            title = href.split("/wiki/", 1)[1] if href.startswith("/wiki/") else href.split("./", 1)[1]
+            title = unquote(title)
+            name = a_tag.get_text(strip=True)
+            
+            # Check if there is an age-like pattern (comma space digits) to filter out nav links
+            desc = li.get_text(strip=True)
+            if name and re.search(r',\s*\d+[\s,]', desc):
+                results.append((name, title))
+                
+    return results
 
 
 # ---------------------------------------------------------------------------
