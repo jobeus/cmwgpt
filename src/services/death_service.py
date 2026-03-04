@@ -90,7 +90,7 @@ class _DeathPageParser(HTMLParser):
             if href.startswith("/wiki/") or href.startswith("./"):
                 # Article title is the path after /wiki/ or ./
                 title = href.split("/wiki/", 1)[1] if href.startswith("/wiki/") else href.split("./", 1)[1]
-                if ":" not in title:
+                if ":" not in title and "#" not in title:
                     self._found_link_in_li = True
                     self._current_href = unquote(title)
                     self._collecting_name = True
@@ -272,12 +272,18 @@ class DeathService:
             try:
                 min_views = self._get_setting("min_views", MIN_AVG_MONTHLY_VIEWS)
                 avg_views = await self._get_avg_monthly_views(article_title, session)
-                if avg_views is not None and avg_views >= min_views:
+                
+                if avg_views is None:
+                    continue
+                    
+                if avg_views >= min_views:
+                    logger.info(
+                        f"Met threshold: {display_name} ({avg_views:,} avg monthly views) -> ANNOUNCING"
+                    )
                     await self._announce(display_name, article_title, avg_views)
                 else:
-                    logger.debug(
-                        f"Skipping {display_name}: "
-                        f"{avg_views or 0:,} avg monthly views"
+                    logger.info(
+                        f"Skipped: {display_name} ({avg_views:,} avg monthly views, below {min_views:,} threshold)"
                     )
             except Exception:
                 logger.exception(f"Error checking views for {display_name}")
