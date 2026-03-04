@@ -13,7 +13,7 @@ DISCORD_GUILD_ID = os.getenv("DISCORD_GUILD_ID", "")
 DEATH_CHANNEL_ID = os.getenv("DEATH_CHANNEL_ID", "")
 
 # Proxies
-YT_TRANSCRIPT_PROXY = os.getenv("YT_TRANSCRIPT_PROXY", "")
+TRANSCRIPT_PROXY = os.getenv("TRANSCRIPT_PROXY", "")
 
 # Bot Configuration
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "anthropic/claude-haiku-4.5")

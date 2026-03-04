@@ -17,6 +17,7 @@ from src.services.queue_service import queue_service
 from src.services.state_service import state_service
 import asyncio
 from src.utils.youtube_utils import extract_video_ids, get_transcript
+from src.utils.url_utils import extract_target_urls, get_article_text
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,21 @@ class ChatCommands:
             if transcripts:
                 prefix_message += "\n\n------\nIncluded youtube link transcript follows:\n\n" + \
                     "\n\n".join(transcripts)
+
+        target_urls = extract_target_urls(message)
+        if target_urls:
+            articles = []
+            for t_url in target_urls:
+                try:
+                    article_text = await asyncio.to_thread(get_article_text, t_url)
+                    if article_text:
+                        articles.append(f"URL content:\n{article_text}")
+                except Exception as e:
+                    logger.warning(
+                        f"[/chat] Failed to fetch article for {t_url}: {e}")
+
+            if articles:
+                prefix_message = "\n\n".join(articles) + "\n\n" + prefix_message
 
         # Initialize conversation if missing (no system prompt in conversation
         # array)

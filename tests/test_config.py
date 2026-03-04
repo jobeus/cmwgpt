@@ -79,7 +79,7 @@ class TestConfig(unittest.TestCase):
             'INCLUDE_USERNAMES': 'false',
             'REPLY_TO_MENTIONS': 'false',
             'INCLUDE_NUM_CHATLINES': '50',
-            'YT_TRANSCRIPT_PROXY': 'http://proxy.example.com'
+            'TRANSCRIPT_PROXY': 'http://proxy.example.com'
         }
 
         with patch('src.config.os.getenv') as mock_getenv:
@@ -100,7 +100,7 @@ class TestConfig(unittest.TestCase):
             self.assertFalse(config.INCLUDE_USERNAMES)
             self.assertFalse(config.REPLY_TO_MENTIONS)
             self.assertEqual(config.INCLUDE_NUM_CHATLINES, 50)
-            self.assertEqual(config.YT_TRANSCRIPT_PROXY, 'http://proxy.example.com')
+            self.assertEqual(config.TRANSCRIPT_PROXY, 'http://proxy.example.com')
 
     @patch('src.config.load_dotenv')
     @patch.dict(os.environ, {}, clear=True)

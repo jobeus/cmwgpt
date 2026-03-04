@@ -2,7 +2,7 @@ import re
 import logging
 from typing import List, Optional
 from youtube_transcript_api import YouTubeTranscriptApi
-from src.config import YT_TRANSCRIPT_PROXY
+from src.config import TRANSCRIPT_PROXY
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +54,9 @@ def get_transcript(video_id: str) -> Optional[str]:
         _transcript_cache[vid_id] = None
 
     try:
-        if YT_TRANSCRIPT_PROXY:
+        if TRANSCRIPT_PROXY:
             from youtube_transcript_api.proxies import GenericProxyConfig
-            proxy_config = GenericProxyConfig(https_url=YT_TRANSCRIPT_PROXY)
+            proxy_config = GenericProxyConfig(https_url=TRANSCRIPT_PROXY)
             api = YouTubeTranscriptApi(proxy_config=proxy_config)
         else:
             api = YouTubeTranscriptApi()
