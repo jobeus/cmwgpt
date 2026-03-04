@@ -110,7 +110,7 @@ def get_tweet_context(tweet_url: str) -> Optional[str]:
         main_text = extract_tweet_text(main_result)
         
         # Check for video and transcribe
-        video_url = extract_video_url(main_result)
+        video_url = extract_video_url(data)
         video_transcript = None
         if video_url and GROQ_API_KEY:
             try:

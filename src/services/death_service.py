@@ -45,7 +45,7 @@ PAGEVIEW_MONTHS = 12
 USER_AGENT = "cmwgpt-bot/1.0 (jobeus@gmail.com)"
 
 # Temp file for persisting known-names across restarts
-STATE_FILE = "/tmp/cmwgpt_death_names.json"
+STATE_FILE = ".cache/cmwgpt_death_names.json"
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +143,7 @@ class DeathService:
     def _save_state(self) -> None:
         """Persist current known names to disk."""
         try:
+            os.makedirs(os.path.dirname(STATE_FILE) or ".", exist_ok=True)
             data = [list(t) for t in self._known_names]
             with open(STATE_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f)
@@ -220,6 +221,9 @@ class DeathService:
 
         if not new_names:
             return
+
+        # Persist immediately so restarts don't lose track of new names
+        self._save_state()
 
         logger.info(f"Detected {len(new_names)} new name(s) on deaths page")
 
