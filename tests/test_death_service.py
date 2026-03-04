@@ -205,8 +205,8 @@ class TestDeathService(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    def test_pageview_api_error_returns_none(self):
-        """Should return None on HTTP error."""
+    def test_pageview_api_404_returns_zero(self):
+        """Should return 0 on 404 HTTP error (no pageviews)."""
         async def run_test():
             mock_resp = AsyncMock()
             mock_resp.status = 404
@@ -220,7 +220,7 @@ class TestDeathService(unittest.TestCase):
             result = await self.service._get_avg_monthly_views(
                 "Missing_Person", mock_session
             )
-            self.assertIsNone(result)
+            self.assertEqual(result, 0)
 
         self.loop.run_until_complete(run_test())
 

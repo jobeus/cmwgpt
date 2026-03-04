@@ -314,31 +314,52 @@ class DeathService:
             start_month += 12
             start_year -= 1
 
-        start = f"{start_year}{start_month:02d}01"
-        end = f"{end_year}{end_month:02d}01"
+        # Wikimedia API requires YYYYMMDD00 format
+        start = f"{start_year}{start_month:02d}0100"
+        end = f"{end_year}{end_month:02d}0100"
 
-        # Percent-encode the title (spaces → underscores is fine for this API)
+        # Properly URL-encode the title (e.g., handling accented characters)
+        from urllib.parse import quote
         safe_title = article_title.replace(" ", "_")
+        encoded_title = quote(safe_title, safe='')
 
         url = (
             f"https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/"
-            f"en.wikipedia/all-access/all-agents/{safe_title}/monthly/{start}/{end}"
+            f"en.wikipedia/all-access/all-agents/{encoded_title}/monthly/{start}/{end}"
         )
 
-        async with session.get(url) as resp:
-            if resp.status != 200:
+        max_retries = 3
+        base_delay = 1.0
+
+        for attempt in range(max_retries):
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    items = data.get("items", [])
+                    if not items:
+                        return 0
+                    total = sum(item.get("views", 0) for item in items)
+                    return total // len(items)
+                
+                if resp.status == 404:
+                    return 0  # No data / page doesn't exist
+                    
+                if resp.status == 429:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        f"Rate limited (429) on {article_title}, retrying in {delay}s..."
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                    
+                text = await resp.text()
                 logger.warning(
-                    f"Pageviews API returned {resp.status} for {article_title}"
+                    f"Pageviews API returned {resp.status} for {article_title}: {text}"
                 )
                 return None
-            data = await resp.json()
-
-        items = data.get("items", [])
-        if not items:
-            return None
-
-        total = sum(item.get("views", 0) for item in items)
-        return total // len(items)
+                
+        logger.error(f"Failed to fetch pageviews for {article_title} after {max_retries} attempts.")
+        return None
 
     # -- announcement -------------------------------------------------------
 
