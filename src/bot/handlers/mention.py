@@ -18,8 +18,8 @@ from src.services.queue_service import queue_service
 import asyncio
 from src.utils.youtube_utils import extract_video_ids, get_transcript
 
-# Pattern to strip cost prefixes like [$0.011] from the start of bot messages
-COST_PREFIX_PATTERN = re.compile(r'^\[\$[\d.]+\]\s*')
+# Pattern to strip cost prefixes like [$0.011] or [$0.005 @ z-image] from the start of bot messages
+COST_PREFIX_PATTERN = re.compile(r'^\[\$[\d.]+(?:\s*@\s*[^\]]+)?\]\s*')
 
 logger = logging.getLogger(__name__)
 

@@ -20,8 +20,8 @@ from src.utils.youtube_utils import extract_video_ids, get_transcript
 
 logger = logging.getLogger(__name__)
 
-# Pattern to strip cost prefixes like [$0.011] from bot messages
-COST_PREFIX_PATTERN = re.compile(r'^\[\$[\d.]+\]\s*')
+# Pattern to strip cost prefixes like [$0.011] or [$0.005 @ z-image] from bot messages
+COST_PREFIX_PATTERN = re.compile(r'^\[\$[\d.]+(?:\s*@\s*[^\]]+)?\]\s*')
 
 
 class ChatCommands:
