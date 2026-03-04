@@ -59,28 +59,56 @@ def get_tiktok_transcript(url: str) -> Optional[str]:
 
     logger.info(f"Fetching TikTok transcript for URL: {url}")
     
-    # yt-dlp options
+    # yt-dlp options (without proxy first)
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': '/tmp/tiktok_%(id)s.%(ext)s',
         'quiet': True,
         'no_warnings': True,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '64',
+        }],
     }
-
-    if TRANSCRIPT_PROXY:
-        ydl_opts['proxy'] = TRANSCRIPT_PROXY
 
     audio_file = None
     try:
+        # Try direct download first
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
+            # The actual downloaded file might be a .mp3 now instead of .ext
             audio_file = ydl.prepare_filename(info)
-
-        if not audio_file or not os.path.exists(audio_file):
-            logger.error(f"Failed to download audio for TikTok URL: {url}")
+            # yt-dlp's prepare_filename with postprocessors might return the original extension path,
+            # so we ensure we have the correct mp3 path
+            if not audio_file.endswith('.mp3'):
+                audio_file = os.path.splitext(audio_file)[0] + '.mp3'
+                
+    except Exception as e:
+        logger.warning(f"Direct download failed for {url}: {e}. Falling back to proxy.")
+        if TRANSCRIPT_PROXY:
+            ydl_opts['proxy'] = TRANSCRIPT_PROXY
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    audio_file = ydl.prepare_filename(info)
+                    if not audio_file.endswith('.mp3'):
+                        audio_file = os.path.splitext(audio_file)[0] + '.mp3'
+            except Exception as e2:
+                logger.error(f"Proxy download failed for {url}: {e2}")
+                cache_failure(url)
+                return None
+        else:
+            logger.error(f"No proxy configured to fall back to for {url}")
             cache_failure(url)
             return None
 
+    if not audio_file or not os.path.exists(audio_file):
+        logger.error(f"Failed to find downloaded audio for TikTok URL: {url}")
+        cache_failure(url)
+        return None
+
+    try:
         # Groq client transcription
         groq_client = Groq(api_key=GROQ_API_KEY)
         
@@ -108,10 +136,6 @@ def get_tiktok_transcript(url: str) -> Optional[str]:
         _tiktok_cache[url] = transcript_text
         return transcript_text
 
-    except yt_dlp.utils.DownloadError as e:
-        logger.warning(f"Failed to download TikTok audio for {url}: {e}")
-        cache_failure(url)
-        return None
     except Exception as e:
         logger.error(f"Unexpected error processing TikTok video {url}: {e}")
         cache_failure(url)
