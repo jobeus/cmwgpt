@@ -65,8 +65,8 @@ class InterjectService:
         self._bot: Optional[commands.Bot] = None
         # channel_id -> timestamp (epoch) when cooldown expires
         self._cooldowns: dict[int, float] = {}
-        # Track daily interjections: {"date": "YYYY-MM-DD", "count": int}
-        self._daily_tracker: dict[str, int] = {"date": "", "count": 0}
+        # Track daily interjections: {"date": "YYYY-MM-DD", "counts": dict[int, int]}
+        self._daily_tracker: dict[str, Any] = {"date": "", "counts": {}}
         # Lock to prevent concurrent interjection attempts
         self._lock = asyncio.Lock()
         self._running = False
@@ -118,7 +118,7 @@ class InterjectService:
             return
 
         # Check daily cap
-        if self._is_daily_cap_reached():
+        if self._is_daily_cap_reached(channel_id):
             return
 
         # --- Acquire lock so only one interjection attempt runs at a time ---
@@ -127,7 +127,7 @@ class InterjectService:
 
         async with self._lock:
             # Re-check after acquiring lock (state may have changed)
-            if self._is_on_cooldown(channel_id) or self._is_daily_cap_reached():
+            if self._is_on_cooldown(channel_id) or self._is_daily_cap_reached(channel_id):
                 return
 
             try:
@@ -164,9 +164,12 @@ class InterjectService:
         Returns True if conditions are met for interjection.
         """
         min_messages = self._get_setting(channel.id, "min_messages", MIN_MESSAGES)
+        window_mins = self._get_setting(channel.id, "window_mins", ACTIVITY_WINDOW_MINUTES)
+        exclude_embeds = self._get_setting(channel.id, "exclude_embeds", EXCLUDE_EMBEDS)
+        min_authors = self._get_setting(channel.id, "min_authors", MIN_UNIQUE_AUTHORS)
         
         fetch_limit = min_messages + 1
-        cutoff = time.time() - (ACTIVITY_WINDOW_MINUTES * 60)
+        cutoff = time.time() - (window_mins * 60)
         unique_authors: set[int] = set()
         qualifying_count = 0
 
@@ -190,7 +193,7 @@ class InterjectService:
                 return False
 
             # Must not have embeds or attachments (if configured)
-            if EXCLUDE_EMBEDS and (msg.embeds or msg.attachments):
+            if exclude_embeds and (msg.embeds or msg.attachments):
                 return False
 
             # Must have actual text content
@@ -205,7 +208,7 @@ class InterjectService:
             return False
 
         # Need enough unique authors
-        if len(unique_authors) < MIN_UNIQUE_AUTHORS:
+        if len(unique_authors) < min_authors:
             return False
 
         return True
@@ -221,8 +224,10 @@ class InterjectService:
         logger.info(f"💬 Interjecting in #{channel.name}")
 
         # Fetch context messages
+        context_lines_cfg = self._get_setting(channel.id, "context_lines", CONTEXT_LINES)
+        
         context_messages: list[discord.Message] = []
-        async for msg in channel.history(limit=CONTEXT_LINES):
+        async for msg in channel.history(limit=context_lines_cfg):
             context_messages.append(msg)
         context_messages.reverse()  # Oldest first
 
@@ -298,7 +303,7 @@ class InterjectService:
 
         # Apply cooldown and increment daily counter
         self._apply_cooldown(channel.id)
-        self._increment_daily_count()
+        self._increment_daily_count(channel.id)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -321,21 +326,25 @@ class InterjectService:
         cooldown = self._get_setting(channel_id, "cooldown", COOLDOWN_MINUTES)
         self._cooldowns[channel_id] = time.time() + (cooldown * 60)
 
-    def _is_daily_cap_reached(self) -> bool:
-        """Check if the daily interjection cap has been reached."""
+    def _is_daily_cap_reached(self, channel_id: int) -> bool:
+        """Check if the daily interjection cap for the channel has been reached."""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if self._daily_tracker["date"] != today:
             # New day — reset
-            self._daily_tracker = {"date": today, "count": 0}
-        return self._daily_tracker["count"] >= MAX_INTERJECTIONS_PER_DAY
+            self._daily_tracker = {"date": today, "counts": {}}
+            
+        daily_max = self._get_setting(channel_id, "daily_max", MAX_INTERJECTIONS_PER_DAY)
+        current_count = self._daily_tracker["counts"].get(channel_id, 0)
+        return current_count >= daily_max
 
-    def _increment_daily_count(self) -> None:
-        """Increment the daily interjection counter."""
+    def _increment_daily_count(self, channel_id: int) -> None:
+        """Increment the daily interjection counter for the channel."""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if self._daily_tracker["date"] != today:
-            self._daily_tracker = {"date": today, "count": 1}
+            self._daily_tracker = {"date": today, "counts": {channel_id: 1}}
         else:
-            self._daily_tracker["count"] += 1
+            current = self._daily_tracker["counts"].get(channel_id, 0)
+            self._daily_tracker["counts"][channel_id] = current + 1
 
     @staticmethod
     def _roll_chance(chance: int) -> bool:
