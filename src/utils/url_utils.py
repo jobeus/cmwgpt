@@ -18,7 +18,8 @@ EXCLUDED_DOMAINS = {
     'tiktok.com', 'vm.tiktok.com',
     'instagram.com', 'www.instagram.com',
     'facebook.com', 'www.facebook.com', 'fb.watch',
-    'x.com', 'www.x.com', 'twitter.com', 'www.twitter.com'
+    'x.com', 'www.x.com', 'twitter.com', 'www.twitter.com',
+    'xcancel.com', 'www.xcancel.com'
 }
 
 def extract_target_urls(text: str) -> List[str]:

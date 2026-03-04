@@ -18,13 +18,13 @@ _twitter_cache = PersistentCache('twitter_transcripts')
 
 def extract_twitter_urls(text: str) -> List[str]:
     """
-    Extract x.com and twitter.com URLs from text.
+    Extract x.com and twitter.com and xcancel.com URLs from text.
     """
     if not text:
         return []
 
     # Regex targeting twitter/x URLs
-    pattern = r'https?://(?:www\.)?(?:twitter\.com|x\.com)/[^\s<>"]+'
+    pattern = r'https?://(?:www\.)?(?:twitter\.com|x\.com|xcancel\.com)/[^\s<>"]+'
 
     matches = re.finditer(pattern, text)
     urls = []
