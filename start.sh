@@ -10,7 +10,7 @@ while true; do
     if [ $exit_code -eq 42 ]; then
         echo "Restarting script because it exited with code 42"
         echo "Running pip install requirements..."
-        .venv/bin/pip install -r requirements.txt
+        venv/bin/pip install --upgrade -r requirements.txt
         sleep 1
     else
         echo "Not restarting. Exiting."
