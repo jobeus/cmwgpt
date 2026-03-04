@@ -53,6 +53,18 @@ def extract_target_urls(text: str) -> List[str]:
 
     return urls
 
+def inject_article_cache(url: str, text: str) -> None:
+    """
+    Directly inject text into the article cache for a given URL.
+    Useful for immediately caching content we just generated (like from paste services).
+    """
+    if len(_article_cache) >= MAX_CACHE_SIZE:
+        oldest_key = next(iter(_article_cache))
+        del _article_cache[oldest_key]
+        
+    _article_cache[url] = text
+    logger.debug(f"Directly injected cache for article: {url}")
+
 def get_article_text(url: str) -> Optional[str]:
     """
     Fetch the text content for a URL, falling back from trafilatura to newspaper3k.

@@ -35,7 +35,10 @@ class PasteService:
                     text.encode("utf-8")), timeout=10)
 
             if response.status_code == 201:
-                return response.text.strip() + ".md"
+                paste_url = response.text.strip() + ".md"
+                from src.utils.url_utils import inject_article_cache
+                inject_article_cache(paste_url, text)
+                return paste_url
             else:
                 raise Exception(
                     f"paste.rs error: {response.status_code} - {response.text}")
