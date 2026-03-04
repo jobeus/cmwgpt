@@ -10,6 +10,7 @@ from typing import Optional
 
 from src.utils.youtube_utils import extract_video_ids, get_transcript
 from src.utils.tiktok_utils import extract_tiktok_urls, get_tiktok_transcript
+from src.utils.twitter_utils import extract_twitter_urls, get_tweet_context
 from src.utils.url_utils import extract_target_urls, get_article_text
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,26 @@ async def fetch_all_url_content(message_text: str) -> str:
                 "------\nIncluded TikTok video transcript follows:\n\n" + "\n\n".join(tiktok_transcripts)
             )
 
-    # 3. General Articles
+    # 3. Twitter / X Context
+    twitter_urls = extract_twitter_urls(message_text)
+    if twitter_urls:
+        twitter_contexts = []
+        for t_url in twitter_urls:
+            try:
+                tweet_text = await asyncio.to_thread(get_tweet_context, t_url)
+                if tweet_text:
+                    if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
+                       logger.info(f"Target Tweet {t_url} context grabbed successfully.") 
+                    twitter_contexts.append(f"Target Tweet {t_url} Context:\n{tweet_text}")
+            except Exception as e:
+                logger.warning(f"Failed to fetch Tweet context for {t_url}: {e}")
+
+        if twitter_contexts:
+            aggregated_content.append(
+                "------\nIncluded Twitter post context follows:\n\n" + "\n\n".join(twitter_contexts)
+            )
+
+    # 4. General Articles
     target_urls = extract_target_urls(message_text)
     if target_urls:
         articles = []

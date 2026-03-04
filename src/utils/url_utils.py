@@ -5,22 +5,20 @@ from typing import List, Optional
 from urllib.parse import urlparse
 
 import trafilatura
-from newspaper import Article
-
 from src.config import TRANSCRIPT_PROXY
 from src.utils.cache_utils import PersistentCache
 
 logger = logging.getLogger(__name__)
 
-MAX_CACHE_SIZE = 100
 # Bounded persistent cache for articles: url -> text or None
-_article_cache = PersistentCache('articles', MAX_CACHE_SIZE)
+_article_cache = PersistentCache('articles')
 
 EXCLUDED_DOMAINS = {
     'youtube.com', 'youtu.be',
     'tiktok.com', 'vm.tiktok.com',
     'instagram.com', 'www.instagram.com',
-    'facebook.com', 'www.facebook.com', 'fb.watch'
+    'facebook.com', 'www.facebook.com', 'fb.watch',
+    'x.com', 'www.x.com', 'twitter.com', 'www.twitter.com'
 }
 
 def extract_target_urls(text: str) -> List[str]:

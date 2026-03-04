@@ -10,9 +10,8 @@ from src.utils.cache_utils import PersistentCache
 
 logger = logging.getLogger(__name__)
 
-MAX_CACHE_SIZE = 100
 # Bounded persistent cache for TikTok transcripts: url -> transcript text or None
-_tiktok_cache = PersistentCache('tiktok_transcripts', MAX_CACHE_SIZE)
+_tiktok_cache = PersistentCache('tiktok_transcripts')
 
 def extract_tiktok_urls(text: str) -> List[str]:
     """

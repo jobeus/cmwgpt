@@ -9,6 +9,7 @@ load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "test-key-for-ci")
 RUNPOD_IO_API_KEY = os.getenv("RUNPOD_IO_API_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "")
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "test-token-for-ci")
 DISCORD_GUILD_ID = os.getenv("DISCORD_GUILD_ID", "")
 DEATH_CHANNEL_ID = os.getenv("DEATH_CHANNEL_ID", "")
@@ -81,6 +82,7 @@ QUIET_UPDATES = os.getenv("QUIET_UPDATES", "False").lower() in ("true", "1")
 
 # Numeric Configuration
 INCLUDE_NUM_CHATLINES = int(os.getenv("INCLUDE_NUM_CHATLINES", 10))
+MAX_CACHE_SIZE = int(os.getenv("MAX_CACHE_SIZE", 200))
 
 
 # Check if we're in a testing environment

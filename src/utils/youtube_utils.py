@@ -1,15 +1,12 @@
 import re
 import logging
 from typing import List, Optional
-from youtube_transcript_api import YouTubeTranscriptApi
-from src.config import TRANSCRIPT_PROXY
 from src.utils.cache_utils import PersistentCache
 
 logger = logging.getLogger(__name__)
 
-MAX_CACHE_SIZE = 100
 # Bounded persistent cache for transcripts: video_id -> transcript text or None
-_transcript_cache = PersistentCache('youtube_transcripts', MAX_CACHE_SIZE)
+_transcript_cache = PersistentCache('youtube_transcripts')
 
 
 def extract_video_ids(text: str) -> List[str]:
