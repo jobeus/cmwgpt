@@ -29,6 +29,7 @@ def setup_signal_handlers(bot_client):
         from src.services.auto_update_service import auto_update_service
         from src.services.queue_service import queue_service
         from src.services.openai_service import openai_service
+        from src.services.interject_service import interject_service
 
         async def complete_shutdown():
             """Complete shutdown sequence with proper cleanup."""
@@ -46,6 +47,13 @@ def setup_signal_handlers(bot_client):
                     logger.info("Auto-update service stopped")
                 except Exception as e:
                     logger.error(f"Error stopping auto-update service: {e}")
+
+                # Stop interject service (synchronous)
+                try:
+                    interject_service.stop()
+                    logger.info("Interject service stopped")
+                except Exception as e:
+                    logger.error(f"Error stopping interject service: {e}")
 
                 # Stop queue service (asynchronous)
                 try:

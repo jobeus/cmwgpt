@@ -20,6 +20,7 @@ from src.services.state_service import state_service
 from src.services.auto_update_service import auto_update_service
 from src.services.restart_handler import restart_handler
 from src.services.announcement_service import announcement_service
+from src.services.interject_service import interject_service
 
 from src.utils.logger import setup_logger
 
@@ -49,6 +50,9 @@ class DiscordBotClient:
 
         # Set up announcement service
         announcement_service.set_bot(self.bot)
+
+        # Set up interject service
+        interject_service.set_bot(self.bot)
 
         # Set up event handlers
         self._setup_events()
@@ -207,6 +211,9 @@ class DiscordBotClient:
             # Start the auto-update service
             auto_update_service.start()
 
+            # Start the interject service
+            interject_service.start()
+
             print(f"🤖 Logged in as {self.bot.user}")
 
             # Log auto-update status
@@ -271,6 +278,9 @@ class DiscordBotClient:
                 # Optionally, you could fall back to immediate processing:
                 # await mention_handler.handle_mention(message, self.bot.user,
                 # model)
+
+        # Check for interjection opportunity (event-driven, no polling)
+        await interject_service.on_new_message(message)
 
         # Ensure other commands are still processed
         await self.bot.process_commands(message)

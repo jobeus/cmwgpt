@@ -1,0 +1,392 @@
+"""
+Unit tests for the Interject Service.
+Tests activity checking, cooldown logic, daily cap, and chance roll.
+"""
+
+import unittest
+from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+import asyncio
+import time
+from datetime import datetime, timezone
+
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+class TestInterjectService(unittest.TestCase):
+    """Tests for InterjectService."""
+
+    def setUp(self):
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+
+        # Import fresh for each test
+        from src.services.interject_service import InterjectService
+        self.service = InterjectService()
+
+        # Set up a mock bot
+        self.mock_bot = MagicMock()
+        self.mock_bot.user = MagicMock()
+        self.mock_bot.user.id = 99999
+        self.service.set_bot(self.mock_bot)
+        self.service.start()
+
+    def tearDown(self):
+        self.loop.close()
+
+    # ----- Cooldown tests -----
+
+    def test_cooldown_not_set_initially(self):
+        """Channel should not be on cooldown initially."""
+        self.assertFalse(self.service._is_on_cooldown(12345))
+
+    def test_cooldown_applied(self):
+        """After applying cooldown, channel should be on cooldown."""
+        self.service._apply_cooldown(12345)
+        self.assertTrue(self.service._is_on_cooldown(12345))
+
+    def test_cooldown_expires(self):
+        """Cooldown should expire after the configured time."""
+        self.service._cooldowns[12345] = time.time() - 1  # Already expired
+        self.assertFalse(self.service._is_on_cooldown(12345))
+
+    # ----- Daily cap tests -----
+
+    def test_daily_cap_not_reached_initially(self):
+        """Daily cap should not be reached initially."""
+        self.assertFalse(self.service._is_daily_cap_reached())
+
+    @patch("src.services.interject_service.MAX_INTERJECTIONS_PER_DAY", 3)
+    def test_daily_cap_reached(self):
+        """Daily cap should be reached when count hits the limit."""
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        self.service._daily_tracker = {"date": today, "count": 3}
+        self.assertTrue(self.service._is_daily_cap_reached())
+
+    @patch("src.services.interject_service.MAX_INTERJECTIONS_PER_DAY", 3)
+    def test_daily_cap_resets_on_new_day(self):
+        """Daily cap should reset when the date changes."""
+        self.service._daily_tracker = {"date": "1999-01-01", "count": 99}
+        self.assertFalse(self.service._is_daily_cap_reached())
+
+    def test_increment_daily_count(self):
+        """Incrementing daily count should increase the counter."""
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        self.service._daily_tracker = {"date": today, "count": 0}
+        self.service._increment_daily_count()
+        self.assertEqual(self.service._daily_tracker["count"], 1)
+
+    def test_increment_daily_count_new_day(self):
+        """Incrementing on a new day should reset and set to 1."""
+        self.service._daily_tracker = {"date": "1999-01-01", "count": 99}
+        self.service._increment_daily_count()
+        self.assertEqual(self.service._daily_tracker["count"], 1)
+
+    # ----- Chance roll tests -----
+
+    @patch("src.services.interject_service.INTERJECT_CHANCE_PERCENT", 100)
+    def test_roll_chance_always_passes_at_100(self):
+        """Roll should always pass at 100%."""
+        for _ in range(50):
+            self.assertTrue(self.service._roll_chance())
+
+    @patch("src.services.interject_service.INTERJECT_CHANCE_PERCENT", 0)
+    def test_roll_chance_always_fails_at_0(self):
+        """Roll should always fail at 0%."""
+        for _ in range(50):
+            self.assertFalse(self.service._roll_chance())
+
+    # ----- Activity check tests -----
+
+    def _make_mock_message(self, author_id, content, is_bot=False,
+                           embeds=None, attachments=None, mentions=None,
+                           created_at=None):
+        """Helper to create a mock Discord message."""
+        msg = MagicMock()
+        msg.author = MagicMock()
+        msg.author.id = author_id
+        msg.author.bot = is_bot
+        msg.content = content
+        msg.embeds = embeds or []
+        msg.attachments = attachments or []
+        msg.mentions = mentions or []
+        msg.id = id(msg)  # Unique ID
+        if created_at is None:
+            created_at = datetime.now(timezone.utc)
+        msg.created_at = created_at
+        return msg
+
+    @patch("src.services.interject_service.MIN_MESSAGES", 3)
+    @patch("src.services.interject_service.MIN_UNIQUE_AUTHORS", 2)
+    @patch("src.services.interject_service.ACTIVITY_WINDOW_MINUTES", 10)
+    @patch("src.services.interject_service.EXCLUDE_EMBEDS", True)
+    def test_activity_check_passes_with_qualifying_messages(self):
+        """Activity check should pass when all messages qualify."""
+        async def run_test():
+            now = datetime.now(timezone.utc)
+            messages = [
+                self._make_mock_message(111, "Hello!", created_at=now),
+                self._make_mock_message(222, "Hey there!", created_at=now),
+                self._make_mock_message(111, "What's up?", created_at=now),
+                self._make_mock_message(222, "Not much!", created_at=now),
+            ]
+
+            mock_channel = MagicMock()
+
+            async def mock_history(limit):
+                for m in messages[:limit]:
+                    yield m
+
+            mock_channel.history = mock_history
+
+            result = await self.service._check_channel_activity(mock_channel, 99999)
+            self.assertTrue(result)
+
+        self.loop.run_until_complete(run_test())
+
+    @patch("src.services.interject_service.MIN_MESSAGES", 3)
+    @patch("src.services.interject_service.MIN_UNIQUE_AUTHORS", 2)
+    @patch("src.services.interject_service.ACTIVITY_WINDOW_MINUTES", 10)
+    @patch("src.services.interject_service.EXCLUDE_EMBEDS", True)
+    def test_activity_check_fails_with_bot_message_in_streak(self):
+        """Activity check should fail when a bot message is in the streak."""
+        async def run_test():
+            now = datetime.now(timezone.utc)
+            messages = [
+                self._make_mock_message(111, "Hello!", created_at=now),
+                self._make_mock_message(99999, "I'm a bot!", is_bot=True, created_at=now),
+                self._make_mock_message(222, "Hey!", created_at=now),
+                self._make_mock_message(111, "What's up?", created_at=now),
+            ]
+
+            mock_channel = MagicMock()
+
+            async def mock_history(limit):
+                for m in messages[:limit]:
+                    yield m
+
+            mock_channel.history = mock_history
+
+            result = await self.service._check_channel_activity(mock_channel, 99999)
+            self.assertFalse(result)
+
+        self.loop.run_until_complete(run_test())
+
+    @patch("src.services.interject_service.MIN_MESSAGES", 3)
+    @patch("src.services.interject_service.MIN_UNIQUE_AUTHORS", 2)
+    @patch("src.services.interject_service.ACTIVITY_WINDOW_MINUTES", 10)
+    @patch("src.services.interject_service.EXCLUDE_EMBEDS", True)
+    def test_activity_check_fails_with_embed_in_streak(self):
+        """Activity check should fail when a message has embeds."""
+        async def run_test():
+            now = datetime.now(timezone.utc)
+            embed_msg = self._make_mock_message(
+                333, "Check this link", embeds=[MagicMock()], created_at=now
+            )
+            messages = [
+                self._make_mock_message(111, "Hello!", created_at=now),
+                embed_msg,
+                self._make_mock_message(222, "Hey!", created_at=now),
+                self._make_mock_message(111, "What's up?", created_at=now),
+            ]
+
+            mock_channel = MagicMock()
+
+            async def mock_history(limit):
+                for m in messages[:limit]:
+                    yield m
+
+            mock_channel.history = mock_history
+
+            result = await self.service._check_channel_activity(mock_channel, 99999)
+            self.assertFalse(result)
+
+        self.loop.run_until_complete(run_test())
+
+    @patch("src.services.interject_service.MIN_MESSAGES", 3)
+    @patch("src.services.interject_service.MIN_UNIQUE_AUTHORS", 2)
+    @patch("src.services.interject_service.ACTIVITY_WINDOW_MINUTES", 10)
+    @patch("src.services.interject_service.EXCLUDE_EMBEDS", True)
+    def test_activity_check_fails_with_bot_mention_in_streak(self):
+        """Activity check should fail when a message mentions the bot."""
+        async def run_test():
+            now = datetime.now(timezone.utc)
+            bot_mention_user = MagicMock()
+            bot_mention_user.id = 99999
+            mention_msg = self._make_mock_message(
+                222, "Hey <@99999> help", mentions=[bot_mention_user], created_at=now
+            )
+            messages = [
+                self._make_mock_message(111, "Hello!", created_at=now),
+                mention_msg,
+                self._make_mock_message(222, "Hey!", created_at=now),
+                self._make_mock_message(111, "What's up?", created_at=now),
+            ]
+
+            mock_channel = MagicMock()
+
+            async def mock_history(limit):
+                for m in messages[:limit]:
+                    yield m
+
+            mock_channel.history = mock_history
+
+            result = await self.service._check_channel_activity(mock_channel, 99999)
+            self.assertFalse(result)
+
+        self.loop.run_until_complete(run_test())
+
+    @patch("src.services.interject_service.MIN_MESSAGES", 3)
+    @patch("src.services.interject_service.MIN_UNIQUE_AUTHORS", 2)
+    @patch("src.services.interject_service.ACTIVITY_WINDOW_MINUTES", 10)
+    @patch("src.services.interject_service.EXCLUDE_EMBEDS", True)
+    def test_activity_check_fails_with_single_author(self):
+        """Activity check should fail when only one author is present."""
+        async def run_test():
+            now = datetime.now(timezone.utc)
+            messages = [
+                self._make_mock_message(111, "Hello!", created_at=now),
+                self._make_mock_message(111, "Anyone here?", created_at=now),
+                self._make_mock_message(111, "Guess not", created_at=now),
+                self._make_mock_message(111, "Oh well", created_at=now),
+            ]
+
+            mock_channel = MagicMock()
+
+            async def mock_history(limit):
+                for m in messages[:limit]:
+                    yield m
+
+            mock_channel.history = mock_history
+
+            result = await self.service._check_channel_activity(mock_channel, 99999)
+            self.assertFalse(result)
+
+        self.loop.run_until_complete(run_test())
+
+    @patch("src.services.interject_service.MIN_MESSAGES", 5)
+    @patch("src.services.interject_service.MIN_UNIQUE_AUTHORS", 2)
+    @patch("src.services.interject_service.ACTIVITY_WINDOW_MINUTES", 10)
+    @patch("src.services.interject_service.EXCLUDE_EMBEDS", True)
+    def test_activity_check_fails_with_too_few_messages(self):
+        """Activity check should fail when there aren't enough messages."""
+        async def run_test():
+            now = datetime.now(timezone.utc)
+            messages = [
+                self._make_mock_message(111, "Hello!", created_at=now),
+                self._make_mock_message(222, "Hey!", created_at=now),
+                self._make_mock_message(111, "How goes?", created_at=now),
+            ]
+
+            mock_channel = MagicMock()
+
+            async def mock_history(limit):
+                for m in messages[:limit]:
+                    yield m
+
+            mock_channel.history = mock_history
+
+            result = await self.service._check_channel_activity(mock_channel, 99999)
+            self.assertFalse(result)
+
+        self.loop.run_until_complete(run_test())
+
+    @patch("src.services.interject_service.MIN_MESSAGES", 3)
+    @patch("src.services.interject_service.MIN_UNIQUE_AUTHORS", 2)
+    @patch("src.services.interject_service.ACTIVITY_WINDOW_MINUTES", 10)
+    @patch("src.services.interject_service.EXCLUDE_EMBEDS", False)
+    def test_activity_check_passes_with_embeds_when_exclude_disabled(self):
+        """Activity check should pass with embeds when EXCLUDE_EMBEDS is False."""
+        async def run_test():
+            now = datetime.now(timezone.utc)
+            messages = [
+                self._make_mock_message(111, "Hello!", embeds=[MagicMock()], created_at=now),
+                self._make_mock_message(222, "Hey there!", created_at=now),
+                self._make_mock_message(111, "What's up?", created_at=now),
+                self._make_mock_message(222, "Not much!", created_at=now),
+            ]
+
+            mock_channel = MagicMock()
+
+            async def mock_history(limit):
+                for m in messages[:limit]:
+                    yield m
+
+            mock_channel.history = mock_history
+
+            result = await self.service._check_channel_activity(mock_channel, 99999)
+            self.assertTrue(result)
+
+        self.loop.run_until_complete(run_test())
+
+    # ----- on_new_message bail-out tests -----
+
+    def test_on_new_message_skips_bot_messages(self):
+        """on_new_message should skip messages from bots."""
+        async def run_test():
+            msg = self._make_mock_message(111, "Hello!", is_bot=True)
+            msg.channel = MagicMock(spec=["history"])
+
+            with patch.object(self.service, '_check_channel_activity') as mock_check:
+                await self.service.on_new_message(msg)
+                mock_check.assert_not_called()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_on_new_message_skips_dms(self):
+        """on_new_message should skip direct messages."""
+        async def run_test():
+            msg = self._make_mock_message(111, "Hello!")
+            msg.channel = MagicMock()  # Not a TextChannel
+
+            with patch.object(self.service, '_check_channel_activity') as mock_check:
+                await self.service.on_new_message(msg)
+                mock_check.assert_not_called()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_on_new_message_skips_bot_mentions(self):
+        """on_new_message should skip messages that mention the bot."""
+        async def run_test():
+            import discord
+            msg = self._make_mock_message(111, "Hey <@99999>", mentions=[self.mock_bot.user])
+            msg.channel = MagicMock(spec=discord.TextChannel)
+
+            with patch.object(self.service, '_check_channel_activity') as mock_check:
+                await self.service.on_new_message(msg)
+                mock_check.assert_not_called()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_on_new_message_skips_when_on_cooldown(self):
+        """on_new_message should skip when channel is on cooldown."""
+        async def run_test():
+            import discord
+            msg = self._make_mock_message(111, "Hello!")
+            msg.channel = MagicMock(spec=discord.TextChannel)
+            msg.channel.id = 12345
+
+            self.service._apply_cooldown(12345)
+
+            with patch.object(self.service, '_check_channel_activity') as mock_check:
+                await self.service.on_new_message(msg)
+                mock_check.assert_not_called()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_on_new_message_skips_when_not_running(self):
+        """on_new_message should skip when service is stopped."""
+        async def run_test():
+            self.service.stop()
+            msg = self._make_mock_message(111, "Hello!")
+
+            with patch.object(self.service, '_check_channel_activity') as mock_check:
+                await self.service.on_new_message(msg)
+                mock_check.assert_not_called()
+
+        self.loop.run_until_complete(run_test())
+
+
+if __name__ == "__main__":
+    unittest.main()
