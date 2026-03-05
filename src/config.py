@@ -17,6 +17,13 @@ DEATH_CHANNEL_ID = os.getenv("DEATH_CHANNEL_ID", "")
 # Proxies
 TRANSCRIPT_PROXY = os.getenv("TRANSCRIPT_PROXY", "")
 
+# Database
+DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
+DB_PORT = int(os.getenv("DB_PORT", "3306"))
+DB_USER = os.getenv("DB_USER", "cmwgpt_user")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+DB_NAME = os.getenv("DB_NAME", "cmwgpt")
+
 # Bot Configuration
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "anthropic/claude-haiku-4.5")
 DEFAULT_DRAW_MODEL = os.getenv("DEFAULT_DRAW_MODEL", "seedream")

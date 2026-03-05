@@ -53,13 +53,17 @@ class MentionHandler:
                 # Mark channel as active
                 state_service.mark_channel_active(message.channel.id)
 
-                chat_msgs, system_prompt = await self._prepare_mention_context(message, bot_user)
+                recent_messages, system_prompt = await self._prepare_mention_context(message, bot_user)
                 logger.info(
                     f"Context prepared for mention by {
                         message.author}, sending to OpenRouter...")
+                channel_id = message.channel.id
                 reply_content = await openai_service.get_chat_completion(
-                    model=model, messages=chat_msgs, system_prompt=system_prompt,
-                    bot_id=bot_user.id,
+                    model=model,
+                    messages=recent_messages,
+                    system_prompt=system_prompt,
+                    channel_id=channel_id,
+                    discord_user_id=message.author.id,
                 )
 
                 if reply_content is None:

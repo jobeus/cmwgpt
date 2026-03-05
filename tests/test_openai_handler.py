@@ -26,6 +26,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         """Set up test environment with mock client."""
         self.mock_client = AsyncMock()
+        self.mock_client.default_headers = {}
         openai_service.set_client(self.mock_client)
 
     async def test_get_chat_completion_success(self):

@@ -153,7 +153,7 @@ class AnnouncementService:
         else:
             # Message too long, upload to paste service
             try:
-                paste_url = upload_to_pasters(changelog)
+                paste_url = await upload_to_pasters(changelog)
                 message = f"{base_message} Changes:\n[View complete changelog]({paste_url})"
             except Exception as e:
                 logger.error(

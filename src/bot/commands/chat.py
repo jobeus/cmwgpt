@@ -204,6 +204,7 @@ class ChatCommands:
                     model=current_model, messages=current_conversation, system_prompt=system_prompt,
                     channel_id=channel_id, state_service=state_service,
                     bot_id=self.bot.user.id if self.bot.user else None,
+                    discord_user_id=interaction.user.id,
                 )
 
                 # Handle different response formats

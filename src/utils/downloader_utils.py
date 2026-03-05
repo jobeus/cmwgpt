@@ -76,7 +76,7 @@ async def fetch_all_url_content(message_text: str) -> str:
         twitter_contexts = []
         for t_url in twitter_urls:
             try:
-                tweet_text = await asyncio.to_thread(get_tweet_context, t_url)
+                tweet_text = await get_tweet_context(t_url)
                 if tweet_text:
                     if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
                        logger.info(f"Target Tweet {t_url} context grabbed successfully.") 
@@ -95,7 +95,7 @@ async def fetch_all_url_content(message_text: str) -> str:
         articles = []
         for t_url in target_urls:
             try:
-                article_text = await asyncio.to_thread(get_article_text, t_url)
+                article_text = await get_article_text(t_url)
                 if article_text:
                     if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
                        logger.info(f"URL content for {t_url} grabbed successfully.") 

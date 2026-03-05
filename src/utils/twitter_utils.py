@@ -4,8 +4,10 @@ import uuid
 import logging
 import requests
 import subprocess
+import asyncio
+import httpx
 from typing import List, Optional
-from groq import Groq
+from groq import AsyncGroq
 
 from src.config import RAPIDAPI_KEY, GROQ_API_KEY
 from src.utils.cache_utils import PersistentCache
@@ -52,7 +54,7 @@ def extract_video_url(data):
         return None
 
 
-def get_tweet_context(tweet_url: str) -> Optional[str]:
+async def get_tweet_context(tweet_url: str) -> Optional[str]:
     """
     Fetch the text content of a tweet and its top replies using RapidAPI.
     Results are cached to persistent disk.
@@ -82,15 +84,15 @@ def get_tweet_context(tweet_url: str) -> Optional[str]:
             "x-rapidapi-key": RAPIDAPI_KEY
         }
         
-        response = requests.get(
-            "https://x-com2.p.rapidapi.com/v2/TweetDetail/",
-            headers=headers,
-            params={"id": tweet_id},
-            timeout=15
-        )
-        response.raise_for_status()
-        
-        data = response.json()
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(
+                "https://x-com2.p.rapidapi.com/v2/TweetDetail/",
+                headers=headers,
+                params={"id": tweet_id}
+            )
+            response.raise_for_status()
+            
+            data = response.json()
         entries = data['data']['threaded_conversation_with_injections_v2']['instructions'][1]['entries']
         
         # Helper to get exact main tweet text
@@ -119,24 +121,30 @@ def get_tweet_context(tweet_url: str) -> Optional[str]:
                 mp3_path = f"/tmp/twit_aud_{tmp_id}.mp3"
                 
                 logger.info(f"Downloading Twitter video: {video_url}")
-                r = requests.get(video_url, stream=True, timeout=30)
-                r.raise_for_status()
-                with open(mp4_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    async with client.stream('GET', video_url) as r:
+                        r.raise_for_status()
+                        with open(mp4_path, 'wb') as f:
+                            async for chunk in r.aiter_bytes():
+                                f.write(chunk)
                 
                 logger.info("Converting to mp3 with ffmpeg...")
-                subprocess.run([
-                    "ffmpeg", "-y", "-i", mp4_path,
-                    "-vn", "-ar", "44100", "-ac", "2", "-b:a", "64k",
-                    mp3_path
-                ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                # Run ffmpeg in a thread pool to avoid blocking the event loop
+                await asyncio.to_thread(
+                    subprocess.run,
+                    [
+                        "ffmpeg", "-y", "-i", mp4_path,
+                        "-vn", "-ar", "44100", "-ac", "2", "-b:a", "64k",
+                        mp3_path
+                    ],
+                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
                 
                 if os.path.exists(mp3_path):
-                    groq_client = Groq(api_key=GROQ_API_KEY)
+                    groq_client = AsyncGroq(api_key=GROQ_API_KEY)
                     logger.info(f"Transcribing {mp3_path} using Groq...")
                     with open(mp3_path, "rb") as file:
-                        transcription = groq_client.audio.transcriptions.create(
+                        transcription = await groq_client.audio.transcriptions.create(
                             file=(os.path.basename(mp3_path), file.read()),
                             model="whisper-large-v3-turbo",
                             temperature=0,

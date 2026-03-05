@@ -20,6 +20,7 @@ from openai import (
 
 from src.config import OPENROUTER_API_KEY, IS_TESTING
 from src.utils.message_utils import clean_openai_response
+from src.db.logger import log_api_request
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,7 @@ class OpenAIService:
         channel_id: int = None,
         state_service: Any = None,
         bot_id: int = None,
+        discord_user_id: Optional[int] = None,
     ) -> str:
         """
         Gets a chat completion using the standard Chat Completions API.
@@ -207,7 +209,6 @@ class OpenAIService:
                         self._dump_bad_request(kwargs, client)
                         
                         if error_code in [429, 500, 502, 503, 504]:
-                           from openai import APIError
                            # Force this up to the retry loop catcher
                            raise APIError(message=f"Upstream provider error: {error_code}", request=None, body=error_data)
                            
@@ -257,6 +258,20 @@ class OpenAIService:
                             cleaned_text = f"[${cost:.3f}] {cleaned_text}"
                     except Exception as e:
                         logger.warning(f"Failed to parse cost: {e}")
+                        
+                    await log_api_request(
+                        service_name=f"openai/{actual_model}",
+                        method="POST",
+                        endpoint_url=str(response.http_response.url) if hasattr(response, 'http_response') else "https://openrouter.ai/api/v1/chat/completions",
+                        request_headers=dict(client.default_headers),
+                        request_body=kwargs,
+                        response_status=200,
+                        response_headers=dict(response.http_response.headers) if hasattr(response, 'http_response') else {},
+                        response_body=response.model_dump() if hasattr(response, 'model_dump') else {},
+                        cost=cost,
+                        discord_user_id=discord_user_id,
+                        discord_channel_id=channel_id
+                    )
                         
                     return cleaned_text
                 

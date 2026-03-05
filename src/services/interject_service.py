@@ -289,6 +289,7 @@ class InterjectService:
                 messages=chat_context,
                 system_prompt=system_prompt,
                 bot_id=bot_id,
+                discord_user_id=context_messages[-1].author.id if context_messages else None,
             )
 
             if reply_content is None:

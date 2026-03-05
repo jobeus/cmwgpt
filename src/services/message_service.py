@@ -46,7 +46,7 @@ class MessageService:
                         "Reply for channel message exceeded %d characters, attempting to upload to paste service",
                         self.DISCORD_MESSAGE_LIMIT,
                     )
-                    pasted_url = paste_service.upload_markdown(reply_text)
+                    pasted_url = await paste_service.upload_markdown(reply_text)
                     final_reply = f"My response was too long to post here, so I've uploaded it to: {pasted_url}"
                     await channel.send(final_reply, suppress_embeds=True)
                     return
@@ -136,7 +136,7 @@ class MessageService:
                     logger.info(
                         "Reply for interaction followup exceeded %d characters with base_content, "
                         "attempting to upload to paste service", self.DISCORD_MESSAGE_LIMIT, )
-                    pasted_url = paste_service.upload_markdown(reply_text)
+                    pasted_url = await paste_service.upload_markdown(reply_text)
                     final_content = (
                         f"{base_content}\n\n"
                         f"My detailed response was too long, so I've uploaded it here: {pasted_url}"
@@ -235,7 +235,7 @@ class MessageService:
                     logger.info(
                         "Reply for interaction followup with files exceeded %d characters with base_content, "
                         "attempting to upload to paste service", self.DISCORD_MESSAGE_LIMIT, )
-                    pasted_url = paste_service.upload_markdown(reply_text)
+                    pasted_url = await paste_service.upload_markdown(reply_text)
                     final_content = (
                         f"{base_content}\n\n"
                         f"My detailed response was too long, so I've uploaded it here: {pasted_url}"
@@ -318,7 +318,7 @@ class MessageService:
                         "Reply for channel message with files exceeded %d characters, attempting to upload to paste service",
                         self.DISCORD_MESSAGE_LIMIT,
                     )
-                    pasted_url = paste_service.upload_markdown(reply_text)
+                    pasted_url = await paste_service.upload_markdown(reply_text)
                     final_reply = f"My response was too long to post here, so I've uploaded it to: {pasted_url}"
                     await channel.send(content=final_reply, files=files, suppress_embeds=True)
                     return

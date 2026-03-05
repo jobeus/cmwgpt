@@ -11,10 +11,10 @@ from src.services.paste_service import paste_service
 import requests  # noqa: F401
 
 
-def upload_to_pasters(markdown_text: str) -> str:
+async def upload_to_pasters(markdown_text: str) -> str:
     """
     Upload markdown text to paste service.
 
     Legacy compatibility function that delegates to the new service.
     """
-    return paste_service.upload_markdown(markdown_text)
+    return await paste_service.upload_markdown(markdown_text)

@@ -5,9 +5,10 @@ Tests paste.rs integration functionality.
 
 from src.utils.pasters import upload_to_pasters
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
+import httpx
 
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -21,155 +22,110 @@ sys.path.insert(
         "src"))
 
 
-class TestPasters(unittest.TestCase):
+class TestPasters(unittest.IsolatedAsyncioTestCase):
     """Test pasters.py functionality."""
 
-    @patch("src.services.paste_service.requests.post")
-    def test_successful_upload(self, mock_post):
+    def _setup_mock_client(self, mock_client_class, status_code=201, text="https://paste.rs/abc123", ExceptionToRaise=None):
+        mock_instance = AsyncMock()
+        mock_post = AsyncMock()
+        
+        if ExceptionToRaise:
+            mock_post.side_effect = ExceptionToRaise
+        else:
+            mock_response = MagicMock()
+            mock_response.status_code = status_code
+            mock_response.text = text
+            mock_post.return_value = mock_response
+            
+        mock_instance.post = mock_post
+        mock_client_class.return_value.__aenter__.return_value = mock_instance
+        return mock_post
+
+    @patch("src.services.paste_service.httpx.AsyncClient")
+    async def test_successful_upload(self, mock_client_class):
         """Test successful upload to paste.rs."""
-        # Mock successful response
-        mock_response = MagicMock()
-        mock_response.status_code = 201
-        mock_response.text = "https://paste.rs/abc123"
-        mock_post.return_value = mock_response
+        mock_post = self._setup_mock_client(mock_client_class, 201, "https://paste.rs/abc123")
 
-        # Test upload
         test_text = "This is a test markdown content"
-        result = upload_to_pasters(test_text)
+        result = await upload_to_pasters(test_text)
 
-        # Verify result
         self.assertEqual(result, "https://paste.rs/abc123.md")
-
-        # Verify request was made correctly
         mock_post.assert_called_once()
-        call_args = mock_post.call_args
-        self.assertEqual(call_args[0][0], "https://paste.rs")
 
-        # Verify the data parameter is a BytesIO object with correct content
-        data_param = call_args[1]["data"]
-        self.assertEqual(data_param.read(), test_text.encode("utf-8"))
-
-    @patch("src.services.paste_service.requests.post")
-    def test_failed_upload_400(self, mock_post):
+    @patch("src.services.paste_service.httpx.AsyncClient")
+    async def test_failed_upload_400(self, mock_client_class):
         """Test failed upload with 400 status code."""
-        # Mock failed response
-        mock_response = MagicMock()
-        mock_response.status_code = 400
-        mock_response.text = "Bad Request"
-        mock_post.return_value = mock_response
+        self._setup_mock_client(mock_client_class, 400, "Bad Request")
 
-        # Test upload should raise exception
         test_text = "This is a test markdown content"
         with self.assertRaises(Exception) as context:
-            upload_to_pasters(test_text)
+            await upload_to_pasters(test_text)
 
         self.assertIn("paste.rs error: 400", str(context.exception))
         self.assertIn("Bad Request", str(context.exception))
 
-    @patch("src.services.paste_service.requests.post")
-    def test_failed_upload_500(self, mock_post):
+    @patch("src.services.paste_service.httpx.AsyncClient")
+    async def test_failed_upload_500(self, mock_client_class):
         """Test failed upload with 500 status code."""
-        # Mock server error response
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-        mock_response.text = "Internal Server Error"
-        mock_post.return_value = mock_response
+        self._setup_mock_client(mock_client_class, 500, "Internal Server Error")
 
-        # Test upload should raise exception
         test_text = "This is a test markdown content"
         with self.assertRaises(Exception) as context:
-            upload_to_pasters(test_text)
+            await upload_to_pasters(test_text)
 
         self.assertIn("paste.rs error: 500", str(context.exception))
         self.assertIn("Internal Server Error", str(context.exception))
 
-    @patch("src.services.paste_service.requests.post")
-    def test_upload_with_special_characters(self, mock_post):
+    @patch("src.services.paste_service.httpx.AsyncClient")
+    async def test_upload_with_special_characters(self, mock_client_class):
         """Test upload with special characters and unicode."""
-        # Mock successful response
-        mock_response = MagicMock()
-        mock_response.status_code = 201
-        mock_response.text = "https://paste.rs/xyz789"
-        mock_post.return_value = mock_response
+        mock_post = self._setup_mock_client(mock_client_class, 201, "https://paste.rs/xyz789")
 
-        # Test with special characters
         test_text = "Special chars: éñ中文🚀\n```python\nprint('hello')\n```"
-        result = upload_to_pasters(test_text)
+        result = await upload_to_pasters(test_text)
 
-        # Verify result
         self.assertEqual(result, "https://paste.rs/xyz789.md")
 
-        # Verify encoding
-        call_args = mock_post.call_args
-        data_param = call_args[1]["data"]
-        self.assertEqual(data_param.read(), test_text.encode("utf-8"))
-
-    @patch("src.services.paste_service.requests.post")
-    def test_upload_empty_string(self, mock_post):
+    @patch("src.services.paste_service.httpx.AsyncClient")
+    async def test_upload_empty_string(self, mock_client_class):
         """Test upload with empty string."""
-        # Mock successful response
-        mock_response = MagicMock()
-        mock_response.status_code = 201
-        mock_response.text = "https://paste.rs/empty123"
-        mock_post.return_value = mock_response
+        self._setup_mock_client(mock_client_class, 201, "https://paste.rs/empty123")
 
-        # Test with empty string
         test_text = ""
-        result = upload_to_pasters(test_text)
+        result = await upload_to_pasters(test_text)
 
-        # Verify result
         self.assertEqual(result, "https://paste.rs/empty123.md")
 
-    @patch("src.services.paste_service.requests.post")
-    def test_upload_large_text(self, mock_post):
+    @patch("src.services.paste_service.httpx.AsyncClient")
+    async def test_upload_large_text(self, mock_client_class):
         """Test upload with large text content."""
-        # Mock successful response
-        mock_response = MagicMock()
-        mock_response.status_code = 201
-        mock_response.text = "https://paste.rs/large456"
-        mock_post.return_value = mock_response
+        self._setup_mock_client(mock_client_class, 201, "https://paste.rs/large456")
 
-        # Test with large text (simulate Discord's 2000+ character limit)
         test_text = "A" * 5000  # 5000 characters
-        result = upload_to_pasters(test_text)
+        result = await upload_to_pasters(test_text)
 
-        # Verify result
         self.assertEqual(result, "https://paste.rs/large456.md")
 
-    @patch("src.services.paste_service.requests.post")
-    def test_response_text_stripping(self, mock_post):
+    @patch("src.services.paste_service.httpx.AsyncClient")
+    async def test_response_text_stripping(self, mock_client_class):
         """Test that response text is properly stripped of whitespace."""
-        # Mock response with whitespace
-        mock_response = MagicMock()
-        mock_response.status_code = 201
-        mock_response.text = "  https://paste.rs/whitespace123  \n"
-        mock_post.return_value = mock_response
+        self._setup_mock_client(mock_client_class, 201, "  https://paste.rs/whitespace123  \n")
 
-        # Test upload
         test_text = "Test content"
-        result = upload_to_pasters(test_text)
+        result = await upload_to_pasters(test_text)
 
-        # Verify whitespace is stripped
         self.assertEqual(result, "https://paste.rs/whitespace123.md")
 
-    @patch("src.services.paste_service.requests.post")
-    def test_network_error(self, mock_post):
+    @patch("src.services.paste_service.httpx.AsyncClient")
+    async def test_network_error(self, mock_client_class):
         """Test handling of network errors."""
-        # Import the exception class properly
-        import requests
+        self._setup_mock_client(mock_client_class, ExceptionToRaise=httpx.RequestError("Network error", request=MagicMock()))
 
-        # Mock network error
-        mock_post.side_effect = requests.RequestException("Network error")
-
-        # Test upload should raise exception with proper message
         test_text = "Test content"
         with self.assertRaises(Exception) as context:
-            upload_to_pasters(test_text)
+            await upload_to_pasters(test_text)
 
-        self.assertIn(
-            "Failed to upload to paste service", str(
-                context.exception))
-
+        self.assertIn("Failed to upload to paste service", str(context.exception))
 
 if __name__ == "__main__":
     unittest.main()

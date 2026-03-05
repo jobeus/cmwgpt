@@ -1,8 +1,9 @@
 import re
 import logging
-import requests
+import httpx
 from typing import List, Optional
 from urllib.parse import urlparse
+from src.db.logger import log_api_request
 
 import trafilatura
 from src.config import TRANSCRIPT_PROXY
@@ -61,7 +62,7 @@ def inject_article_cache(url: str, text: str) -> None:
     _article_cache[url] = text
     logger.debug(f"Directly injected cache for article: {url}")
 
-def get_article_text(url: str) -> Optional[str]:
+async def get_article_text(url: str) -> Optional[str]:
     """
     Fetch the text content for a URL, falling back from trafilatura to newspaper3k.
     Results are cached to persistent disk.
@@ -91,9 +92,10 @@ def get_article_text(url: str) -> Optional[str]:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
         
-        response = requests.get(url, headers=headers, proxies=proxies, timeout=15)
-        response.raise_for_status()
-        html = response.text
+        async with httpx.AsyncClient(proxies=proxies, timeout=15.0) as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            html = response.text
         
         # Try trafilatura first
         text = trafilatura.extract(html)
@@ -111,6 +113,19 @@ def get_article_text(url: str) -> Optional[str]:
             return None
 
         _article_cache[url] = text
+        
+        await log_api_request(
+            service_name="url_utils/get_article_text",
+            method="GET",
+            endpoint_url=url,
+            request_headers=headers,
+            request_body={},
+            response_status=200,
+            response_headers={},
+            response_body={"summary_length": len(text), "summary_preview": text[:500]},
+            cost=0.0
+        )
+        
         return text
 
     except Exception as e:

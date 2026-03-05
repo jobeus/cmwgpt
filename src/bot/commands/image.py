@@ -107,7 +107,12 @@ class ImageCommands:
                 cost = None
                 # Generate the image
                 if runpod_service.has_model(active_model):
-                    img_bytes, cost = await runpod_service.generate_image(prompt=prompt, model=active_model)
+                    img_bytes, cost = await runpod_service.generate_image(
+                        prompt=prompt, 
+                        model=active_model,
+                        discord_user_id=interaction.user.id,
+                        discord_channel_id=channel_id
+                    )
                 else:
                     raise Exception(
                         f"Model {active_model} is not supported or not configured via Runpod.")
@@ -313,7 +318,13 @@ class ImageCommands:
                             images_b64.append(
                                 base64.b64encode(img_bytes).decode('utf-8'))
 
-                    img_bytes, cost = await runpod_service.edit_image(prompt=prompt, model=active_model, images=images_b64)
+                    img_bytes, cost = await runpod_service.edit_image(
+                        prompt=prompt, 
+                        model=active_model, 
+                        images=images_b64,
+                        discord_user_id=interaction.user.id,
+                        discord_channel_id=channel_id
+                    )
                 else:
                     await interaction.followup.send(content=f"Sorry, model {active_model} does not support editing.")
                     return

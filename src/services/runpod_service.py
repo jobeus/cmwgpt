@@ -6,6 +6,7 @@ import httpx
 import logging
 from typing import Optional
 from src.config import RUNPOD_IO_API_KEY
+from src.db.logger import log_api_request
 
 logger = logging.getLogger(__name__)
 
@@ -148,8 +149,9 @@ class RunpodService:
     async def _execute_request(self,
                                url: str,
                                payload: dict,
-                               operation: str) -> tuple[bytes,
-                                                        Optional[float]]:
+                               operation: str,
+                               discord_user_id: Optional[int] = None,
+                               discord_channel_id: Optional[int] = None) -> tuple[bytes, Optional[float]]:
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}"
@@ -177,6 +179,21 @@ class RunpodService:
                     logger.info(f"Downloading Runpod image from: {image_url}")
                     img_response = await client.get(image_url)
                     img_response.raise_for_status()
+
+                    await log_api_request(
+                        service_name=f"runpod/{operation}",
+                        method="POST",
+                        endpoint_url=url,
+                        request_headers={"Content-Type": "application/json", "Authorization": "Bearer ***"},
+                        request_body=payload,
+                        response_status=response.status_code,
+                        response_headers=dict(response.headers),
+                        response_body=data,
+                        cost=cost or 0.0,
+                        discord_user_id=discord_user_id,
+                        discord_channel_id=discord_channel_id
+                    )
+
                     return img_response.content, cost
                 elif status == "FAILED":
                     error_msg = data.get("error", "Unknown error")
@@ -198,7 +215,7 @@ class RunpodService:
                 raise RunpodServiceError(f"Unexpected error: {str(e)}")
 
     async def generate_image(
-            self, prompt: str, model: str) -> tuple[bytes, Optional[float]]:
+            self, prompt: str, model: str, discord_user_id: Optional[int] = None, discord_channel_id: Optional[int] = None) -> tuple[bytes, Optional[float]]:
         if not self.is_configured():
             raise RunpodServiceError("Runpod API key is not configured.")
 
@@ -207,10 +224,10 @@ class RunpodService:
                 f"Model {model} is not supported by Runpod service.")
 
         model_config = self.models[model]
-        return await self._execute_request(model_config["url"], model_config["payload"](prompt), "generate")
+        return await self._execute_request(model_config["url"], model_config["payload"](prompt), "generate", discord_user_id, discord_channel_id)
 
     async def edit_image(self, prompt: str, model: str,
-                         images: list[str]) -> tuple[bytes, Optional[float]]:
+                         images: list[str], discord_user_id: Optional[int] = None, discord_channel_id: Optional[int] = None) -> tuple[bytes, Optional[float]]:
         if not self.is_configured():
             raise RunpodServiceError("Runpod API key is not configured.")
 
@@ -219,7 +236,7 @@ class RunpodService:
                 f"Model {model} is not supported for editing by Runpod service.")
 
         model_config = self.edit_models[model]
-        return await self._execute_request(model_config["url"], model_config["payload"](prompt, images), "edit")
+        return await self._execute_request(model_config["url"], model_config["payload"](prompt, images), "edit", discord_user_id, discord_channel_id)
 
 
 runpod_service = RunpodService()
