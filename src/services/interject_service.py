@@ -7,7 +7,9 @@ configurable thresholds, cooldowns, and a daily cap to avoid being obnoxious.
 """
 
 import asyncio
+import json
 import logging
+import os
 import random
 import re
 import time
@@ -47,7 +49,7 @@ COOLDOWN_MINUTES = 30
 # Number of recent messages to include as AI context when generating a reply
 CONTEXT_LINES = 20
 
-# Maximum interjections per calendar day (UTC). Resets at midnight.
+# Maximum interjections per calendar day (Local Server Time). Resets at midnight.
 MAX_INTERJECTIONS_PER_DAY = 10
 
 # If True, messages with embeds or attachments break the streak even if they
@@ -56,6 +58,9 @@ EXCLUDE_EMBEDS = True
 
 # Pattern to strip cost prefixes like [$0.011] from the start of bot messages
 COST_PREFIX_PATTERN = re.compile(r'^\[\$[\d.]+(?:\s*@\s*[^\]]+)?\]\s*')
+
+# File to persist daily interjection counts
+STATE_FILE = ".cache/cmwgpt_interject_counts.json"
 
 
 class InterjectService:
@@ -70,6 +75,9 @@ class InterjectService:
         # Lock to prevent concurrent interjection attempts
         self._lock = asyncio.Lock()
         self._running = False
+        
+        # Load state from file if it exists
+        self._load_state()
 
     def set_bot(self, bot: commands.Bot) -> None:
         """Set the Discord bot instance."""
@@ -260,7 +268,7 @@ class InterjectService:
         chat_context: list[dict] = []
         for msg in context_messages:
             role = "assistant" if msg.author.id == bot_id else "user"
-            timestamp_str = msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            timestamp_str = msg.created_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
             text = f"[{timestamp_str}] [{msg.id}] <@{msg.author.id}>:"
             if msg.content:
                 content = msg.content
@@ -328,23 +336,49 @@ class InterjectService:
 
     def _is_daily_cap_reached(self, channel_id: int) -> bool:
         """Check if the daily interjection cap for the channel has been reached."""
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now().strftime("%Y-%m-%d")
         if self._daily_tracker["date"] != today:
             # New day — reset
             self._daily_tracker = {"date": today, "counts": {}}
+            self._save_state()
             
         daily_max = self._get_setting(channel_id, "daily_max", MAX_INTERJECTIONS_PER_DAY)
-        current_count = self._daily_tracker["counts"].get(channel_id, 0)
+        # Handle string keys from JSON loading
+        current_count = self._daily_tracker["counts"].get(str(channel_id), self._daily_tracker["counts"].get(channel_id, 0))
         return current_count >= daily_max
 
     def _increment_daily_count(self, channel_id: int) -> None:
         """Increment the daily interjection counter for the channel."""
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now().strftime("%Y-%m-%d")
+        channel_key = str(channel_id) # consistently use strings for json
+        
         if self._daily_tracker["date"] != today:
-            self._daily_tracker = {"date": today, "counts": {channel_id: 1}}
+            self._daily_tracker = {"date": today, "counts": {channel_key: 1}}
         else:
-            current = self._daily_tracker["counts"].get(channel_id, 0)
-            self._daily_tracker["counts"][channel_id] = current + 1
+            current = self._daily_tracker["counts"].get(channel_key, self._daily_tracker["counts"].get(channel_id, 0))
+            self._daily_tracker["counts"][channel_key] = current + 1
+            
+        self._save_state()
+
+    def _save_state(self) -> None:
+        """Save the daily tracker to disk."""
+        try:
+            os.makedirs(os.path.dirname(STATE_FILE) or ".", exist_ok=True)
+            with open(STATE_FILE, "w", encoding="utf-8") as f:
+                json.dump(self._daily_tracker, f)
+        except (OSError, ValueError) as exc:
+            logger.error(f"Failed to save interject counts state: {exc}")
+            
+    def _load_state(self) -> None:
+        """Load daily tracker from disk."""
+        if not os.path.exists(STATE_FILE):
+            return
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                self._daily_tracker = json.load(f)
+            logger.info("Loaded daily interject counts from state file")
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            logger.error(f"Failed to load interject counts state: {exc}")
 
     @staticmethod
     def _roll_chance(chance: int) -> bool:

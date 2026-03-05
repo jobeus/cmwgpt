@@ -59,7 +59,7 @@ class TestInterjectService(unittest.TestCase):
 
     def test_daily_cap_reached(self):
         """Daily cap should be reached when count hits the limit."""
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now().strftime("%Y-%m-%d")
         self.service._daily_tracker = {"date": today, "counts": {12345: 10}}
         self.assertTrue(self.service._is_daily_cap_reached(12345))
 
@@ -70,16 +70,16 @@ class TestInterjectService(unittest.TestCase):
 
     def test_increment_daily_count(self):
         """Incrementing daily count should increase the counter."""
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now().strftime("%Y-%m-%d")
         self.service._daily_tracker = {"date": today, "counts": {}}
         self.service._increment_daily_count(12345)
-        self.assertEqual(self.service._daily_tracker["counts"][12345], 1)
+        self.assertEqual(self.service._daily_tracker["counts"]["12345"], 1)
 
     def test_increment_daily_count_new_day(self):
         """Incrementing on a new day should reset and set to 1."""
-        self.service._daily_tracker = {"date": "1999-01-01", "counts": {12345: 99}}
+        self.service._daily_tracker = {"date": "1999-01-01", "counts": {"12345": 99}}
         self.service._increment_daily_count(12345)
-        self.assertEqual(self.service._daily_tracker["counts"][12345], 1)
+        self.assertEqual(self.service._daily_tracker["counts"]["12345"], 1)
 
     # ----- Chance roll tests -----
 
