@@ -87,6 +87,16 @@ class InterjectCommands:
                 safe_run(interaction, self._handle_interject_view, interaction)
             )
 
+        @interject_group.command(
+            name="count",
+            description="View the number of interjections used and remaining for this channel today"
+        )
+        async def interject_count(interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            asyncio.create_task(
+                safe_run(interaction, self._handle_interject_count, interaction)
+            )
+
         return interject_group
 
     async def _handle_interject_set(
@@ -180,4 +190,20 @@ class InterjectCommands:
         )
 
         logger.info(f"[/interject view] Channel {channel_id}: displayed settings.")
+        await interaction.followup.send(msg, ephemeral=True)
+
+    async def _handle_interject_count(self, interaction: discord.Interaction) -> None:
+        """Handle the /interject count command."""
+        channel_id = interaction.channel.id
+        from src.services.interject_service import interject_service
+        current_count, daily_max = interject_service.get_daily_status(channel_id)
+        
+        remaining = max(0, daily_max - current_count)
+        msg = (
+            f"**Interjection Count for #{interaction.channel.name}**\n"
+            f"- Used today: `{current_count}`\n"
+            f"- Daily Max: `{daily_max}`\n"
+            f"- Remaining: `{remaining}`"
+        )
+        logger.info(f"[/interject count] Channel {channel_id}: displayed count ({current_count}/{daily_max}).")
         await interaction.followup.send(msg, ephemeral=True)

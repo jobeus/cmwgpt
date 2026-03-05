@@ -360,6 +360,16 @@ class InterjectService:
             
         self._save_state()
 
+    def get_daily_status(self, channel_id: int) -> tuple[int, int]:
+        """Return the current daily count and maximum cap for the given channel."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        if self._daily_tracker["date"] != today:
+             return 0, self._get_setting(channel_id, "daily_max", MAX_INTERJECTIONS_PER_DAY)
+             
+        daily_max = self._get_setting(channel_id, "daily_max", MAX_INTERJECTIONS_PER_DAY)
+        current_count = self._daily_tracker["counts"].get(str(channel_id), self._daily_tracker["counts"].get(channel_id, 0))
+        return current_count, daily_max
+
     def _save_state(self) -> None:
         """Save the daily tracker to disk."""
         try:
