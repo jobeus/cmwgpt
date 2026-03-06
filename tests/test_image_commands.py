@@ -15,6 +15,38 @@ class _AsyncTyping:
 
 
 class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
+    def test_editmodel_choices_follow_injected_runpod_flag(self):
+        no_runpod_commands = ImageCommands(
+            MagicMock(),
+            state_service=MagicMock(),
+            message_service=MagicMock(),
+            runpod_service=MagicMock(),
+            default_draw_model="seedream",
+            default_edit_model="seedream",
+            enable_runpod_models=False,
+        )
+        no_runpod_choices = [
+            choice.value
+            for choice in no_runpod_commands._create_editmodel_command().parameters[0].choices
+        ]
+
+        with_runpod_commands = ImageCommands(
+            MagicMock(),
+            state_service=MagicMock(),
+            message_service=MagicMock(),
+            runpod_service=MagicMock(),
+            default_draw_model="seedream",
+            default_edit_model="seedream",
+            enable_runpod_models=True,
+        )
+        with_runpod_choices = [
+            choice.value
+            for choice in with_runpod_commands._create_editmodel_command().parameters[0].choices
+        ]
+
+        self.assertEqual(no_runpod_choices, ["seedream"])
+        self.assertEqual(with_runpod_choices, ["seedream", "qwen", "pruna"])
+
     async def test_handle_draw_command_uses_injected_services(self):
         state_service = MagicMock()
         state_service.get_draw_model.return_value = "wan-2.6"

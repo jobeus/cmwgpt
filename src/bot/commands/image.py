@@ -407,7 +407,7 @@ class ImageCommands:
             Choice(name="seedream", value="seedream"),
         ]
 
-        if RUNPOD_IO_API_KEY:
+        if self._enable_runpod_models:
             edit_model_choices.extend([
                 Choice(name="qwen", value="qwen"),
                 Choice(name="pruna", value="pruna"),
