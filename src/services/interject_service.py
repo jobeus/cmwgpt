@@ -276,6 +276,34 @@ class InterjectService:
                     content = COST_PREFIX_PATTERN.sub("", content)
                 text += f" {content}"
 
+            # Append reply context if applicable
+            if msg.reference and msg.reference.message_id:
+                ref_msg = getattr(msg.reference, 'resolved', None)
+                if ref_msg is None:
+                    ref_msg = getattr(msg.reference, 'cached_message', None)
+
+                ref_text = None
+                ref_timestamp = None
+                ref_author_id = None
+                if isinstance(ref_msg, discord.Message) and ref_msg.content:
+                    ref_text = ref_msg.content
+                    ref_timestamp = ref_msg.created_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+                    ref_author_id = ref_msg.author.id
+                else:
+                    for h_msg in context_messages:
+                        if h_msg.id == msg.reference.message_id:
+                            ref_text = h_msg.content
+                            ref_timestamp = h_msg.created_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+                            ref_author_id = h_msg.author.id
+                            break
+
+                if ref_text is not None and ref_timestamp and ref_author_id:
+                    text += f" [Replying to message: \"[{ref_timestamp}] [{msg.reference.message_id}] <@{ref_author_id}>: {ref_text}\"]"
+                elif ref_text is not None:
+                    text += f" [Replying to message: \"{ref_text}\"]"
+                else:
+                    text += f" [Replying to message ID: {msg.reference.message_id}]"
+
             chat_context.append(
                 {"role": role, "content": [{"type": "text", "text": text}]}
             )
