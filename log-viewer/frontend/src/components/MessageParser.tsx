@@ -1,9 +1,33 @@
-
+import { useState } from 'react';
 import userMapData from '../user_map.json';
-import { Image as ImageIcon, FileAudio, ExternalLink } from 'lucide-react';
+import { Image as ImageIcon, FileAudio, ExternalLink, Copy, Check } from 'lucide-react';
 
 const userMap = userMapData as Record<string, string>;
 const GUILD_ID = import.meta.env.VITE_DISCORD_GUILD_ID || '1120463633693024346'; // fallback for demo
+
+export const CopyButton = ({ text, className = '' }: { text: string, className?: string }) => {
+    const [copied, setCopied] = useState(false);
+
+    const handleCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            console.error('Failed to copy text: ', err);
+        }
+    };
+
+    return (
+        <button
+            onClick={handleCopy}
+            title="Copy text"
+            className={`p-1.5 rounded-md text-gray-400 hover:text-gray-200 hover:bg-gray-700/50 transition-colors ${className}`}
+        >
+            {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+        </button>
+    );
+};
 
 // Helper to truncate raw base64 strings so they don't break JSON views
 export const truncateBase64 = (str: string) => {
@@ -259,7 +283,67 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
     } else if (serviceName.startsWith('rapidapi/twitter')) {
         // Twitter RapidAPI Fetch
         messages.push({ role: 'system', content: `[Action: Fetching Twitter Data via RapidAPI]` });
-        messages.push({ role: 'assistant', content: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) });
+
+        // Try to format the JSON data into a readable tweet + replies
+        let formattedTwitterContent = '';
+        if (typeof responseBody === 'object' && responseBody?.data?.threaded_conversation_with_injections_v2) {
+            try {
+                const entries = responseBody.data.threaded_conversation_with_injections_v2.instructions[1].entries;
+
+                const extractTweetText = (result: any) => {
+                    const note = result.note_tweet;
+                    if (note && note.note_tweet_results?.result?.text) {
+                        return note.note_tweet_results.result.text;
+                    }
+                    return result.legacy.full_text;
+                };
+
+                const extractAuthor = (result: any) => {
+                    return result.core.user_results.result.legacy.name;
+                };
+
+                // Main tweet
+                const mainResult = entries[0].content.itemContent.tweet_results.result;
+                const mainAuthor = extractAuthor(mainResult);
+                const mainText = extractTweetText(mainResult);
+
+                // Replies
+                let repliesText = "";
+                const replies = [];
+                for (let i = 1; i < Math.min(6, entries.length); i++) {
+                    const entry = entries[i];
+                    try {
+                        let replyResult;
+                        const items = entry.content.items;
+                        if (items && items.length > 0) {
+                            replyResult = items[0].item.itemContent.tweet_results.result;
+                        } else {
+                            replyResult = entry.content.itemContent.tweet_results.result;
+                        }
+
+                        if (replyResult) {
+                            const replyAuthor = extractAuthor(replyResult);
+                            const replyText = extractTweetText(replyResult);
+                            replies.push(`  ↳ ${replyAuthor}: ${replyText}`);
+                        }
+                    } catch (e) {
+                        // ignore missing items
+                    }
+                }
+
+                if (replies.length > 0) {
+                    repliesText = "\n\nTop replies:\n" + replies.join('\n');
+                }
+
+                formattedTwitterContent = `Tweet by ${mainAuthor}:\n${mainText}${repliesText}`;
+            } catch (e) {
+                formattedTwitterContent = JSON.stringify(responseBody, null, 2);
+            }
+        } else {
+            formattedTwitterContent = typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2);
+        }
+
+        messages.push({ role: 'assistant', content: formattedTwitterContent });
     } else if (serviceName.startsWith('url_utils/')) {
         // Article scraping
         const representsPython = typeof requestBody === 'string' && requestBody.includes('import');
@@ -285,9 +369,16 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
             {messages.map((msg, idx) => {
                 const isUser = msg.role.includes('user') || msg.role.includes('request') || msg.role === 'system';
                 return (
-                    <div key={idx} className={`flex w-full ${isUser ? 'justify-start' : 'justify-end'}`}>
-                        <div className={`max-w-[80%] rounded-2xl px-5 py-4 shadow-sm ${isUser ? 'bg-gray-800 text-gray-100 border border-gray-700/50' : 'bg-blue-900/30 border border-blue-500/20 text-gray-100'
+                    <div key={idx} className={`flex w-full group ${isUser ? 'justify-start' : 'justify-end'}`}>
+                        <div className={`relative max-w-[80%] rounded-2xl px-5 py-4 shadow-sm ${isUser ? 'bg-gray-800 text-gray-100 border border-gray-700/50' : 'bg-blue-900/30 border border-blue-500/20 text-gray-100'
                             }`}>
+
+                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <CopyButton
+                                    text={typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}
+                                />
+                            </div>
+
                             {msg.role && <div className="text-xs font-bold uppercase tracking-wider mb-2 opacity-50">{msg.role}</div>}
                             {renderMessageContent(msg.content, channelId)}
                         </div>
