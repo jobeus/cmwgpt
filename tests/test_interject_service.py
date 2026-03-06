@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 import asyncio
 import time
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import sys
 import os
@@ -385,6 +386,147 @@ class TestInterjectService(unittest.TestCase):
             with patch.object(self.service, '_check_channel_activity') as mock_check:
                 await self.service.on_new_message(msg)
                 mock_check.assert_not_called()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_get_setting_daily_status_and_state_persistence_helpers(self):
+        self.service._state_service.get_interject_settings.return_value = {"daily_max": 7, "cooldown": 3}
+        self.assertEqual(self.service._get_setting(12345, "daily_max", 10), 7)
+        self.assertEqual(self.service._get_setting(12345, "missing", 10), 10)
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        self.service._daily_tracker = {"date": today, "counts": {"12345": 2}}
+        self.assertEqual(self.service.get_daily_status(12345), (2, 7))
+
+        self.service._daily_tracker = {"date": "1999-01-01", "counts": {"12345": 99}}
+        self.assertEqual(self.service.get_daily_status(12345), (0, 7))
+
+    def test_save_and_load_state_error_paths(self):
+        self.service._daily_tracker = {"date": "2024-01-01", "counts": {"123": 1}}
+        with patch("builtins.open", side_effect=OSError("denied")):
+            self.service._save_state()
+
+        with patch("os.path.exists", return_value=True), patch(
+            "builtins.open", side_effect=ValueError("bad")
+        ):
+            self.service._load_state()
+
+    def test_on_new_message_skips_when_daily_cap_or_lock_or_activity_fail(self):
+        async def run_test():
+            import discord
+
+            msg = self._make_mock_message(111, "Hello!")
+            msg.channel = MagicMock(spec=discord.TextChannel)
+            msg.channel.id = 12345
+            msg.channel.name = "general"
+            msg.mentions = []
+
+            with patch.object(self.service, "_is_daily_cap_reached", return_value=True), patch.object(
+                self.service, "_check_channel_activity", new=AsyncMock()
+            ) as mock_check:
+                await self.service.on_new_message(msg)
+                mock_check.assert_not_called()
+
+            with patch.object(self.service._lock, "locked", return_value=True), patch.object(
+                self.service, "_check_channel_activity", new=AsyncMock()
+            ) as mock_check:
+                await self.service.on_new_message(msg)
+                mock_check.assert_not_called()
+
+            with patch.object(self.service, "_check_channel_activity", new=AsyncMock(return_value=False)), patch.object(
+                self.service, "_roll_chance"
+            ) as mock_roll:
+                await self.service.on_new_message(msg)
+                mock_roll.assert_not_called()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_on_new_message_applies_cooldown_on_failed_roll_and_handles_errors(self):
+        async def run_test():
+            import discord
+
+            msg = self._make_mock_message(111, "Hello!")
+            msg.channel = MagicMock(spec=discord.TextChannel)
+            msg.channel.id = 12345
+            msg.channel.name = "general"
+            msg.mentions = []
+
+            with patch.object(self.service, "_check_channel_activity", new=AsyncMock(return_value=True)), patch.object(
+                self.service, "_roll_chance", return_value=False
+            ), patch.object(self.service, "_apply_cooldown") as mock_cooldown:
+                await self.service.on_new_message(msg)
+                mock_cooldown.assert_called_once_with(12345)
+
+            with patch.object(self.service, "_check_channel_activity", new=AsyncMock(side_effect=RuntimeError("boom"))):
+                await self.service.on_new_message(msg)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_do_interject_handles_reply_formats_none_dict_and_failures(self):
+        async def run_test():
+            self.service._state_service.get_system_prompt.return_value = "channel prompt"
+            self.service._state_service.get_model.return_value = "chosen-model"
+            self.service._message_service.send_channel_reply = AsyncMock()
+
+            channel = MagicMock()
+            channel.id = 123
+            channel.name = "general"
+
+            ref_author = SimpleNamespace(id=222)
+            ref_msg = SimpleNamespace(
+                content="earlier text",
+                created_at=MagicMock(),
+                author=ref_author,
+            )
+            ref_msg.created_at.astimezone.return_value.strftime.return_value = "2024-01-01 00:00:00"
+
+            msg1 = MagicMock()
+            msg1.author.id = 99999
+            msg1.content = "[$1.23] bot said hi"
+            msg1.reference = None
+            msg1.id = 1
+            msg1.created_at.astimezone.return_value.strftime.return_value = "2024-01-01 00:00:01"
+
+            msg2 = MagicMock()
+            msg2.author.id = 123
+            msg2.content = "replying"
+            msg2.id = 2
+            msg2.reference = SimpleNamespace(message_id=55, resolved=ref_msg, cached_message=None)
+            msg2.created_at.astimezone.return_value.strftime.return_value = "2024-01-01 00:00:02"
+
+            msg3 = MagicMock()
+            msg3.author.id = 456
+            msg3.content = "fallback"
+            msg3.id = 55
+            msg3.reference = None
+            msg3.created_at.astimezone.return_value.strftime.return_value = "2024-01-01 00:00:03"
+
+            async def history(limit):
+                for item in [msg2, msg3, msg1]:
+                    yield item
+
+            channel.history = history
+            self.mock_bot.user = SimpleNamespace(id=99999)
+
+            self.service._openai_service.get_chat_completion = AsyncMock(side_effect=[None, {"text": "dict reply"}, RuntimeError("boom")])
+            self.service._mention_legend_provider = AsyncMock(return_value="legend text")
+
+            await self.service._do_interject(channel, 99999)
+            self.service._message_service.send_channel_reply.assert_not_awaited()
+
+            await self.service._do_interject(channel, 99999)
+            self.service._message_service.send_channel_reply.assert_awaited_once_with(channel, "dict reply")
+            self.assertIn(123, self.service._cooldowns)
+            self.assertEqual(self.service._daily_tracker["counts"]["123"], 1)
+
+            await self.service._do_interject(channel, 99999)
+
+            call = self.service._openai_service.get_chat_completion.await_args_list[1]
+            self.assertEqual(call.kwargs["model"], "chosen-model")
+            self.assertIn("legend text", call.kwargs["system_prompt"])
+            messages = call.kwargs["messages"]
+            self.assertIn("bot said hi", messages[0]["content"][0]["text"])
+            self.assertIn("Replying to message", messages[2]["content"][0]["text"])
 
         self.loop.run_until_complete(run_test())
 

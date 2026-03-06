@@ -475,7 +475,7 @@ class StateService:
             logger.debug(f"State saved to temporary file: {temp_filename}")
             return temp_filename
 
-        except (OSError, PermissionError, json.JSONEncodeError) as e:
+        except (OSError, PermissionError, TypeError, ValueError) as e:
             logger.error(f"Failed to save state to temporary file: {e}")
             return None
 

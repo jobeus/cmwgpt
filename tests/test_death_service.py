@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -317,6 +318,169 @@ class TestDeathService(unittest.TestCase):
 
             self.service.stop()
             self.assertFalse(self.service._running)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_get_setting_and_get_session_reuse(self):
+        self.state_service.get_death_settings.return_value = {"interval": 9}
+        self.assertEqual(self.service._get_setting("interval", 15), 9)
+        self.assertEqual(self.service._get_setting("missing", 15), 15)
+
+        async def run_test():
+            session_one = await self.service._get_session()
+            session_two = await self.service._get_session()
+            self.assertIs(session_one, session_two)
+            await session_one.close()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_start_already_running_and_stop_when_not_running(self):
+        def fake_create_task(coro):
+            coro.close()
+            task = MagicMock()
+            task.done.return_value = False
+            return task
+
+        with patch("src.services.death_service.asyncio.create_task", side_effect=fake_create_task):
+            self.service.start()
+            first_task = self.service._task
+            self.service.start()
+        self.assertIs(self.service._task, first_task)
+
+        self.service.stop()
+        self.service.stop()
+
+    def test_save_and_load_state_handle_errors(self):
+        self.service._known_names = {("John Doe", "John_Doe")}
+
+        with patch("builtins.open", side_effect=OSError("denied")):
+            self.service._save_state()
+
+        with patch("os.path.exists", return_value=True), patch(
+            "builtins.open", mock_open(read_data="{bad json")
+        ):
+            self.service._known_names = set()
+            self.service._load_state()
+            self.assertEqual(self.service._known_names, set())
+
+    def test_poll_once_sets_baseline_and_handles_status_and_new_names(self):
+        async def run_test():
+            async def fake_views(article_title, session):
+                if article_title == "New_One":
+                    return 200000
+                if article_title == "Low_Views":
+                    return 1000
+                if article_title == "No_Data":
+                    return None
+                if article_title == "Boom":
+                    raise RuntimeError("boom")
+                raise AssertionError(f"unexpected article {article_title}")
+
+            bad_resp = AsyncMock()
+            bad_resp.status = 500
+            ok_resp = AsyncMock()
+            ok_resp.status = 200
+            ok_resp.text = AsyncMock(return_value=SAMPLE_HTML)
+
+            session = MagicMock()
+            session.get = MagicMock(side_effect=[
+                AsyncMock(__aenter__=AsyncMock(return_value=bad_resp), __aexit__=AsyncMock(return_value=False)),
+                AsyncMock(__aenter__=AsyncMock(return_value=ok_resp), __aexit__=AsyncMock(return_value=False)),
+                AsyncMock(__aenter__=AsyncMock(return_value=ok_resp), __aexit__=AsyncMock(return_value=False)),
+            ])
+
+            with patch.object(self.service, "_get_session", AsyncMock(return_value=session)), patch.object(
+                self.service, "_save_state"
+            ) as mock_save, patch.object(
+                self.service, "_get_avg_monthly_views", AsyncMock(side_effect=fake_views)
+            ) as mock_views, patch.object(
+                self.service, "_announce", AsyncMock()
+            ) as mock_announce, patch(
+                "src.services.death_service.parse_deaths_html",
+                side_effect=[
+                    [("John Doe", "John_Doe")],
+                    [
+                        ("John Doe", "John_Doe"),
+                        ("New One", "New_One"),
+                        ("Low Views", "Low_Views"),
+                        ("No Data", "No_Data"),
+                        ("Boom", "Boom"),
+                    ],
+                ],
+            ):
+                await self.service._poll_once()
+                self.assertTrue(self.service._first_poll)
+
+                await self.service._poll_once()
+                self.assertFalse(self.service._first_poll)
+                self.assertEqual(self.service._known_names, {("John Doe", "John_Doe")})
+
+                await self.service._poll_once()
+
+            mock_save.assert_called_once()
+            self.assertEqual(mock_views.await_count, 4)
+            mock_announce.assert_awaited_once_with("New One", "New_One", 200000)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_get_avg_monthly_views_handles_empty_items_429_and_other_errors(self):
+        async def run_test():
+            empty_resp = AsyncMock()
+            empty_resp.status = 200
+            empty_resp.json = AsyncMock(return_value={"items": []})
+            session = MagicMock()
+            session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=empty_resp), __aexit__=AsyncMock(return_value=False)))
+            self.assertEqual(await self.service._get_avg_monthly_views("Missing", session), 0)
+
+            rate_resp = AsyncMock()
+            rate_resp.status = 429
+            other_resp = AsyncMock()
+            other_resp.status = 500
+            other_resp.text = AsyncMock(return_value="oops")
+            session = MagicMock()
+            session.get = MagicMock(side_effect=[
+                AsyncMock(__aenter__=AsyncMock(return_value=rate_resp), __aexit__=AsyncMock(return_value=False)),
+                AsyncMock(__aenter__=AsyncMock(return_value=rate_resp), __aexit__=AsyncMock(return_value=False)),
+                AsyncMock(__aenter__=AsyncMock(return_value=rate_resp), __aexit__=AsyncMock(return_value=False)),
+            ])
+            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+                self.assertIsNone(await self.service._get_avg_monthly_views("Rate Limited", session))
+            self.assertEqual(mock_sleep.await_count, 3)
+
+            session = MagicMock()
+            session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=other_resp), __aexit__=AsyncMock(return_value=False)))
+            self.assertIsNone(await self.service._get_avg_monthly_views("Oops", session))
+
+        self.loop.run_until_complete(run_test())
+
+    def test_announce_handles_missing_bot_and_http_error(self):
+        async def run_test():
+            self.service._bot = None
+            await self.service._announce("Ghost", "Ghost", 1)
+
+            channel = AsyncMock()
+            channel.send = AsyncMock(side_effect=Exception("send failed"))
+            self.service._bot = MagicMock(get_channel=MagicMock(return_value=channel))
+            with patch("src.services.death_service.discord.HTTPException", Exception):
+                await self.service._announce("Ghost", "Ghost", 1)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_poll_loop_handles_errors_and_closes_session(self):
+        async def run_test():
+            self.service._running = True
+            self.service._session = SimpleNamespace(closed=False, close=AsyncMock())
+
+            async def fake_poll_once():
+                self.service._running = False
+                raise RuntimeError("boom")
+
+            self.service._poll_once = fake_poll_once
+
+            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()):
+                await self.service._poll_loop()
+
+            self.service._session.close.assert_awaited_once()
 
         self.loop.run_until_complete(run_test())
 

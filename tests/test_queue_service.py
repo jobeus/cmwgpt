@@ -6,7 +6,7 @@ Tests per-channel FIFO message queue functionality.
 from src.services.queue_service import QueueService
 import unittest
 import asyncio
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, patch
 import sys
 import os
 
@@ -456,6 +456,149 @@ class TestQueueService(unittest.TestCase):
             total = self.queue_service.get_queue_size()
             self.assertEqual(total, ch100_size + ch200_size)
 
+            await self.queue_service.stop()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_queue_command_not_running_and_overflow(self):
+        async def run_test():
+            interaction = self._make_mock_interaction()
+            handler = AsyncMock()
+            self.assertFalse(await self.queue_service.queue_command(interaction, handler))
+
+            await self.queue_service.start()
+            queue = asyncio.Queue(maxsize=3)
+            for _ in range(3):
+                queue.put_nowait(MagicMock())
+            with patch.object(self.queue_service, "_ensure_channel_worker", return_value=queue):
+                self.assertFalse(await self.queue_service.queue_command(interaction, handler))
+            await self.queue_service.stop()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_queue_restart_success_not_running_and_overflow(self):
+        async def run_test():
+            handler = AsyncMock()
+            self.assertFalse(await self.queue_service.queue_restart(handler))
+
+            await self.queue_service.start()
+            self.assertTrue(await self.queue_service.queue_restart(handler))
+
+            queue = asyncio.Queue(maxsize=3)
+            for _ in range(3):
+                queue.put_nowait(MagicMock())
+            with patch.object(self.queue_service, "_ensure_channel_worker", return_value=queue):
+                self.assertFalse(await self.queue_service.queue_restart(handler))
+            await self.queue_service.stop()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_stop_cancels_workers_after_timeout(self):
+        async def run_test():
+            await self.queue_service.start()
+            worker = MagicMock()
+            worker.cancel = MagicMock()
+            self.queue_service._channel_workers = {100: worker}
+            self.queue_service._channel_queues = {100: asyncio.Queue(maxsize=3)}
+
+            def fake_gather(*args, **kwargs):
+                fut = asyncio.get_event_loop().create_future()
+                fut.set_result([])
+                return fut
+
+            with patch("src.services.queue_service.asyncio.wait_for", side_effect=asyncio.TimeoutError()), patch(
+                "src.services.queue_service.asyncio.gather", side_effect=fake_gather
+            ):
+                await self.queue_service.stop()
+
+            worker.cancel.assert_called_once_with()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_process_channel_messages_handles_restart_runtime_error_and_system_exit(self):
+        async def run_test():
+            from src.services.queue_service import MessageType, QueuedMessage
+
+            await self.queue_service.start()
+            queue = asyncio.Queue()
+            self.queue_service._channel_queues[100] = queue
+
+            restart_handler = AsyncMock()
+            await queue.put(QueuedMessage(
+                message_type=MessageType.RESTART,
+                handler=restart_handler,
+                timestamp=0.0,
+                channel_id=100,
+            ))
+            await queue.put(QueuedMessage(
+                message_type=MessageType.SHUTDOWN,
+                handler=None,
+                timestamp=0.0,
+                channel_id=100,
+            ))
+            await self.queue_service._process_channel_messages(100)
+            restart_handler.assert_awaited_once()
+
+            self.queue_service._is_running = True
+            queue = asyncio.Queue()
+            self.queue_service._channel_queues[200] = queue
+            await queue.put(MagicMock())
+            await queue.put(QueuedMessage(
+                message_type=MessageType.SHUTDOWN,
+                handler=None,
+                timestamp=0.0,
+                channel_id=200,
+            ))
+            with patch.object(self.queue_service, "_handle_queued_message", new=AsyncMock(side_effect=RuntimeError("boom"))):
+                await self.queue_service._process_channel_messages(200)
+            self.assertGreater(self.queue_service.get_stats()["messages_failed"], 0)
+
+            self.queue_service._is_running = True
+            queue = asyncio.Queue()
+            self.queue_service._channel_queues[300] = queue
+            await queue.put(MagicMock())
+            await queue.put(QueuedMessage(
+                message_type=MessageType.SHUTDOWN,
+                handler=None,
+                timestamp=0.0,
+                channel_id=300,
+            ))
+
+            def fake_exit(code):
+                self.queue_service._is_running = False
+
+            with patch.object(self.queue_service, "_handle_queued_message", new=AsyncMock(side_effect=SystemExit(5))), patch(
+                "src.services.queue_service.os._exit", side_effect=fake_exit
+            ) as mock_exit:
+                await self.queue_service._process_channel_messages(300)
+            mock_exit.assert_called_once_with(5)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_handle_queued_message_restart_and_unknown_failure_branch(self):
+        async def run_test():
+            from src.services.queue_service import MessageType, QueuedMessage
+
+            await self.queue_service.start()
+            restart_handler = AsyncMock()
+            restart_msg = QueuedMessage(
+                message_type=MessageType.RESTART,
+                handler=restart_handler,
+                timestamp=0.0,
+                channel_id=0,
+            )
+            await self.queue_service._handle_queued_message(restart_msg)
+            restart_handler.assert_awaited_once()
+
+            command_msg = QueuedMessage(
+                message_type=MessageType.COMMAND,
+                handler=AsyncMock(side_effect=TypeError("bad")),
+                timestamp=0.0,
+                channel_id=0,
+                interaction=self._make_mock_interaction(),
+            )
+            await self.queue_service._handle_queued_message(command_msg)
+            self.assertGreaterEqual(self.queue_service.get_stats()["messages_failed"], 1)
             await self.queue_service.stop()
 
         self.loop.run_until_complete(run_test())

@@ -1,13 +1,12 @@
-"""
-Unit tests for OpenAI service module.
-Tests OpenAI API integration functionality.
-"""
+"""Unit tests for OpenAI service module."""
 
-from src.services.openai_service import openai_service
-import unittest
-from unittest.mock import MagicMock, AsyncMock, patch
-import sys
 import os
+import sys
+import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+
+from src.services.openai_service import OpenAIService, OpenAIServiceError, openai_service
 
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -128,6 +127,335 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, "cleaned")
         mock_clean.assert_called_once_with("<@12345> Hello", bot_id=12345)
+
+
+def make_response(text=None, *, error=None, cost=0.0, http_response=None):
+    response = SimpleNamespace(
+        choices=[] if text is None else [SimpleNamespace(message=SimpleNamespace(content=text))],
+        error=error,
+        usage=SimpleNamespace(model_extra={"cost_details": {"upstream_inference_cost": cost}}),
+        http_response=http_response,
+    )
+    response.model_dump = lambda: {"text": text, "error": error}
+    return response
+
+
+class FakeAPIError(Exception):
+    def __init__(self, message=None, request=None, body=None):
+        super().__init__(message)
+        self.message = message
+        self.request = request
+        self.body = body
+
+
+class FakeBadRequestError(Exception):
+    def __init__(self, message="bad request"):
+        super().__init__(message)
+        self.message = message
+
+
+class FakeRateLimitError(Exception):
+    pass
+
+
+class FakeAuthenticationError(Exception):
+    pass
+
+
+class FakeAPIConnectionError(Exception):
+    pass
+
+
+class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.service = OpenAIService()
+        self.client = MagicMock()
+        self.client.default_headers = {"X-Test": "1"}
+        self.client.api_key = "api-key"
+        self.client.chat.completions.create = AsyncMock()
+        self.service.set_client(self.client)
+
+    def test_get_client_uses_testing_stub_and_real_client_factory(self):
+        service = OpenAIService()
+
+        with patch("src.services.openai_service.IS_TESTING", True):
+            client = service.get_client()
+            self.assertTrue(callable(client.anything))
+
+        service = OpenAIService()
+        fake_client = MagicMock()
+        with patch("src.services.openai_service.IS_TESTING", False), patch(
+            "src.services.openai_service.AsyncOpenAI", return_value=fake_client
+        ) as mock_factory:
+            client = service.get_client()
+
+        self.assertIs(client, fake_client)
+        mock_factory.assert_called_once()
+
+    async def test_close_resets_client_on_success_and_failure(self):
+        closing_client = MagicMock()
+        closing_client.close = AsyncMock()
+        self.service.set_client(closing_client)
+
+        await self.service.close()
+        self.assertIsNone(self.service._client)
+
+        failing_client = MagicMock()
+        failing_client.close = AsyncMock(side_effect=RuntimeError("boom"))
+        self.service.set_client(failing_client)
+
+        await self.service.close()
+        self.assertIsNone(self.service._client)
+
+    def test_dump_bad_request_writes_json_and_script(self):
+        with patch("builtins.open", mock_open()) as mock_file, patch(
+            "src.services.openai_service.json.dump"
+        ) as mock_dump, patch("os.chmod") as mock_chmod:
+            self.service._dump_bad_request({"model": "x"}, self.client)
+
+        mock_dump.assert_called_once()
+        mock_chmod.assert_called_once_with("/tmp/bad_request.sh", 0o755)
+        script_handle = mock_file()
+        written = "".join(call.args[0] for call in script_handle.write.call_args_list)
+        self.assertIn("curl https://openrouter.ai/api/v1/chat/completions", written)
+        self.assertIn("Authorization: Bearer api-key", written)
+
+    def test_dump_bad_request_uses_config_key_skips_omit_headers_and_logs_failures(self):
+        omit_value = type("OmitHeader", (), {})()
+        client = MagicMock()
+        client.default_headers = {"X-Test": "1", "X-Skip": omit_value}
+        client.api_key = None
+
+        with patch("src.services.openai_service.OPENROUTER_API_KEY", "config-key"), patch(
+            "builtins.open", mock_open()
+        ) as mock_file, patch("src.services.openai_service.json.dump"), patch("os.chmod"):
+            self.service._dump_bad_request({"model": "x"}, client)
+
+        written = "".join(call.args[0] for call in mock_file().write.call_args_list)
+        self.assertIn("Authorization: Bearer config-key", written)
+        self.assertNotIn("X-Skip", written)
+
+        with patch("builtins.open", side_effect=OSError("disk full")), patch(
+            "src.services.openai_service.logger.error"
+        ) as mock_error:
+            self.service._dump_bad_request({"model": "x"}, client)
+
+        self.assertIn("Failed to dump bad request", mock_error.call_args.args[0])
+
+    async def test_get_chat_completion_prefixes_cost_and_logs_wire_request(self):
+        http_response = SimpleNamespace(
+            request=SimpleNamespace(
+                headers={"X-Req": "1"},
+                content=b'{"messages":[]}',
+                url="https://openrouter.ai/api/v1/chat/completions",
+                method="POST",
+            ),
+            status_code=200,
+            headers={"X-Resp": "1"},
+        )
+        self.client.chat.completions.create.return_value = make_response(
+            "hello",
+            cost=1.2345,
+            http_response=http_response,
+        )
+
+        with patch("src.services.openai_service.clean_openai_response", return_value="cleaned"), patch(
+            "src.services.openai_service.log_api_request", new=AsyncMock()
+        ) as mock_log:
+            result = await self.service.get_chat_completion(
+                "gpt-test",
+                [{"role": "user", "content": "hi"}],
+                discord_user_id=42,
+                channel_id=7,
+            )
+
+        self.assertEqual(result, "[$1.234] cleaned")
+        self.client.chat.completions.create.assert_awaited_once()
+        logged = mock_log.await_args.kwargs
+        self.assertEqual(logged["service_name"], "openai/gpt-test")
+        self.assertEqual(logged["method"], "POST")
+        self.assertEqual(logged["response_status"], 200)
+        self.assertEqual(logged["discord_user_id"], 42)
+        self.assertEqual(logged["discord_channel_id"], 7)
+
+    async def test_get_chat_completion_preserves_invalid_json_and_uses_state_service_bot_id(self):
+        self.client.chat.completions.create.return_value = make_response("hello")
+        state_service = SimpleNamespace(bot_id=555)
+        messages = [
+            {"role": "system", "content": "skip me"},
+            {"role": "user", "content": "[not-json"},
+            {"role": "user", "content": [{"type": "text", "text": "hello\nworld"}]},
+        ]
+
+        with patch("src.services.openai_service.clean_openai_response", return_value="cleaned") as mock_clean, patch(
+            "src.services.openai_service.log_api_request", new=AsyncMock()
+        ):
+            result = await self.service.get_chat_completion(
+                "gpt-test", messages, system_prompt="system", state_service=state_service
+            )
+
+        self.assertEqual(result, "cleaned")
+        payload = self.client.chat.completions.create.await_args.kwargs["messages"]
+        self.assertEqual(payload[1]["content"], "[not-json")
+        self.assertEqual(payload[2]["content"], [{"type": "text", "text": "hello\nworld"}])
+        mock_clean.assert_called_once_with("hello", bot_id=555)
+
+    async def test_get_chat_completion_handles_bot_id_loader_and_cost_parse_failures(self):
+        class BadCostDict(dict):
+            def get(self, key, default=None):
+                raise RuntimeError("bad cost")
+
+        response = make_response("hello")
+        response.usage = SimpleNamespace(model_extra={"cost_details": BadCostDict()})
+        self.client.chat.completions.create.return_value = response
+        self.service.set_bot_id_loader(lambda: (_ for _ in ()).throw(RuntimeError("no bot")))
+
+        with patch("src.services.openai_service.clean_openai_response", return_value="cleaned") as mock_clean, patch(
+            "src.services.openai_service.log_api_request", new=AsyncMock()
+        ), patch("src.services.openai_service.logger.warning") as mock_warning:
+            result = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+
+        self.assertEqual(result, "cleaned")
+        mock_clean.assert_called_once_with("hello", bot_id=None)
+        warning_messages = [call.args[0] for call in mock_warning.call_args_list]
+        self.assertTrue(any("Failed to get bot_id" in msg for msg in warning_messages))
+        self.assertTrue(any("Failed to parse cost" in msg for msg in warning_messages))
+
+    async def test_get_chat_completion_retries_rate_limit_then_succeeds(self):
+        self.client.chat.completions.create.side_effect = [
+            FakeRateLimitError("slow down"),
+            make_response("hello"),
+        ]
+
+        with patch("src.services.openai_service.RateLimitError", FakeRateLimitError), patch(
+            "src.services.openai_service.clean_openai_response", return_value="done"
+        ), patch("src.services.openai_service.log_api_request", new=AsyncMock()), patch(
+            "src.services.openai_service.asyncio.sleep", new=AsyncMock()
+        ) as mock_sleep:
+            result = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+
+        self.assertEqual(result, "done")
+        mock_sleep.assert_awaited_once_with(1.0)
+
+    async def test_get_chat_completion_raises_after_rate_limit_retries_exhausted(self):
+        self.client.chat.completions.create.side_effect = [
+            FakeRateLimitError("slow down 1"),
+            FakeRateLimitError("slow down 2"),
+            FakeRateLimitError("slow down 3"),
+        ]
+
+        with patch("src.services.openai_service.RateLimitError", FakeRateLimitError), patch(
+            "src.services.openai_service.asyncio.sleep", new=AsyncMock()
+        ) as mock_sleep:
+            with self.assertRaises(OpenAIServiceError) as ctx:
+                await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+
+        self.assertIn("Rate limit exceeded after 3 attempts", str(ctx.exception))
+        self.assertEqual(mock_sleep.await_count, 2)
+
+    async def test_get_chat_completion_handles_authentication_errors(self):
+        self.client.chat.completions.create.side_effect = FakeAuthenticationError("bad key")
+
+        with patch("src.services.openai_service.AuthenticationError", FakeAuthenticationError):
+            with self.assertRaises(OpenAIServiceError) as ctx:
+                await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+
+        self.assertIn("Authentication failed", str(ctx.exception))
+
+    async def test_get_chat_completion_raises_after_connection_retries_exhausted(self):
+        self.client.chat.completions.create.side_effect = [
+            FakeAPIConnectionError("offline 1"),
+            FakeAPIConnectionError("offline 2"),
+            FakeAPIConnectionError("offline 3"),
+        ]
+
+        with patch("src.services.openai_service.APIConnectionError", FakeAPIConnectionError), patch(
+            "src.services.openai_service.asyncio.sleep", new=AsyncMock()
+        ) as mock_sleep:
+            with self.assertRaises(OpenAIServiceError) as ctx:
+                await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+
+        self.assertIn("Connection failed after 3 attempts", str(ctx.exception))
+        self.assertEqual(mock_sleep.await_count, 2)
+
+    async def test_get_chat_completion_retries_retryable_soft_error_then_succeeds(self):
+        self.client.chat.completions.create.side_effect = [
+            make_response(error={"code": 429, "message": "busy"}),
+            make_response("hi"),
+        ]
+
+        with patch("src.services.openai_service.APIError", FakeAPIError), patch(
+            "src.services.openai_service.clean_openai_response", return_value="ok"
+        ), patch("src.services.openai_service.log_api_request", new=AsyncMock()), patch(
+            "src.services.openai_service.asyncio.sleep", new=AsyncMock()
+        ) as mock_sleep:
+            result = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+
+        self.assertEqual(result, "ok")
+        mock_sleep.assert_awaited_once_with(1.0)
+
+    async def test_get_chat_completion_raises_after_api_error_retries_exhausted(self):
+        self.client.chat.completions.create.side_effect = [
+            FakeAPIError("upstream 1"),
+            FakeAPIError("upstream 2"),
+            FakeAPIError("upstream 3"),
+        ]
+
+        with patch("src.services.openai_service.APIError", FakeAPIError), patch.object(
+            self.service, "_dump_bad_request"
+        ) as mock_dump, patch("src.services.openai_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+            with self.assertRaises(OpenAIServiceError) as ctx:
+                await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+
+        self.assertIn("OpenAI API error after 3 attempts", str(ctx.exception))
+        self.assertEqual(mock_sleep.await_count, 2)
+        mock_dump.assert_called_once()
+
+    async def test_get_chat_completion_raises_for_non_retryable_soft_error(self):
+        self.client.chat.completions.create.return_value = make_response(
+            error={"code": 400, "message": "bad request"}
+        )
+
+        with patch.object(self.service, "_dump_bad_request") as mock_dump:
+            with self.assertRaises(OpenAIServiceError) as ctx:
+                await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+
+        self.assertIn("Non-retryable soft-error 400", str(ctx.exception))
+        mock_dump.assert_called_once()
+
+    async def test_get_chat_completion_handles_bad_request_errors(self):
+        self.client.chat.completions.create.side_effect = FakeBadRequestError("payload invalid")
+
+        with patch("src.services.openai_service.BadRequestError", FakeBadRequestError), patch.object(
+            self.service, "_dump_bad_request"
+        ) as mock_dump:
+            with self.assertRaises(OpenAIServiceError) as ctx:
+                await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+
+        self.assertIn("Invalid request: payload invalid", str(ctx.exception))
+        mock_dump.assert_called_once()
+
+    async def test_get_chat_completion_returns_fallback_string_when_no_choices_exist(self):
+        self.client.chat.completions.create.return_value = make_response(text=None)
+
+        with patch.object(self.service, "_dump_bad_request") as mock_dump:
+            result = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+
+        self.assertEqual(result, "Failed to get a response from the model.")
+        mock_dump.assert_called_once()
+
+    async def test_get_chat_completion_retries_empty_response_then_raises(self):
+        self.client.chat.completions.create.return_value = make_response("")
+
+        with patch.object(self.service, "_dump_bad_request") as mock_dump, patch(
+            "src.services.openai_service.asyncio.sleep", new=AsyncMock()
+        ) as mock_sleep:
+            with self.assertRaises(OpenAIServiceError) as ctx:
+                await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+
+        self.assertIn("Unexpected error: The model API returned an empty response.", str(ctx.exception))
+        self.assertEqual(mock_sleep.await_count, 2)
+        mock_dump.assert_called_once()
 
 
 if __name__ == "__main__":

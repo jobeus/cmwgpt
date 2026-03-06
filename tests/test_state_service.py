@@ -8,6 +8,9 @@ import unittest
 import threading
 import sys
 import os
+import json
+import tempfile
+from unittest.mock import patch
 
 # Add parent directory to path to import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -302,8 +305,6 @@ class TestStateService(unittest.TestCase):
 
     def test_response_id_persistence(self):
         """Test that response IDs are included in state persistence."""
-        import json
-        import os
 
         channel_id = 12345
         response_id = "resp_abc123"
@@ -345,6 +346,151 @@ class TestStateService(unittest.TestCase):
             # Clean up temp file
             if os.path.exists(temp_file):
                 os.remove(temp_file)
+
+    def test_draw_edit_interject_death_active_and_git_sha_management(self):
+        self.state_service.set_draw_model(1, "draw-model")
+        self.state_service.set_edit_model(1, "edit-model")
+        self.state_service.set_interject_settings(1, {"chance": 10})
+        self.state_service.set_death_settings({"interval": 30})
+        self.state_service.mark_channel_active(1)
+        self.state_service.set_last_git_sha("abc123")
+
+        self.assertEqual(self.state_service.get_draw_model(1), "draw-model")
+        self.assertEqual(self.state_service.get_edit_model(1), "edit-model")
+        self.assertEqual(self.state_service.get_interject_settings(1), {"chance": 10})
+        self.assertEqual(self.state_service.get_death_settings(), {"interval": 30})
+        self.assertEqual(self.state_service.get_active_channels(), {1})
+        self.assertEqual(self.state_service.get_last_git_sha(), "abc123")
+
+        self.state_service.clear_interject_settings(1)
+        self.state_service.clear_death_settings()
+        self.state_service.clear_active_channels()
+
+        self.assertIsNone(self.state_service.get_interject_settings(1))
+        self.assertIsNone(self.state_service.get_death_settings())
+        self.assertEqual(self.state_service.get_active_channels(), set())
+
+    def test_get_channel_context_and_update_channel_context_copy_values(self):
+        self.state_service.update_channel_context(
+            5,
+            conversation=[{"role": "user", "content": "hello"}],
+            model="gpt-test",
+            draw_model="seedream",
+            edit_model="qwen",
+            system_prompt="be helpful",
+            response_id="resp-1",
+            interject_settings={"chance": 25},
+            ignored_field="nope",
+        )
+
+        context = self.state_service.get_channel_context(5)
+        self.assertEqual(context["model"], "gpt-test")
+        self.assertEqual(context["draw_model"], "seedream")
+        self.assertEqual(context["edit_model"], "qwen")
+        self.assertEqual(context["response_id"], "resp-1")
+        self.assertEqual(context["interject_settings"], {"chance": 25})
+
+        missing = self.state_service.get_channel_context(999)
+        self.assertIsNone(missing["conversation"])
+        self.assertIsNone(missing["model"])
+
+    def test_add_message_and_update_response_id_and_clear_conversation_preserves_other_data(self):
+        self.state_service.set_model(7, "gpt-test")
+        self.state_service.add_message_and_update_response_id(
+            7, {"role": "user", "content": "hello"}, "resp-7"
+        )
+
+        self.assertEqual(self.state_service.get_response_id(7), "resp-7")
+        self.assertEqual(self.state_service.get_conversation(7)[0]["content"], "hello")
+
+        self.state_service.clear_conversation(7)
+
+        self.assertIsNone(self.state_service.get_conversation(7))
+        self.assertIsNone(self.state_service.get_response_id(7))
+        self.assertEqual(self.state_service.get_model(7), "gpt-test")
+
+    def test_save_state_to_temp_file_includes_restart_info_and_handles_failures(self):
+        self.state_service.set_conversation(1, [{"role": "user", "content": "hello"}])
+        self.state_service.set_model(1, "gpt-test")
+        self.state_service.set_draw_model(1, "seedream")
+        self.state_service.set_edit_model(1, "qwen")
+        self.state_service.set_system_prompt(1, "be helpful")
+        self.state_service.set_response_id(1, "resp-1")
+        self.state_service.set_interject_settings(1, {"chance": 10})
+        self.state_service.set_death_settings({"interval": 30})
+        self.state_service.mark_channel_active(1)
+        self.state_service.set_last_git_sha("abc123")
+
+        with patch("src.services.state_service.time.time", return_value=1234567890), patch(
+            "src.services.state_service.os.getpid", return_value=4321
+        ):
+            temp_file = self.state_service.save_state_to_temp_file({"manual_restart": True})
+
+        self.assertEqual(temp_file, "/tmp/cmwgpt_state_backup_1234567890_4321.json")
+        with open(temp_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        self.assertEqual(state["restart_info"], {"manual_restart": True})
+        self.assertEqual(state["draw_models"]["1"], "seedream")
+        self.assertEqual(state["edit_models"]["1"], "qwen")
+        self.assertEqual(state["interject_settings"]["1"], {"chance": 10})
+        self.assertEqual(state["last_git_sha"], "abc123")
+        os.remove(temp_file)
+
+        with patch("builtins.open", side_effect=OSError("denied")):
+            self.assertIsNone(self.state_service.save_state_to_temp_file())
+
+    def test_load_state_from_temp_files_skips_invalid_then_loads_valid_and_cleans_up(self):
+        invalid = tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8")
+        valid = tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8")
+        try:
+            json.dump({"bad": "shape"}, invalid)
+            invalid.close()
+            json.dump(
+                {
+                    "conversations": {"5": [{"role": "user", "content": "hello"}]},
+                    "models": {"5": "gpt-test"},
+                    "draw_models": {"5": "seedream"},
+                    "edit_models": {"5": "qwen"},
+                    "system_prompts": {"5": "be helpful"},
+                    "response_ids": {"5": "resp-5"},
+                    "interject_settings": {"5": {"chance": 10}},
+                    "death_settings": {"interval": 30},
+                    "last_git_sha": "abc123",
+                },
+                valid,
+            )
+            valid.close()
+
+            with patch("src.services.state_service.glob.glob", return_value=[invalid.name, valid.name]):
+                loaded = self.state_service.load_state_from_temp_files()
+
+            self.assertTrue(loaded)
+            self.assertEqual(self.state_service.get_conversation(5)[0]["content"], "hello")
+            self.assertEqual(self.state_service.get_model(5), "gpt-test")
+            self.assertEqual(self.state_service.get_draw_model(5), "seedream")
+            self.assertEqual(self.state_service.get_edit_model(5), "qwen")
+            self.assertEqual(self.state_service.get_interject_settings(5), {"chance": 10})
+            self.assertEqual(self.state_service.get_death_settings(), {"interval": 30})
+            self.assertEqual(self.state_service.get_last_git_sha(), "abc123")
+            self.assertEqual(self.state_service.get_active_channels(), {5})
+            self.assertFalse(os.path.exists(invalid.name))
+            self.assertFalse(os.path.exists(valid.name))
+        finally:
+            for path in [invalid.name, valid.name]:
+                if os.path.exists(path):
+                    os.remove(path)
+
+    def test_load_state_from_temp_files_and_cleanup_temp_files_handle_missing_files_and_errors(self):
+        with patch("src.services.state_service.glob.glob", return_value=[]):
+            self.assertFalse(self.state_service.load_state_from_temp_files())
+
+        with patch("src.services.state_service.glob.glob", side_effect=OSError("boom")):
+            self.assertFalse(self.state_service.load_state_from_temp_files())
+
+        with patch("src.services.state_service.glob.glob", return_value=["/tmp/a.json", "/tmp/b.json"]), patch(
+            "src.services.state_service.os.remove", side_effect=[OSError("denied"), None]
+        ):
+            self.state_service.cleanup_temp_files()
 
 
 if __name__ == "__main__":
