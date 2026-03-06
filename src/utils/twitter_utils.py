@@ -21,6 +21,7 @@ _twitter_cache = PersistentCache('twitter_transcripts')
 def extract_twitter_urls(text: str) -> List[str]:
     """
     Extract x.com and twitter.com and xcancel.com URLs from text.
+    Normalizes all variants to x.com so the same tweet isn't fetched twice.
     """
     if not text:
         return []
@@ -33,6 +34,8 @@ def extract_twitter_urls(text: str) -> List[str]:
 
     for match in matches:
         url = match.group(0)
+        # Normalize to x.com so twitter.com/foo/status/123 and x.com/foo/status/123 dedup
+        url = re.sub(r'https?://(?:www\.)?(?:twitter\.com|xcancel\.com)', 'https://x.com', url)
         if url not in urls:
             urls.append(url)
 
