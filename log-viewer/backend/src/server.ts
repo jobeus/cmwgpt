@@ -1,0 +1,72 @@
+import express from 'express';
+import http from 'http';
+import { Server } from 'socket.io';
+import cors from 'cors';
+import authRouter, { socketAuthMiddleware } from './auth';
+import logsRouter from './routes';
+import { pool } from './db';
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: { origin: '*' } // Be more restrictive in production
+});
+
+app.use(cors());
+app.use(express.json());
+
+// Routes
+app.use('/api', authRouter);
+app.use('/api', logsRouter);
+
+// Socket.io Middlewares
+io.use(socketAuthMiddleware);
+
+io.on('connection', (socket) => {
+    console.log(`Socket connected: ${socket.id}`);
+    socket.on('disconnect', () => {
+        console.log(`Socket disconnected: ${socket.id}`);
+    });
+});
+
+// Polling for new logs
+let lastCheckedId = 0;
+const pollNewLogs = async () => {
+    try {
+        if (lastCheckedId === 0) {
+            // First run, find the max ID to start tailing
+            const result = await pool.query('SELECT MAX(id) as maxId FROM api_request_logs');
+            lastCheckedId = Number(result[0].maxId) || 0;
+            return;
+        }
+
+        const query = `
+            SELECT id, timestamp, service_name, method, endpoint_url, 
+                   response_status, cost, discord_user_id, discord_channel_id,
+                   LEFT(request_body, 1000) as request_body_snippet, 
+                   LEFT(response_body, 1000) as response_body_snippet,
+                   curl_command
+            FROM api_request_logs
+            WHERE id > ?
+            ORDER BY timestamp ASC
+        `;
+        const newLogs = await pool.query(query, [lastCheckedId]);
+
+        if (newLogs.length > 0) {
+            newLogs.forEach((log: any) => {
+                io.emit('new-log', log);
+                lastCheckedId = Math.max(lastCheckedId, log.id);
+            });
+        }
+    } catch (err) {
+        console.error('Error polling for new logs:', err);
+    }
+};
+
+// Poll every 1.5 seconds
+setInterval(pollNewLogs, 1500);
+
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => {
+    console.log(`Log viewer backend listening on port ${PORT}`);
+});
