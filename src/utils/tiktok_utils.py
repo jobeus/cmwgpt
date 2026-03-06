@@ -47,8 +47,6 @@ def get_tiktok_transcript(url: str) -> Optional[str]:
         logger.debug(f"Cache hit for TikTok transcript: {url}")
         return cached_result
 
-    def cache_failure(u: str):
-        _tiktok_cache[u] = None
 
     if not GROQ_API_KEY:
         logger.error("GROQ_API_KEY is not set. Cannot transcribe TikTok videos.")
@@ -93,16 +91,13 @@ def get_tiktok_transcript(url: str) -> Optional[str]:
                         audio_file = os.path.splitext(audio_file)[0] + '.mp3'
             except Exception as e2:
                 logger.error(f"Proxy download failed for {url}: {e2}")
-                cache_failure(url)
                 return None
         else:
             logger.error(f"No proxy configured to fall back to for {url}")
-            cache_failure(url)
             return None
 
     if not audio_file or not os.path.exists(audio_file):
         logger.error(f"Failed to find downloaded audio for TikTok URL: {url}")
-        cache_failure(url)
         return None
 
     try:
@@ -122,7 +117,6 @@ def get_tiktok_transcript(url: str) -> Optional[str]:
         
         if not transcript_text:
             logger.warning(f"Groq returned an empty transcript for {url}")
-            cache_failure(url)
             return None
 
         _tiktok_cache[url] = transcript_text
@@ -130,7 +124,6 @@ def get_tiktok_transcript(url: str) -> Optional[str]:
 
     except Exception as e:
         logger.error(f"Unexpected error processing TikTok video {url}: {e}")
-        cache_failure(url)
         return None
     finally:
         # Cleanup

@@ -47,8 +47,6 @@ def get_transcript(video_id: str) -> Optional[str]:
         logger.debug(f"Cache hit for transcript: {video_id}")
         return cached_result
 
-    def cache_failure(vid_id: str):
-        _transcript_cache[vid_id] = None
 
     try:
         if TRANSCRIPT_PROXY:
@@ -71,5 +69,4 @@ def get_transcript(video_id: str) -> Optional[str]:
     except Exception as e:
         logger.warning(
             f"Failed to fetch transcript for video ID {video_id}: {e}")
-        cache_failure(video_id)
         return None

@@ -68,12 +68,9 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
         logger.debug(f"Cache hit for Twitter fetch: {tweet_url}")
         return cached_result
 
-    def cache_failure(u: str):
-        _twitter_cache[u] = None
 
     if not RAPIDAPI_KEY:
         logger.error("RAPIDAPI_KEY is not set. Cannot fetch Twitter content.")
-        cache_failure(tweet_url)
         return None
 
     try:
@@ -222,9 +219,7 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
 
     except KeyError as ke:
         logger.warning(f"Failed to parse RapidAPI JSON response for {tweet_url}: {ke}")
-        cache_failure(tweet_url)
         return None
     except Exception as e:
         logger.warning(f"Failed to fetch Twitter text for {tweet_url}: {e}")
-        cache_failure(tweet_url)
         return None

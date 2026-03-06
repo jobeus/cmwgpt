@@ -75,8 +75,6 @@ async def get_article_text(url: str) -> Optional[str]:
         logger.debug(f"Cache hit for article: {url}")
         return cached_result
         
-    def cache_failure(u: str):
-        _article_cache[u] = None
 
     try:
         logger.info(f"Fetching article for URL: {url}")
@@ -104,7 +102,6 @@ async def get_article_text(url: str) -> Optional[str]:
             
         if not text:
             logger.warning(f"Both trafilatura and newspaper3k failed to extract text for {url}")
-            cache_failure(url)
             return None
 
         _article_cache[url] = text
@@ -125,5 +122,4 @@ async def get_article_text(url: str) -> Optional[str]:
 
     except Exception as e:
         logger.warning(f"Failed to fetch article text for {url}: {e}")
-        cache_failure(url)
         return None
