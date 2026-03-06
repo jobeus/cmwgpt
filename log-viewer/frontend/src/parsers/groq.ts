@@ -4,7 +4,7 @@ import { extractAudioFromHex } from '../utils/media';
 export function parseGroq(requestBody: any, responseBody: any): ServiceMessage[] {
     const messages: ServiceMessage[] = [];
 
-    let content: any[] = [];
+    const content: any[] = [];
 
     if (typeof requestBody === 'string' && requestBody.length > 200) {
         const audioDataUri = extractAudioFromHex(requestBody);

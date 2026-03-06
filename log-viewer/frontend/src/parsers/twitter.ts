@@ -89,7 +89,7 @@ export function parseTwitter(_requestBody: any, responseBody: any, endpointUrl?:
         try {
             const isThreaded = responseBody.data.threaded_conversation_with_injections_v2 !== undefined;
 
-            let tweetObj: any = {
+            const tweetObj: any = {
                 type: 'tweet',
                 author: '',
                 authorHandle: '',
@@ -128,7 +128,7 @@ export function parseTwitter(_requestBody: any, responseBody: any, endpointUrl?:
                             const replyImage = extractProfileImage(replyResult);
                             tweetObj.replies.push({ author: replyAuthor, text: replyText, authorHandle: replyHandle, authorImage: replyImage });
                         }
-                    } catch (e) {
+                    } catch {
                         // ignore missing items
                     }
                 }
@@ -156,8 +156,8 @@ export function parseTwitter(_requestBody: any, responseBody: any, endpointUrl?:
             } else {
                 messages.push({ role: 'assistant', content: [{ type: 'text', text: JSON.stringify(responseBody, null, 2) }] });
             }
-        } catch (e) {
-            console.error("Failed to parse Twitter object payload:", e);
+        } catch (error) {
+            console.error("Failed to parse Twitter object payload:", error);
             messages.push({ role: 'assistant', content: [{ type: 'text', text: JSON.stringify(responseBody, null, 2) }] });
         }
     } else {

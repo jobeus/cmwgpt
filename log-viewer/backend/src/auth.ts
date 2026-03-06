@@ -22,7 +22,7 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction) 
         const decoded = jwt.verify(token, JWT_SECRET);
         (req as any).user = decoded;
         next();
-    } catch (err) {
+    } catch {
         return res.status(401).json({ error: 'Invalid token' });
     }
 };
@@ -60,7 +60,7 @@ export const socketAuthMiddleware = (socket: any, next: (err?: Error) => void) =
         const decoded = jwt.verify(token, JWT_SECRET);
         socket.user = decoded;
         next();
-    } catch (err) {
+    } catch {
         next(new Error('Authentication error'));
     }
 };
