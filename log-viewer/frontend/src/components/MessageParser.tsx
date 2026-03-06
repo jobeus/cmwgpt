@@ -65,7 +65,7 @@ const renderMessageContent = (content: any, channelId: string | null) => {
                         <span>{parsed.timestamp}</span>
                         {channelId && (
                             <a
-                                href={`https://discord.com/channels/${GUILD_ID}/${channelId}/${parsed.msgId}`}
+                                href={`discord://-/channels/${GUILD_ID}/${channelId}/${parsed.msgId}`}
                                 target="_blank" rel="noreferrer"
                                 className="hover:text-blue-400 flex items-center transition-colors"
                                 title="View in Discord"

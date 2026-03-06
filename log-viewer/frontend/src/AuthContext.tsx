@@ -10,8 +10,14 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Set default header synchronously before any component mounts
+const initialToken = localStorage.getItem('token');
+if (initialToken) {
+    axios.defaults.headers.common['Authorization'] = `Bearer ${initialToken}`;
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
+    const [token, setToken] = useState<string | null>(initialToken);
     const [username, setUsername] = useState<string | null>(localStorage.getItem('username'));
 
     useEffect(() => {
