@@ -41,7 +41,10 @@ router.get('/logs/:id', authMiddleware, async (req, res) => {
     const { id } = req.params;
     try {
         const query = `
-            SELECT *
+            SELECT id, timestamp, service_name, method, endpoint_url, 
+                   request_headers, request_body, response_status, 
+                   response_headers, response_body, cost, 
+                   discord_user_id, discord_channel_id, curl_command
             FROM api_request_logs
             WHERE id = ?
         `;

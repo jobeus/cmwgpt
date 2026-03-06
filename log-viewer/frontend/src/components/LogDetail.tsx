@@ -150,7 +150,7 @@ export default function LogDetail() {
                                 )}
                                 <div>
                                     <div className="text-xs text-gray-500 uppercase mb-2 font-bold tracking-widest">Body</div>
-                                    <pre className="text-xs font-mono text-gray-300 bg-gray-900/50 p-3 rounded-lg border border-gray-800/60 overflow-x-auto whitespace-pre-wrap">
+                                    <pre className="text-xs font-mono text-gray-300 bg-gray-900/50 p-3 rounded-lg border border-gray-800/60 overflow-x-auto whitespace-pre-wrap break-all">
                                         {typeof reqBody === 'object' ? JSON.stringify(sanitizeJsonForRawView(reqBody), null, 2) : reqBody}
                                     </pre>
                                 </div>
@@ -173,7 +173,7 @@ export default function LogDetail() {
                                 )}
                                 <div>
                                     <div className="text-xs text-gray-500 uppercase mb-2 font-bold tracking-widest">Body</div>
-                                    <pre className="text-xs font-mono text-emerald-200/80 bg-gray-900/50 p-3 rounded-lg border border-gray-800/60 overflow-x-auto whitespace-pre-wrap">
+                                    <pre className="text-xs font-mono text-emerald-200/80 bg-gray-900/50 p-3 rounded-lg border border-gray-800/60 overflow-x-auto whitespace-pre-wrap break-all">
                                         {typeof resBody === 'object' ? JSON.stringify(sanitizeJsonForRawView(resBody), null, 2) : resBody}
                                     </pre>
                                 </div>
