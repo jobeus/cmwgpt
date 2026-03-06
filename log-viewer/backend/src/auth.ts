@@ -1,12 +1,9 @@
 import express, { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
+import jwt, { type SignOptions } from 'jsonwebtoken';
 import pam from 'authenticate-pam';
-import fs from 'fs';
-import path from 'path';
+import { JWT_EXPIRES_IN, JWT_SECRET } from './config';
 
 const router = express.Router();
-
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-for-dev-only-change-in-prod';
 
 // Attempt to load the user map. This gives us a predefined list of valid IDs, but PAM doesn't care.
 // For the UI we might want to know who is logged in, but for PAM auth we just rely on OS.
@@ -44,7 +41,11 @@ router.post('/login', (req: Request, res: Response) => {
         }
 
         console.log(`PAM Auth successful for ${username}`);
-        const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: '7d' });
+        const token = jwt.sign(
+            { username },
+            JWT_SECRET,
+            { expiresIn: JWT_EXPIRES_IN as SignOptions['expiresIn'] }
+        );
         res.json({ token, username });
     });
 });

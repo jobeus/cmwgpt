@@ -1,5 +1,5 @@
 // Helper to proxy media URLs (videos, images) through our backend to bypass CORS
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://polar.jobe.wtf/api';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 export const proxyMediaUrl = (url: string, stripQuery = true) => {
     try {

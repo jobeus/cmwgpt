@@ -1,9 +1,134 @@
 import express from 'express';
+import dns from 'dns/promises';
+import net from 'net';
 import { pool } from './db';
 import { authMiddleware } from './auth';
 import axios from 'axios';
 
 const router = express.Router();
+
+const MAX_PROXY_REDIRECTS = 3;
+
+const normalizeHostname = (hostname: string) => hostname.replace(/\.$/, '').toLowerCase();
+
+const isBlockedHostname = (hostname: string) => {
+    const normalizedHostname = normalizeHostname(hostname);
+    return normalizedHostname === 'localhost' || normalizedHostname.endsWith('.localhost');
+};
+
+const isPrivateIpv4 = (ip: string) => {
+    const octets = ip.split('.').map(Number);
+    if (octets.length !== 4 || octets.some((octet) => Number.isNaN(octet) || octet < 0 || octet > 255)) {
+        return true;
+    }
+
+    const [first, second] = octets;
+    if (first === 0 || first === 10 || first === 127) return true;
+    if (first === 169 && second === 254) return true;
+    if (first === 172 && second >= 16 && second <= 31) return true;
+    if (first === 192 && second === 168) return true;
+    if (first === 100 && second >= 64 && second <= 127) return true;
+    if (first === 198 && (second === 18 || second === 19)) return true;
+    return false;
+};
+
+const isPrivateIpv6 = (ip: string) => {
+    const normalizedIp = ip.toLowerCase();
+    if (normalizedIp === '::' || normalizedIp === '::1') {
+        return true;
+    }
+
+    if (normalizedIp.startsWith('::ffff:')) {
+        const mappedIpv4 = normalizedIp.substring('::ffff:'.length);
+        return net.isIP(mappedIpv4) === 4 ? isPrivateIpv4(mappedIpv4) : true;
+    }
+
+    return normalizedIp.startsWith('fc')
+        || normalizedIp.startsWith('fd')
+        || /^fe[89ab]/.test(normalizedIp);
+};
+
+const isPrivateAddress = (address: string) => {
+    const ipVersion = net.isIP(address);
+    if (ipVersion === 4) {
+        return isPrivateIpv4(address);
+    }
+    if (ipVersion === 6) {
+        return isPrivateIpv6(address);
+    }
+    return true;
+};
+
+const validateProxyUrl = async (rawUrl: string) => {
+    try {
+        const parsedUrl = new URL(rawUrl);
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+            return null;
+        }
+        if (parsedUrl.username || parsedUrl.password) {
+            return null;
+        }
+
+        if (isBlockedHostname(parsedUrl.hostname)) {
+            return null;
+        }
+
+        if (net.isIP(parsedUrl.hostname)) {
+            return isPrivateAddress(parsedUrl.hostname) ? null : parsedUrl.toString();
+        }
+
+        try {
+            const resolvedAddresses = await dns.lookup(parsedUrl.hostname, { all: true, verbatim: true });
+            if (resolvedAddresses.some(({ address }) => isPrivateAddress(address))) {
+                return null;
+            }
+        } catch {
+            // Let the outbound request fail normally if DNS is temporarily unavailable.
+        }
+
+        return parsedUrl.toString();
+    } catch {
+        return null;
+    }
+};
+
+const fetchProxiedMedia = async (targetUrl: string, redirectCount = 0): Promise<any> => {
+    const response = await axios({
+        method: 'GET',
+        url: targetUrl,
+        responseType: 'stream',
+        timeout: 15000,
+        maxRedirects: 0,
+        validateStatus: (status) => status >= 200 && status < 400,
+        headers: {
+            'Referer': 'https://x.com/',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': '*/*'
+        }
+    });
+
+    if (response.status >= 300 && response.status < 400) {
+        if (redirectCount >= MAX_PROXY_REDIRECTS) {
+            throw new Error('Too many proxy redirects');
+        }
+
+        const redirectLocation = response.headers.location;
+        if (!redirectLocation) {
+            throw new Error('Redirect missing location header');
+        }
+
+        const redirectedUrl = new URL(redirectLocation, targetUrl).toString();
+        const validatedRedirectUrl = await validateProxyUrl(redirectedUrl);
+        if (!validatedRedirectUrl) {
+            throw new Error('Blocked proxy redirect target');
+        }
+
+        response.data.destroy();
+        return fetchProxiedMedia(validatedRedirectUrl, redirectCount + 1);
+    }
+
+    return response;
+};
 
 // Get paginated logs
 router.get('/logs', authMiddleware, async (req, res) => {
@@ -60,25 +185,21 @@ router.get('/logs/:id', authMiddleware, async (req, res) => {
     }
 });
 
-// Proxy media endpoint to bypass CORS and stream Twitter MP4s, images, etc.
-router.get('/proxy-media', async (req, res) => {
+// Proxy media endpoint to bypass CORS and stream remote media for authenticated users.
+router.get('/proxy-media', authMiddleware, async (req, res) => {
     const mediaUrl = req.query.url as string;
 
     if (!mediaUrl) {
         return res.status(400).json({ error: 'Missing media URL' });
     }
 
+    const validatedMediaUrl = await validateProxyUrl(mediaUrl);
+    if (!validatedMediaUrl) {
+        return res.status(400).json({ error: 'Invalid or disallowed media URL' });
+    }
+
     try {
-        const response = await axios({
-            method: 'GET',
-            url: mediaUrl,
-            responseType: 'stream',
-            headers: {
-                'Referer': 'https://x.com/',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': '*/*'
-            }
-        });
+        const response = await fetchProxiedMedia(validatedMediaUrl);
 
         // Forward content-type and length headers
         res.setHeader('Content-Type', response.headers['content-type'] || 'application/octet-stream');
@@ -86,13 +207,15 @@ router.get('/proxy-media', async (req, res) => {
             res.setHeader('Content-Length', response.headers['content-length']);
         }
         res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Cache-Control', 'public, max-age=86400'); // cache proxied media for 24h
+        res.setHeader('Cache-Control', 'private, max-age=3600');
+        res.setHeader('Vary', 'Authorization');
 
         response.data.pipe(res);
 
     } catch (error: any) {
         console.error('Error proxying media:', error.message);
-        res.status(500).json({ error: 'Failed to proxy media' });
+        const status = error.response?.status || (error.message?.includes('Blocked proxy') ? 403 : 500);
+        res.status(status).json({ error: 'Failed to proxy media' });
     }
 });
 

@@ -1,7 +1,7 @@
 import { Image as ImageIcon, FileAudio, ExternalLink } from 'lucide-react';
-import { proxyMediaUrl } from '../utils/media';
 import { parseDiscordPrefix, GUILD_ID } from '../utils/discord';
 import { TweetCard } from './TweetCard';
+import { AuthenticatedVideo } from './AuthenticatedMedia';
 
 /**
  * Renders a single message's content based on its type:
@@ -64,17 +64,17 @@ export const MessageContent = ({ content, channelId }: { content: any, channelId
                         );
                     }
                     if (part.type === 'video') {
-                        const url = proxyMediaUrl(part.video.url);
                         return (
                             <div key={idx} className="mt-2 text-sm text-gray-400 flex flex-col items-start border border-gray-800 bg-gray-900 rounded-lg p-3 inline-block max-w-[24rem]">
                                 <div className="flex items-center mb-2">
                                     <ImageIcon className="w-4 h-4 mr-2 text-purple-400" />
                                     <span>Attached Video</span>
                                 </div>
-                                <video controls className="w-full rounded-md border border-gray-700 bg-black max-h-64" preload="metadata">
-                                    <source src={url} type="video/mp4" />
-                                    Your browser does not support the video tag.
-                                </video>
+                                <AuthenticatedVideo
+                                    src={part.video.url}
+                                    className="w-full rounded-md border border-gray-700 bg-black max-h-64"
+                                    loadingFallback={<div className="w-full h-40 rounded-md border border-gray-700 bg-black/60 animate-pulse" />}
+                                />
                             </div>
                         );
                     }

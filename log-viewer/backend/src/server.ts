@@ -3,16 +3,23 @@ import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import authRouter, { socketAuthMiddleware } from './auth';
+import { allowedOrigins } from './config';
 import logsRouter from './routes';
 import { pool } from './db';
 
 const app = express();
 const server = http.createServer(app);
+const corsOptions = {
+    origin: allowedOrigins,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type']
+};
+
 const io = new Server(server, {
-    cors: { origin: '*' } // Be more restrictive in production
+    cors: corsOptions
 });
 
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Routes
@@ -66,7 +73,9 @@ const pollNewLogs = async () => {
 // Poll every 1.5 seconds
 setInterval(pollNewLogs, 1500);
 
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-    console.log(`Log viewer backend listening on port ${PORT}`);
+const PORT = Number(process.env.PORT || 3001);
+const HOST = process.env.LOG_VIEWER_HOST || '127.0.0.1';
+
+server.listen(PORT, HOST, () => {
+    console.log(`Log viewer backend listening on ${HOST}:${PORT}`);
 });

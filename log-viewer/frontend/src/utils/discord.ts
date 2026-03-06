@@ -1,6 +1,6 @@
-import userMapData from '../user_map.json';
+import userMap from '../userMap';
 
-export const userMap = userMapData as Record<string, string>;
+export { userMap };
 export const GUILD_ID = import.meta.env.VITE_DISCORD_GUILD_ID || '1120463633693024346'; // fallback for demo
 
 export interface ParsedMessage {

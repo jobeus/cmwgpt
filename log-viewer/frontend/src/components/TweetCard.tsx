@@ -1,5 +1,5 @@
-import { proxyMediaUrl } from '../utils/media';
 import { CopyButton } from './CopyButton';
+import { AuthenticatedImage, AuthenticatedVideo } from './AuthenticatedMedia';
 
 interface TweetData {
     type: 'tweet';
@@ -33,7 +33,17 @@ export const TweetCard = ({ tweet }: { tweet: TweetData }) => {
 
                     <div className="flex items-center mb-3">
                         {tweet.authorImage ? (
-                            <img src={proxyMediaUrl(tweet.authorImage, false)} alt={tweet.author} className="w-10 h-10 rounded-full mr-3 object-cover" />
+                            <AuthenticatedImage
+                                src={tweet.authorImage}
+                                alt={tweet.author}
+                                stripQuery={false}
+                                className="w-10 h-10 rounded-full mr-3 object-cover"
+                                fallback={
+                                    <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-lg mr-3 shadow-inner">
+                                        {tweet.author.charAt(0).toUpperCase()}
+                                    </div>
+                                }
+                            />
                         ) : (
                             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-lg mr-3 shadow-inner">
                                 {tweet.author.charAt(0).toUpperCase()}
@@ -61,11 +71,19 @@ export const TweetCard = ({ tweet }: { tweet: TweetData }) => {
                             {tweet.media.map((mediaId: any, i: number) => (
                                 <div key={i} className="w-full h-full flex items-center justify-center bg-black">
                                     {mediaId.type === 'video' ? (
-                                        <video controls className="max-w-full max-h-[400px] object-contain" preload="metadata">
-                                            <source src={proxyMediaUrl(mediaId.url)} type="video/mp4" />
-                                        </video>
+                                        <AuthenticatedVideo
+                                            src={mediaId.url}
+                                            className="max-w-full max-h-[400px] object-contain"
+                                            loadingFallback={<div className="w-[24rem] h-64 max-w-full bg-gray-900 animate-pulse" />}
+                                        />
                                     ) : (
-                                        <img src={proxyMediaUrl(mediaId.url, false)} alt="Tweet Attachment" className="max-w-full max-h-[400px] object-contain" />
+                                        <AuthenticatedImage
+                                            src={mediaId.url}
+                                            alt="Tweet Attachment"
+                                            stripQuery={false}
+                                            className="max-w-full max-h-[400px] object-contain"
+                                            loadingFallback={<div className="w-[24rem] h-64 max-w-full bg-gray-900 animate-pulse" />}
+                                        />
                                     )}
                                 </div>
                             ))}
@@ -88,7 +106,17 @@ export const TweetCard = ({ tweet }: { tweet: TweetData }) => {
                                         <div className="absolute left-[-24px] top-6 bottom-[-24px] w-0.5 bg-[#38444d]"></div>
                                     )}
                                     {reply.authorImage ? (
-                                        <img src={proxyMediaUrl(reply.authorImage, false)} alt={reply.author} className="absolute left-[-28px] top-0 w-8 h-8 rounded-full object-cover" />
+                                        <AuthenticatedImage
+                                            src={reply.authorImage}
+                                            alt={reply.author}
+                                            stripQuery={false}
+                                            className="absolute left-[-28px] top-0 w-8 h-8 rounded-full object-cover"
+                                            fallback={
+                                                <div className="absolute left-[-28px] top-0 w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-300">
+                                                    {reply.author.charAt(0).toUpperCase()}
+                                                </div>
+                                            }
+                                        />
                                     ) : (
                                         <div className="absolute left-[-28px] top-0 w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-300">
                                             {reply.author.charAt(0).toUpperCase()}

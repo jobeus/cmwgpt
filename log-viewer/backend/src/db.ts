@@ -1,9 +1,5 @@
+import './config';
 import mariadb from 'mariadb';
-import dotenv from 'dotenv';
-import path from 'path';
-
-// Load the root .env file from two directories up
-dotenv.config({ path: path.join(__dirname, '../../../.env') });
 
 export const pool = mariadb.createPool({
     host: process.env.DB_HOST || 'localhost',

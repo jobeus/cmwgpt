@@ -5,9 +5,7 @@ import { format } from 'date-fns';
 import { useAuth } from '../AuthContext';
 import { Terminal, ChevronRight, Server, Check, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import userMapData from '../user_map.json';
-
-const userMap = userMapData as Record<string, string>;
+import userMap from '../userMap';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || '/';
