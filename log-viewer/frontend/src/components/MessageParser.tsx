@@ -161,7 +161,7 @@ const renderMessageContent = (content: any, channelId: string | null) => {
             <div className="space-y-4">
                 {content.map((part, idx) => {
                     if (part.type === 'text') {
-                        return <div key={idx}>{renderMessageContent(part.text, channelId)}</div>;
+                        return <div key={idx} className="whitespace-pre-wrap">{renderMessageContent(part.text, channelId)}</div>;
                     }
                     if (part.type === 'image_url') {
                         const url = part.image_url.url;
@@ -178,6 +178,21 @@ const renderMessageContent = (content: any, channelId: string | null) => {
                                         {url}
                                     </a>
                                 )}
+                            </div>
+                        );
+                    }
+                    if (part.type === 'video') {
+                        const url = part.video.url;
+                        return (
+                            <div key={idx} className="mt-2 text-sm text-gray-400 flex flex-col items-start border border-gray-800 bg-gray-900 rounded-lg p-3 inline-block max-w-[24rem]">
+                                <div className="flex items-center mb-2">
+                                    <ImageIcon className="w-4 h-4 mr-2 text-purple-400" />
+                                    <span>Attached Video</span>
+                                </div>
+                                <video controls className="w-full rounded-md border border-gray-700 bg-black max-h-64" preload="metadata">
+                                    <source src={url} type="video/mp4" />
+                                    Your browser does not support the video tag.
+                                </video>
                             </div>
                         );
                     }
@@ -282,68 +297,147 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
         messages.push({ role: 'assistant', content: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) });
     } else if (serviceName.startsWith('rapidapi/twitter')) {
         // Twitter RapidAPI Fetch
-        messages.push({ role: 'system', content: `[Action: Fetching Twitter Data via RapidAPI]` });
+        const targetUrl = requestBody?.url || requestBody?.tweet_url || requestBody?.id || "Unknown URL";
+        messages.push({ role: 'system', content: `[Action: Fetching Twitter Data via RapidAPI for ${targetUrl}]` });
 
         // Try to format the JSON data into a readable tweet + replies
-        let formattedTwitterContent = '';
-        if (typeof responseBody === 'object' && responseBody?.data?.threaded_conversation_with_injections_v2) {
+        let contentArray: any[] = [];
+        let hasMedia = false;
+
+        if (typeof responseBody === 'object' && responseBody?.data) {
             try {
-                const entries = responseBody.data.threaded_conversation_with_injections_v2.instructions[1].entries;
+                // Determine if we are on the threaded_conversation v2 (which has instructions array) 
+                // or standard direct v2 (with data + includes object)
+                const isThreaded = responseBody.data.threaded_conversation_with_injections_v2 !== undefined;
+
+                let mainText = "";
+                let mainAuthor = "";
+                let repliesText = "";
 
                 const extractTweetText = (result: any) => {
-                    const note = result.note_tweet;
+                    const note = result?.note_tweet;
                     if (note && note.note_tweet_results?.result?.text) {
                         return note.note_tweet_results.result.text;
                     }
-                    return result.legacy.full_text;
+                    return result?.legacy?.full_text || result?.text || "";
                 };
 
                 const extractAuthor = (result: any) => {
-                    return result.core.user_results.result.legacy.name;
+                    return result?.core?.user_results?.result?.legacy?.name || "Twitter User";
                 };
 
-                // Main tweet
-                const mainResult = entries[0].content.itemContent.tweet_results.result;
-                const mainAuthor = extractAuthor(mainResult);
-                const mainText = extractTweetText(mainResult);
+                // ---- Extract text and Replies ---- 
+                if (isThreaded) {
+                    const entries = responseBody.data.threaded_conversation_with_injections_v2.instructions[1].entries;
+                    // Main tweet
+                    const mainResult = entries[0].content.itemContent.tweet_results.result;
+                    mainAuthor = extractAuthor(mainResult);
+                    mainText = extractTweetText(mainResult);
 
-                // Replies
-                let repliesText = "";
-                const replies = [];
-                for (let i = 1; i < Math.min(6, entries.length); i++) {
-                    const entry = entries[i];
-                    try {
-                        let replyResult;
-                        const items = entry.content.items;
-                        if (items && items.length > 0) {
-                            replyResult = items[0].item.itemContent.tweet_results.result;
-                        } else {
-                            replyResult = entry.content.itemContent.tweet_results.result;
-                        }
+                    // Replies
+                    const replies = [];
+                    for (let i = 1; i < Math.min(6, entries.length); i++) {
+                        const entry = entries[i];
+                        try {
+                            let replyResult;
+                            const items = entry.content.items;
+                            if (items && items.length > 0) {
+                                replyResult = items[0].item.itemContent.tweet_results.result;
+                            } else {
+                                replyResult = entry.content.itemContent.tweet_results.result;
+                            }
 
-                        if (replyResult) {
-                            const replyAuthor = extractAuthor(replyResult);
-                            const replyText = extractTweetText(replyResult);
-                            replies.push(`  ↳ ${replyAuthor}: ${replyText}`);
+                            if (replyResult) {
+                                const replyAuthor = extractAuthor(replyResult);
+                                const replyText = extractTweetText(replyResult);
+                                replies.push(`  ↳ ${replyAuthor}: ${replyText}`);
+                            }
+                        } catch (e) {
+                            // ignore missing items
                         }
-                    } catch (e) {
-                        // ignore missing items
+                    }
+
+                    if (replies.length > 0) {
+                        repliesText = "\n\nTop replies:\n" + replies.join('\n');
+                    }
+                } else if (Array.isArray(responseBody.data)) {
+                    // This is the direct `tweets` array structure
+                    mainText = responseBody.data[0]?.text || "";
+                    mainAuthor = "Twitter User";
+                }
+
+                // Push formatted text first
+                const fullText = `Tweet by ${mainAuthor}:\n${mainText}${repliesText}`;
+                if (fullText.trim()) {
+                    contentArray.push({ type: 'text', text: fullText });
+                }
+
+                // ---- Extract Media ----
+                const extractMediaFromIncludes = (includes: any) => {
+                    if (includes && includes.media && Array.isArray(includes.media)) {
+                        for (const m of includes.media) {
+                            if (m.type === 'photo') {
+                                contentArray.push({ type: 'image_url', image_url: { url: m.url } });
+                                hasMedia = true;
+                            } else if (m.type === 'video' || m.type === 'animated_gif') {
+                                if (m.variants && Array.isArray(m.variants)) {
+                                    // Get best mp4 variant
+                                    const mp4Variants = m.variants.filter((v: any) => v.content_type === 'video/mp4');
+                                    if (mp4Variants.length > 0) {
+                                        const bestVariant = mp4Variants.reduce((prev: any, current: any) => {
+                                            return ((prev.bit_rate || 0) > (current.bit_rate || 0)) ? prev : current;
+                                        });
+                                        contentArray.push({ type: 'video', video: { url: bestVariant.url } });
+                                        hasMedia = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+
+                const extractMediaFromExtended = (extended_entities: any) => {
+                    if (extended_entities && extended_entities.media && Array.isArray(extended_entities.media)) {
+                        for (const m of extended_entities.media) {
+                            if (m.type === 'photo') {
+                                contentArray.push({ type: 'image_url', image_url: { url: m.media_url_https } });
+                                hasMedia = true;
+                            } else if (m.type === 'video' || m.type === 'animated_gif') {
+                                if (m.video_info && m.video_info.variants) {
+                                    const mp4Variants = m.video_info.variants.filter((v: any) => v.content_type === 'video/mp4');
+                                    if (mp4Variants.length > 0) {
+                                        const bestVariant = mp4Variants.reduce((prev: any, current: any) => {
+                                            return ((prev.bitrate || 0) > (current.bitrate || 0)) ? prev : current;
+                                        });
+                                        contentArray.push({ type: 'video', video: { url: bestVariant.url } });
+                                        hasMedia = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+
+                // Attempt both legacy and new extraction methods
+                if (responseBody.includes) {
+                    extractMediaFromIncludes(responseBody.includes);
+                }
+
+                if (isThreaded) {
+                    const mainResult = responseBody.data.threaded_conversation_with_injections_v2.instructions[1].entries[0].content.itemContent.tweet_results.result;
+                    if (mainResult?.legacy?.extended_entities) {
+                        extractMediaFromExtended(mainResult.legacy.extended_entities);
                     }
                 }
-
-                if (replies.length > 0) {
-                    repliesText = "\n\nTop replies:\n" + replies.join('\n');
-                }
-
-                formattedTwitterContent = `Tweet by ${mainAuthor}:\n${mainText}${repliesText}`;
             } catch (e) {
-                formattedTwitterContent = JSON.stringify(responseBody, null, 2);
+                console.error("Failed to parse Twitter object payload:", e);
+                contentArray = [{ type: 'text', text: JSON.stringify(responseBody, null, 2) }];
             }
         } else {
-            formattedTwitterContent = typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2);
+            contentArray = [{ type: 'text', text: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) }];
         }
 
-        messages.push({ role: 'assistant', content: formattedTwitterContent });
+        messages.push({ role: 'assistant', content: contentArray.length === 1 && !hasMedia ? contentArray[0].text : contentArray });
     } else if (serviceName.startsWith('url_utils/')) {
         // Article scraping
         const representsPython = typeof requestBody === 'string' && requestBody.includes('import');
