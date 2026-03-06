@@ -10,8 +10,7 @@ from typing import Any, Optional
 import discord
 from discord.ext import commands
 
-from src.config import AppConfig, DEFAULT_MODEL, load_config
-from src.bot.commands.chat import ChatCommands
+from src.config import AppConfig, DEFAULT_MODEL, get_system_prompt, load_config
 from src.bot.commands.image import ImageCommands
 from src.bot.commands.system import SystemCommands
 from src.bot.commands.interject import InterjectCommands
@@ -37,6 +36,8 @@ class DiscordBotClient:
         intents.message_content = True
         intents.members = True
         self.bot = commands.Bot(command_prefix="/", intents=intents)
+        self.services.openai_service.set_bot_id_loader(
+            lambda: self.bot.user.id if self.bot.user else None)
 
         # Load any saved state from previous restart
         self._load_saved_state()
@@ -245,26 +246,39 @@ class DiscordBotClient:
 
     def _setup_commands(self) -> None:
         """Set up Discord slash commands."""
-        chat_commands = ChatCommands(self.bot)
-        chat_commands.setup_commands()
-
-        image_commands = ImageCommands(self.bot)
+        image_commands = ImageCommands(
+            self.bot,
+            state_service=self.services.state_service,
+            message_service=self.services.message_service,
+            runpod_service=self.services.runpod_service,
+            default_draw_model=self.config.default_draw_model,
+            default_edit_model=self.config.default_edit_model,
+            enable_runpod_models=bool(self.config.runpod_io_api_key),
+        )
         image_commands.setup_commands()
 
         system_commands = SystemCommands(
             self.bot,
+            queue_service_instance=self.services.queue_service,
+            state_service_instance=self.services.state_service,
             auto_update_service=self.services.auto_update_service,
+            system_prompt_loader=lambda: get_system_prompt(self.config.system_prompt_path),
             default_model=self.config.default_model,
         )
         system_commands.setup_commands()
 
         interject_commands = InterjectCommands(
             self.bot,
+            state_service_instance=self.services.state_service,
             interject_service=self.services.interject_service,
         )
         interject_commands.setup_commands()
 
-        death_commands = DeathCommands(self.bot)
+        death_commands = DeathCommands(
+            self.bot,
+            state_service_instance=self.services.state_service,
+            death_channel_id=self.config.death_channel_id,
+        )
         death_commands.setup_commands()
 
     async def _handle_message(self, message: discord.Message) -> None:

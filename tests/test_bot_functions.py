@@ -28,10 +28,19 @@ class TestBotFunctions(unittest.TestCase):
         """Set up test environment."""
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
+        from src.services.message_service import message_service
+        self._message_service = message_service
+        self._original_paste_service = message_service._paste_service
 
     def tearDown(self):
         """Clean up test environment."""
+        self._message_service.set_paste_service(self._original_paste_service)
         self.loop.close()
+
+    def _set_mock_paste_service(self, upload_mock):
+        paste_service = MagicMock()
+        paste_service.upload_markdown = upload_mock
+        self._message_service.set_paste_service(paste_service)
 
     def test_prepare_mention_context(self):
         """Test mention handler _prepare_mention_context function."""
@@ -88,6 +97,9 @@ class TestBotFunctions(unittest.TestCase):
 
             mention_handler = MentionHandler(
                 state_service=mock_state_service,
+                openai_service=MagicMock(),
+                message_service=MagicMock(),
+                queue_service=MagicMock(),
                 system_prompt_loader=lambda: "Default system prompt",
                 include_num_chatlines=3,
                 mention_legend_provider=mock_mention_legend,
@@ -131,12 +143,13 @@ class TestBotFunctions(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    @patch("src.services.paste_service.paste_service.upload_markdown")
-    def test_send_channel_reply_short_message(self, mock_upload):
+    def test_send_channel_reply_short_message(self):
         """Test message service send_channel_reply with short message."""
 
         async def run_test():
             from src.services.message_service import message_service
+            mock_upload = AsyncMock()
+            self._set_mock_paste_service(mock_upload)
 
             # Mock channel
             mock_channel = AsyncMock()
@@ -153,18 +166,16 @@ class TestBotFunctions(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    @patch("src.services.paste_service.paste_service.upload_markdown")
-    def test_send_channel_reply_long_message(self, mock_upload):
+    def test_send_channel_reply_long_message(self):
         """Test message service send_channel_reply with long message that needs pasting."""
 
         async def run_test():
             from src.services.message_service import message_service
+            mock_upload = AsyncMock(return_value="https://paste.rs/abc123.md")
+            self._set_mock_paste_service(mock_upload)
 
             # Mock channel
             mock_channel = AsyncMock()
-
-            # Mock pasters upload
-            mock_upload.return_value = "https://paste.rs/abc123.md"
 
             # Test long message (over 2000 characters)
             long_message = "A" * 2500
@@ -183,18 +194,16 @@ class TestBotFunctions(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    @patch("src.services.paste_service.paste_service.upload_markdown")
-    def test_send_channel_reply_upload_error(self, mock_upload):
+    def test_send_channel_reply_upload_error(self):
         """Test message service send_channel_reply when paste upload fails."""
 
         async def run_test():
             from src.services.message_service import message_service
+            mock_upload = AsyncMock(side_effect=Exception("Upload failed"))
+            self._set_mock_paste_service(mock_upload)
 
             # Mock channel
             mock_channel = AsyncMock()
-
-            # Mock pasters upload failure
-            mock_upload.side_effect = Exception("Upload failed")
 
             # Test long message
             long_message = "B" * 2500
@@ -214,12 +223,13 @@ class TestBotFunctions(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    @patch("src.services.paste_service.paste_service.upload_markdown")
-    def test_send_interaction_followup_short_message(self, mock_upload):
+    def test_send_interaction_followup_short_message(self):
         """Test message service send_interaction_followup with short message."""
 
         async def run_test():
             from src.services.message_service import message_service
+            mock_upload = AsyncMock()
+            self._set_mock_paste_service(mock_upload)
 
             # Mock interaction
             mock_interaction = MagicMock()
@@ -239,19 +249,17 @@ class TestBotFunctions(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    @patch("src.services.paste_service.paste_service.upload_markdown")
-    def test_send_interaction_followup_long_message(self, mock_upload):
+    def test_send_interaction_followup_long_message(self):
         """Test message service send_interaction_followup with long message that needs pasting."""
 
         async def run_test():
             from src.services.message_service import message_service
+            mock_upload = AsyncMock(return_value="https://paste.rs/xyz789.md")
+            self._set_mock_paste_service(mock_upload)
 
             # Mock interaction
             mock_interaction = MagicMock()
             mock_interaction.followup = AsyncMock()
-
-            # Mock pasters upload
-            mock_upload.return_value = "https://paste.rs/xyz789.md"
 
             # Test parameters
             base_content = "> Test prompt"

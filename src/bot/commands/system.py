@@ -12,8 +12,6 @@ from discord.app_commands import Choice
 
 from src.config import get_system_prompt, DEFAULT_MODEL
 from src.utils.discord_helper import get_mention_legend
-from src.services.queue_service import queue_service
-from src.services.state_service import state_service
 from src.utils.async_utils import safe_run
 
 logger = logging.getLogger(__name__)
@@ -26,11 +24,12 @@ class SystemCommands:
         self,
         bot: discord.ext.commands.Bot,
         *,
-        queue_service_instance=queue_service,
-        state_service_instance=state_service,
+        queue_service_instance,
+        state_service_instance,
         auto_update_service=None,
         system_prompt_loader=get_system_prompt,
         default_model: str = DEFAULT_MODEL,
+        mention_legend_provider=get_mention_legend,
     ):
         self.bot = bot
         self._queue_service = queue_service_instance
@@ -38,6 +37,7 @@ class SystemCommands:
         self._auto_update_service = auto_update_service
         self._system_prompt_loader = system_prompt_loader
         self._default_model = default_model
+        self._mention_legend_provider = mention_legend_provider
 
     def setup_commands(self) -> None:
         """Set up all system-related commands."""
@@ -139,7 +139,7 @@ class SystemCommands:
 
         @systemprompt_group.command(
             name="view",
-            description="View the full system prompt for this channel (as used by /chat)")
+            description="View the composed base system prompt for this channel")
         async def systemprompt_view(interaction: discord.Interaction):
             await interaction.response.defer(ephemeral=True, thinking=True)
 
@@ -192,7 +192,7 @@ class SystemCommands:
         # Mark channel as active
         self._state_service.mark_channel_active(channel_id)
 
-        legend_section = await get_mention_legend(interaction.channel, self.bot.user)
+        legend_section = await self._mention_legend_provider(interaction.channel, self.bot.user)
 
         if prompt_text:
             # Set new system prompt (no longer stored in conversation arrays)
@@ -219,16 +219,16 @@ class SystemCommands:
             self, interaction: discord.Interaction) -> None:
         """
         Handle the /systemprompt view command.
-        Shows the full composed system prompt exactly as /chat would use it.
+        Shows the composed base system prompt used for channel-scoped bot behavior.
 
         Args:
             interaction: The Discord interaction
         """
         channel_id = interaction.channel.id
 
-        legend_section = await get_mention_legend(interaction.channel, self.bot.user)
+        legend_section = await self._mention_legend_provider(interaction.channel, self.bot.user)
 
-        # Compose exactly as /chat does
+        # Compose the channel base prompt with the current mention legend.
         channel_system_prompt = self._state_service.get_system_prompt(channel_id)
         if channel_system_prompt:
             full_prompt = channel_system_prompt + "\n" + legend_section
@@ -323,9 +323,7 @@ class SystemCommands:
         help_text = (
             "**🤖 AI Bot Commands Help**\n\n"
             "**Chat & Conversations:**\n"
-            "`/chat [message]` - Chat privately with the AI (can attach images)\n"
-            "`@BotName [message]` - Mention the bot for context-aware responses in the channel\n"
-            "`/reset` - Clear the conversation history for this channel\n\n"
+            "`@BotName [message]` - Mention the bot for context-aware responses in the channel\n\n"
             "**Image Generation & Editing:**\n"
             "`/draw [prompt]` - Generate an image with the AI\n"
             "`/edit [prompt] [edit_image]` - Edit an existing image (supports up to 4 images for seedream/qwen/pruna)\n"

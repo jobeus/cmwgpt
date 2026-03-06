@@ -5,7 +5,7 @@ Tests OpenAI API integration functionality.
 
 from src.services.openai_service import openai_service
 import unittest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, patch
 import sys
 import os
 
@@ -28,6 +28,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.mock_client = AsyncMock()
         self.mock_client.default_headers = {}
         openai_service.set_client(self.mock_client)
+        openai_service.set_bot_id_loader(None)
 
     async def test_get_chat_completion_success(self):
         """Test successful chat completion."""
@@ -113,6 +114,20 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         result = await openai_service.get_chat_completion("google/gemini-2.5-flash", messages, system_prompt)
 
         self.assertEqual(result, "Complex response")
+
+    @patch("src.services.openai_service.clean_openai_response", return_value="cleaned")
+    async def test_chat_completion_uses_injected_bot_id_loader(self, mock_clean):
+        mock_response = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = "<@12345> Hello"
+        mock_response.choices = [mock_choice]
+        self.mock_client.chat.completions.create.return_value = mock_response
+        openai_service.set_bot_id_loader(lambda: 12345)
+
+        result = await openai_service.get_chat_completion("gpt-5-mini", [{"role": "user", "content": "hi"}])
+
+        self.assertEqual(result, "cleaned")
+        mock_clean.assert_called_once_with("<@12345> Hello", bot_id=12345)
 
 
 if __name__ == "__main__":

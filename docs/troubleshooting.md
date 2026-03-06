@@ -173,14 +173,14 @@ sudo systemctl restart discord-bot
 
 #### Solutions
 
-1. **Verify .env File**
+1. **Verify environment file**
    ```bash
-   # Check file exists and is readable
-   ls -la .env
-   cat .env
+   # Check whichever file you are using (.env.production or .env)
+   ls -la .env.production .env
+   cat .env.production
    
    # Check for syntax errors
-   grep -v '^#' .env | grep -v '^$'
+   grep -v '^#' .env.production | grep -v '^$'
    ```
 
 2. **Test Configuration Loading**

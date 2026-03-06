@@ -1,7 +1,6 @@
-import dotenv from 'dotenv';
-import path from 'path';
+import { loadResolvedEnvFile } from './env';
 
-dotenv.config({ path: path.join(__dirname, '../../../.env') });
+loadResolvedEnvFile();
 
 const normalizeOrigin = (origin: string) => origin.trim().replace(/\/$/, '');
 

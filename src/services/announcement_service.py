@@ -14,7 +14,6 @@ import discord
 from discord.ext import commands
 
 from src.config import QUIET_UPDATES
-from src.services.state_service import state_service as default_state_service
 from src.utils.pasters import upload_to_pasters
 
 logger = logging.getLogger(__name__)
@@ -26,7 +25,7 @@ class AnnouncementService:
     def __init__(
         self,
         *,
-        state_service=default_state_service,
+        state_service,
         paste_service=None,
         quiet_updates: bool = QUIET_UPDATES,
         current_git_sha_loader: Optional[Callable[[], Optional[str]]] = None,

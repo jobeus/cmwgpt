@@ -96,7 +96,10 @@ class TestDeathService(unittest.TestCase):
             pass
 
         from src.services.death_service import DeathService
+        self.state_service = MagicMock()
+        self.state_service.get_death_settings.return_value = None
         self.service = DeathService(
+            state_service=self.state_service,
             state_file="/tmp/_test_death_names.json",
             death_channel_id="12345",
         )
@@ -258,6 +261,7 @@ class TestDeathService(unittest.TestCase):
 
         from src.services.death_service import DeathService
         new_service = DeathService(
+            state_service=self.state_service,
             state_file="/tmp/_test_death_names.json",
             death_channel_id="12345",
         )
@@ -270,6 +274,7 @@ class TestDeathService(unittest.TestCase):
 
         from src.services.death_service import DeathService
         new_service = DeathService(
+            state_service=self.state_service,
             state_file="/tmp/_test_death_names.json",
             death_channel_id="12345",
         )
@@ -282,6 +287,7 @@ class TestDeathService(unittest.TestCase):
         """Should handle missing state file gracefully."""
         from src.services.death_service import DeathService
         service = DeathService(
+            state_service=self.state_service,
             state_file="/tmp/_missing_death_names.json",
             death_channel_id="12345",
         )
@@ -294,7 +300,11 @@ class TestDeathService(unittest.TestCase):
         """Service should not start if DEATH_CHANNEL_ID is empty."""
         from src.services.death_service import DeathService
 
-        service = DeathService(state_file="/tmp/_test_death_names.json", death_channel_id="")
+        service = DeathService(
+            state_service=self.state_service,
+            state_file="/tmp/_test_death_names.json",
+            death_channel_id="",
+        )
         service.start()
         self.assertFalse(service._running)
 

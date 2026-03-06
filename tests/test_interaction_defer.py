@@ -3,10 +3,8 @@ Test Discord interaction deferring functionality.
 Tests that slash commands properly defer interactions before queueing.
 """
 
-from src.services.queue_service import QueueService
 from src.bot.commands.image import ImageCommands
 from src.bot.commands.system import SystemCommands
-from src.bot.commands.chat import ChatCommands
 import unittest
 import asyncio
 from unittest.mock import MagicMock, AsyncMock, patch
@@ -29,59 +27,27 @@ class TestInteractionDefer(unittest.TestCase):
 
         # Create mock bot
         self.mock_bot = MagicMock()
-
-        # Create command instances
-        self.chat_commands = ChatCommands(self.mock_bot)
-        self.system_commands = SystemCommands(self.mock_bot)
-        self.image_commands = ImageCommands(self.mock_bot)
-
-        # Create a test queue service
-        self.queue_service = QueueService(max_queue_size=3)
+        self.mock_queue_service = MagicMock()
+        self.mock_queue_service.queue_command = AsyncMock()
+        self.mock_state_service = MagicMock()
+        self.system_commands = SystemCommands(
+            self.mock_bot,
+            queue_service_instance=self.mock_queue_service,
+            state_service_instance=self.mock_state_service,
+        )
+        self.image_commands = ImageCommands(
+            self.mock_bot,
+            state_service=MagicMock(),
+            message_service=MagicMock(),
+            runpod_service=MagicMock(),
+            default_draw_model="seedream",
+            default_edit_model="seedream",
+            enable_runpod_models=False,
+        )
 
     def tearDown(self):
         """Clean up test environment."""
-        # Ensure queue service is stopped
-        if self.queue_service.is_running():
-            self.loop.run_until_complete(self.queue_service.stop())
         self.loop.close()
-
-    def test_chat_command_defers_interaction(self):
-        """Test that /chat command properly defers the interaction."""
-
-        async def run_test():
-            # Create mock interaction
-            mock_interaction = MagicMock()
-            mock_interaction.response = AsyncMock()
-            mock_interaction.followup = AsyncMock()
-            mock_interaction.user = MagicMock()
-            mock_interaction.user.__str__ = MagicMock(return_value="TestUser")
-            mock_interaction.channel = MagicMock()
-            mock_interaction.channel.__str__ = MagicMock(
-                return_value="TestChannel")
-
-            # Mock the queue service to return False (queue full)
-            with patch("src.bot.commands.chat.queue_service") as mock_queue_service:
-                mock_queue_service.queue_command = AsyncMock(
-                    return_value=False)
-
-                # Create the chat command
-                chat_command = self.chat_commands._create_chat_command()
-
-                # Execute the command
-                await chat_command.callback(mock_interaction, "test message")
-
-                # Verify interaction was deferred first
-                mock_interaction.response.defer.assert_called_once_with(
-                    ephemeral=False, thinking=True)
-
-                # Verify queue_command was called
-                mock_queue_service.queue_command.assert_called_once()
-
-                # Verify followup was used (not response.send_message)
-                mock_interaction.followup.send.assert_called_once()
-                mock_interaction.response.send_message.assert_not_called()
-
-        self.loop.run_until_complete(run_test())
 
     def test_model_command_defers_interaction(self):
         """Test that /model command properly defers the interaction."""
@@ -97,31 +63,23 @@ class TestInteractionDefer(unittest.TestCase):
             mock_interaction.channel.__str__ = MagicMock(
                 return_value="TestChannel")
 
-            # Mock the queue service to return False (queue full)
-            with patch("src.bot.commands.system.queue_service") as mock_queue_service:
-                mock_queue_service.queue_command = AsyncMock(
-                    return_value=False)
+            self.mock_queue_service.queue_command.return_value = False
 
-                # Create the model command
-                system_commands = SystemCommands(
-                    self.mock_bot,
-                    queue_service_instance=mock_queue_service,
-                )
-                model_command = system_commands._create_model_command()
+            model_command = self.system_commands._create_model_command()
 
-                # Execute the command
-                await model_command.callback(mock_interaction, "gpt-5-mini")
+            # Execute the command
+            await model_command.callback(mock_interaction, "gpt-5-mini")
 
-                # Verify interaction was deferred first
-                mock_interaction.response.defer.assert_called_once_with(
-                    ephemeral=False, thinking=True)
+            # Verify interaction was deferred first
+            mock_interaction.response.defer.assert_called_once_with(
+                ephemeral=False, thinking=True)
 
-                # Verify queue_command was called
-                mock_queue_service.queue_command.assert_called_once()
+            # Verify queue_command was called
+            self.mock_queue_service.queue_command.assert_called_once()
 
-                # Verify followup was used (not response.send_message)
-                mock_interaction.followup.send.assert_called_once()
-                mock_interaction.response.send_message.assert_not_called()
+            # Verify followup was used (not response.send_message)
+            mock_interaction.followup.send.assert_called_once()
+            mock_interaction.response.send_message.assert_not_called()
 
         self.loop.run_until_complete(run_test())
 
@@ -139,55 +97,21 @@ class TestInteractionDefer(unittest.TestCase):
             mock_interaction.channel.__str__ = MagicMock(
                 return_value="TestChannel")
 
-            # Create the draw command
-            draw_command = self.image_commands._create_draw_command()
+            with patch("src.bot.commands.image.asyncio.create_task") as mock_create_task:
+                draw_command = self.image_commands._create_draw_command()
 
-            # Execute the command — /draw is fire-and-forget (no queue)
-            await draw_command.callback(mock_interaction, "test prompt")
+                # Execute the command — /draw is fire-and-forget (no queue)
+                await draw_command.callback(mock_interaction, "test prompt")
 
-            # Verify interaction was deferred first
-            mock_interaction.response.defer.assert_called_once_with(
-                ephemeral=False, thinking=True)
-
-            # No queue_service call — draw runs async directly
-            # No followup error since it's not queue-based anymore
-            mock_interaction.response.send_message.assert_not_called()
-
-        self.loop.run_until_complete(run_test())
-
-    def test_successful_queue_no_error_message(self):
-        """Test that successful queueing doesn't send error messages."""
-
-        async def run_test():
-            # Create mock interaction
-            mock_interaction = MagicMock()
-            mock_interaction.response = AsyncMock()
-            mock_interaction.followup = AsyncMock()
-            mock_interaction.user = MagicMock()
-            mock_interaction.user.__str__ = MagicMock(return_value="TestUser")
-            mock_interaction.channel = MagicMock()
-            mock_interaction.channel.__str__ = MagicMock(
-                return_value="TestChannel")
-
-            # Mock the queue service to return True (successful queue)
-            with patch("src.bot.commands.chat.queue_service") as mock_queue_service:
-                mock_queue_service.queue_command = AsyncMock(return_value=True)
-
-                # Create the chat command
-                chat_command = self.chat_commands._create_chat_command()
-
-                # Execute the command
-                await chat_command.callback(mock_interaction, "test message")
-
-                # Verify interaction was deferred
+                # Verify interaction was deferred first
                 mock_interaction.response.defer.assert_called_once_with(
                     ephemeral=False, thinking=True)
 
-                # Verify queue_command was called
-                mock_queue_service.queue_command.assert_called_once()
+                # Verify async execution was scheduled
+                mock_create_task.assert_called_once()
+                scheduled_coro = mock_create_task.call_args.args[0]
+                scheduled_coro.close()
 
-                # Verify no error message was sent
-                mock_interaction.followup.send.assert_not_called()
                 mock_interaction.response.send_message.assert_not_called()
 
         self.loop.run_until_complete(run_test())

@@ -23,7 +23,12 @@ class TestInterjectService(unittest.TestCase):
 
         # Import fresh for each test
         from src.services.interject_service import InterjectService
-        self.service = InterjectService()
+        self.service = InterjectService(
+            state_service=MagicMock(),
+            openai_service=MagicMock(),
+            message_service=MagicMock(),
+            state_file="",
+        )
 
         # Set up a mock bot
         self.mock_bot = MagicMock()

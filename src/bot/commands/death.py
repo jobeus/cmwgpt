@@ -9,9 +9,6 @@ from typing import Optional
 import discord
 from discord import app_commands
 
-from src.config import DEATH_CHANNEL_ID
-from src.services.queue_service import queue_service
-from src.services.state_service import state_service
 from src.services.death_service import POLL_INTERVAL_SECONDS, MIN_AVG_MONTHLY_VIEWS, PAGEVIEW_MONTHS
 from src.utils.async_utils import safe_run
 
@@ -21,8 +18,10 @@ logger = logging.getLogger(__name__)
 class DeathCommands:
     """Handles /death Discord commands."""
 
-    def __init__(self, bot: discord.ext.commands.Bot):
+    def __init__(self, bot: discord.ext.commands.Bot, *, state_service_instance, death_channel_id: str):
         self.bot = bot
+        self._state_service = state_service_instance
+        self._death_channel_id = death_channel_id
 
     def setup_commands(self) -> None:
         """Set up all death-related commands."""
@@ -72,10 +71,10 @@ class DeathCommands:
 
     def _check_auth(self, interaction: discord.Interaction) -> bool:
         """Ensure the command is only run in the DEATH_CHANNEL_ID."""
-        if not DEATH_CHANNEL_ID:
+        if not self._death_channel_id:
             return False
             
-        if str(interaction.channel_id) != str(DEATH_CHANNEL_ID):
+        if str(interaction.channel_id) != str(self._death_channel_id):
             return False
             
         return True
@@ -91,13 +90,13 @@ class DeathCommands:
             await interaction.followup.send("This command can only be used in the designated death announcements channel.", ephemeral=True)
             return
 
-        state_service.mark_channel_active(interaction.channel.id)
+        self._state_service.mark_channel_active(interaction.channel.id)
 
         if poll_interval is None and min_views is None and pageview_months is None:
             await interaction.followup.send("You must provide at least one setting to change.", ephemeral=True)
             return
 
-        current_settings = state_service.get_death_settings() or {}
+        current_settings = self._state_service.get_death_settings() or {}
         
         if poll_interval is not None:
             current_settings["interval"] = poll_interval
@@ -106,7 +105,7 @@ class DeathCommands:
         if pageview_months is not None:
             current_settings["pageview_months"] = pageview_months
 
-        state_service.set_death_settings(current_settings)
+        self._state_service.set_death_settings(current_settings)
 
         logger.info(f"[/death set] Settings updated to {current_settings}.")
         await interaction.followup.send(
@@ -123,9 +122,9 @@ class DeathCommands:
             await interaction.followup.send("This command can only be used in the designated death announcements channel.", ephemeral=True)
             return
             
-        state_service.mark_channel_active(interaction.channel.id)
+        self._state_service.mark_channel_active(interaction.channel.id)
 
-        state_service.clear_death_settings()
+        self._state_service.clear_death_settings()
         
         logger.info("[/death reset] Settings reset to defaults.")
         await interaction.followup.send("Death settings have been reset to defaults.", ephemeral=True)
@@ -136,7 +135,7 @@ class DeathCommands:
             await interaction.followup.send("This command can only be used in the designated death announcements channel.", ephemeral=True)
             return
 
-        settings = state_service.get_death_settings() or {}
+        settings = self._state_service.get_death_settings() or {}
         
         interval = settings.get("interval", POLL_INTERVAL_SECONDS)
         min_views = settings.get("min_views", MIN_AVG_MONTHLY_VIEWS)

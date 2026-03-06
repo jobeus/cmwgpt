@@ -9,13 +9,8 @@ from typing import Any, Awaitable, Callable, Dict, List
 
 import discord
 
-from src.config import get_system_prompt, INCLUDE_NUM_CHATLINES
-from src.services.state_service import state_service as default_state_service
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url
-from src.services.openai_service import openai_service as default_openai_service, OpenAIServiceError
-from src.services.message_service import message_service as default_message_service
-from src.services.queue_service import queue_service as default_queue_service
-import asyncio
+from src.services.openai_service import OpenAIServiceError
 from src.utils.downloader_utils import fetch_all_url_content
 
 # Pattern to strip cost prefixes like [$0.011] or [$0.005 @ z-image] from the start of bot messages
@@ -30,12 +25,12 @@ class MentionHandler:
     def __init__(
         self,
         *,
-        state_service=default_state_service,
-        openai_service=default_openai_service,
-        message_service=default_message_service,
-        queue_service=default_queue_service,
-        system_prompt_loader: Callable[[], str] = get_system_prompt,
-        include_num_chatlines: int = INCLUDE_NUM_CHATLINES,
+        state_service: Any,
+        openai_service: Any,
+        message_service: Any,
+        queue_service: Any,
+        system_prompt_loader: Callable[[], str],
+        include_num_chatlines: int,
         mention_legend_provider: Callable[[discord.TextChannel, discord.User], Awaitable[str]] = get_mention_legend,
         attachment_converter: Callable[[discord.Attachment], Awaitable[str]] = attachment_to_base64_data_url,
         url_converter: Callable[[str], Awaitable[str]] = url_to_base64_data_url,
@@ -383,7 +378,3 @@ class MentionHandler:
                     {"role": role, "content": text_payload + file_payloads})
 
         return chat_context, current_channel_system_prompt
-
-
-# Global handler instance
-mention_handler = MentionHandler()

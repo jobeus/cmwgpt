@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Mapping, Optional
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from zoneinfo import ZoneInfo
 
 DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
@@ -19,6 +19,27 @@ def _read_int(value: Optional[str], default: int) -> int:
     if value is None:
         return default
     return int(value)
+
+
+def resolve_env_file_path(env: Optional[Mapping[str, str]] = None) -> Optional[str]:
+    source = os.environ if env is None else env
+    explicit_path = source.get("CMWGPT_ENV_FILE", "").strip()
+    if explicit_path:
+        return explicit_path
+
+    for candidate in (".env.production", ".env"):
+        resolved_path = find_dotenv(candidate, usecwd=True)
+        if resolved_path:
+            return resolved_path
+
+    return None
+
+
+def load_resolved_env_file(env: Optional[Mapping[str, str]] = None) -> Optional[str]:
+    env_file_path = resolve_env_file_path(env)
+    if env_file_path:
+        load_dotenv(env_file_path)
+    return env_file_path
 
 
 @dataclass(frozen=True)
@@ -56,7 +77,7 @@ def load_config(
     system_prompt_path: str = "system_prompt.txt",
 ) -> AppConfig:
     if load_env_file:
-        load_dotenv()
+        load_resolved_env_file(env)
 
     source = os.environ if env is None else env
     return AppConfig(

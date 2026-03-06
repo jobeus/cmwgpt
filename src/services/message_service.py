@@ -9,7 +9,6 @@ from typing import List, Optional, Protocol, Union
 import discord
 from discord import HTTPException, Forbidden, NotFound
 
-from src.services.paste_service import paste_service
 from src.utils.message_utils import format_attachment_message, format_prompt_message
 
 logger = logging.getLogger(__name__)
@@ -25,7 +24,7 @@ class MessageService:
 
     DISCORD_MESSAGE_LIMIT = 2000
 
-    def __init__(self, paste_service_instance: Optional[PasteUploader] = paste_service):
+    def __init__(self, paste_service_instance: Optional[PasteUploader] = None):
         self._paste_service = paste_service_instance
 
     def set_paste_service(self, paste_service_instance: Optional[PasteUploader]) -> None:
