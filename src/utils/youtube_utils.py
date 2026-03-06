@@ -22,7 +22,7 @@ def extract_video_ids(text: str) -> List[str]:
         return []
 
     # Regex to match youtube video IDs from various URL formats
-    pattern = r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
+    pattern = r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:shorts\/|[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?\&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
 
     matches = re.finditer(pattern, text)
     video_ids = []
