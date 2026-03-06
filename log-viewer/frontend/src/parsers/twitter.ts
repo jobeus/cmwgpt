@@ -64,7 +64,7 @@ const extractMediaFromExtended = (extended_entities: any, media: any[]) => {
 
 // ---- Main parser ----
 
-export function parseTwitter(requestBody: any, responseBody: any, endpointUrl?: string | null): ServiceMessage[] {
+export function parseTwitter(_requestBody: any, responseBody: any, endpointUrl?: string | null): ServiceMessage[] {
     const messages: ServiceMessage[] = [];
 
     // Extract tweet ID from endpoint URL and build a useful Python snippet
