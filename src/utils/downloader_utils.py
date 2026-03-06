@@ -40,22 +40,11 @@ async def fetch_all_url_content(message_text: str) -> str:
         transcripts = []
         for vid_id in video_ids:
             try:
-                transcript_text = await asyncio.to_thread(get_transcript, vid_id)
+                transcript_text = await get_transcript(vid_id)
                 if transcript_text:
                     if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
                        logger.info(f"Target Video ID {vid_id} Transcript grabbed successfully.") 
                     transcripts.append(f"Target Video ID {vid_id} Transcript:\n{transcript_text}")
-                    await log_api_request(
-                        service_name="youtube/transcript",
-                        method="GET",
-                        endpoint_url=f"https://www.youtube.com/watch?v={vid_id}",
-                        request_headers={},
-                        request_body={"video_id": vid_id},
-                        response_status=200,
-                        response_headers={},
-                        response_body=transcript_text,
-                        cost=0.0
-                    )
             except Exception as e:
                 logger.warning(f"Failed to fetch transcript for {vid_id}: {e}")
 

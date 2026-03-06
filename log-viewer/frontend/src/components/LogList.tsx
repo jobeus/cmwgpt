@@ -36,7 +36,9 @@ const extractLastMessageSnippet = (bodyStr: string | null, serviceName: string, 
         }
 
         if (serviceName.startsWith('youtube/')) {
-            if (type === 'request') return `Fetching transcript for ${parsed.video_id || 'video'}`;
+            if (type === 'request') {
+                return '[Python Script] ' + parsed.split('\n')[0];
+            }
             if (type === 'response') {
                 let text = typeof parsed === 'string' ? parsed : JSON.stringify(parsed);
                 if (text.length > 150) text = text.substring(0, 150) + '...';
@@ -61,7 +63,12 @@ const extractLastMessageSnippet = (bodyStr: string | null, serviceName: string, 
         }
 
         if (serviceName.startsWith('url_utils/')) {
-            if (type === 'request') return 'Scraping article content';
+            if (type === 'request') {
+                if (typeof parsed === 'string' && parsed.includes('import')) {
+                    return '[Python Script] ' + parsed.split('\n')[0];
+                }
+                return 'Scraping article content';
+            }
             if (type === 'response') {
                 let text = typeof parsed === 'string' ? parsed : JSON.stringify(parsed);
                 return text.length > 150 ? text.substring(0, 150) + '...' : text;
@@ -211,9 +218,18 @@ export default function LogList() {
                                 <span className="text-sm font-medium text-gray-400">
                                     {format(new Date(log.timestamp), 'MMM d, HH:mm:ss')}
                                 </span>
-                                {log.curl_command && (
+                                {log.method === 'PYTHON' ? (
                                     <button
-                                        onClick={(e) => copyCurl(e, log.id, !log.curl_command ? null : log.curl_command)}
+                                        onClick={(e) => copyCurl(e, log.id, log.request_body_snippet)}
+                                        className="flex items-center space-x-1.5 px-3 py-1.5 bg-blue-950/40 hover:bg-blue-900/60 text-blue-300 hover:text-white rounded-lg border border-blue-800/50 transition-colors z-10"
+                                        title="Copy Python snippet"
+                                    >
+                                        {copiedId === log.id ? <Check className="w-4 h-4 text-emerald-400" /> : <Terminal className="w-4 h-4" />}
+                                        <span className="text-xs font-medium">{copiedId === log.id ? 'Copied' : 'Python'}</span>
+                                    </button>
+                                ) : log.curl_command && (
+                                    <button
+                                        onClick={(e) => copyCurl(e, log.id, log.curl_command)}
                                         className="flex items-center space-x-1.5 px-3 py-1.5 bg-gray-950 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg border border-gray-700 transition-colors z-10"
                                         title="Copy cURL command"
                                     >

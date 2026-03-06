@@ -122,7 +122,17 @@ export default function LogDetail() {
                 </div>
             ) : (
                 <div className="space-y-6">
-                    {log.curl_command && (
+                    {log.method === 'PYTHON' ? (
+                        <div className="bg-gray-950 border border-gray-800 rounded-xl overflow-hidden">
+                            <div className="bg-blue-900/30 border-b border-gray-800 px-4 py-3 flex items-center shadow-lg">
+                                <Code className="w-4 h-4 text-blue-400 mr-2" />
+                                <span className="text-sm font-semibold text-blue-300">Executable Python Snippet</span>
+                            </div>
+                            <div className="p-4 overflow-x-auto text-xs font-mono text-gray-300 bg-black/50 leading-relaxed whitespace-pre-wrap">
+                                {reqBody}
+                            </div>
+                        </div>
+                    ) : log.curl_command && (
                         <div className="bg-gray-950 border border-gray-800 rounded-xl overflow-hidden">
                             <div className="bg-gray-900 border-b border-gray-800 px-4 py-3 flex items-center shadow-lg">
                                 <Terminal className="w-4 h-4 text-blue-400 mr-2" />

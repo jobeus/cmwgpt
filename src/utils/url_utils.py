@@ -109,12 +109,35 @@ async def get_article_text(url: str) -> Optional[str]:
 
         _article_cache[url] = text
         
+        python_snippet = f'''import httpx
+import trafilatura
+from newspaper import Article
+
+url = "{url}"
+proxy = "{TRANSCRIPT_PROXY}" if "{TRANSCRIPT_PROXY}" else None
+headers = {{'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}}
+
+with httpx.Client(proxies=proxy, timeout=15.0) as client:
+    response = client.get(url, headers=headers)
+    response.raise_for_status()
+    html = response.text
+
+text = trafilatura.extract(html)
+if not text:
+    article = Article(url)
+    article.set_html(html)
+    article.parse()
+    text = article.text
+
+print(text)
+'''
+
         await log_api_request(
             service_name="url_utils/get_article_text",
-            method="GET",
+            method="PYTHON",
             endpoint_url=url,
-            request_headers=actual_request_headers,
-            request_body="",
+            request_headers=actual_request_headers, # keeping real headers for accuracy tracking
+            request_body=python_snippet,
             response_status=actual_response_status,
             response_headers=actual_response_headers,
             response_body=text,
