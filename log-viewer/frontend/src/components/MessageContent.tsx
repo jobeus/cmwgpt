@@ -14,6 +14,18 @@ export const MessageContent = ({ content, channelId }: { content: any, channelId
         const parsed = parseDiscordPrefix(content);
         return (
             <div className="text-gray-200 text-sm whitespace-pre-wrap font-sans">
+                {parsed.replyTo && (
+                    <div className="mb-2 ml-1 pl-2 border-l-2 border-slate-600/50 flex flex-col gap-0.5 max-w-[90%]">
+                        <div className="flex items-center gap-1.5 text-xs">
+                            <span className="text-slate-500 font-bold select-none">↳</span>
+                            {parsed.replyTo.userName && <span className="font-semibold text-blue-300 opacity-90">{parsed.replyTo.userName}</span>}
+                            {parsed.replyTo.timestamp && <span className="text-[10px] text-slate-500">{parsed.replyTo.timestamp}</span>}
+                        </div>
+                        <div className="opacity-75 text-xs text-slate-300 line-clamp-2 overflow-hidden text-ellipsis ml-4">
+                            {parsed.replyTo.content}
+                        </div>
+                    </div>
+                )}
                 {parsed.msgId && (
                     <div className="flex items-center space-x-2 mb-1 text-xs text-gray-500">
                         <span className="font-semibold text-blue-400">{parsed.userName}</span>
