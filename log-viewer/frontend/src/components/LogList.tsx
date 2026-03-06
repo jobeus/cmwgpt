@@ -28,12 +28,32 @@ const extractLastMessageSnippet = (bodyStr: string | null): string => {
         const parsed = JSON.parse(bodyStr);
         if (parsed.messages && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
             const last = parsed.messages[parsed.messages.length - 1];
-            let text = typeof last.content === 'string' ? last.content : JSON.stringify(last.content);
+            let text = '';
+            // Handle array content like [{type: 'text', text: '...'}]
+            if (Array.isArray(last.content)) {
+                const textPart = last.content.find((p: any) => p.type === 'text');
+                if (textPart) text = textPart.text;
+                else text = '[Complex Content]';
+            } else if (typeof last.content === 'string') {
+                text = last.content;
+            } else {
+                text = JSON.stringify(last.content);
+            }
             if (text.length > 150) text = text.substring(0, 150) + '...';
             return text;
         }
         if (parsed.choices && parsed.choices[0] && parsed.choices[0].message) { // response
-            let text = parsed.choices[0].message.content || '';
+            let text = '';
+            const content = parsed.choices[0].message.content;
+            // Response content can also be array in some models
+            if (Array.isArray(content)) {
+                const textPart = content.find((p: any) => p.type === 'text');
+                if (textPart) text = textPart.text;
+            } else if (typeof content === 'string') {
+                text = content;
+            } else {
+                text = JSON.stringify(content);
+            }
             if (text.length > 150) text = text.substring(0, 150) + '...';
             return text;
         }
@@ -125,7 +145,7 @@ export default function LogList() {
                                     <span className="text-gray-500 text-sm font-mono px-2 py-0.5 bg-gray-950 rounded border border-gray-800">{log.method}</span>
                                 </div>
                             </div>
-                            <div className="flex items-center space-x-4">
+                            <div className="flex items-center space-x-4 pr-24">
                                 <span className="text-sm font-medium text-gray-400">
                                     {format(new Date(log.timestamp), 'MMM d, HH:mm:ss')}
                                 </span>
@@ -139,7 +159,7 @@ export default function LogList() {
                                         <span className="text-xs font-medium">{copiedId === log.id ? 'Copied' : 'cURL'}</span>
                                     </button>
                                 )}
-                                <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-blue-400 transition-colors" />
+                                <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-blue-400 transition-colors -mr-2" />
                             </div>
                         </div>
 
@@ -165,7 +185,7 @@ export default function LogList() {
                         </div>
 
                         {Number(log.cost) > 0 && (
-                            <div className="absolute bottom-4 right-14 text-xs font-medium text-amber-500/80 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20 pointer-events-none">
+                            <div className="absolute top-4 right-4 text-xs font-medium text-amber-500/80 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20 pointer-events-none">
                                 ${Number(log.cost).toFixed(5)}
                             </div>
                         )}

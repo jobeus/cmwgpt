@@ -271,7 +271,7 @@ class MentionHandler:
                 elif ref_text is not None:
                     reply_text = f"[Replying to message: \"{ref_text}\"]"
                     
-                text_lines.append(reply_text)
+                text_lines.insert(0, reply_text + "\n\n")
 
             # Note single-text representations for embeds
             if msg.embeds:

@@ -298,11 +298,11 @@ class InterjectService:
                             break
 
                 if ref_text is not None and ref_timestamp and ref_author_id:
-                    text += f" [Replying to message: \"[{ref_timestamp}] [{msg.reference.message_id}] <@{ref_author_id}>: {ref_text}\"]"
+                    text = f" [Replying to message: \"[{ref_timestamp}] [{msg.reference.message_id}] <@{ref_author_id}>: {ref_text}\"]\n\n" + text
                 elif ref_text is not None:
-                    text += f" [Replying to message: \"{ref_text}\"]"
+                    text = f" [Replying to message: \"{ref_text}\"]\n\n" + text
                 else:
-                    text += f" [Replying to message ID: {msg.reference.message_id}]"
+                    text = f" [Replying to message ID: {msg.reference.message_id}]\n\n" + text
 
             chat_context.append(
                 {"role": role, "content": [{"type": "text", "text": text}]}
