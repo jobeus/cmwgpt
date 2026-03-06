@@ -1,5 +1,6 @@
 import re
 import logging
+import asyncio
 from typing import List, Optional
 from youtube_transcript_api import YouTubeTranscriptApi
 from src.config import TRANSCRIPT_PROXY
