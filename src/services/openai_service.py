@@ -157,8 +157,7 @@ class OpenAIService:
         for attempt in range(max_retries):
             try:
                 logger.debug(
-                    f"Attempting response creation for model {model} (attempt {
-                        attempt + 1}/{max_retries})")
+                    f"Attempting response creation for model {model} (attempt {attempt + 1}/{max_retries})")
 
                 # actual_model = f"{model}:online" if not model.endswith(":online") else model
                 actual_model = model
@@ -333,9 +332,7 @@ class OpenAIService:
                 logger.error(f"Bad request error: {e}")
                 self._dump_bad_request(kwargs, client)
                 raise OpenAIServiceError(
-                    f"Invalid request: {
-                        e.message if hasattr(
-                            e, 'message') else str(e)}") from e
+                    f"Invalid request: {e.message if hasattr(e, 'message') else str(e)}") from e
 
             except APIError as e:
                 logger.error(f"OpenAI API error on attempt {attempt + 1}: {e}")

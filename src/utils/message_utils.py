@@ -17,8 +17,7 @@ def format_attachment_message(
     """Format a message with one or more attachment URLs."""
     if isinstance(attachment, list):
         urls = "\n".join(
-            f"> {
-                att.url}" for att in attachment if att is not None)
+            f"> {att.url}" for att in attachment if att is not None)
         return f"{urls}\n> {message}"
     return f"> {attachment.url}\n> {message}"
 

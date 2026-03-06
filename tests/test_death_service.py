@@ -89,12 +89,6 @@ class TestDeathService(unittest.TestCase):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
 
-        # Patch STATE_FILE so tests don't touch real disk
-        self.state_patcher = patch(
-            "src.services.death_service.STATE_FILE", "/tmp/_test_death_names.json"
-        )
-        self.state_patcher.start()
-
         # Remove any leftover test state file
         try:
             os.remove("/tmp/_test_death_names.json")
@@ -102,7 +96,10 @@ class TestDeathService(unittest.TestCase):
             pass
 
         from src.services.death_service import DeathService
-        self.service = DeathService()
+        self.service = DeathService(
+            state_file="/tmp/_test_death_names.json",
+            death_channel_id="12345",
+        )
 
         self.mock_bot = MagicMock()
         self.mock_bot.user = MagicMock()
@@ -110,7 +107,6 @@ class TestDeathService(unittest.TestCase):
         self.service.set_bot(self.mock_bot)
 
     def tearDown(self):
-        self.state_patcher.stop()
         self.loop.close()
         try:
             os.remove("/tmp/_test_death_names.json")
@@ -226,7 +222,6 @@ class TestDeathService(unittest.TestCase):
 
     # ----- Announcement -----
 
-    @patch("src.services.death_service.DEATH_CHANNEL_ID", "12345")
     def test_announce_sends_rip_message(self):
         """Should send RIP message to the configured channel."""
         async def run_test():
@@ -242,7 +237,6 @@ class TestDeathService(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    @patch("src.services.death_service.DEATH_CHANNEL_ID", "12345")
     def test_announce_skips_when_channel_not_found(self):
         """Should log error when channel doesn't exist."""
         async def run_test():
@@ -263,7 +257,10 @@ class TestDeathService(unittest.TestCase):
         self.service._save_state()
 
         from src.services.death_service import DeathService
-        new_service = DeathService()
+        new_service = DeathService(
+            state_file="/tmp/_test_death_names.json",
+            death_channel_id="12345",
+        )
         self.assertEqual(new_service._known_names, self.service._known_names)
 
     def test_load_state_sets_first_poll_false(self):
@@ -272,7 +269,10 @@ class TestDeathService(unittest.TestCase):
         self.service._save_state()
 
         from src.services.death_service import DeathService
-        new_service = DeathService()
+        new_service = DeathService(
+            state_file="/tmp/_test_death_names.json",
+            death_channel_id="12345",
+        )
         # Simulate start() without actually creating the asyncio task
         if new_service._known_names:
             new_service._first_poll = False
@@ -281,19 +281,23 @@ class TestDeathService(unittest.TestCase):
     def test_load_state_missing_file(self):
         """Should handle missing state file gracefully."""
         from src.services.death_service import DeathService
-        service = DeathService()
+        service = DeathService(
+            state_file="/tmp/_missing_death_names.json",
+            death_channel_id="12345",
+        )
         self.assertEqual(service._known_names, set())
         self.assertTrue(service._first_poll)
 
     # ----- Start/stop -----
 
-    @patch("src.services.death_service.DEATH_CHANNEL_ID", "")
     def test_start_disabled_without_channel_id(self):
         """Service should not start if DEATH_CHANNEL_ID is empty."""
-        self.service.start()
-        self.assertFalse(self.service._running)
+        from src.services.death_service import DeathService
 
-    @patch("src.services.death_service.DEATH_CHANNEL_ID", "12345")
+        service = DeathService(state_file="/tmp/_test_death_names.json", death_channel_id="")
+        service.start()
+        self.assertFalse(service._running)
+
     def test_start_and_stop(self):
         """Service should start and stop cleanly."""
         async def run_test():

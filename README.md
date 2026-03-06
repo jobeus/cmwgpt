@@ -71,6 +71,21 @@ The bot operates in two distinct modes:
    python3 main.py
    ```
 
+### Docker development stack
+
+If you want the bot, log-viewer backend, log-viewer frontend, and MariaDB together in Docker:
+
+```bash
+cp .env.development.example .env.development
+# Fill in .env.development
+
+docker compose --env-file .env.development up --build
+```
+
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:3001/api`
+- Log viewer login uses `LOG_VIEWER_DEV_USERNAME` / `LOG_VIEWER_DEV_PASSWORD` when `LOG_VIEWER_DEV_AUTH_ENABLED=true`
+
 ## 🔧 Setup Guide
 
 ### 1. Discord Bot Setup

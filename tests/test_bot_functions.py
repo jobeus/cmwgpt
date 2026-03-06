@@ -33,14 +33,11 @@ class TestBotFunctions(unittest.TestCase):
         """Clean up test environment."""
         self.loop.close()
 
-    @patch("src.services.openai_service.openai_service.get_chat_completion")
-    @patch("src.utils.discord_helper.get_mention_legend")
-    def test_prepare_mention_context(self, mock_get_legend, mock_get_chat):
+    def test_prepare_mention_context(self):
         """Test mention handler _prepare_mention_context function."""
 
         async def run_test():
-            # Import the function we want to test
-            from src.bot.handlers.mention import mention_handler
+            from src.bot.handlers.mention import MentionHandler
 
             # Mock message and bot user
             mock_message = MagicMock()
@@ -83,18 +80,22 @@ class TestBotFunctions(unittest.TestCase):
 
             mock_message.channel.history = mock_history
 
-            # Mock get_mention_legend
-            mock_get_legend.return_value = "Legend: @user1 = <@11111>"
+            mock_state_service = MagicMock()
+            mock_state_service.get_system_prompt.return_value = None
 
-            # Mock state service
-            with patch("src.services.state_service.state_service") as mock_state_service:
-                mock_state_service.get_system_prompt.return_value = None
-                with patch("src.config.get_system_prompt", return_value="Default system prompt"):
-                    with patch("src.config.INCLUDE_NUM_CHATLINES", 3):
-                        # Call the function
-                        result, system_prompt = await mention_handler._prepare_mention_context(
-                            mock_message, mock_bot_user
-                        )
+            async def mock_mention_legend(channel, bot_user):
+                return "Legend: @user1 = <@11111>"
+
+            mention_handler = MentionHandler(
+                state_service=mock_state_service,
+                system_prompt_loader=lambda: "Default system prompt",
+                include_num_chatlines=3,
+                mention_legend_provider=mock_mention_legend,
+            )
+
+            result, system_prompt = await mention_handler._prepare_mention_context(
+                mock_message, mock_bot_user
+            )
 
             # Verify result structure
             self.assertIsInstance(result, list)

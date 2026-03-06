@@ -53,9 +53,7 @@ class ChatCommands:
 
             if not queued:
                 logger.warning(
-                    f"""Failed to queue chat command from {
-                        interaction.user} in #{
-                        interaction.channel} - queue may be full"""
+                    f"Failed to queue chat command from {interaction.user} in #{interaction.channel} - queue may be full"
                 )
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
@@ -78,9 +76,7 @@ class ChatCommands:
 
             if not queued:
                 logger.warning(
-                    f"""Failed to queue reset command from {
-                        interaction.user} in #{
-                        interaction.channel} - queue may be full"""
+                    f"Failed to queue reset command from {interaction.user} in #{interaction.channel} - queue may be full"
                 )
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
@@ -108,8 +104,7 @@ class ChatCommands:
         legend_section = await get_mention_legend(interaction.channel, self.bot.user)
 
         # Add username if configured
-        prefix_message = f"<@{
-            interaction.user.id}>: {message}" if INCLUDE_USERNAMES else message
+        prefix_message = f"<@{interaction.user.id}>: {message}" if INCLUDE_USERNAMES else message
 
         # Fetch all supported URLs in the message automatically
         url_content = await fetch_all_url_content(message)
@@ -162,9 +157,7 @@ class ChatCommands:
                         f"[/chat] Channel {channel_id}: Using image attachment URL as fallback (may expire)")
                 else:
                     # Non-image attachment fallback
-                    attachment_info = f"\n\n[Attached File: {
-                        attachment.filename}, type: {
-                        attachment.content_type}]"
+                    attachment_info = f"\n\n[Attached File: {attachment.filename}, type: {attachment.content_type}]"
                     prefix_message += attachment_info
                     logger.warning(
                         f"[/chat] Channel {channel_id}: Using textual file reference as fallback")
@@ -251,8 +244,7 @@ class ChatCommands:
                         message)
 
                 error_message = (
-                    f"{base_content}\n\nSorry, I encountered an error while processing your request: {
-                        str(e)}")
+                    f"{base_content}\n\nSorry, I encountered an error while processing your request: {str(e)}")
 
                 try:
                     await interaction.followup.send(content=error_message)

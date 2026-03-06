@@ -88,7 +88,16 @@ def parse_deaths_html(html: str) -> list[Tuple[str, str]]:
 class DeathService:
     """Background service that monitors Wikipedia for notable deaths."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        state_service=state_service,
+        death_channel_id: str = DEATH_CHANNEL_ID,
+        state_file: str = STATE_FILE,
+    ):
+        self._state_service = state_service
+        self._death_channel_id = death_channel_id
+        self._state_file = state_file
         self._bot: Optional[commands.Bot] = None
         self._task: Optional[asyncio.Task] = None
         self._running = False
@@ -101,7 +110,7 @@ class DeathService:
 
     def _get_setting(self, key: str, default: Any) -> Any:
         """Helper to get a global death setting or default."""
-        settings = state_service.get_death_settings()
+        settings = self._state_service.get_death_settings()
         if settings and key in settings:
             return settings[key]
         return default
@@ -113,7 +122,7 @@ class DeathService:
 
     def start(self) -> None:
         """Start the polling background task."""
-        if not DEATH_CHANNEL_ID:
+        if not self._death_channel_id:
             logger.info("DEATH_CHANNEL_ID not set — death service disabled")
             return
         if self._running:
@@ -142,25 +151,27 @@ class DeathService:
 
     def _save_state(self) -> None:
         """Persist current known names to disk."""
+        if not self._state_file:
+            return
         try:
-            os.makedirs(os.path.dirname(STATE_FILE) or ".", exist_ok=True)
+            os.makedirs(os.path.dirname(self._state_file) or ".", exist_ok=True)
             data = [list(t) for t in self._known_names]
-            with open(STATE_FILE, "w", encoding="utf-8") as f:
+            with open(self._state_file, "w", encoding="utf-8") as f:
                 json.dump(data, f)
-            logger.debug(f"Saved {len(data)} known death names to {STATE_FILE}")
+            logger.debug(f"Saved {len(data)} known death names to {self._state_file}")
         except (OSError, ValueError) as exc:
             logger.error(f"Failed to save death state: {exc}")
 
     def _load_state(self) -> None:
         """Load known names from a previous session, if available."""
-        if not os.path.exists(STATE_FILE):
+        if not self._state_file or not os.path.exists(self._state_file):
             return
         try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
+            with open(self._state_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self._known_names = {tuple(item) for item in data}
             logger.info(
-                f"Loaded {len(self._known_names)} known death names from {STATE_FILE}"
+                f"Loaded {len(self._known_names)} known death names from {self._state_file}"
             )
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             logger.error(f"Failed to load death state: {exc}")
@@ -330,9 +341,9 @@ class DeathService:
             logger.error("Bot not set — cannot announce death")
             return
 
-        channel = self._bot.get_channel(int(DEATH_CHANNEL_ID))
+        channel = self._bot.get_channel(int(self._death_channel_id))
         if channel is None:
-            logger.error(f"Could not find channel {DEATH_CHANNEL_ID}")
+            logger.error(f"Could not find channel {self._death_channel_id}")
             return
 
         wiki_link = (
@@ -347,5 +358,3 @@ class DeathService:
             logger.error(f"Failed to send death announcement: {exc}")
 
 
-# Global singleton
-death_service = DeathService()

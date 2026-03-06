@@ -345,8 +345,7 @@ class ImageCommands:
                         image2,
                         image3,
                         image4] if img]
-                cost_prefix = f"[${
-                    cost:.3f} @ {active_model}] " if cost is not None else ""
+                cost_prefix = f"[${cost:.3f} @ {active_model}] " if cost is not None else ""
                 formatted_prompt = f"{cost_prefix}{prompt}"
                 content = message_service.format_attachment_message(
                     valid_images, formatted_prompt)

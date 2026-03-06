@@ -120,58 +120,43 @@ pm2 startup
 
 ## Docker Deployment
 
-### Building Docker Image
+### Development stack with Docker Compose
 
 ```bash
-# Build locally
-docker build -t discord-bot .
+# Create your local Docker env file
+cp .env.development.example .env.development
 
-# Build with specific tag
-docker build -t discord-bot:v1.0.0 .
+# Fill in .env.development, then start everything
+docker compose --env-file .env.development up --build
 ```
 
-### Running with Docker
+This compose stack starts:
+- the Discord bot
+- the log-viewer backend
+- the log-viewer frontend
+- a MariaDB instance initialized from `init_db.sql`
+
+### Helpful endpoints
+
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:3001/api
+- MariaDB: localhost:3306 (or whatever you set in DB_EXPOSE_PORT)
+
+### Log viewer authentication in Docker development
+
+When `LOG_VIEWER_DEV_AUTH_ENABLED=true`, the log-viewer backend uses the credentials below instead of PAM:
+
+```env
+LOG_VIEWER_DEV_USERNAME=devadmin
+LOG_VIEWER_DEV_PASSWORD=change-me
+```
+
+Disable that mode outside Docker development if you want the backend to keep using PAM.
+
+### Stopping the stack
 
 ```bash
-# Run with environment variables
-docker run -d \
-  --name discord-bot \
-  --restart unless-stopped \
-  -e DISCORD_BOT_TOKEN=your_token \
-  -e OPENROUTER_API_KEY=your_key \
-  discord-bot
-
-# Run with environment file
-docker run -d \
-  --name discord-bot \
-  --restart unless-stopped \
-  --env-file .env \
-  discord-bot
-```
-
-### Docker Compose
-
-Create `docker-compose.yml`:
-
-```yaml
-version: '3.8'
-
-services:
-  discord-bot:
-    build: .
-    container_name: discord-bot
-    restart: unless-stopped
-    env_file:
-      - .env
-    volumes:
-      - ./logs:/app/logs
-    environment:
-      - PYTHONUNBUFFERED=1
-```
-
-Run with:
-```bash
-docker-compose up -d
+docker compose --env-file .env.development down
 ```
 
 ### Using GitHub Container Registry

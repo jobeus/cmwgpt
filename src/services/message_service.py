@@ -4,21 +4,37 @@ Message Service - Handles message formatting and sending
 
 import asyncio
 import logging
-from typing import List, Union
+from typing import List, Optional, Protocol, Union
 
 import discord
 from discord import HTTPException, Forbidden, NotFound
 
-from src.utils.pasters import paste_service
+from src.services.paste_service import paste_service
 from src.utils.message_utils import format_attachment_message, format_prompt_message
 
 logger = logging.getLogger(__name__)
+
+
+class PasteUploader(Protocol):
+    async def upload_markdown(self, markdown_text: str) -> str:
+        """Upload markdown content and return a URL."""
 
 
 class MessageService:
     """Service for handling message operations."""
 
     DISCORD_MESSAGE_LIMIT = 2000
+
+    def __init__(self, paste_service_instance: Optional[PasteUploader] = paste_service):
+        self._paste_service = paste_service_instance
+
+    def set_paste_service(self, paste_service_instance: Optional[PasteUploader]) -> None:
+        self._paste_service = paste_service_instance
+
+    async def _upload_to_paste(self, reply_text: str) -> str:
+        if not self._paste_service:
+            raise RuntimeError("Paste service is disabled")
+        return await self._paste_service.upload_markdown(reply_text)
 
     async def send_channel_reply(
             self,
@@ -46,7 +62,7 @@ class MessageService:
                         "Reply for channel message exceeded %d characters, attempting to upload to paste service",
                         self.DISCORD_MESSAGE_LIMIT,
                     )
-                    pasted_url = await paste_service.upload_markdown(reply_text)
+                    pasted_url = await self._upload_to_paste(reply_text)
                     final_reply = f"My response was too long to post here, so I've uploaded it to: {pasted_url}"
                     await channel.send(final_reply, suppress_embeds=True)
                     return
@@ -63,8 +79,7 @@ class MessageService:
             except HTTPException as e:
                 if e.status == 429:  # Rate limited
                     logger.warning(
-                        f"""Rate limited on attempt {
-                            attempt + 1}: {e}"""
+                        f"Rate limited on attempt {attempt + 1}: {e}"
                     )
                     if attempt < max_retries - 1:
                         # Extract retry-after from headers if available
@@ -95,8 +110,7 @@ class MessageService:
 
             except Exception as e:
                 logger.error(
-                    f"""Unexpected error sending message on attempt {
-                        attempt + 1}: {e}"""
+                    f"Unexpected error sending message on attempt {attempt + 1}: {e}"
                 )
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
@@ -136,7 +150,7 @@ class MessageService:
                     logger.info(
                         "Reply for interaction followup exceeded %d characters with base_content, "
                         "attempting to upload to paste service", self.DISCORD_MESSAGE_LIMIT, )
-                    pasted_url = await paste_service.upload_markdown(reply_text)
+                    pasted_url = await self._upload_to_paste(reply_text)
                     final_content = (
                         f"{base_content}\n\n"
                         f"My detailed response was too long, so I've uploaded it here: {pasted_url}"
@@ -157,8 +171,7 @@ class MessageService:
             except HTTPException as e:
                 if e.status == 429:  # Rate limited
                     logger.warning(
-                        f"""Rate limited on interaction followup attempt {
-                            attempt + 1}: {e}"""
+                        f"Rate limited on interaction followup attempt {attempt + 1}: {e}"
                     )
                     if attempt < max_retries - 1:
                         # Extract retry-after from headers if available
@@ -191,8 +204,7 @@ class MessageService:
 
             except Exception as e:
                 logger.error(
-                    f"""Unexpected error sending interaction followup on attempt {
-                        attempt + 1}: {e}""")
+                    f"Unexpected error sending interaction followup on attempt {attempt + 1}: {e}")
                 if attempt < max_retries - 1:
                     delay = base_delay * (2**attempt)
                     logger.info(f"Retrying in {delay} seconds...")
@@ -235,7 +247,7 @@ class MessageService:
                     logger.info(
                         "Reply for interaction followup with files exceeded %d characters with base_content, "
                         "attempting to upload to paste service", self.DISCORD_MESSAGE_LIMIT, )
-                    pasted_url = await paste_service.upload_markdown(reply_text)
+                    pasted_url = await self._upload_to_paste(reply_text)
                     final_content = (
                         f"{base_content}\n\n"
                         f"My detailed response was too long, so I've uploaded it here: {pasted_url}"
@@ -318,7 +330,7 @@ class MessageService:
                         "Reply for channel message with files exceeded %d characters, attempting to upload to paste service",
                         self.DISCORD_MESSAGE_LIMIT,
                     )
-                    pasted_url = await paste_service.upload_markdown(reply_text)
+                    pasted_url = await self._upload_to_paste(reply_text)
                     final_reply = f"My response was too long to post here, so I've uploaded it to: {pasted_url}"
                     await channel.send(content=final_reply, files=files, suppress_embeds=True)
                     return
@@ -380,5 +392,4 @@ class MessageService:
         return format_prompt_message(message)
 
 
-# Global service instance
 message_service = MessageService()

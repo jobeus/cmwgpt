@@ -135,8 +135,7 @@ def perform_git_pull() -> bool:
             return True
         else:
             logger.error(
-                f"""Git pull failed with return code {
-                    result.returncode}"""
+                f"Git pull failed with return code {result.returncode}"
             )
             if result.stderr.strip():
                 logger.error(f"Git pull error: {result.stderr.strip()}")
