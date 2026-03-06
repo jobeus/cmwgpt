@@ -11,6 +11,7 @@ from typing import Optional
 from src.utils.youtube_utils import extract_video_ids, get_transcript
 from src.utils.tiktok_utils import extract_tiktok_urls, get_tiktok_transcript
 from src.utils.twitter_utils import extract_twitter_urls, get_tweet_context
+from src.utils.facebook_utils import extract_facebook_urls, get_facebook_transcript
 from src.utils.url_utils import extract_target_urls, get_article_text
 from src.db.logger import log_api_request
 from src.config import GROQ_API_KEY
@@ -110,7 +111,44 @@ async def fetch_all_url_content(message_text: str) -> str:
                 "------\nIncluded Twitter post context follows:\n\n" + "\n\n".join(twitter_contexts)
             )
 
-    # 4. General Articles
+    # 4. Facebook Video Transcripts
+    facebook_urls = extract_facebook_urls(message_text)
+    if facebook_urls:
+        facebook_transcripts = []
+        for fb_url in facebook_urls:
+            try:
+                result = await asyncio.to_thread(get_facebook_transcript, fb_url)
+                if result:
+                    transcript_text, groq_resp = result
+                    if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
+                       logger.info(f"Target Facebook Video {fb_url} Transcript grabbed successfully.") 
+                    facebook_transcripts.append(f"Target Facebook Video {fb_url} Transcript:\n{transcript_text}")
+                    
+                    if groq_resp:
+                        actual_req = groq_resp.request
+                        actual_req.read()
+                        req_body_bytes = actual_req.content if actual_req.content else b""
+                        
+                        await log_api_request(
+                            service_name="groq/whisper-large-v3-turbo",
+                            method=actual_req.method,
+                            endpoint_url=str(actual_req.url),
+                            request_headers=dict(actual_req.headers),
+                            request_body=req_body_bytes.hex() if req_body_bytes else "",
+                            response_status=groq_resp.status_code,
+                            response_headers=dict(groq_resp.headers),
+                            response_body=transcript_text,
+                            cost=0.0
+                        )
+            except Exception as e:
+                logger.warning(f"Failed to fetch Facebook transcript for {fb_url}: {e}")
+
+        if facebook_transcripts:
+            aggregated_content.append(
+                "------\nIncluded Facebook video transcript follows:\n\n" + "\n\n".join(facebook_transcripts)
+            )
+
+    # 5. General Articles
     target_urls = extract_target_urls(message_text)
     if target_urls:
         articles = []
