@@ -3,7 +3,7 @@ import axios from 'axios';
 import { io, Socket } from 'socket.io-client';
 import { format } from 'date-fns';
 import { useAuth } from '../AuthContext';
-import { Copy, Terminal, ChevronRight, Server, Check, AlertCircle } from 'lucide-react';
+import { Terminal, ChevronRight, Server, Check, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
