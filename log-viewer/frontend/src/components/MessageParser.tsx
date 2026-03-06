@@ -5,6 +5,16 @@ import { Image as ImageIcon, FileAudio, ExternalLink, Copy, Check } from 'lucide
 const userMap = userMapData as Record<string, string>;
 const GUILD_ID = import.meta.env.VITE_DISCORD_GUILD_ID || '1120463633693024346'; // fallback for demo
 
+// Helper to handle video urls cleanly, removing trailing queries like ?tag=21 which can break html5 video playback
+const cleanVideoUrl = (url: string) => {
+    try {
+        const u = new URL(url);
+        return `${u.origin}${u.pathname}`;
+    } catch {
+        return url.split('?')[0];
+    }
+};
+
 export const CopyButton = ({ text, className = '' }: { text: string, className?: string }) => {
     const [copied, setCopied] = useState(false);
 
@@ -182,7 +192,7 @@ const renderMessageContent = (content: any, channelId: string | null) => {
                         );
                     }
                     if (part.type === 'video') {
-                        const url = part.video.url;
+                        const url = cleanVideoUrl(part.video.url);
                         return (
                             <div key={idx} className="mt-2 text-sm text-gray-400 flex flex-col items-start border border-gray-800 bg-gray-900 rounded-lg p-3 inline-block max-w-[24rem]">
                                 <div className="flex items-center mb-2">
@@ -222,6 +232,91 @@ const renderMessageContent = (content: any, channelId: string | null) => {
     }
 
     if (typeof content === 'object') {
+        if (content.type === 'tweet') {
+            // Custom styling for Twitter objects
+            const replyContent = content.replies && content.replies.length > 0 ? content.replies.join('\n') : "";
+            const rawCopyText = `Tweet by ${content.author}:\n${content.text}${replyContent ? `\n\nReplies:\n${replyContent}` : ''}`;
+
+            return (
+                <div className="w-full" title={rawCopyText}>
+                    <div className="bg-[#15202b] border border-[#38444d] rounded-xl overflow-hidden shadow-xl max-w-xl self-start group">
+
+                        {/* Main Tweet Area */}
+                        <div className="p-4 relative">
+                            {/* Small absolute copy button specifically for the tweet box context */}
+                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                <CopyButton text={rawCopyText} className="bg-[#15202b]/80 border border-[#38444d] p-1 shadow" />
+                            </div>
+
+                            <div className="flex items-center mb-3">
+                                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-lg mr-3 shadow-inner">
+                                    {content.author.charAt(0).toUpperCase()}
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-white font-bold leading-tight">{content.author}</span>
+                                    <span className="text-[#8899a6] text-sm leading-tight">@twitter_user</span>
+                                </div>
+
+                                {/* X icon SVG inline */}
+                                <div className="ml-auto text-[#8899a6]">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true" className="w-5 h-5 fill-current">
+                                        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 22.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path>
+                                    </svg>
+                                </div>
+                            </div>
+
+                            <div className="text-white text-base font-normal leading-normal whitespace-pre-wrap mb-3 font-sans break-words">
+                                {content.text}
+                            </div>
+
+                            {content.media && content.media.length > 0 && (
+                                <div className="rounded-xl overflow-hidden border border-[#38444d] mt-3 mb-2 max-h-[400px]">
+                                    {content.media.map((mediaId: any, i: number) => (
+                                        <div key={i} className="w-full h-full flex items-center justify-center bg-black">
+                                            {mediaId.type === 'video' ? (
+                                                <video controls className="max-w-full max-h-[400px] object-contain" preload="metadata">
+                                                    <source src={cleanVideoUrl(mediaId.url)} type="video/mp4" />
+                                                </video>
+                                            ) : (
+                                                <img src={mediaId.url} alt="Tweet Attachment" className="max-w-full max-h-[400px] object-contain" />
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div className="text-[#8899a6] text-sm mt-3 pt-3 border-t border-[#38444d]">
+                                {new Date().toLocaleDateString('en-US', { hour: 'numeric', minute: 'numeric', year: 'numeric', month: 'short', day: 'numeric' })}
+                            </div>
+                        </div>
+
+                        {/* Replies Section */}
+                        {content.replies && content.replies.length > 0 && (
+                            <div className="bg-[#192734] border-t border-[#38444d] p-4 pl-14">
+                                <div className="text-[#1da1f2] text-xs font-bold uppercase tracking-wider mb-3">Top Replies</div>
+                                <div className="space-y-4">
+                                    {content.replies.map((reply: any, idx: number) => (
+                                        <div key={idx} className="flex relative">
+                                            {idx !== content.replies.length - 1 && (
+                                                <div className="absolute left-[-24px] top-6 bottom-[-24px] w-0.5 bg-[#38444d]"></div>
+                                            )}
+                                            <div className="absolute left-[-28px] top-0 w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-300">
+                                                {reply.author.charAt(0).toUpperCase()}
+                                            </div>
+                                            <div className="flex flex-col ml-1">
+                                                <div className="text-white font-bold text-sm">{reply.author} <span className="text-[#8899a6] font-normal">@reply_user</span></div>
+                                                <div className="text-gray-300 text-sm whitespace-pre-wrap mt-1 leading-normal break-words">{reply.text}</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
         return <div className="text-gray-400 text-xs font-mono whitespace-pre-wrap break-all">{JSON.stringify(content, null, 2)}</div>;
     }
 
@@ -300,19 +395,18 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
         const targetUrl = requestBody?.url || requestBody?.tweet_url || requestBody?.id || "Unknown URL";
         messages.push({ role: 'system', content: `[Action: Fetching Twitter Data via RapidAPI for ${targetUrl}]` });
 
-        // Try to format the JSON data into a readable tweet + replies
-        let contentArray: any[] = [];
-        let hasMedia = false;
-
+        // Try to format the JSON data into a custom 'tweet' object
         if (typeof responseBody === 'object' && responseBody?.data) {
             try {
-                // Determine if we are on the threaded_conversation v2 (which has instructions array) 
-                // or standard direct v2 (with data + includes object)
                 const isThreaded = responseBody.data.threaded_conversation_with_injections_v2 !== undefined;
 
-                let mainText = "";
-                let mainAuthor = "";
-                let repliesText = "";
+                let tweetObj: any = {
+                    type: 'tweet',
+                    author: '',
+                    text: '',
+                    media: [],
+                    replies: []
+                };
 
                 const extractTweetText = (result: any) => {
                     const note = result?.note_tweet;
@@ -331,11 +425,10 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
                     const entries = responseBody.data.threaded_conversation_with_injections_v2.instructions[1].entries;
                     // Main tweet
                     const mainResult = entries[0].content.itemContent.tweet_results.result;
-                    mainAuthor = extractAuthor(mainResult);
-                    mainText = extractTweetText(mainResult);
+                    tweetObj.author = extractAuthor(mainResult);
+                    tweetObj.text = extractTweetText(mainResult);
 
                     // Replies
-                    const replies = [];
                     for (let i = 1; i < Math.min(6, entries.length); i++) {
                         const entry = entries[i];
                         try {
@@ -350,26 +443,16 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
                             if (replyResult) {
                                 const replyAuthor = extractAuthor(replyResult);
                                 const replyText = extractTweetText(replyResult);
-                                replies.push(`  ↳ ${replyAuthor}: ${replyText}`);
+                                tweetObj.replies.push({ author: replyAuthor, text: replyText });
                             }
                         } catch (e) {
                             // ignore missing items
                         }
                     }
-
-                    if (replies.length > 0) {
-                        repliesText = "\n\nTop replies:\n" + replies.join('\n');
-                    }
                 } else if (Array.isArray(responseBody.data)) {
                     // This is the direct `tweets` array structure
-                    mainText = responseBody.data[0]?.text || "";
-                    mainAuthor = "Twitter User";
-                }
-
-                // Push formatted text first
-                const fullText = `Tweet by ${mainAuthor}:\n${mainText}${repliesText}`;
-                if (fullText.trim()) {
-                    contentArray.push({ type: 'text', text: fullText });
+                    tweetObj.text = responseBody.data[0]?.text || "";
+                    tweetObj.author = "Twitter User";
                 }
 
                 // ---- Extract Media ----
@@ -377,18 +460,15 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
                     if (includes && includes.media && Array.isArray(includes.media)) {
                         for (const m of includes.media) {
                             if (m.type === 'photo') {
-                                contentArray.push({ type: 'image_url', image_url: { url: m.url } });
-                                hasMedia = true;
+                                tweetObj.media.push({ type: 'photo', url: m.url });
                             } else if (m.type === 'video' || m.type === 'animated_gif') {
                                 if (m.variants && Array.isArray(m.variants)) {
-                                    // Get best mp4 variant
                                     const mp4Variants = m.variants.filter((v: any) => v.content_type === 'video/mp4');
                                     if (mp4Variants.length > 0) {
                                         const bestVariant = mp4Variants.reduce((prev: any, current: any) => {
                                             return ((prev.bit_rate || 0) > (current.bit_rate || 0)) ? prev : current;
                                         });
-                                        contentArray.push({ type: 'video', video: { url: bestVariant.url } });
-                                        hasMedia = true;
+                                        tweetObj.media.push({ type: 'video', url: bestVariant.url });
                                     }
                                 }
                             }
@@ -400,8 +480,7 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
                     if (extended_entities && extended_entities.media && Array.isArray(extended_entities.media)) {
                         for (const m of extended_entities.media) {
                             if (m.type === 'photo') {
-                                contentArray.push({ type: 'image_url', image_url: { url: m.media_url_https } });
-                                hasMedia = true;
+                                tweetObj.media.push({ type: 'photo', url: m.media_url_https });
                             } else if (m.type === 'video' || m.type === 'animated_gif') {
                                 if (m.video_info && m.video_info.variants) {
                                     const mp4Variants = m.video_info.variants.filter((v: any) => v.content_type === 'video/mp4');
@@ -409,8 +488,7 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
                                         const bestVariant = mp4Variants.reduce((prev: any, current: any) => {
                                             return ((prev.bitrate || 0) > (current.bitrate || 0)) ? prev : current;
                                         });
-                                        contentArray.push({ type: 'video', video: { url: bestVariant.url } });
-                                        hasMedia = true;
+                                        tweetObj.media.push({ type: 'video', url: bestVariant.url });
                                     }
                                 }
                             }
@@ -429,15 +507,20 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
                         extractMediaFromExtended(mainResult.legacy.extended_entities);
                     }
                 }
+
+                // If we successfully built a tweetObj with an author and text, wrap it as a single root message object instead of pushing text-only content arrays
+                if (tweetObj.text && tweetObj.author) {
+                    messages.push({ role: 'assistant', content: tweetObj });
+                } else {
+                    messages.push({ role: 'assistant', content: [{ type: 'text', text: JSON.stringify(responseBody, null, 2) }] });
+                }
             } catch (e) {
                 console.error("Failed to parse Twitter object payload:", e);
-                contentArray = [{ type: 'text', text: JSON.stringify(responseBody, null, 2) }];
+                messages.push({ role: 'assistant', content: [{ type: 'text', text: JSON.stringify(responseBody, null, 2) }] });
             }
         } else {
-            contentArray = [{ type: 'text', text: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) }];
+            messages.push({ role: 'assistant', content: [{ type: 'text', text: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) }] });
         }
-
-        messages.push({ role: 'assistant', content: contentArray.length === 1 && !hasMedia ? contentArray[0].text : contentArray });
     } else if (serviceName.startsWith('url_utils/')) {
         // Article scraping
         const representsPython = typeof requestBody === 'string' && requestBody.includes('import');
