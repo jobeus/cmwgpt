@@ -37,7 +37,7 @@ def extract_tiktok_urls(text: str) -> List[str]:
 
     return urls
 
-def get_tiktok_transcript(url: str) -> Optional[str]:
+def get_tiktok_transcript(url: str) -> Optional[tuple]:
     """
     Fetch the transcript for a TikTok video by downloading audio and processing with Groq via httpx.
     Results are cached to persistent disk.
@@ -48,7 +48,7 @@ def get_tiktok_transcript(url: str) -> Optional[str]:
             logger.debug(f"Cache hit for TikTok transcript failure: {url}")
             return None
         logger.debug(f"Cache hit for TikTok transcript: {url}")
-        return cached_result
+        return cached_result, None
 
 
     if not GROQ_API_KEY:
