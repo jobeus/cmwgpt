@@ -6,16 +6,16 @@ services:
       - .env.development
     environment:
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-change-me-root}
-      MARIADB_DATABASE: ${DB_NAME:-cmwgpt}
-      MARIADB_USER: ${DB_USER:-cmwgpt_user}
-      MARIADB_PASSWORD: ${DB_PASSWORD:-change-me-db}
     ports:
       - "${DB_EXPOSE_PORT:-3306}:3306"
     volumes:
       - mariadb-data:/var/lib/mysql
       - ./init_db.sql:/docker-entrypoint-initdb.d/01-init_db.sql:ro
+      - ./docker/mariadb/conf.d/zz-cmwgpt.cnf:/etc/mysql/conf.d/zz-cmwgpt.cnf:ro
+      - ./docker/mariadb/entrypoint.sh:/cmwgpt-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/cmwgpt-entrypoint.sh"]
     healthcheck:
-      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -u$$MARIADB_USER -p$$MARIADB_PASSWORD --silent"]
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -u$${DB_USER:-cmwgpt_user} -p$${DB_PASSWORD:-change-me-db} --silent"]
       interval: 10s
       timeout: 5s
       retries: 10
