@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from src.db.logger import log_api_request
 
 import trafilatura
+from newspaper import Article
 from src.config import TRANSCRIPT_PROXY
 from src.utils.cache_utils import PersistentCache
 

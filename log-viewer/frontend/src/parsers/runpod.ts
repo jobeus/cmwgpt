@@ -6,7 +6,7 @@ export function parseRunpod(requestBody: any, responseBody: any): ServiceMessage
     const input = requestBody?.input || {};
     const prompt = input.prompt || '(No prompt provided)';
 
-    let content: any[] = [{ type: 'text', text: prompt }];
+    const content: any[] = [{ type: 'text', text: prompt }];
     if (input.images && Array.isArray(input.images)) {
         input.images.forEach((img: string) => {
             content.push({ type: 'image_url', image_url: { url: img } });

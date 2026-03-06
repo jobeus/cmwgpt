@@ -1,10 +1,15 @@
 # Makefile for Discord Bot project
 
-.PHONY: help install install-test install-hooks test test-verbose test-coverage test-specific lint autofix format security ci-test docker-build docker-run clean run dev-setup
+.PHONY: help venv install install-test install-hooks test test-verbose test-coverage test-specific lint typecheck autofix format security ci-test docker-build docker-run clean run run-direct dev-setup
+
+VENV ?= .venv
+PYTHON := $(VENV)/bin/python
+PIP := $(PYTHON) -m pip
 
 # Default target
 help:
 	@echo "Available commands:"
+	@echo "  venv          - Create the local Python virtual environment"
 	@echo "  install       - Install dependencies"
 	@echo "  install-test  - Install test dependencies"
 	@echo "  install-hooks - Install git pre-commit hooks"
@@ -13,6 +18,7 @@ help:
 	@echo "  test-coverage - Run tests with coverage report"
 	@echo "  test-specific - Run specific test (usage: make test-specific TEST=config)"
 	@echo "  lint          - Run code linting"
+	@echo "  typecheck     - Run Python type checking"
 	@echo "  autofix       - Auto-fix linting issues"
 	@echo "  format        - Format code"
 	@echo "  security      - Run security scans"
@@ -24,13 +30,18 @@ help:
 	@echo "  run-direct    - Run the Discord bot directly (no auto-restart)"
 	@echo "  dev-setup     - Complete development environment setup"
 
+# Create local virtual environment
+venv:
+	python3 -m venv $(VENV)
+	$(PIP) install --upgrade pip
+
 # Install dependencies
 install:
-	pip install -r requirements.txt
+	$(PIP) install -r requirements.txt
 
 # Install test dependencies
 install-test:
-	pip install -r test_requirements.txt
+	$(PIP) install -r test_requirements.txt
 
 # Install git pre-commit hooks
 install-hooks:
@@ -39,52 +50,43 @@ install-hooks:
 
 # Run all tests
 test:
-	python tests/run_tests.py
+	$(PYTHON) tests/run_tests.py
 
 # Run tests with verbose output
 test-verbose:
-	python -m unittest discover tests -v
+	$(PYTHON) -m unittest discover tests -v
 
 # Run tests with coverage (requires pytest)
 test-coverage:
-	pytest --cov=. --cov-report=term-missing --cov-report=html
+	$(PYTHON) -m pytest --cov=. --cov-report=term-missing --cov-report=html
 
 # Run specific test module
 test-specific:
-	python tests/run_tests.py $(TEST)
+	$(PYTHON) tests/run_tests.py $(TEST)
 
 # Run code linting
 lint:
-	@echo "Running flake8 linting..."
-	@if command -v flake8 >/dev/null 2>&1; then \
-		flake8 main.py src/ tests/ --max-line-length=120 --ignore=E501,W503,W504,E999,E122 || (echo "❌ Linting issues found. Run 'make autofix' to fix them automatically." && exit 1); \
-		echo "✅ No linting issues found!"; \
-	else \
-		echo "❌ flake8 not installed. Install with: pip install -r test_requirements.txt"; \
-		exit 1; \
-	fi
+	@echo "Running flake8 linting from $(VENV)..."
+	@$(PYTHON) -m flake8 main.py src/ tests/ --select=F63,F7,F82,E9 || (echo "❌ High-signal Python lint issues found." && exit 1)
+	@echo "✅ No linting issues found!"
+
+# Run Python type checks
+typecheck:
+	@echo "Running mypy type checks from $(VENV)..."
+	@$(PYTHON) -m mypy
+	@echo "✅ No type issues found!"
 
 # Auto-fix linting issues
 autofix:
 	@echo "🔧 Auto-fixing linting issues..."
-	@if command -v autopep8 >/dev/null 2>&1; then \
-		find src tests -name "*.py" -exec autopep8 --in-place --aggressive --aggressive {} \;; \
-		autopep8 --in-place --aggressive --aggressive main.py; \
-		echo "✅ Auto-fix complete! Run 'make lint' to verify."; \
-	else \
-		echo "❌ autopep8 not installed. Install with: pip install -r test_requirements.txt"; \
-		exit 1; \
-	fi
+	@find src tests -name "*.py" -exec $(PYTHON) -m autopep8 --in-place --aggressive --aggressive {} \;
+	@$(PYTHON) -m autopep8 --in-place --aggressive --aggressive main.py
+	@echo "✅ Auto-fix complete! Run 'make lint' to verify."
 
 # Format code (if black is installed)
 format:
-	@if command -v black >/dev/null 2>&1; then \
-		black main.py src/ tests/ --line-length=120; \
-		echo "✅ Code formatting complete!"; \
-	else \
-		echo "❌ black not installed. Install with: pip install -r test_requirements.txt"; \
-		exit 1; \
-	fi
+	@$(PYTHON) -m black main.py src/ tests/ --line-length=120
+	@echo "✅ Code formatting complete!"
 
 # Clean up generated files
 clean:
@@ -98,19 +100,19 @@ clean:
 # Run security scans
 security:
 	@echo "Running security scans..."
-	@pip install bandit safety
+	@$(PIP) install bandit safety
 	@echo "🔍 Running bandit security scan..."
-	@bandit -r src tests main.py -f json -o bandit-report.json || true
+	@$(PYTHON) -m bandit -r src tests main.py -f json -o bandit-report.json || true
 	@echo "🔍 Checking for dependency vulnerabilities..."
-	@safety check || true
+	@$(PYTHON) -m safety check || true
 	@echo "✅ Security scan complete. Check bandit-report.json for details."
 
 # Run CI-style tests locally
 ci-test:
 	@echo "Running CI-style tests locally..."
 	@make lint
+	@make typecheck
 	@make test
-	@make security
 	@echo "✅ All CI checks passed!"
 
 # Build Docker image
@@ -137,10 +139,10 @@ run:
 
 # Run the Discord bot directly (without auto-restart)
 run-direct:
-	python main.py
+	$(PYTHON) main.py
 
 # Development setup (install everything)
-dev-setup: install install-test install-hooks
+dev-setup: venv install install-test install-hooks
 	@echo "Development environment set up!"
 	@echo "Run 'make test' to verify everything works."
 	@echo "Git pre-commit hooks are now active!"

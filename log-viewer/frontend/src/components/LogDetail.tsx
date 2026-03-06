@@ -20,7 +20,7 @@ export default function LogDetail() {
             try {
                 const res = await axios.get(`${API_BASE_URL}/logs/${id}`);
                 setLog(res.data);
-            } catch (err) {
+            } catch {
                 setError('Failed to load log details');
             }
         };
@@ -32,7 +32,7 @@ export default function LogDetail() {
 
     const parseJsonSafe = (str: string | null) => {
         if (!str) return null;
-        try { return JSON.parse(str); } catch (e) { return str; }
+        try { return JSON.parse(str); } catch { return str; }
     };
 
     const reqBody = parseJsonSafe(log.request_body);

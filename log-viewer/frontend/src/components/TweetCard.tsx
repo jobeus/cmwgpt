@@ -68,17 +68,17 @@ export const TweetCard = ({ tweet }: { tweet: TweetData }) => {
 
                     {tweet.media && tweet.media.length > 0 && (
                         <div className="rounded-xl overflow-hidden border border-[#38444d] mt-3 mb-2 max-h-[400px]">
-                            {tweet.media.map((mediaId: any, i: number) => (
+                            {tweet.media.map((mediaItem, i) => (
                                 <div key={i} className="w-full h-full flex items-center justify-center bg-black">
-                                    {mediaId.type === 'video' ? (
+                                    {mediaItem.type === 'video' ? (
                                         <AuthenticatedVideo
-                                            src={mediaId.url}
+                                            src={mediaItem.url}
                                             className="max-w-full max-h-[400px] object-contain"
                                             loadingFallback={<div className="w-[24rem] h-64 max-w-full bg-gray-900 animate-pulse" />}
                                         />
                                     ) : (
                                         <AuthenticatedImage
-                                            src={mediaId.url}
+                                            src={mediaItem.url}
                                             alt="Tweet Attachment"
                                             stripQuery={false}
                                             className="max-w-full max-h-[400px] object-contain"
@@ -100,7 +100,7 @@ export const TweetCard = ({ tweet }: { tweet: TweetData }) => {
                     <div className="bg-[#192734] border-t border-[#38444d] p-4 pl-14">
                         <div className="text-[#1da1f2] text-xs font-bold uppercase tracking-wider mb-3">Top Replies</div>
                         <div className="space-y-4">
-                            {tweet.replies.map((reply: any, idx: number) => (
+                            {tweet.replies.map((reply, idx) => (
                                 <div key={idx} className="flex relative">
                                     {idx !== tweet.replies!.length - 1 && (
                                         <div className="absolute left-[-24px] top-6 bottom-[-24px] w-0.5 bg-[#38444d]"></div>

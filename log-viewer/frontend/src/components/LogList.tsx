@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { io, Socket } from 'socket.io-client';
 import { format } from 'date-fns';
@@ -68,7 +68,7 @@ const extractLastMessageSnippet = (bodyStr: string | null, serviceName: string, 
                 return 'Scraping article content';
             }
             if (type === 'response') {
-                let text = typeof parsed === 'string' ? parsed : JSON.stringify(parsed);
+                const text = typeof parsed === 'string' ? parsed : JSON.stringify(parsed);
                 return text.length > 150 ? text.substring(0, 150) + '...' : text;
             }
         }
@@ -126,7 +126,7 @@ const extractLastMessageSnippet = (bodyStr: string | null, serviceName: string, 
 
         // Fallback for json objects that don't match our shapes (like raw rapidapi payload)
         return '[JSON Object]';
-    } catch (e) {
+    } catch {
         // Fallback for non-json (e.g. raw text articles)
         return bodyStr.length > 150 ? bodyStr.substring(0, 150) + '...' : bodyStr;
     }
@@ -139,6 +139,16 @@ export default function LogList() {
     const { token } = useAuth();
     const navigate = useNavigate();
     const socketRef = useRef<Socket | null>(null);
+
+    const fetchLogs = useCallback(async () => {
+        try {
+            const res = await axios.get(`${API_BASE_URL}/logs?limit=50`);
+            setLogs(res.data.logs);
+            setTotal(res.data.total);
+        } catch (err) {
+            console.error('Failed to fetch logs', err);
+        }
+    }, []);
 
     useEffect(() => {
         fetchLogs();
@@ -158,17 +168,7 @@ export default function LogList() {
         return () => {
             socket.disconnect();
         };
-    }, [token]);
-
-    const fetchLogs = async () => {
-        try {
-            const res = await axios.get(`${API_BASE_URL}/logs?limit=50`);
-            setLogs(res.data.logs);
-            setTotal(res.data.total);
-        } catch (err) {
-            console.error('Failed to fetch logs', err);
-        }
-    };
+    }, [fetchLogs, token]);
 
     const copyCurl = (e: React.MouseEvent, id: number, curl: string | null) => {
         e.stopPropagation();
