@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node dist/server.js",
     "build": "tsc",
-    "dev": "nodemon src/server.ts",
+    "dev": "nodemon --legacy-watch --watch src --ext ts --exec \"ts-node --files\" src/server.ts",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "test": "vitest run"
   },

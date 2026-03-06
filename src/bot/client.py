@@ -289,9 +289,7 @@ class DiscordBotClient:
 
             if not queued:
                 logger.warning(
-                    f"""Failed to queue mention from {
-                        message.author} in #{
-                        message.channel} - queue may be full"""
+                    f"Failed to queue mention from {message.author} in #{message.channel} - queue may be full"
                 )
                 # Optionally, you could fall back to immediate processing:
                 # await mention_handler.handle_mention(message, self.bot.user,

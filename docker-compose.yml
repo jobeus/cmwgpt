@@ -1,0 +1,84 @@
+services:
+  db:
+    image: mariadb:11.7
+    restart: unless-stopped
+    env_file:
+      - .env.development
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-change-me-root}
+      MARIADB_DATABASE: ${DB_NAME:-cmwgpt}
+      MARIADB_USER: ${DB_USER:-cmwgpt_user}
+      MARIADB_PASSWORD: ${DB_PASSWORD:-change-me-db}
+    ports:
+      - "${DB_EXPOSE_PORT:-3306}:3306"
+    volumes:
+      - mariadb-data:/var/lib/mysql
+      - ./init_db.sql:/docker-entrypoint-initdb.d/01-init_db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -u$$MARIADB_USER -p$$MARIADB_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.development
+    environment:
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+    command: python main.py
+
+  backend:
+    build:
+      context: ./log-viewer/backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.development
+    environment:
+      NODE_ENV: development
+      PORT: ${LOG_VIEWER_PORT:-3001}
+      LOG_VIEWER_HOST: 0.0.0.0
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${LOG_VIEWER_PORT:-3001}:${LOG_VIEWER_PORT:-3001}"
+    volumes:
+      - ./log-viewer/backend:/app
+      - backend-node_modules:/app/node_modules
+    command: npm run dev
+
+  frontend:
+    build:
+      context: ./log-viewer/frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.development
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      VITE_PORT: ${VITE_PORT:-5173}
+      VITE_BACKEND_PROXY_TARGET: http://backend:${LOG_VIEWER_PORT:-3001}
+    depends_on:
+      - backend
+    ports:
+      - "${VITE_PORT:-5173}:${VITE_PORT:-5173}"
+    volumes:
+      - ./log-viewer/frontend:/app
+      - frontend-node_modules:/app/node_modules
+    command: npm run dev
+
+volumes:
+  mariadb-data:
+  backend-node_modules:
+  frontend-node_modules:

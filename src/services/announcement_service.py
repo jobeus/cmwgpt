@@ -184,8 +184,7 @@ class AnnouncementService:
                 message = self._build_truncated_message(base_message, changelog)
 
         logger.info(
-            f"Announcing update to {
-                len(active_channels)} channels: {current_sha_short}")
+            f"Announcing update to {len(active_channels)} channels: {current_sha_short}")
 
         # Send announcements to all active channels
         successful_announcements = 0
@@ -198,8 +197,7 @@ class AnnouncementService:
                     await channel.send(message)
                     successful_announcements += 1
                     logger.debug(
-                        f"""Sent update announcement to #{
-                            channel.name} ({channel_id})"""
+                        f"Sent update announcement to #{channel.name} ({channel_id})"
                     )
 
                     # Small delay to avoid rate limiting

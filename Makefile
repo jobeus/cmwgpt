@@ -23,8 +23,8 @@ help:
 	@echo "  format        - Format code"
 	@echo "  security      - Run security scans"
 	@echo "  ci-test       - Run CI-style tests locally"
-	@echo "  docker-build  - Build Docker image"
-	@echo "  docker-run    - Run Docker container"
+	@echo "  docker-build  - Build the Docker development stack"
+	@echo "  docker-run    - Run the Docker development stack"
 	@echo "  clean         - Clean up generated files"
 	@echo "  run           - Run the Discord bot with auto-restart support"
 	@echo "  run-direct    - Run the Discord bot directly (no auto-restart)"
@@ -117,18 +117,14 @@ ci-test:
 
 # Build Docker image
 docker-build:
-	@echo "Building Docker image..."
-	@docker build -t discord-bot:latest .
-	@echo "✅ Docker image built successfully!"
+	@echo "Building Docker development stack with .env.development..."
+	@docker compose --env-file .env.development build
+	@echo "✅ Docker images built successfully!"
 
 # Run Docker container
 docker-run:
-	@echo "Running Docker container..."
-	@docker run -d \
-		--name discord-bot \
-		--env-file .env \
-		discord-bot:latest
-	@echo "✅ Docker container started!"
+	@echo "Starting Docker development stack with .env.development..."
+	@docker compose --env-file .env.development up --build
 
 # Run the Discord bot with auto-restart support
 run:

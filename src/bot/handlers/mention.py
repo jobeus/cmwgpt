@@ -78,8 +78,7 @@ class MentionHandler:
 
                 recent_messages, system_prompt = await self._prepare_mention_context(message, bot_user)
                 logger.info(
-                    f"Context prepared for mention by {
-                        message.author}, sending to OpenRouter...")
+                    f"Context prepared for mention by {message.author}, sending to OpenRouter...")
                 channel_id = message.channel.id
                 reply_content = await self._openai_service.get_chat_completion(
                     model=model,
@@ -185,10 +184,7 @@ class MentionHandler:
             Tuple of (message list for OpenAI API, system prompt string)
         """
         logger.info(
-            f"""Mention by {
-                message.author} in #{
-                message.channel}: {
-                message.content}"""
+            f"Mention by {message.author} in #{message.channel}: {message.content}"
         )
 
         # Gather message history
@@ -350,8 +346,7 @@ class MentionHandler:
                             )
                 except Exception as e:
                     logger.error(
-                        f"Failed to convert attachment context for msg {
-                            msg.id}: {e}")
+                        f"Failed to convert attachment context for msg {msg.id}: {e}")
             # 3. Add native embed image previews
             for e in msg.embeds:
                 logger.debug(f"Checking embed for image previews: {e.title}")
@@ -371,8 +366,7 @@ class MentionHandler:
                         )
                     except Exception as ex:
                         logger.warning(
-                            f"Failed to fetch embed preview context for msg {
-                                msg.id}: {ex}")
+                            f"Failed to fetch embed preview context for msg {msg.id}: {ex}")
 
             # Chat completions API doesn't support image_url parts in the 'assistant' role natively.
             # So if it's an assistant message with images, send text as

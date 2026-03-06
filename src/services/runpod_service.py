@@ -206,8 +206,7 @@ class RunpodService:
             except httpx.HTTPError as e:
                 logger.error(f"HTTP error during Runpod API call: {e}")
                 raise RunpodServiceError(
-                    f"Failed to communicate with Runpod API: {
-                        str(e)}")
+                    f"Failed to communicate with Runpod API: {str(e)}")
             except RunpodServiceError:
                 raise
             except Exception as e:
