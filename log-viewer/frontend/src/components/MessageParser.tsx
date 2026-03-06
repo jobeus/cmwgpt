@@ -40,7 +40,7 @@ interface ParsedMessage {
 
 const parseDiscordPrefix = (text: string): ParsedMessage => {
     // Regex matches: [2026-03-04 13:13:17] [1478742130095554613] <@392013989930074127>: message text
-    const regex = /\[(.*?)\] \[(\d+)\] <@(\d+)>:\s*([\s\S]*)/;
+    const regex = /^\[(.*?)\] \[(\d+)\] <@(\d+)>:\s*([\s\S]*)/;
     const match = text.match(regex);
     if (match) {
         return {
