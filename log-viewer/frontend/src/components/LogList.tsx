@@ -6,8 +6,8 @@ import { useAuth } from '../AuthContext';
 import { Terminal, ChevronRight, Server, Check, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || '/';
 
 interface LogEntry {
     id: number;

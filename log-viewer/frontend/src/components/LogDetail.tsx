@@ -5,7 +5,7 @@ import { ArrowLeft, Terminal, Code, MessageSquare, Clock, Server, Hash } from 'l
 import { format } from 'date-fns';
 import { ConversationView, sanitizeJsonForRawView } from './MessageParser';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 export default function LogDetail() {
     const { id } = useParams<{ id: string }>();
