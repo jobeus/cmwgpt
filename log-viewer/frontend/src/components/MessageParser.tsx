@@ -5,13 +5,17 @@ import { Image as ImageIcon, FileAudio, ExternalLink, Copy, Check } from 'lucide
 const userMap = userMapData as Record<string, string>;
 const GUILD_ID = import.meta.env.VITE_DISCORD_GUILD_ID || '1120463633693024346'; // fallback for demo
 
-// Helper to handle video urls cleanly, removing trailing queries like ?tag=21 which can break html5 video playback
-const cleanVideoUrl = (url: string) => {
+// Helper to proxy media URLs (videos, images) through our backend to bypass CORS
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+
+const proxyMediaUrl = (url: string, stripQuery = true) => {
     try {
         const u = new URL(url);
-        return `${u.origin}${u.pathname}`;
+        const finalUrl = stripQuery ? `${u.origin}${u.pathname}` : url;
+        return `${API_BASE_URL}/proxy-media?url=${encodeURIComponent(finalUrl)}`;
     } catch {
-        return url.split('?')[0];
+        const base = stripQuery ? url.split('?')[0] : url;
+        return `${API_BASE_URL}/proxy-media?url=${encodeURIComponent(base)}`;
     }
 };
 
@@ -192,7 +196,7 @@ const renderMessageContent = (content: any, channelId: string | null) => {
                         );
                     }
                     if (part.type === 'video') {
-                        const url = cleanVideoUrl(part.video.url);
+                        const url = proxyMediaUrl(part.video.url);
                         return (
                             <div key={idx} className="mt-2 text-sm text-gray-400 flex flex-col items-start border border-gray-800 bg-gray-900 rounded-lg p-3 inline-block max-w-[24rem]">
                                 <div className="flex items-center mb-2">
@@ -249,12 +253,16 @@ const renderMessageContent = (content: any, channelId: string | null) => {
                             </div>
 
                             <div className="flex items-center mb-3">
-                                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-lg mr-3 shadow-inner">
-                                    {content.author.charAt(0).toUpperCase()}
-                                </div>
+                                {content.authorImage ? (
+                                    <img src={proxyMediaUrl(content.authorImage, false)} alt={content.author} className="w-10 h-10 rounded-full mr-3 object-cover" />
+                                ) : (
+                                    <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-lg mr-3 shadow-inner">
+                                        {content.author.charAt(0).toUpperCase()}
+                                    </div>
+                                )}
                                 <div className="flex flex-col">
                                     <span className="text-white font-bold leading-tight">{content.author}</span>
-                                    <span className="text-[#8899a6] text-sm leading-tight">@twitter_user</span>
+                                    <span className="text-[#8899a6] text-sm leading-tight">{content.authorHandle ? `@${content.authorHandle}` : '@twitter_user'}</span>
                                 </div>
 
                                 {/* X icon SVG inline */}
@@ -275,10 +283,10 @@ const renderMessageContent = (content: any, channelId: string | null) => {
                                         <div key={i} className="w-full h-full flex items-center justify-center bg-black">
                                             {mediaId.type === 'video' ? (
                                                 <video controls className="max-w-full max-h-[400px] object-contain" preload="metadata">
-                                                    <source src={cleanVideoUrl(mediaId.url)} type="video/mp4" />
+                                                    <source src={proxyMediaUrl(mediaId.url)} type="video/mp4" />
                                                 </video>
                                             ) : (
-                                                <img src={mediaId.url} alt="Tweet Attachment" className="max-w-full max-h-[400px] object-contain" />
+                                                <img src={proxyMediaUrl(mediaId.url, false)} alt="Tweet Attachment" className="max-w-full max-h-[400px] object-contain" />
                                             )}
                                         </div>
                                     ))}
@@ -300,11 +308,15 @@ const renderMessageContent = (content: any, channelId: string | null) => {
                                             {idx !== content.replies.length - 1 && (
                                                 <div className="absolute left-[-24px] top-6 bottom-[-24px] w-0.5 bg-[#38444d]"></div>
                                             )}
-                                            <div className="absolute left-[-28px] top-0 w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-300">
-                                                {reply.author.charAt(0).toUpperCase()}
-                                            </div>
+                                            {reply.authorImage ? (
+                                                <img src={proxyMediaUrl(reply.authorImage, false)} alt={reply.author} className="absolute left-[-28px] top-0 w-8 h-8 rounded-full object-cover" />
+                                            ) : (
+                                                <div className="absolute left-[-28px] top-0 w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-300">
+                                                    {reply.author.charAt(0).toUpperCase()}
+                                                </div>
+                                            )}
                                             <div className="flex flex-col ml-1">
-                                                <div className="text-white font-bold text-sm">{reply.author} <span className="text-[#8899a6] font-normal">@reply_user</span></div>
+                                                <div className="text-white font-bold text-sm">{reply.author} <span className="text-[#8899a6] font-normal">{reply.authorHandle ? `@${reply.authorHandle}` : '@reply_user'}</span></div>
                                                 <div className="text-gray-300 text-sm whitespace-pre-wrap mt-1 leading-normal break-words">{reply.text}</div>
                                             </div>
                                         </div>
@@ -403,6 +415,8 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
                 let tweetObj: any = {
                     type: 'tweet',
                     author: '',
+                    authorHandle: '',
+                    authorImage: '',
                     text: '',
                     media: [],
                     replies: []
@@ -420,12 +434,22 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
                     return result?.core?.user_results?.result?.legacy?.name || "Twitter User";
                 };
 
+                const extractHandle = (result: any) => {
+                    return result?.core?.user_results?.result?.legacy?.screen_name || '';
+                };
+
+                const extractProfileImage = (result: any) => {
+                    return result?.core?.user_results?.result?.legacy?.profile_image_url_https || '';
+                };
+
                 // ---- Extract text and Replies ---- 
                 if (isThreaded) {
                     const entries = responseBody.data.threaded_conversation_with_injections_v2.instructions[1].entries;
                     // Main tweet
                     const mainResult = entries[0].content.itemContent.tweet_results.result;
                     tweetObj.author = extractAuthor(mainResult);
+                    tweetObj.authorHandle = extractHandle(mainResult);
+                    tweetObj.authorImage = extractProfileImage(mainResult);
                     tweetObj.text = extractTweetText(mainResult);
 
                     // Replies
@@ -443,7 +467,9 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
                             if (replyResult) {
                                 const replyAuthor = extractAuthor(replyResult);
                                 const replyText = extractTweetText(replyResult);
-                                tweetObj.replies.push({ author: replyAuthor, text: replyText });
+                                const replyHandle = extractHandle(replyResult);
+                                const replyImage = extractProfileImage(replyResult);
+                                tweetObj.replies.push({ author: replyAuthor, text: replyText, authorHandle: replyHandle, authorImage: replyImage });
                             }
                         } catch (e) {
                             // ignore missing items

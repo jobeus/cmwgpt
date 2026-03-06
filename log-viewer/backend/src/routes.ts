@@ -1,6 +1,7 @@
 import express from 'express';
 import { pool } from './db';
 import { authMiddleware } from './auth';
+import axios from 'axios';
 
 const router = express.Router();
 
@@ -56,6 +57,42 @@ router.get('/logs/:id', authMiddleware, async (req, res) => {
     } catch (error) {
         console.error(`Error fetching log ${id}:`, error);
         res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// Proxy media endpoint to bypass CORS and stream Twitter MP4s, images, etc.
+router.get('/proxy-media', async (req, res) => {
+    const mediaUrl = req.query.url as string;
+
+    if (!mediaUrl) {
+        return res.status(400).json({ error: 'Missing media URL' });
+    }
+
+    try {
+        const response = await axios({
+            method: 'GET',
+            url: mediaUrl,
+            responseType: 'stream',
+            headers: {
+                'Referer': 'https://x.com/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': '*/*'
+            }
+        });
+
+        // Forward content-type and length headers
+        res.setHeader('Content-Type', response.headers['content-type'] || 'application/octet-stream');
+        if (response.headers['content-length']) {
+            res.setHeader('Content-Length', response.headers['content-length']);
+        }
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Cache-Control', 'public, max-age=86400'); // cache proxied media for 24h
+
+        response.data.pipe(res);
+
+    } catch (error: any) {
+        console.error('Error proxying media:', error.message);
+        res.status(500).json({ error: 'Failed to proxy media' });
     }
 });
 

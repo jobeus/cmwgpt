@@ -364,3 +364,5 @@ test_config.py
 
 # Don't commit my own prompt
 system_prompt.txt
+
+log-viewer/frontend/src/user_map.json
