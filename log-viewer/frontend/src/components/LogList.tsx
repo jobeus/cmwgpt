@@ -29,16 +29,22 @@ const extractLastMessageSnippet = (bodyStr: string | null): string => {
         if (parsed.messages && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
             const last = parsed.messages[parsed.messages.length - 1];
             let text = '';
+
             // Handle array content like [{type: 'text', text: '...'}]
             if (Array.isArray(last.content)) {
-                const textPart = last.content.find((p: any) => p.type === 'text');
-                if (textPart) text = textPart.text;
-                else text = '[Complex Content]';
+                // Look for text blocks
+                const textParts = last.content.filter((p: any) => p.type === 'text');
+                if (textParts.length > 0) {
+                    text = textParts.map((p: any) => p.text).join(' ');
+                } else {
+                    text = '[Complex Content / Image / Audio]';
+                }
             } else if (typeof last.content === 'string') {
                 text = last.content;
             } else {
                 text = JSON.stringify(last.content);
             }
+
             if (text.length > 150) text = text.substring(0, 150) + '...';
             return text;
         }
