@@ -62,6 +62,10 @@ The bot operates in two distinct modes:
    # Edit system_prompt.txt to customize the AI's personality and behavior
    ```
 
+   For non-Docker production deployments you can also use `.env.production`.
+   If both files exist, the app prefers `.env.production`. You can override the
+   file explicitly with `CMWGPT_ENV_FILE=/path/to/your.env`.
+
 3. **Run the Bot**
    ```bash
    # With auto-restart support (recommended)
