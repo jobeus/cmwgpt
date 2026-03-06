@@ -6,7 +6,7 @@ const userMap = userMapData as Record<string, string>;
 const GUILD_ID = import.meta.env.VITE_DISCORD_GUILD_ID || '1120463633693024346'; // fallback for demo
 
 // Helper to proxy media URLs (videos, images) through our backend to bypass CORS
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://polar.jobe.wtf/api';
 
 const proxyMediaUrl = (url: string, stripQuery = true) => {
     try {
