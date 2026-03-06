@@ -1,6 +1,8 @@
 import re
 import logging
 from typing import List, Optional
+from youtube_transcript_api import YouTubeTranscriptApi
+from src.config import TRANSCRIPT_PROXY
 from src.utils.cache_utils import PersistentCache
 
 logger = logging.getLogger(__name__)

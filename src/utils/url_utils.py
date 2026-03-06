@@ -81,18 +81,13 @@ async def get_article_text(url: str) -> Optional[str]:
     try:
         logger.info(f"Fetching article for URL: {url}")
         
-        proxies = None
-        if TRANSCRIPT_PROXY:
-            proxies = {
-                "http": TRANSCRIPT_PROXY,
-                "https": TRANSCRIPT_PROXY
-            }
+        proxy = TRANSCRIPT_PROXY if TRANSCRIPT_PROXY else None
             
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
         
-        async with httpx.AsyncClient(proxies=proxies, timeout=15.0) as client:
+        async with httpx.AsyncClient(proxy=proxy, timeout=15.0) as client:
             response = await client.get(url, headers=headers)
             response.raise_for_status()
             html = response.text
@@ -122,7 +117,7 @@ async def get_article_text(url: str) -> Optional[str]:
             request_body={},
             response_status=200,
             response_headers={},
-            response_body={"summary_length": len(text), "summary_preview": text[:500]},
+            response_body=text,
             cost=0.0
         )
         

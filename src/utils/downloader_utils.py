@@ -12,6 +12,8 @@ from src.utils.youtube_utils import extract_video_ids, get_transcript
 from src.utils.tiktok_utils import extract_tiktok_urls, get_tiktok_transcript
 from src.utils.twitter_utils import extract_twitter_urls, get_tweet_context
 from src.utils.url_utils import extract_target_urls, get_article_text
+from src.db.logger import log_api_request
+from src.config import GROQ_API_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,17 @@ async def fetch_all_url_content(message_text: str) -> str:
                     if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
                        logger.info(f"Target Video ID {vid_id} Transcript grabbed successfully.") 
                     transcripts.append(f"Target Video ID {vid_id} Transcript:\n{transcript_text}")
+                    await log_api_request(
+                        service_name="youtube/transcript",
+                        method="GET",
+                        endpoint_url=f"https://www.youtube.com/watch?v={vid_id}",
+                        request_headers={},
+                        request_body={"video_id": vid_id},
+                        response_status=200,
+                        response_headers={},
+                        response_body=transcript_text,
+                        cost=0.0
+                    )
             except Exception as e:
                 logger.warning(f"Failed to fetch transcript for {vid_id}: {e}")
 
@@ -62,6 +75,17 @@ async def fetch_all_url_content(message_text: str) -> str:
                     if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
                        logger.info(f"Target TikTok Video {t_url} Transcript grabbed successfully.") 
                     tiktok_transcripts.append(f"Target TikTok Video {t_url} Transcript:\n{transcript_text}")
+                    await log_api_request(
+                        service_name="groq/whisper-large-v3-turbo",
+                        method="POST",
+                        endpoint_url="https://api.groq.com/openai/v1/audio/transcriptions",
+                        request_headers={"Authorization": f"Bearer {GROQ_API_KEY[:8]}..."} if GROQ_API_KEY else {},
+                        request_body={"model": "whisper-large-v3-turbo", "source_url": t_url},
+                        response_status=200,
+                        response_headers={},
+                        response_body=transcript_text,
+                        cost=0.0
+                    )
             except Exception as e:
                 logger.warning(f"Failed to fetch TikTok transcript for {t_url}: {e}")
 

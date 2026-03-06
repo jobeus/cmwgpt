@@ -11,6 +11,7 @@ from groq import AsyncGroq
 
 from src.config import RAPIDAPI_KEY, GROQ_API_KEY
 from src.utils.cache_utils import PersistentCache
+from src.db.logger import log_api_request
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,18 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
             response.raise_for_status()
             
             data = response.json()
+
+            await log_api_request(
+                service_name="rapidapi/twitter",
+                method="GET",
+                endpoint_url="https://x-com2.p.rapidapi.com/v2/TweetDetail/",
+                request_headers=headers,
+                request_body={"id": tweet_id},
+                response_status=response.status_code,
+                response_headers=dict(response.headers),
+                response_body=data,
+                cost=0.0
+            )
         entries = data['data']['threaded_conversation_with_injections_v2']['instructions'][1]['entries']
         
         # Helper to get exact main tweet text
@@ -154,6 +167,17 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
                     transcript_text = transcription.strip()
                     if transcript_text:
                         video_transcript = transcript_text
+                        await log_api_request(
+                            service_name="groq/whisper-large-v3-turbo",
+                            method="POST",
+                            endpoint_url="https://api.groq.com/openai/v1/audio/transcriptions",
+                            request_headers={"Authorization": f"Bearer {GROQ_API_KEY[:8]}..."} if GROQ_API_KEY else {},
+                            request_body={"model": "whisper-large-v3-turbo", "source_url": tweet_url, "video_url": video_url},
+                            response_status=200,
+                            response_headers={},
+                            response_body=transcript_text,
+                            cost=0.0
+                        )
             except Exception as e:
                 logger.warning(f"Failed to process video for tweet {tweet_url}: {e}")
             finally:
