@@ -30,11 +30,15 @@ export const sanitizeJsonForRawView = (obj: any): any => {
     return obj;
 };
 
-// Helper to extract audio binary from a raw multipart/form-data hex payload
-export const extractAudioFromMultipartHex = (hexString: string): string | null => {
+// Helper to extract audio binary from a raw hex payload
+export const extractAudioFromHex = (hexString: string): string | null => {
     try {
         if (!hexString || hexString.length < 100) return null;
-        if (!/^[0-9a-fA-F]+$/.test(hexString)) return null;
+
+        // Quick peek at the first few characters to see if it even looks like hex
+        // We avoid heavy regex on 10MB strings because it crashes Safari/iOS and some V8 limits
+        const head = hexString.substring(0, 100);
+        if (!/^[0-9a-fA-F]+$/.test(head)) return null;
 
         // Convert hex to Uint8Array
         const bytes = new Uint8Array(hexString.length / 2);
@@ -42,33 +46,33 @@ export const extractAudioFromMultipartHex = (hexString: string): string | null =
             bytes[i / 2] = parseInt(hexString.substring(i, i + 2), 16);
         }
 
-        // Convert to string to find boundaries (binary data will be mangled but headers survive)
-        const decoder = new TextDecoder('latin1'); // Use latin1 to preserve byte length exactly 1:1
-        const str = decoder.decode(bytes);
+        // Check if there are multipart boundaries
+        const decoder = new TextDecoder('latin1');
+        const headStr = decoder.decode(bytes.subarray(0, 500));
 
-        // Find the "filename=" header and the two newlines that follow it before the binary data starts
-        const fileContentIdx = str.indexOf('filename=');
-        if (fileContentIdx === -1) return null;
+        let audioBytes = bytes;
 
-        // Find the end of the headers for this part (the blank line)
-        const headerEndIdx = str.indexOf('\r\n\r\n', fileContentIdx);
-        if (headerEndIdx === -1) return null;
-
-        const binaryStartIndex = headerEndIdx + 4; // Skip the \r\n\r\n
-
-        // Look for the next boundary to find the end of the binary data
-        const nextBoundaryIdx = str.indexOf('\r\n--', binaryStartIndex);
-        if (nextBoundaryIdx === -1) return null;
-
-        const audioBytes = bytes.slice(binaryStartIndex, nextBoundaryIdx);
-
-        // Convert the sliced bytes to base64
-        let binaryStr = '';
-        const len = audioBytes.byteLength;
-        for (let i = 0; i < len; i++) {
-            binaryStr += String.fromCharCode(audioBytes[i]);
+        // If it contains a filename boundary, extract just the binary part
+        const fileContentIdx = headStr.indexOf('filename=');
+        if (fileContentIdx !== -1) {
+            const str = decoder.decode(bytes);
+            const headerEndIdx = str.indexOf('\r\n\r\n', fileContentIdx);
+            if (headerEndIdx !== -1) {
+                const binaryStartIndex = headerEndIdx + 4;
+                const nextBoundaryIdx = str.indexOf('\r\n--', binaryStartIndex);
+                if (nextBoundaryIdx !== -1) {
+                    audioBytes = bytes.slice(binaryStartIndex, nextBoundaryIdx);
+                }
+            }
+        } else {
+            // Otherwise, it's just a raw audio file (e.g. ID3 header '494433' or MPEG sync word 'fffb')
+            // We can just dump the whole bytes array into the blob!
+            audioBytes = bytes;
         }
-        return `data:audio/mpeg;base64,${btoa(binaryStr)}`;
+
+        // Convert to a blob URI directly, avoiding `btoa()` memory crashes and slow UI string concatenation loops
+        const blob = new Blob([audioBytes], { type: 'audio/mpeg' });
+        return URL.createObjectURL(blob);
     } catch (e) {
         console.error("Failed to parse audio hex:", e);
         return null;
@@ -154,7 +158,7 @@ const renderMessageContent = (content: any, channelId: string | null) => {
                         );
                     }
                     if (part.type === 'input_audio') {
-                        // Handle base64 audio if provided
+                        // Handle base64 or blob URL audio if provided
                         const rawData = part.input_audio.data;
                         const format = part.input_audio.format || 'mp3';
                         if (rawData) {
@@ -165,7 +169,7 @@ const renderMessageContent = (content: any, channelId: string | null) => {
                                         <span>Attached Audio ({format})</span>
                                     </div>
                                     <audio controls className="w-full">
-                                        <source src={`data:audio/${format};base64,${rawData}`} />
+                                        <source src={part.input_audio.is_blob_uri ? rawData : `data:audio/${format};base64,${rawData}`} />
                                         Your browser does not support the audio element.
                                     </audio>
                                 </div>
@@ -235,13 +239,13 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
         // Groq Audio Transcriptions 
         let content: any[] = [];
 
-        if (typeof requestBody === 'string' && /^[0-9a-fA-F]+$/.test(requestBody)) {
-            const audioDataUri = extractAudioFromMultipartHex(requestBody);
+        if (typeof requestBody === 'string' && requestBody.length > 200) {
+            const audioDataUri = extractAudioFromHex(requestBody);
             if (audioDataUri) {
-                // If we successfully extracted the audio file from the raw multipart hex, show the inline player!
+                // If we successfully extracted the audio file from the raw hex, show the inline player!
                 content.push({
                     type: 'input_audio',
-                    input_audio: { data: audioDataUri.split(',')[1], format: 'mp3' }
+                    input_audio: { data: audioDataUri, format: 'mp3', is_blob_uri: true }
                 });
             } else {
                 content.push({ type: 'text', text: `[Action: Transcribing Audio to Groq Api (Hex Decode Failed)]` });
