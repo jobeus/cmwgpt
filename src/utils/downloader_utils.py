@@ -72,21 +72,27 @@ async def fetch_all_url_content(message_text: str) -> str:
             try:
                 result = await asyncio.to_thread(get_tiktok_transcript, t_url)
                 if result:
-                    transcript_text, audio_b64 = result
+                    transcript_text, groq_resp = result
                     if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
                        logger.info(f"Target TikTok Video {t_url} Transcript grabbed successfully.") 
                     tiktok_transcripts.append(f"Target TikTok Video {t_url} Transcript:\n{transcript_text}")
-                    await log_api_request(
-                        service_name="groq/whisper-large-v3-turbo",
-                        method="POST",
-                        endpoint_url="https://api.groq.com/openai/v1/audio/transcriptions",
-                        request_headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "multipart/form-data"} if GROQ_API_KEY else {},
-                        request_body={"model": "whisper-large-v3-turbo", "source_url": t_url, "audio_base64": audio_b64},
-                        response_status=200,
-                        response_headers={},
-                        response_body=transcript_text,
-                        cost=0.0
-                    )
+                    
+                    if groq_resp:
+                        # Log exact HTTP multipart request as it went over the wire
+                        actual_req = groq_resp.request
+                        req_body_bytes = actual_req.content if actual_req.content else b""
+                        
+                        await log_api_request(
+                            service_name="groq/whisper-large-v3-turbo",
+                            method=actual_req.method,
+                            endpoint_url=str(actual_req.url),
+                            request_headers=dict(actual_req.headers),
+                            request_body=req_body_bytes.hex() if req_body_bytes else "",
+                            response_status=groq_resp.status_code,
+                            response_headers=dict(groq_resp.headers),
+                            response_body=transcript_text,
+                            cost=0.0
+                        )
             except Exception as e:
                 logger.warning(f"Failed to fetch TikTok transcript for {t_url}: {e}")
 

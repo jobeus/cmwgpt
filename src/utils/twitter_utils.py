@@ -8,8 +8,6 @@ import subprocess
 import asyncio
 import httpx
 from typing import List, Optional
-from groq import AsyncGroq
-
 from src.config import RAPIDAPI_KEY, GROQ_API_KEY
 from src.utils.cache_utils import PersistentCache
 from src.db.logger import log_api_request
@@ -152,28 +150,38 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
                 )
                 
                 if os.path.exists(mp3_path):
-                    groq_client = AsyncGroq(api_key=GROQ_API_KEY)
-                    logger.info(f"Transcribing {mp3_path} using Groq...")
+                    logger.info(f"Transcribing {mp3_path} using Groq via httpx...")
                     with open(mp3_path, "rb") as file:
                         audio_bytes = file.read()
-                        transcription = await groq_client.audio.transcriptions.create(
-                            file=(os.path.basename(mp3_path), audio_bytes),
-                            model="whisper-large-v3-turbo",
-                            temperature=0,
-                            response_format="text",
+                        
+                    async with httpx.AsyncClient(timeout=60.0) as client:
+                        files = {'file': (os.path.basename(mp3_path), audio_bytes, 'audio/mpeg')}
+                        data_payload = {
+                            'model': 'whisper-large-v3-turbo',
+                            'temperature': '0',
+                            'response_format': 'text'
+                        }
+                        groq_headers = {'Authorization': f'Bearer {GROQ_API_KEY}'}
+                        
+                        groq_resp = await client.post(
+                            "https://api.groq.com/openai/v1/audio/transcriptions",
+                            headers=groq_headers,
+                            data=data_payload,
+                            files=files
                         )
+                        groq_resp.raise_for_status()
+                        transcript_text = groq_resp.text.strip()
 
-                    transcript_text = transcription.strip()
                     if transcript_text:
                         video_transcript = transcript_text
                         await log_api_request(
                             service_name="groq/whisper-large-v3-turbo",
-                            method="POST",
-                            endpoint_url="https://api.groq.com/openai/v1/audio/transcriptions",
-                            request_headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "multipart/form-data"},
-                            request_body={"model": "whisper-large-v3-turbo", "source_url": tweet_url, "video_url": video_url, "audio_base64": base64.b64encode(audio_bytes).decode('utf-8')},
-                            response_status=200,
-                            response_headers={},
+                            method=groq_resp.request.method,
+                            endpoint_url=str(groq_resp.request.url),
+                            request_headers=dict(groq_resp.request.headers),
+                            request_body=audio_bytes.hex() if audio_bytes else "",
+                            response_status=groq_resp.status_code,
+                            response_headers=dict(groq_resp.headers),
                             response_body=transcript_text,
                             cost=0.0
                         )

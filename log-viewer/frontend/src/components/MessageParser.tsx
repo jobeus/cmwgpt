@@ -187,12 +187,8 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
         messages.push({ role: 'assistant', content: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) });
     } else if (serviceName.startsWith('groq/whisper')) {
         // Groq Audio Transcriptions 
-        const sourceUrl = requestBody?.source_url || '(unknown source)';
-        let content: any[] = [{ type: 'text', text: `[Action: Transcribing Audio from ${sourceUrl}]` }];
+        let content: any[] = [{ type: 'text', text: `[Action: Transcribing Audio to Groq Api]` }];
 
-        if (requestBody?.audio_base64) {
-            content.push({ type: 'input_audio', input_audio: { format: 'mp3', data: requestBody.audio_base64 } });
-        }
         messages.push({ role: 'system', content });
         messages.push({ role: 'assistant', content: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) });
     } else if (serviceName.startsWith('rapidapi/twitter')) {

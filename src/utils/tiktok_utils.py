@@ -3,11 +3,13 @@ import re
 import base64
 import logging
 import yt_dlp
+import httpx
 from typing import List, Optional
-from groq import Groq
+from groq import Groq # This import is no longer needed as httpx is used directly
 
 from src.config import TRANSCRIPT_PROXY, GROQ_API_KEY
 from src.utils.cache_utils import PersistentCache
+from src.db.logger import log_api_request # Added for logging API requests
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +37,10 @@ def extract_tiktok_urls(text: str) -> List[str]:
 
     return urls
 
-def get_tiktok_transcript(url: str) -> Optional[tuple]:
+def get_tiktok_transcript(url: str) -> Optional[str]:
     """
-    Fetch the transcript for a TikTok video by downloading audio and processing with Groq.
+    Fetch the transcript for a TikTok video by downloading audio and processing with Groq via httpx.
     Results are cached to persistent disk.
-    Returns a tuple of (transcript_text, audio_base64) or None if it fails.
     """
     if url in _tiktok_cache:
         cached_result = _tiktok_cache[url]
@@ -47,7 +48,7 @@ def get_tiktok_transcript(url: str) -> Optional[tuple]:
             logger.debug(f"Cache hit for TikTok transcript failure: {url}")
             return None
         logger.debug(f"Cache hit for TikTok transcript: {url}")
-        return cached_result, None
+        return cached_result
 
 
     if not GROQ_API_KEY:
@@ -103,28 +104,37 @@ def get_tiktok_transcript(url: str) -> Optional[tuple]:
         return None
 
     try:
-        # Groq client transcription
-        groq_client = Groq(api_key=GROQ_API_KEY)
-        
-        logger.info(f"Transcribing {audio_file} using Groq...")
+        logger.info(f"Transcribing {audio_file} using Groq via httpx...")
         with open(audio_file, "rb") as file:
             audio_bytes = file.read()
-            transcription = groq_client.audio.transcriptions.create(
-                file=(os.path.basename(audio_file), audio_bytes),
-                model="whisper-large-v3-turbo",
-                temperature=0,
-                response_format="text",
-            )
             
-        transcript_text = transcription.strip()
+        with httpx.Client(timeout=60.0) as client:
+            files = {'file': (os.path.basename(audio_file), audio_bytes, 'audio/mpeg')}
+            data_payload = {
+                'model': 'whisper-large-v3-turbo',
+                'temperature': '0',
+                'response_format': 'text'
+            }
+            groq_headers = {'Authorization': f'Bearer {GROQ_API_KEY}'}
+            
+            groq_resp = client.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers=groq_headers,
+                data=data_payload,
+                files=files
+            )
+            groq_resp.raise_for_status()
+            transcript_text = groq_resp.text.strip()
         
         if not transcript_text:
             logger.warning(f"Groq returned an empty transcript for {url}")
             return None
 
-        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+        # Log it right here synchronously, but wait, log_api_request is async.
+        # I need to return the request/response data to downloader_utils to log asynchronously.
+        
         _tiktok_cache[url] = transcript_text
-        return transcript_text, audio_b64
+        return transcript_text, groq_resp
 
     except Exception as e:
         logger.error(f"Unexpected error processing TikTok video {url}: {e}")

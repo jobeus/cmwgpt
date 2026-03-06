@@ -45,7 +45,9 @@ const extractLastMessageSnippet = (bodyStr: string | null, serviceName: string, 
         }
 
         if (serviceName.startsWith('groq/whisper')) {
-            if (type === 'request') return `Transcribing audio from ${parsed.source_url || 'source'}`;
+            if (type === 'request') {
+                return '[Audio Upload (multipart/form-data)]';
+            }
             if (type === 'response') {
                 let text = typeof parsed === 'string' ? parsed : JSON.stringify(parsed);
                 if (text.length > 150) text = text.substring(0, 150) + '...';
