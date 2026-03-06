@@ -25,74 +25,104 @@ interface LogEntry {
     curl_command: string | null;
 }
 
-const extractLastMessageSnippet = (bodyStr: string | null): string => {
+const extractLastMessageSnippet = (bodyStr: string | null, serviceName: string, type: 'request' | 'response'): string => {
     if (!bodyStr) return '';
     try {
         const parsed = JSON.parse(bodyStr);
-        if (parsed.messages && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
-            const last = parsed.messages[parsed.messages.length - 1];
-            let text = '';
 
-            // Handle array content like [{type: 'text', text: '...'}]
-            if (Array.isArray(last.content)) {
-                // Look for text blocks
-                const textParts = last.content.filter((p: any) => p.type === 'text');
-                if (textParts.length > 0) {
-                    text = textParts.map((p: any) => p.text).join(' ');
+        if (serviceName.startsWith('runpod/')) {
+            if (type === 'request') return parsed.input?.prompt || '[Image Gen Request]';
+            if (type === 'response') return parsed.output?.image_url || parsed.output?.result || '[Generated Image URL]';
+        }
+
+        if (serviceName.startsWith('youtube/')) {
+            if (type === 'request') return `Fetching transcript for ${parsed.video_id || 'video'}`;
+            if (type === 'response') {
+                let text = typeof parsed === 'string' ? parsed : JSON.stringify(parsed);
+                if (text.length > 150) text = text.substring(0, 150) + '...';
+                return text;
+            }
+        }
+
+        if (serviceName.startsWith('groq/whisper')) {
+            if (type === 'request') return `Transcribing audio from ${parsed.source_url || 'source'}`;
+            if (type === 'response') {
+                let text = typeof parsed === 'string' ? parsed : JSON.stringify(parsed);
+                if (text.length > 150) text = text.substring(0, 150) + '...';
+                return text;
+            }
+        }
+
+        if (serviceName.startsWith('rapidapi/twitter')) {
+            if (type === 'request') return 'Fetching Twitter/X thread context';
+            if (type === 'response') return `[Twitter Data JSON Payload]`;
+        }
+
+        if (serviceName.startsWith('url_utils/')) {
+            if (type === 'request') return 'Scraping article content';
+            if (type === 'response') {
+                let text = typeof parsed === 'string' ? parsed : JSON.stringify(parsed);
+                return text.length > 150 ? text.substring(0, 150) + '...' : text;
+            }
+        }
+
+        // Default OpenAI / Anthropic format
+        if (type === 'request') {
+            if (parsed.messages && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+                const last = parsed.messages[parsed.messages.length - 1];
+                let text = '';
+                if (Array.isArray(last.content)) {
+                    const textParts = last.content.filter((p: any) => p.type === 'text');
+                    text = textParts.length > 0 ? textParts.map((p: any) => p.text).join(' ') : '[Complex Content / Image / Audio]';
+                } else if (typeof last.content === 'string') {
+                    text = last.content;
                 } else {
-                    text = '[Complex Content / Image / Audio]';
+                    text = JSON.stringify(last.content);
                 }
-            } else if (typeof last.content === 'string') {
-                text = last.content;
-            } else {
-                text = JSON.stringify(last.content);
-            }
 
-            // Clean up Discord prefix and mentions
-            // Regex matches: [timestamp] [msg_id] <@user_id>: message text
-            const discordRegex = /^\[.*?\] \[\d+\] <@(\d+)>:\s*([\s\S]*)/;
-            const match = text.match(discordRegex);
-            if (match) {
-                const userId = match[1];
-                const content = match[2];
-                const username = userMap[userId] || userId;
-                text = `@${username}: ${content}`;
+                // Clean up Discord prefix and mentions
+                const discordRegex = /^\[.*?\] \[\d+\] <@(\d+)>:\s*([\s\S]*)/;
+                const match = text.match(discordRegex);
+                if (match) {
+                    const userId = match[1];
+                    const content = match[2];
+                    const username = userMap[userId] || userId;
+                    text = `@${username}: ${content}`;
+                }
+                text = text.replace(/<@(\d+)>/g, (_m, id) => {
+                    const username = userMap[id];
+                    return username ? `@${username}` : _m;
+                });
+                return text.length > 150 ? text.substring(0, 150) + '...' : text;
             }
-            // Global replace for any remaining <@id> mentions
-            text = text.replace(/<@(\d+)>/g, (original_match, id) => {
-                const username = userMap[id];
-                return username ? `@${username}` : original_match;
-            });
+        }
 
-            if (text.length > 150) text = text.substring(0, 150) + '...';
-            return text;
-        }
-        if (parsed.choices && parsed.choices[0] && parsed.choices[0].message) { // response
-            let text = '';
-            const content = parsed.choices[0].message.content;
-            // Response content can also be array in some models
-            if (Array.isArray(content)) {
-                const textPart = content.find((p: any) => p.type === 'text');
-                if (textPart) text = textPart.text;
-            } else if (typeof content === 'string') {
-                text = content;
-            } else {
-                text = JSON.stringify(content);
+        if (type === 'response') {
+            if (parsed.choices && parsed.choices[0] && parsed.choices[0].message) {
+                let text = '';
+                const content = parsed.choices[0].message.content;
+                if (Array.isArray(content)) {
+                    const textPart = content.find((p: any) => p.type === 'text');
+                    if (textPart) text = textPart.text;
+                } else if (typeof content === 'string') {
+                    text = content;
+                } else {
+                    text = JSON.stringify(content);
+                }
+                text = text.replace(/<@(\d+)>/g, (_m, id) => {
+                    const username = userMap[id];
+                    return username ? `@${username}` : _m;
+                });
+                return text.length > 150 ? text.substring(0, 150) + '...' : text;
             }
-            // Replace <@id> mentions with usernames
-            text = text.replace(/<@(\d+)>/g, (_m, id) => {
-                const username = userMap[id];
-                return username ? `@${username}` : _m;
-            });
-            if (text.length > 150) text = text.substring(0, 150) + '...';
-            return text;
         }
+
+        // Fallback for json objects that don't match our shapes (like raw rapidapi payload)
+        return '[JSON Object]';
     } catch (e) {
-        // might be truncated json, just use regex or raw
+        // Fallback for non-json (e.g. raw text articles)
+        return bodyStr.length > 150 ? bodyStr.substring(0, 150) + '...' : bodyStr;
     }
-
-    // Fallback
-    return bodyStr.length > 100 ? bodyStr.substring(0, 100) + '...' : bodyStr;
 };
 
 export default function LogList() {
@@ -200,16 +230,16 @@ export default function LogList() {
                                     Request
                                 </div>
                                 <div className="text-gray-300 font-mono text-xs truncate opacity-80">
-                                    {extractLastMessageSnippet(log.request_body_snippet) || <span className="text-gray-600 italic">No body</span>}
+                                    {extractLastMessageSnippet(log.request_body_snippet, log.service_name, 'request') || <span className="text-gray-600 italic">No body</span>}
                                 </div>
                             </div>
-                            <div className="bg-gray-950 rounded-lg p-3 border border-gray-800/60">
+                            <div className="bg-gray-950 rounded-lg p-3 border border-gray-800/60 overflow-hidden">
                                 <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center">
                                     <span className="w-2 h-2 rounded-full bg-emerald-500 mr-2"></span>
                                     Response
                                 </div>
                                 <div className="text-gray-300 font-mono text-xs truncate opacity-80">
-                                    {extractLastMessageSnippet(log.response_body_snippet) || <span className="text-gray-600 italic">No body</span>}
+                                    {extractLastMessageSnippet(log.response_body_snippet, log.service_name, 'response') || <span className="text-gray-600 italic">No body</span>}
                                 </div>
                             </div>
                         </div>

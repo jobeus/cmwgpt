@@ -127,32 +127,86 @@ const renderMessageContent = (content: any, channelId: string | null) => {
                             )
                         }
                     }
-                    return <div key={idx} className="text-yellow-500 text-xs">Unsupported part type: {part.type}</div>;
+                    return <div key={idx} className="text-yellow-500 text-xs font-mono whitespace-pre-wrap">{JSON.stringify(part, null, 2)}</div>;
                 })}
             </div>
         );
     }
 
+    if (typeof content === 'object') {
+        return <div className="text-gray-400 text-xs font-mono whitespace-pre-wrap break-all">{JSON.stringify(content, null, 2)}</div>;
+    }
+
     return <div className="text-red-400 text-xs">Unparseable content</div>;
 };
 
-export const ConversationView = ({ requestBody, responseBody, channelId }: { requestBody: any, responseBody: any, channelId: string | null }) => {
-    const messages = [];
+export const ConversationView = ({ requestBody, responseBody, channelId, serviceName }: { requestBody: any, responseBody: any, channelId: string | null, serviceName: string }) => {
+    let messages: { role: string, content: any }[] = [];
 
-    // Extract from request
-    if (requestBody?.messages && Array.isArray(requestBody.messages)) {
-        requestBody.messages.forEach((m: any) => {
-            messages.push({ role: m.role, content: m.content });
-        });
-    } else if (requestBody?.prompt || requestBody?.text) {
-        messages.push({ role: 'user', content: requestBody.prompt || requestBody.text });
-    }
+    // Parse based on service name
+    if (serviceName.startsWith('openai/') || serviceName.startsWith('anthropic/')) {
+        // Extract from request messages array
+        if (requestBody?.messages && Array.isArray(requestBody.messages)) {
+            requestBody.messages.forEach((m: any) => {
+                messages.push({ role: m.role, content: m.content });
+            });
+        }
+        // Extract from response choices
+        if (responseBody?.choices && responseBody.choices[0]?.message) {
+            messages.push({ role: 'assistant', content: responseBody.choices[0].message.content });
+        }
+    } else if (serviceName.startsWith('runpod/')) {
+        // Runpod Image Generation / Editing
+        const input = requestBody?.input || {};
+        const prompt = input.prompt || '(No prompt provided)';
 
-    // Extract from response
-    if (responseBody?.choices && responseBody.choices[0]?.message) {
-        messages.push({ role: 'assistant', content: responseBody.choices[0].message.content });
-    } else if (responseBody?.text || typeof responseBody === 'string') {
-        messages.push({ role: 'assistant', content: responseBody.text || responseBody });
+        let content: any[] = [{ type: 'text', text: prompt }];
+        if (input.images && Array.isArray(input.images)) {
+            input.images.forEach((img: string) => {
+                // If base64 is passed to pruna/seedream edit
+                if (img.startsWith('data:')) {
+                    content.push({ type: 'image_url', image_url: { url: img } });
+                } else {
+                    content.push({ type: 'image_url', image_url: { url: img } });
+                }
+            });
+        }
+        messages.push({ role: 'user (image gen)', content });
+
+        // Response
+        if (responseBody?.output?.image_url || responseBody?.output?.result) {
+            messages.push({
+                role: 'assistant',
+                content: [{ type: 'image_url', image_url: { url: responseBody.output.image_url || responseBody.output.result } }]
+            });
+        }
+    } else if (serviceName.startsWith('youtube/')) {
+        // YouTube Transcripts
+        const videoId = requestBody?.video_id || '(unknown video id)';
+        messages.push({ role: 'system', content: `[Action: Fetching YouTube Transcript for video ${videoId}]` });
+        messages.push({ role: 'assistant', content: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) });
+    } else if (serviceName.startsWith('groq/whisper')) {
+        // Groq Audio Transcriptions 
+        const sourceUrl = requestBody?.source_url || '(unknown source)';
+        let content: any[] = [{ type: 'text', text: `[Action: Transcribing Audio from ${sourceUrl}]` }];
+
+        if (requestBody?.audio_base64) {
+            content.push({ type: 'input_audio', input_audio: { format: 'mp3', data: requestBody.audio_base64 } });
+        }
+        messages.push({ role: 'system', content });
+        messages.push({ role: 'assistant', content: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) });
+    } else if (serviceName.startsWith('rapidapi/twitter')) {
+        // Twitter RapidAPI Fetch
+        messages.push({ role: 'system', content: `[Action: Fetching Twitter Data via RapidAPI]` });
+        messages.push({ role: 'assistant', content: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) });
+    } else if (serviceName.startsWith('url_utils/')) {
+        // Article scraping
+        messages.push({ role: 'system', content: `[Action: Scraping Article]` });
+        messages.push({ role: 'assistant', content: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) });
+    } else {
+        // Fallback for unknown services
+        if (requestBody) messages.push({ role: 'request', content: typeof requestBody === 'object' ? JSON.stringify(requestBody, null, 2) : requestBody });
+        if (responseBody) messages.push({ role: 'response', content: typeof responseBody === 'object' ? JSON.stringify(responseBody, null, 2) : responseBody });
     }
 
     if (messages.length === 0) {
@@ -166,7 +220,7 @@ export const ConversationView = ({ requestBody, responseBody, channelId }: { req
     return (
         <div className="space-y-6 my-4 w-full">
             {messages.map((msg, idx) => {
-                const isUser = msg.role === 'user' || msg.role === 'system';
+                const isUser = msg.role.includes('user') || msg.role.includes('request') || msg.role === 'system';
                 return (
                     <div key={idx} className={`flex w-full ${isUser ? 'justify-start' : 'justify-end'}`}>
                         <div className={`max-w-[80%] rounded-2xl px-5 py-4 shadow-sm ${isUser ? 'bg-gray-800 text-gray-100 border border-gray-700/50' : 'bg-blue-900/30 border border-blue-500/20 text-gray-100'

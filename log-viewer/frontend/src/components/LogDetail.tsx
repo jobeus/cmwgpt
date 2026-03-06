@@ -117,6 +117,7 @@ export default function LogDetail() {
                         requestBody={reqBody}
                         responseBody={resBody}
                         channelId={log.discord_channel_id ? log.discord_channel_id.toString() : null}
+                        serviceName={log.service_name}
                     />
                 </div>
             ) : (
