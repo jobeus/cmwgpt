@@ -89,6 +89,9 @@ async def get_article_text(url: str) -> Optional[str]:
             response = await client.get(url, headers=headers)
             response.raise_for_status()
             html = response.text
+            actual_request_headers = dict(response.request.headers)
+            actual_response_status = response.status_code
+            actual_response_headers = dict(response.headers)
         
         # Try trafilatura first
         text = trafilatura.extract(html)
@@ -110,10 +113,10 @@ async def get_article_text(url: str) -> Optional[str]:
             service_name="url_utils/get_article_text",
             method="GET",
             endpoint_url=url,
-            request_headers=headers,
-            request_body={},
-            response_status=200,
-            response_headers={},
+            request_headers=actual_request_headers,
+            request_body="",
+            response_status=actual_response_status,
+            response_headers=actual_response_headers,
             response_body=text,
             cost=0.0
         )

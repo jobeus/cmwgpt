@@ -1,5 +1,6 @@
 import os
 import re
+import base64
 import logging
 import yt_dlp
 from typing import List, Optional
@@ -34,10 +35,11 @@ def extract_tiktok_urls(text: str) -> List[str]:
 
     return urls
 
-def get_tiktok_transcript(url: str) -> Optional[str]:
+def get_tiktok_transcript(url: str) -> Optional[tuple]:
     """
     Fetch the transcript for a TikTok video by downloading audio and processing with Groq.
     Results are cached to persistent disk.
+    Returns a tuple of (transcript_text, audio_base64) or None if it fails.
     """
     if url in _tiktok_cache:
         cached_result = _tiktok_cache[url]
@@ -45,7 +47,7 @@ def get_tiktok_transcript(url: str) -> Optional[str]:
             logger.debug(f"Cache hit for TikTok transcript failure: {url}")
             return None
         logger.debug(f"Cache hit for TikTok transcript: {url}")
-        return cached_result
+        return cached_result, None
 
 
     if not GROQ_API_KEY:
@@ -106,8 +108,9 @@ def get_tiktok_transcript(url: str) -> Optional[str]:
         
         logger.info(f"Transcribing {audio_file} using Groq...")
         with open(audio_file, "rb") as file:
+            audio_bytes = file.read()
             transcription = groq_client.audio.transcriptions.create(
-                file=(os.path.basename(audio_file), file.read()),
+                file=(os.path.basename(audio_file), audio_bytes),
                 model="whisper-large-v3-turbo",
                 temperature=0,
                 response_format="text",
@@ -119,8 +122,9 @@ def get_tiktok_transcript(url: str) -> Optional[str]:
             logger.warning(f"Groq returned an empty transcript for {url}")
             return None
 
+        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
         _tiktok_cache[url] = transcript_text
-        return transcript_text
+        return transcript_text, audio_b64
 
     except Exception as e:
         logger.error(f"Unexpected error processing TikTok video {url}: {e}")

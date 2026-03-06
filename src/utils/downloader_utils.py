@@ -70,8 +70,9 @@ async def fetch_all_url_content(message_text: str) -> str:
         tiktok_transcripts = []
         for t_url in tiktok_urls:
             try:
-                transcript_text = await asyncio.to_thread(get_tiktok_transcript, t_url)
-                if transcript_text:
+                result = await asyncio.to_thread(get_tiktok_transcript, t_url)
+                if result:
+                    transcript_text, audio_b64 = result
                     if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
                        logger.info(f"Target TikTok Video {t_url} Transcript grabbed successfully.") 
                     tiktok_transcripts.append(f"Target TikTok Video {t_url} Transcript:\n{transcript_text}")
@@ -79,8 +80,8 @@ async def fetch_all_url_content(message_text: str) -> str:
                         service_name="groq/whisper-large-v3-turbo",
                         method="POST",
                         endpoint_url="https://api.groq.com/openai/v1/audio/transcriptions",
-                        request_headers={"Authorization": f"Bearer {GROQ_API_KEY[:8]}..."} if GROQ_API_KEY else {},
-                        request_body={"model": "whisper-large-v3-turbo", "source_url": t_url},
+                        request_headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "multipart/form-data"} if GROQ_API_KEY else {},
+                        request_body={"model": "whisper-large-v3-turbo", "source_url": t_url, "audio_base64": audio_b64},
                         response_status=200,
                         response_headers={},
                         response_body=transcript_text,

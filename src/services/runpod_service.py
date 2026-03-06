@@ -182,10 +182,10 @@ class RunpodService:
 
                     await log_api_request(
                         service_name=f"runpod/{operation}",
-                        method="POST",
-                        endpoint_url=url,
-                        request_headers={"Content-Type": "application/json", "Authorization": "Bearer ***"},
-                        request_body=payload,
+                        method=response.request.method,
+                        endpoint_url=str(response.request.url),
+                        request_headers=dict(response.request.headers),
+                        request_body=response.request.content.decode('utf-8', errors='replace') if response.request.content else "",
                         response_status=response.status_code,
                         response_headers=dict(response.headers),
                         response_body=data,

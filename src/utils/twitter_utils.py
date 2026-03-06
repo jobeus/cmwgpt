@@ -1,6 +1,7 @@
 import os
 import re
 import uuid
+import base64
 import logging
 import requests
 import subprocess
@@ -94,10 +95,10 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
 
             await log_api_request(
                 service_name="rapidapi/twitter",
-                method="GET",
-                endpoint_url="https://x-com2.p.rapidapi.com/v2/TweetDetail/",
-                request_headers=headers,
-                request_body={"id": tweet_id},
+                method=response.request.method,
+                endpoint_url=str(response.request.url),
+                request_headers=dict(response.request.headers),
+                request_body=response.request.content.decode('utf-8', errors='replace') if response.request.content else "",
                 response_status=response.status_code,
                 response_headers=dict(response.headers),
                 response_body=data,
@@ -154,8 +155,9 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
                     groq_client = AsyncGroq(api_key=GROQ_API_KEY)
                     logger.info(f"Transcribing {mp3_path} using Groq...")
                     with open(mp3_path, "rb") as file:
+                        audio_bytes = file.read()
                         transcription = await groq_client.audio.transcriptions.create(
-                            file=(os.path.basename(mp3_path), file.read()),
+                            file=(os.path.basename(mp3_path), audio_bytes),
                             model="whisper-large-v3-turbo",
                             temperature=0,
                             response_format="text",
@@ -168,8 +170,8 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
                             service_name="groq/whisper-large-v3-turbo",
                             method="POST",
                             endpoint_url="https://api.groq.com/openai/v1/audio/transcriptions",
-                            request_headers={"Authorization": f"Bearer {GROQ_API_KEY[:8]}..."} if GROQ_API_KEY else {},
-                            request_body={"model": "whisper-large-v3-turbo", "source_url": tweet_url, "video_url": video_url},
+                            request_headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "multipart/form-data"},
+                            request_body={"model": "whisper-large-v3-turbo", "source_url": tweet_url, "video_url": video_url, "audio_base64": base64.b64encode(audio_bytes).decode('utf-8')},
                             response_status=200,
                             response_headers={},
                             response_body=transcript_text,

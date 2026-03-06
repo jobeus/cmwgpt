@@ -259,21 +259,32 @@ class OpenAIService:
                     except Exception as e:
                         logger.warning(f"Failed to parse cost: {e}")
                         
-                    # Filter out any internal openai.Omit objects from the headers before logging
-                    clean_request_headers = {}
-                    if hasattr(client, 'default_headers'):
-                        for k, v in dict(client.default_headers).items():
-                            if 'Omit' not in str(type(v)):
-                                clean_request_headers[k] = v
+                    # Extract the actual wire-level request from the httpx response
+                    http_resp = getattr(response, 'http_response', None)
+                    if http_resp and hasattr(http_resp, 'request'):
+                        actual_req = http_resp.request
+                        req_headers = dict(actual_req.headers)
+                        req_body = actual_req.content.decode('utf-8', errors='replace') if actual_req.content else ""
+                        req_url = str(actual_req.url)
+                        req_method = actual_req.method
+                        resp_status = http_resp.status_code
+                        resp_headers = dict(http_resp.headers)
+                    else:
+                        req_headers = {}
+                        req_body = kwargs
+                        req_url = "https://openrouter.ai/api/v1/chat/completions"
+                        req_method = "POST"
+                        resp_status = 200
+                        resp_headers = {}
 
                     await log_api_request(
                         service_name=f"openai/{actual_model}",
-                        method="POST",
-                        endpoint_url=str(response.http_response.url) if hasattr(response, 'http_response') else "https://openrouter.ai/api/v1/chat/completions",
-                        request_headers=clean_request_headers,
-                        request_body=kwargs,
-                        response_status=200,
-                        response_headers=dict(response.http_response.headers) if hasattr(response, 'http_response') else {},
+                        method=req_method,
+                        endpoint_url=req_url,
+                        request_headers=req_headers,
+                        request_body=req_body,
+                        response_status=resp_status,
+                        response_headers=resp_headers,
                         response_body=response.model_dump() if hasattr(response, 'model_dump') else {},
                         cost=cost,
                         discord_user_id=discord_user_id,
