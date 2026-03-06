@@ -182,8 +182,9 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
         }
     } else if (serviceName.startsWith('youtube/')) {
         // YouTube Transcripts
-        const videoId = requestBody?.video_id || '(unknown video id)';
-        messages.push({ role: 'system', content: `[Action: Fetching YouTube Transcript for video ${videoId}]` });
+        const representsPython = typeof requestBody === 'string' && requestBody.includes('import');
+        const reqContent = representsPython ? requestBody : `[Action: Fetching YouTube Transcript for video ${requestBody?.video_id || '(unknown video id)'}]`;
+        messages.push({ role: 'system', content: reqContent });
         messages.push({ role: 'assistant', content: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) });
     } else if (serviceName.startsWith('groq/whisper')) {
         // Groq Audio Transcriptions 
@@ -197,7 +198,9 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
         messages.push({ role: 'assistant', content: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) });
     } else if (serviceName.startsWith('url_utils/')) {
         // Article scraping
-        messages.push({ role: 'system', content: `[Action: Scraping Article]` });
+        const representsPython = typeof requestBody === 'string' && requestBody.includes('import');
+        const reqContent = representsPython ? requestBody : `[Action: Scraping Article]`;
+        messages.push({ role: 'system', content: reqContent });
         messages.push({ role: 'assistant', content: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) });
     } else {
         // Fallback for unknown services
