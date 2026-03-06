@@ -11,7 +11,6 @@ import threading
 from typing import Optional, Callable, Awaitable
 
 from src.config import KEEP_UP_TO_DATE_WITH_GIT
-from src.services.queue_service import queue_service as default_queue_service
 from src.utils.git_utils import (
     check_for_new_commits as default_check_for_new_commits,
     fetch_updates as default_fetch_updates,
@@ -30,7 +29,7 @@ class AutoUpdateService:
         check_interval: int = 60,
         *,
         enabled: Optional[bool] = None,
-        queue_service=default_queue_service,
+        queue_service,
         is_git_repository_fn: Callable[[], bool] = default_is_git_repository,
         get_current_commit_hash_fn: Callable[[], Optional[str]] = default_get_current_commit_hash,
         fetch_updates_fn: Callable[[], bool] = default_fetch_updates,

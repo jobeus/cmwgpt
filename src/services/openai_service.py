@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import httpx
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
 
 from openai import (
     AsyncOpenAI,
@@ -35,10 +35,15 @@ class OpenAIService:
 
     def __init__(self):
         self._client: Optional[AsyncOpenAI] = None
+        self._bot_id_loader: Optional[Callable[[], Optional[int]]] = None
 
     def set_client(self, client) -> None:
         """Set a custom client (useful for testing)."""
         self._client = client
+
+    def set_bot_id_loader(self, bot_id_loader: Optional[Callable[[], Optional[int]]]) -> None:
+        """Set a callable that returns the current bot user ID."""
+        self._bot_id_loader = bot_id_loader
 
     def get_client(self) -> AsyncOpenAI:
         """Get OpenAI client with lazy initialization."""
@@ -236,10 +241,8 @@ class OpenAIService:
                         try:
                             if state_service and hasattr(state_service, 'bot_id'):
                                 effective_bot_id = state_service.bot_id
-                            else:
-                                from src.services.message_service import message_service
-                                if message_service and hasattr(message_service, 'bot') and message_service.bot and hasattr(message_service.bot, 'user'):
-                                    effective_bot_id = message_service.bot.user.id
+                            elif self._bot_id_loader:
+                                effective_bot_id = self._bot_id_loader()
                         except Exception as e:
                             logger.warning(f"Failed to get bot_id for cleaning: {e}")
                     

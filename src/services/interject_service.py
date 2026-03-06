@@ -20,9 +20,6 @@ import discord
 from discord.ext import commands
 
 from src.config import get_system_prompt, DEFAULT_MODEL
-from src.services.openai_service import openai_service as default_openai_service
-from src.services.message_service import message_service as default_message_service
-from src.services.state_service import state_service as default_state_service
 from src.utils.discord_helper import get_mention_legend
 
 logger = logging.getLogger(__name__)
@@ -69,9 +66,9 @@ class InterjectService:
     def __init__(
         self,
         *,
-        state_service=default_state_service,
-        openai_service=default_openai_service,
-        message_service=default_message_service,
+        state_service,
+        openai_service,
+        message_service,
         system_prompt_loader: Callable[[], str] = get_system_prompt,
         default_model: str = DEFAULT_MODEL,
         state_file: str = STATE_FILE,

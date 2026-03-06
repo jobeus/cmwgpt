@@ -9,12 +9,14 @@ from src.services.announcement_service import AnnouncementService
 from src.services.auto_update_service import AutoUpdateService
 from src.services.death_service import DeathService
 from src.services.interject_service import InterjectService
-from src.services.message_service import message_service
-from src.services.openai_service import openai_service
-from src.services.paste_service import paste_service
-from src.services.queue_service import queue_service
+from src.services.message_service import MessageService
+from src.services.openai_service import OpenAIService
+from src.services.paste_service import PasteService
+from src.services.queue_service import QueueService
 from src.services.restart_handler import RestartHandler
-from src.services.state_service import state_service
+from src.services.runpod_service import RunpodService
+from src.services.state_service import StateService
+from src.utils.url_utils import inject_article_cache
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,7 @@ class AppServices:
     openai_service: Any
     message_service: Any
     paste_service: Any
+    runpod_service: Any
     restart_handler: RestartHandler
     auto_update_service: AutoUpdateService
     announcement_service: AnnouncementService
@@ -35,7 +38,12 @@ class AppServices:
 def create_services(config: Optional[AppConfig] = None) -> AppServices:
     app_config = config or load_config()
 
-    message_service.set_paste_service(paste_service)
+    state_service = StateService()
+    queue_service = QueueService()
+    openai_service = OpenAIService()
+    paste_service = PasteService(cache_injector=inject_article_cache)
+    message_service = MessageService(paste_service_instance=paste_service)
+    runpod_service = RunpodService()
 
     restart_handler = RestartHandler(state_service=state_service)
     auto_update_service = AutoUpdateService(
@@ -73,6 +81,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         openai_service=openai_service,
         message_service=message_service,
         paste_service=paste_service,
+        runpod_service=runpod_service,
         restart_handler=restart_handler,
         auto_update_service=auto_update_service,
         announcement_service=announcement_service,

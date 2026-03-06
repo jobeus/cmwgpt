@@ -24,9 +24,6 @@ import aiohttp
 import discord
 from discord.ext import commands
 
-from src.config import DEATH_CHANNEL_ID
-from src.services.state_service import state_service
-
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -91,8 +88,8 @@ class DeathService:
     def __init__(
         self,
         *,
-        state_service=state_service,
-        death_channel_id: str = DEATH_CHANNEL_ID,
+        state_service,
+        death_channel_id: str,
         state_file: str = STATE_FILE,
     ):
         self._state_service = state_service

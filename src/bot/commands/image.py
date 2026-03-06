@@ -12,11 +12,8 @@ import discord
 from discord import app_commands
 from discord.app_commands import Choice
 from discord.ext import commands
-from src.config import DEFAULT_DRAW_MODEL, DEFAULT_EDIT_MODEL, RUNPOD_IO_API_KEY
 from src.services.openai_service import OpenAIServiceError
-from src.services.runpod_service import runpod_service, RunpodServiceError
-from src.services.message_service import message_service
-from src.services.state_service import state_service
+from src.services.runpod_service import RunpodServiceError
 from src.utils.async_utils import safe_run
 
 logger = logging.getLogger(__name__)
@@ -25,8 +22,24 @@ logger = logging.getLogger(__name__)
 class ImageCommands:
     """Handles image-related Discord commands."""
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(
+        self,
+        bot: commands.Bot,
+        *,
+        state_service,
+        message_service,
+        runpod_service,
+        default_draw_model: str,
+        default_edit_model: str,
+        enable_runpod_models: bool,
+    ):
         self.bot = bot
+        self._state_service = state_service
+        self._message_service = message_service
+        self._runpod_service = runpod_service
+        self._default_draw_model = default_draw_model
+        self._default_edit_model = default_edit_model
+        self._enable_runpod_models = enable_runpod_models
 
     def setup_commands(self) -> None:
         """Set up all image-related commands."""
@@ -42,7 +55,7 @@ class ImageCommands:
             Choice(name="seedream", value="seedream"),
         ]
 
-        if RUNPOD_IO_API_KEY:
+        if self._enable_runpod_models:
             model_choices.extend([
                 Choice(name="z-image", value="z-image"),
                 Choice(name="wan-2.6", value="wan-2.6"),
@@ -92,11 +105,11 @@ class ImageCommands:
         """
         channel_id = interaction.channel.id
 
-        state_service.mark_channel_active(channel_id)
+        self._state_service.mark_channel_active(channel_id)
 
         # Use provided model, or channel default, or global default
-        active_model = model or state_service.get_draw_model(
-            channel_id) or DEFAULT_DRAW_MODEL
+        active_model = model or self._state_service.get_draw_model(
+            channel_id) or self._default_draw_model
 
         logger.info(
             f"[/draw] Channel {channel_id} Prompt: {prompt} Model: {active_model}")
@@ -106,8 +119,8 @@ class ImageCommands:
             try:
                 cost = None
                 # Generate the image
-                if runpod_service.has_model(active_model):
-                    img_bytes, cost = await runpod_service.generate_image(
+                if self._runpod_service.has_model(active_model):
+                    img_bytes, cost = await self._runpod_service.generate_image(
                         prompt=prompt, 
                         model=active_model,
                         discord_user_id=interaction.user.id,
@@ -124,7 +137,7 @@ class ImageCommands:
                     filename="image.png")
 
                 # Send the result
-                content = message_service.format_prompt_message(prompt)
+                content = self._message_service.format_prompt_message(prompt)
 
                 if cost is not None:
                     # prepend cost and model to the prompt text
@@ -136,7 +149,7 @@ class ImageCommands:
             except RunpodServiceError as e:
                 logger.error(f"Runpod API error in draw command: {e}")
                 error_message = (
-                    f"{message_service.format_prompt_message(prompt)}\n\n"
+                    f"{self._message_service.format_prompt_message(prompt)}\n\n"
                     f"Sorry, I encountered an error while generating your image: {str(e)}"
                 )
                 try:
@@ -154,7 +167,7 @@ class ImageCommands:
             except OpenAIServiceError as e:
                 logger.error(f"OpenAI API error in draw command: {e}")
                 error_message = (
-                    f"{message_service.format_prompt_message(prompt)}\n\n"
+                    f"{self._message_service.format_prompt_message(prompt)}\n\n"
                     f"Sorry, I encountered an error while generating your image: {str(e)}"
                 )
                 try:
@@ -173,7 +186,7 @@ class ImageCommands:
             except Exception as e:
                 logger.error(f"Unexpected error in draw command: {e}")
                 error_message = (
-                    f"{message_service.format_prompt_message(prompt)}\n\n"
+                    f"{self._message_service.format_prompt_message(prompt)}\n\n"
                     f"Sorry, there was an unexpected error generating your image. Please try again later."
                 )
                 try:
@@ -196,7 +209,7 @@ class ImageCommands:
             Choice(name="seedream", value="seedream"),
         ]
 
-        if RUNPOD_IO_API_KEY:
+        if self._enable_runpod_models:
             model_choices.extend([
                 Choice(name="z-image", value="z-image"),
                 Choice(name="wan-2.6", value="wan-2.6"),
@@ -227,16 +240,16 @@ class ImageCommands:
                                         model: Optional[str] = None) -> None:
         """Handle the /drawmodel command."""
         channel_id = interaction.channel.id
-        state_service.mark_channel_active(channel_id)
+        self._state_service.mark_channel_active(channel_id)
 
         if model:
-            state_service.set_draw_model(channel_id, model)
+            self._state_service.set_draw_model(channel_id, model)
             logger.info(
                 f"[/drawmodel] Channel {channel_id}: draw model set to {model}")
             await interaction.followup.send(f"Default draw model set to `{model}`.", ephemeral=True)
         else:
-            current_model = state_service.get_draw_model(
-                channel_id) or DEFAULT_DRAW_MODEL
+            current_model = self._state_service.get_draw_model(
+                channel_id) or self._default_draw_model
             await interaction.followup.send(f"Default draw model is `{current_model}`.", ephemeral=True)
 
     def _create_edit_command(self) -> app_commands.Command:
@@ -246,7 +259,7 @@ class ImageCommands:
             Choice(name="seedream", value="seedream"),
         ]
 
-        if RUNPOD_IO_API_KEY:
+        if self._enable_runpod_models:
             edit_model_choices.extend([
                 Choice(name="qwen", value="qwen"),
                 Choice(name="pruna", value="pruna"),
@@ -295,10 +308,10 @@ class ImageCommands:
     ) -> None:
         """Handle the /edit command."""
         channel_id = interaction.channel.id
-        state_service.mark_channel_active(channel_id)
+        self._state_service.mark_channel_active(channel_id)
 
-        active_model = model or state_service.get_edit_model(
-            channel_id) or DEFAULT_EDIT_MODEL
+        active_model = model or self._state_service.get_edit_model(
+            channel_id) or self._default_edit_model
 
         logger.info(
             f"[/edit] Channel {channel_id} Prompt: {prompt} Model: {active_model} Edit? True")
@@ -309,7 +322,7 @@ class ImageCommands:
                     f"[/edit] Channel {channel_id}: editing image {edit_image.filename}")
 
                 cost = None
-                if runpod_service.has_edit_model(active_model):
+                if self._runpod_service.has_edit_model(active_model):
                     # Gather base64 images
                     images_b64 = []
                     for img in [edit_image, image2, image3, image4]:
@@ -318,7 +331,7 @@ class ImageCommands:
                             images_b64.append(
                                 base64.b64encode(img_bytes).decode('utf-8'))
 
-                    img_bytes, cost = await runpod_service.edit_image(
+                    img_bytes, cost = await self._runpod_service.edit_image(
                         prompt=prompt, 
                         model=active_model, 
                         images=images_b64,
@@ -347,14 +360,14 @@ class ImageCommands:
                         image4] if img]
                 cost_prefix = f"[${cost:.3f} @ {active_model}] " if cost is not None else ""
                 formatted_prompt = f"{cost_prefix}{prompt}"
-                content = message_service.format_attachment_message(
+                content = self._message_service.format_attachment_message(
                     valid_images, formatted_prompt)
                 await interaction.followup.send(content=content, file=file, embed=embed)
 
             except OpenAIServiceError as e:
                 logger.error(f"OpenAI API error in edit command: {e}")
                 error_message = (
-                    f"{message_service.format_prompt_message(prompt)}\n\n"
+                    f"{self._message_service.format_prompt_message(prompt)}\n\n"
                     f"Sorry, I encountered an error while editing your image: {str(e)}"
                 )
                 try:
@@ -372,7 +385,7 @@ class ImageCommands:
             except Exception as e:
                 logger.error(f"Unexpected error in edit command: {e}")
                 error_message = (
-                    f"{message_service.format_prompt_message(prompt)}\n\n"
+                    f"{self._message_service.format_prompt_message(prompt)}\n\n"
                     f"Sorry, there was an unexpected error editing your image. Please try again later."
                 )
                 try:
@@ -422,14 +435,14 @@ class ImageCommands:
                                         model: Optional[str] = None) -> None:
         """Handle the /editmodel command."""
         channel_id = interaction.channel.id
-        state_service.mark_channel_active(channel_id)
+        self._state_service.mark_channel_active(channel_id)
 
         if model:
-            state_service.set_edit_model(channel_id, model)
+            self._state_service.set_edit_model(channel_id, model)
             logger.info(
                 f"[/editmodel] Channel {channel_id}: edit model set to {model}")
             await interaction.followup.send(f"Default edit model set to `{model}`.", ephemeral=True)
         else:
-            current_model = state_service.get_edit_model(
-                channel_id) or DEFAULT_EDIT_MODEL
+            current_model = self._state_service.get_edit_model(
+                channel_id) or self._default_edit_model
             await interaction.followup.send(f"Default edit model is `{current_model}`.", ephemeral=True)

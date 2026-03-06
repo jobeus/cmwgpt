@@ -13,7 +13,6 @@ import logging
 import sys
 from typing import Callable
 
-from src.services.state_service import state_service as default_state_service
 from src.utils.git_utils import perform_git_pull as default_perform_git_pull
 
 logger = logging.getLogger(__name__)
@@ -25,7 +24,7 @@ class RestartHandler:
     def __init__(
         self,
         *,
-        state_service=default_state_service,
+        state_service,
         git_pull: Callable[[], bool] = default_perform_git_pull,
     ):
         """Initialize the restart handler."""

@@ -9,7 +9,6 @@ from typing import Optional
 import discord
 from discord import app_commands
 
-from src.services.state_service import state_service
 from src.services.interject_service import (
     INTERJECT_CHANCE_PERCENT, COOLDOWN_MINUTES, MIN_MESSAGES,
     MIN_UNIQUE_AUTHORS, ACTIVITY_WINDOW_MINUTES, CONTEXT_LINES,
@@ -23,7 +22,7 @@ logger = logging.getLogger(__name__)
 class InterjectCommands:
     """Handles /interject Discord commands."""
 
-    def __init__(self, bot: discord.ext.commands.Bot, *, state_service_instance=state_service, interject_service=None):
+    def __init__(self, bot: discord.ext.commands.Bot, *, state_service_instance, interject_service=None):
         self.bot = bot
         self._state_service = state_service_instance
         self._interject_service = interject_service
