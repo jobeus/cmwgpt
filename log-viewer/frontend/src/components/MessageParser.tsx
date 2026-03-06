@@ -30,6 +30,51 @@ export const sanitizeJsonForRawView = (obj: any): any => {
     return obj;
 };
 
+// Helper to extract audio binary from a raw multipart/form-data hex payload
+export const extractAudioFromMultipartHex = (hexString: string): string | null => {
+    try {
+        if (!hexString || hexString.length < 100) return null;
+        if (!/^[0-9a-fA-F]+$/.test(hexString)) return null;
+
+        // Convert hex to Uint8Array
+        const bytes = new Uint8Array(hexString.length / 2);
+        for (let i = 0; i < hexString.length; i += 2) {
+            bytes[i / 2] = parseInt(hexString.substring(i, i + 2), 16);
+        }
+
+        // Convert to string to find boundaries (binary data will be mangled but headers survive)
+        const decoder = new TextDecoder('latin1'); // Use latin1 to preserve byte length exactly 1:1
+        const str = decoder.decode(bytes);
+
+        // Find the "filename=" header and the two newlines that follow it before the binary data starts
+        const fileContentIdx = str.indexOf('filename=');
+        if (fileContentIdx === -1) return null;
+
+        // Find the end of the headers for this part (the blank line)
+        const headerEndIdx = str.indexOf('\r\n\r\n', fileContentIdx);
+        if (headerEndIdx === -1) return null;
+
+        const binaryStartIndex = headerEndIdx + 4; // Skip the \r\n\r\n
+
+        // Look for the next boundary to find the end of the binary data
+        const nextBoundaryIdx = str.indexOf('\r\n--', binaryStartIndex);
+        if (nextBoundaryIdx === -1) return null;
+
+        const audioBytes = bytes.slice(binaryStartIndex, nextBoundaryIdx);
+
+        // Convert the sliced bytes to base64
+        let binaryStr = '';
+        const len = audioBytes.byteLength;
+        for (let i = 0; i < len; i++) {
+            binaryStr += String.fromCharCode(audioBytes[i]);
+        }
+        return `data:audio/mpeg;base64,${btoa(binaryStr)}`;
+    } catch (e) {
+        console.error("Failed to parse audio hex:", e);
+        return null;
+    }
+};
+
 interface ParsedMessage {
     timestamp?: string;
     msgId?: string;
@@ -188,7 +233,22 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
         messages.push({ role: 'assistant', content: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) });
     } else if (serviceName.startsWith('groq/whisper')) {
         // Groq Audio Transcriptions 
-        let content: any[] = [{ type: 'text', text: `[Action: Transcribing Audio to Groq Api]` }];
+        let content: any[] = [];
+
+        if (typeof requestBody === 'string' && /^[0-9a-fA-F]+$/.test(requestBody)) {
+            const audioDataUri = extractAudioFromMultipartHex(requestBody);
+            if (audioDataUri) {
+                // If we successfully extracted the audio file from the raw multipart hex, show the inline player!
+                content.push({
+                    type: 'input_audio',
+                    input_audio: { data: audioDataUri.split(',')[1], format: 'mp3' }
+                });
+            } else {
+                content.push({ type: 'text', text: `[Action: Transcribing Audio to Groq Api (Hex Decode Failed)]` });
+            }
+        } else {
+            content.push({ type: 'text', text: `[Action: Transcribing Audio to Groq Api]` });
+        }
 
         messages.push({ role: 'system', content });
         messages.push({ role: 'assistant', content: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) });
