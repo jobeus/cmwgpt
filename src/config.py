@@ -110,7 +110,10 @@ def get_system_prompt(prompt_path: str = "system_prompt.txt") -> str:
     return load_system_prompt(prompt_path)
 
 
-LEGACY_CONFIG = load_config(load_env_file=False)
+# Backward-compatibility path for modules that still import config constants at
+# module import time. This must continue loading `.env` so existing non-Docker
+# production startup keeps working until all callers move to injected config.
+LEGACY_CONFIG = load_config()
 
 OPENROUTER_API_KEY = LEGACY_CONFIG.openrouter_api_key
 RUNPOD_IO_API_KEY = LEGACY_CONFIG.runpod_io_api_key

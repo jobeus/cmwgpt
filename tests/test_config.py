@@ -1,8 +1,10 @@
 """Unit tests for explicit config loading."""
 
+import importlib
 import unittest
 from unittest.mock import mock_open, patch
 
+import src.config as config_module
 from src.config import DEFAULT_SYSTEM_PROMPT, load_config, load_system_prompt
 
 
@@ -25,6 +27,12 @@ class TestConfig(unittest.TestCase):
     def test_load_config_can_control_dotenv_loading(self, mock_load_dotenv):
         load_config(env={}, load_env_file=True)
         mock_load_dotenv.assert_called_once()
+
+    @patch("dotenv.load_dotenv")
+    def test_legacy_config_constants_still_load_dotenv_on_import(self, mock_load_dotenv):
+        importlib.reload(config_module)
+        mock_load_dotenv.assert_called()
+        importlib.reload(config_module)
 
     def test_load_system_prompt_replaces_timestamp(self):
         with patch(
