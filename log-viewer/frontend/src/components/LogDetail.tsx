@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { ArrowLeft, Terminal, Code, MessageSquare, Clock, Server, Hash } from 'lucide-react';
+import { ArrowLeft, Terminal, Code, MessageSquare, Clock, Server, Hash, ExternalLink } from 'lucide-react';
 import { format } from 'date-fns';
 import { ConversationView, sanitizeJsonForRawView, CopyButton } from './MessageParser';
 
@@ -118,6 +118,7 @@ export default function LogDetail() {
                         responseBody={resBody}
                         channelId={log.discord_channel_id ? log.discord_channel_id.toString() : null}
                         serviceName={log.service_name}
+                        endpointUrl={log.endpoint_url || null}
                     />
                 </div>
             ) : (
@@ -157,6 +158,23 @@ export default function LogDetail() {
                                 Request Details
                             </div>
                             <div className="p-4 max-h-[70vh] overflow-y-auto">
+                                {log.method && (
+                                    <div className="mb-4">
+                                        <div className="text-xs text-gray-500 uppercase mb-2 font-bold tracking-widest">Method</div>
+                                        <div className="inline-block text-sm font-mono font-bold px-3 py-1.5 rounded-lg border border-gray-800/60 bg-gray-900/50 text-purple-300">
+                                            {log.method}
+                                        </div>
+                                    </div>
+                                )}
+                                {log.endpoint_url && (
+                                    <div className="mb-4">
+                                        <div className="text-xs text-gray-500 uppercase mb-2 font-bold tracking-widest">Endpoint</div>
+                                        <div className="flex items-center space-x-2 text-sm font-mono text-blue-300 bg-gray-900/50 p-3 rounded-lg border border-gray-800/60 break-all">
+                                            <ExternalLink className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                                            <span>{log.endpoint_url}</span>
+                                        </div>
+                                    </div>
+                                )}
                                 {reqHeaders && (
                                     <div className="mb-4">
                                         <div className="text-xs text-gray-500 uppercase mb-2 font-bold tracking-widest">Headers</div>
@@ -185,6 +203,14 @@ export default function LogDetail() {
                                 Response Details
                             </div>
                             <div className="p-4 max-h-[70vh] overflow-y-auto">
+                                {log.response_status && (
+                                    <div className="mb-4">
+                                        <div className="text-xs text-gray-500 uppercase mb-2 font-bold tracking-widest">Status</div>
+                                        <div className={`inline-block text-sm font-mono font-bold px-3 py-1.5 rounded-lg border border-gray-800/60 bg-gray-900/50 ${log.response_status >= 400 ? 'text-red-400' : 'text-emerald-400'}`}>
+                                            {log.response_status}
+                                        </div>
+                                    </div>
+                                )}
                                 {resHeaders && (
                                     <div className="mb-4">
                                         <div className="text-xs text-gray-500 uppercase mb-2 font-bold tracking-widest">Headers</div>

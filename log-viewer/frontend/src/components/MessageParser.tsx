@@ -335,7 +335,7 @@ const renderMessageContent = (content: any, channelId: string | null) => {
     return <div className="text-red-400 text-xs">Unparseable content</div>;
 };
 
-export const ConversationView = ({ requestBody, responseBody, channelId, serviceName }: { requestBody: any, responseBody: any, channelId: string | null, serviceName: string }) => {
+export const ConversationView = ({ requestBody, responseBody, channelId, serviceName, endpointUrl }: { requestBody: any, responseBody: any, channelId: string | null, serviceName: string, endpointUrl?: string | null }) => {
     let messages: { role: string, content: any }[] = [];
 
     // Parse based on service name
@@ -403,9 +403,22 @@ export const ConversationView = ({ requestBody, responseBody, channelId, service
         messages.push({ role: 'system', content });
         messages.push({ role: 'assistant', content: typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2) });
     } else if (serviceName.startsWith('rapidapi/twitter')) {
-        // Twitter RapidAPI Fetch
-        const targetUrl = requestBody?.url || requestBody?.tweet_url || requestBody?.id || "Unknown URL";
-        messages.push({ role: 'system', content: `[Action: Fetching Twitter Data via RapidAPI for ${targetUrl}]` });
+        // Twitter RapidAPI Fetch — extract tweet ID from endpoint URL and build a useful Python snippet
+        let tweetId = '';
+        let tweetUrl = '';
+        if (endpointUrl) {
+            try {
+                const u = new URL(endpointUrl);
+                tweetId = u.searchParams.get('id') || '';
+            } catch { /* ignore */ }
+        }
+        if (tweetId) {
+            tweetUrl = `https://x.com/i/status/${tweetId}`;
+        }
+
+        const pythonSnippet = `import httpx\n\nRAPIDAPI_KEY = "YOUR_RAPIDAPI_KEY"\ntweet_id = "${tweetId || 'TWEET_ID'}"\n\nheaders = {\n    "x-rapidapi-host": "x-com2.p.rapidapi.com",\n    "x-rapidapi-key": RAPIDAPI_KEY,\n}\n\nwith httpx.Client(timeout=15.0) as client:\n    response = client.get(\n        "https://x-com2.p.rapidapi.com/v2/TweetDetail/",\n        headers=headers,\n        params={"id": tweet_id},\n    )\n    response.raise_for_status()\n    data = response.json()\n\nprint(data)\n${tweetUrl ? `\n# Original tweet: ${tweetUrl}` : ''}`;
+
+        messages.push({ role: 'system', content: pythonSnippet });
 
         // Try to format the JSON data into a custom 'tweet' object
         if (typeof responseBody === 'object' && responseBody?.data) {
