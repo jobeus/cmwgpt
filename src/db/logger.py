@@ -47,6 +47,8 @@ async def log_api_request(
         logger.debug(f"[TESTING] Skipped logging API request to {service_name}")
         return
 
+    # We rely on MariaDB's Virtual Column to generate the curl commands natively!
+
     query = """
         INSERT INTO api_request_logs (
             service_name, method, endpoint_url, 

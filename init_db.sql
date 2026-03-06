@@ -13,14 +13,27 @@ CREATE TABLE IF NOT EXISTS api_request_logs (
     request_body LONGTEXT,
     
     -- Virtual column to regenerate exactly what was sent via cURL
+    -- We use nested REGEXP_REPLACE to elegantly map JSON keys to -H flags bypassing MariaDB subquery limitations
+    -- We also natively escape JSON single quotes to `'\''` to prevent bash injection or zsh event expansion errors
     curl_command LONGTEXT GENERATED ALWAYS AS (
-        CONCAT('curl -X ', method, ' ''', endpoint_url, ''' ',
-        COALESCE(
-            (SELECT GROUP_CONCAT(CONCAT('-H ''', k, ': ', JSON_UNQUOTE(v), '''') SEPARATOR ' ')
-             FROM JSON_TABLE(JSON_KEYS(request_headers), '$[*]' COLUMNS(k VARCHAR(255) PATH '$')) as keys_seq
-             JOIN JSON_TABLE(request_headers, '$' COLUMNS(v JSON PATH '$.*')) as vals ON 1=1), ''
+        CONCAT('curl -X ', method, ' ''', REPLACE(endpoint_url, '''', CONCAT('''', '\\', '''', '''')), ''' ',
+        IF(request_headers IS NULL OR JSON_TYPE(request_headers) != 'OBJECT' OR JSON_LENGTH(request_headers) = 0, '',
+            REGEXP_REPLACE(
+                REGEXP_REPLACE(
+                    REGEXP_REPLACE(
+                        REPLACE(request_headers, '''', CONCAT('''', '\\', '''', '''')),
+                        '"\\s*:\\s*"', ': '
+                    ),
+                    '"\\s*,\\s*"', ''' -H '''
+                ),
+                '^\\{\\s*"(.*)"\\s*\\}$',
+                '-H ''\\1'''
+            )
         ),
-        IF(request_body IS NOT NULL AND length(request_body) > 0, CONCAT(' -d ''', request_body, ''''), '')
+        IF(request_body IS NOT NULL AND length(request_body) > 0, 
+           CONCAT(' -d ''', REPLACE(request_body, '''', CONCAT('''', '\\', '''', '''')), ''''), 
+           ''
+        )
         )
     ) VIRTUAL,
     
@@ -36,4 +49,3 @@ CREATE TABLE IF NOT EXISTS api_request_logs (
     INDEX idx_discord_user_id (discord_user_id),
     INDEX idx_discord_channel_id (discord_channel_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-

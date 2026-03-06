@@ -259,11 +259,18 @@ class OpenAIService:
                     except Exception as e:
                         logger.warning(f"Failed to parse cost: {e}")
                         
+                    # Filter out any internal openai.Omit objects from the headers before logging
+                    clean_request_headers = {}
+                    if hasattr(client, 'default_headers'):
+                        for k, v in dict(client.default_headers).items():
+                            if 'Omit' not in str(type(v)):
+                                clean_request_headers[k] = v
+
                     await log_api_request(
                         service_name=f"openai/{actual_model}",
                         method="POST",
                         endpoint_url=str(response.http_response.url) if hasattr(response, 'http_response') else "https://openrouter.ai/api/v1/chat/completions",
-                        request_headers=dict(client.default_headers),
+                        request_headers=clean_request_headers,
                         request_body=kwargs,
                         response_status=200,
                         response_headers=dict(response.http_response.headers) if hasattr(response, 'http_response') else {},
