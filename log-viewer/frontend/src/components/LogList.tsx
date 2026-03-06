@@ -5,6 +5,9 @@ import { format } from 'date-fns';
 import { useAuth } from '../AuthContext';
 import { Terminal, ChevronRight, Server, Check, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import userMapData from '../user_map.json';
+
+const userMap = userMapData as Record<string, string>;
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || '/';
@@ -45,6 +48,22 @@ const extractLastMessageSnippet = (bodyStr: string | null): string => {
                 text = JSON.stringify(last.content);
             }
 
+            // Clean up Discord prefix and mentions
+            // Regex matches: [timestamp] [msg_id] <@user_id>: message text
+            const discordRegex = /^\[.*?\] \[\d+\] <@(\d+)>:\s*([\s\S]*)/;
+            const match = text.match(discordRegex);
+            if (match) {
+                const userId = match[1];
+                const content = match[2];
+                const username = userMap[userId] || userId;
+                text = `@${username}: ${content}`;
+            }
+            // Global replace for any remaining <@id> mentions
+            text = text.replace(/<@(\d+)>/g, (original_match, id) => {
+                const username = userMap[id];
+                return username ? `@${username}` : original_match;
+            });
+
             if (text.length > 150) text = text.substring(0, 150) + '...';
             return text;
         }
@@ -60,6 +79,11 @@ const extractLastMessageSnippet = (bodyStr: string | null): string => {
             } else {
                 text = JSON.stringify(content);
             }
+            // Replace <@id> mentions with usernames
+            text = text.replace(/<@(\d+)>/g, (_m, id) => {
+                const username = userMap[id];
+                return username ? `@${username}` : _m;
+            });
             if (text.length > 150) text = text.substring(0, 150) + '...';
             return text;
         }
