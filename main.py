@@ -1,8 +1,6 @@
-"""
-Main entry point for the Discord bot using the refactored architecture.
-"""
+"""Main entry point for the Discord bot using explicit startup composition."""
 
-from src.bot.client import create_bot
+from src.startup import create_bot_client
 import sys
 import os
 import signal
@@ -24,19 +22,11 @@ def setup_signal_handlers(bot_client):
         print(f"\n🛑 Received {signal_name}, performing graceful shutdown...")
         logger.info(f"Received {signal_name}, initiating graceful shutdown")
 
-        # Import here to avoid circular imports
-        from src.services.restart_handler import restart_handler
-        from src.services.auto_update_service import auto_update_service
-        from src.services.queue_service import queue_service
-        from src.services.openai_service import openai_service
-        from src.services.interject_service import interject_service
-        from src.services.death_service import death_service
-
         async def complete_shutdown():
             """Complete shutdown sequence with proper cleanup."""
             try:
                 # Step 1: Save state
-                await restart_handler.perform_graceful_shutdown()
+                await bot_client.services.restart_handler.perform_graceful_shutdown()
                 print("👋 Graceful shutdown complete")
 
                 # Step 2: Stop background services
@@ -44,35 +34,35 @@ def setup_signal_handlers(bot_client):
 
                 # Stop auto-update service (synchronous)
                 try:
-                    auto_update_service.stop()
+                    bot_client.services.auto_update_service.stop()
                     logger.info("Auto-update service stopped")
                 except Exception as e:
                     logger.error(f"Error stopping auto-update service: {e}")
 
                 # Stop interject service (synchronous)
                 try:
-                    interject_service.stop()
+                    bot_client.services.interject_service.stop()
                     logger.info("Interject service stopped")
                 except Exception as e:
                     logger.error(f"Error stopping interject service: {e}")
 
                 # Stop death service (synchronous)
                 try:
-                    death_service.stop()
+                    bot_client.services.death_service.stop()
                     logger.info("Death service stopped")
                 except Exception as e:
                     logger.error(f"Error stopping death service: {e}")
 
                 # Stop queue service (asynchronous)
                 try:
-                    await queue_service.stop()
+                    await bot_client.services.queue_service.stop()
                     logger.info("Queue service stopped")
                 except Exception as e:
                     logger.error(f"Error stopping queue service: {e}")
 
                 # Close OpenAI service
                 try:
-                    await openai_service.close()
+                    await bot_client.services.openai_service.close()
                     logger.info("OpenAI service closed")
                 except Exception as e:
                     logger.error(f"Error closing OpenAI service: {e}")
@@ -128,7 +118,7 @@ def setup_signal_handlers(bot_client):
 
 
 if __name__ == "__main__":
-    bot_client = create_bot()
+    bot_client = create_bot_client()
 
     # Set up signal handlers for graceful shutdown
     setup_signal_handlers(bot_client)

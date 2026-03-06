@@ -14,15 +14,15 @@ import random
 import re
 import time
 from datetime import datetime, timezone
-from typing import Optional, Any
+from typing import Any, Awaitable, Callable, Optional
 
 import discord
 from discord.ext import commands
 
 from src.config import get_system_prompt, DEFAULT_MODEL
-from src.services.openai_service import openai_service
-from src.services.message_service import message_service
-from src.services.state_service import state_service
+from src.services.openai_service import openai_service as default_openai_service
+from src.services.message_service import message_service as default_message_service
+from src.services.state_service import state_service as default_state_service
 from src.utils.discord_helper import get_mention_legend
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,24 @@ STATE_FILE = ".cache/cmwgpt_interject_counts.json"
 class InterjectService:
     """Event-driven service that occasionally interjects in active channels."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        state_service=default_state_service,
+        openai_service=default_openai_service,
+        message_service=default_message_service,
+        system_prompt_loader: Callable[[], str] = get_system_prompt,
+        default_model: str = DEFAULT_MODEL,
+        state_file: str = STATE_FILE,
+        mention_legend_provider: Callable[[discord.TextChannel, discord.User], Awaitable[str]] = get_mention_legend,
+    ):
+        self._state_service = state_service
+        self._openai_service = openai_service
+        self._message_service = message_service
+        self._system_prompt_loader = system_prompt_loader
+        self._default_model = default_model
+        self._state_file = state_file
+        self._mention_legend_provider = mention_legend_provider
         self._bot: Optional[commands.Bot] = None
         # channel_id -> timestamp (epoch) when cooldown expires
         self._cooldowns: dict[int, float] = {}
@@ -241,11 +258,11 @@ class InterjectService:
 
         # Build the user legend
         bot_user = self._bot.user
-        legend_section = await get_mention_legend(channel, bot_user)
+        legend_section = await self._mention_legend_provider(channel, bot_user)
 
         # Use the default system prompt (or channel override)
-        channel_system_prompt = state_service.get_system_prompt(channel.id)
-        system_prompt = channel_system_prompt or get_system_prompt()
+        channel_system_prompt = self._state_service.get_system_prompt(channel.id)
+        system_prompt = channel_system_prompt or self._system_prompt_loader()
 
         system_prompt += (
             f"\nIn the channel you are <@{bot_id}>!\n\n"
@@ -309,10 +326,10 @@ class InterjectService:
             )
 
         # Get the model for this channel
-        model = state_service.get_model(channel.id) or DEFAULT_MODEL
+        model = self._state_service.get_model(channel.id) or self._default_model
 
         try:
-            reply_content = await openai_service.get_chat_completion(
+            reply_content = await self._openai_service.get_chat_completion(
                 model=model,
                 messages=chat_context,
                 system_prompt=system_prompt,
@@ -331,7 +348,7 @@ class InterjectService:
                 reply_text = reply_content
 
             if reply_text and reply_text.strip():
-                await message_service.send_channel_reply(channel, reply_text)
+                await self._message_service.send_channel_reply(channel, reply_text)
                 logger.info(f"💬 Interjected in #{channel.name}: {reply_text[:80]}...")
 
         except Exception as e:
@@ -348,7 +365,7 @@ class InterjectService:
 
     def _get_setting(self, channel_id: int, key: str, default: Any) -> Any:
         """Helper to get a channel-specific interject setting or default."""
-        settings = state_service.get_interject_settings(channel_id)
+        settings = self._state_service.get_interject_settings(channel_id)
         if settings and key in settings:
             return settings[key]
         return default
@@ -401,19 +418,21 @@ class InterjectService:
 
     def _save_state(self) -> None:
         """Save the daily tracker to disk."""
+        if not self._state_file:
+            return
         try:
-            os.makedirs(os.path.dirname(STATE_FILE) or ".", exist_ok=True)
-            with open(STATE_FILE, "w", encoding="utf-8") as f:
+            os.makedirs(os.path.dirname(self._state_file) or ".", exist_ok=True)
+            with open(self._state_file, "w", encoding="utf-8") as f:
                 json.dump(self._daily_tracker, f)
         except (OSError, ValueError) as exc:
             logger.error(f"Failed to save interject counts state: {exc}")
             
     def _load_state(self) -> None:
         """Load daily tracker from disk."""
-        if not os.path.exists(STATE_FILE):
+        if not self._state_file or not os.path.exists(self._state_file):
             return
         try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
+            with open(self._state_file, "r", encoding="utf-8") as f:
                 self._daily_tracker = json.load(f)
             logger.info("Loaded daily interject counts from state file")
         except (OSError, json.JSONDecodeError, ValueError) as exc:
@@ -425,5 +444,3 @@ class InterjectService:
         return random.randint(1, 100) <= chance
 
 
-# Global service instance
-interject_service = InterjectService()

@@ -14,7 +14,6 @@ from src.config import get_system_prompt, DEFAULT_MODEL
 from src.utils.discord_helper import get_mention_legend
 from src.services.queue_service import queue_service
 from src.services.state_service import state_service
-from src.services.auto_update_service import auto_update_service
 from src.utils.async_utils import safe_run
 
 logger = logging.getLogger(__name__)
@@ -23,8 +22,22 @@ logger = logging.getLogger(__name__)
 class SystemCommands:
     """Handles system/admin Discord commands."""
 
-    def __init__(self, bot: discord.ext.commands.Bot):
+    def __init__(
+        self,
+        bot: discord.ext.commands.Bot,
+        *,
+        queue_service_instance=queue_service,
+        state_service_instance=state_service,
+        auto_update_service=None,
+        system_prompt_loader=get_system_prompt,
+        default_model: str = DEFAULT_MODEL,
+    ):
         self.bot = bot
+        self._queue_service = queue_service_instance
+        self._state_service = state_service_instance
+        self._auto_update_service = auto_update_service
+        self._system_prompt_loader = system_prompt_loader
+        self._default_model = default_model
 
     def setup_commands(self) -> None:
         """Set up all system-related commands."""
@@ -65,7 +78,7 @@ class SystemCommands:
             await interaction.response.defer(ephemeral=False, thinking=True)
 
             # Queue the command for FIFO processing
-            queued = await queue_service.queue_command(interaction, self._handle_model_command, model)
+            queued = await self._queue_service.queue_command(interaction, self._handle_model_command, model)
 
             if not queued:
                 logger.warning(
@@ -97,7 +110,7 @@ class SystemCommands:
             await interaction.response.defer(ephemeral=True, thinking=True)
 
             # Queue the command for FIFO processing
-            queued = await queue_service.queue_command(interaction, self._handle_systemprompt_set, prompt_text)
+            queued = await self._queue_service.queue_command(interaction, self._handle_systemprompt_set, prompt_text)
 
             if not queued:
                 logger.warning(
@@ -118,7 +131,7 @@ class SystemCommands:
             await interaction.response.defer(ephemeral=True, thinking=True)
 
             # Queue the command for FIFO processing
-            queued = await queue_service.queue_command(interaction, self._handle_systemprompt_reset)
+            queued = await self._queue_service.queue_command(interaction, self._handle_systemprompt_reset)
 
             if not queued:
                 logger.warning(
@@ -157,15 +170,15 @@ class SystemCommands:
         # Interaction already deferred in slash command handler
 
         # Mark channel as active
-        state_service.mark_channel_active(channel_id)
+        self._state_service.mark_channel_active(channel_id)
 
         if model:
-            state_service.set_model(channel_id, model)
+            self._state_service.set_model(channel_id, model)
             logger.info(f"[/model] Channel {channel_id}: model set to {model}")
             await interaction.followup.send(f"Model set to `{model}`.", ephemeral=True)
         else:
-            current_model = state_service.get_model(
-                channel_id) or DEFAULT_MODEL
+            current_model = self._state_service.get_model(
+                channel_id) or self._default_model
             await interaction.followup.send(f"Model is `{current_model}`.", ephemeral=True)
 
     async def _handle_systemprompt_set(
@@ -183,13 +196,13 @@ class SystemCommands:
         # Interaction already deferred in slash command handler
 
         # Mark channel as active
-        state_service.mark_channel_active(channel_id)
+        self._state_service.mark_channel_active(channel_id)
 
         legend_section = await get_mention_legend(interaction.channel, self.bot.user)
 
         if prompt_text:
             # Set new system prompt (no longer stored in conversation arrays)
-            state_service.set_system_prompt(channel_id, prompt_text)
+            self._state_service.set_system_prompt(channel_id, prompt_text)
 
             logger.info(
                 f"[/systemprompt set] Channel {channel_id}: system prompt updated.")
@@ -199,9 +212,9 @@ class SystemCommands:
             )
         else:
             # Show current system prompt
-            current_prompt = state_service.get_system_prompt(channel_id)
+            current_prompt = self._state_service.get_system_prompt(channel_id)
             if not current_prompt:
-                current_prompt = get_system_prompt() + "\n" + legend_section
+                current_prompt = self._system_prompt_loader() + "\n" + legend_section
             logger.info(
                 f"[/systemprompt set] Channel {channel_id}: displayed current system prompt.")
             await interaction.followup.send(
@@ -222,11 +235,11 @@ class SystemCommands:
         legend_section = await get_mention_legend(interaction.channel, self.bot.user)
 
         # Compose exactly as /chat does
-        channel_system_prompt = state_service.get_system_prompt(channel_id)
+        channel_system_prompt = self._state_service.get_system_prompt(channel_id)
         if channel_system_prompt:
             full_prompt = channel_system_prompt + "\n" + legend_section
         else:
-            full_prompt = get_system_prompt() + "\n" + legend_section
+            full_prompt = self._system_prompt_loader() + "\n" + legend_section
 
         logger.info(
             f"[/systemprompt view] Channel {channel_id}: displayed full composed system prompt.")
@@ -252,11 +265,11 @@ class SystemCommands:
         # Interaction already deferred in slash command handler
 
         # Mark channel as active
-        state_service.mark_channel_active(channel_id)
+        self._state_service.mark_channel_active(channel_id)
 
         # Remove custom prompt (system prompts no longer stored in conversation
         # arrays)
-        state_service.clear_system_prompt(channel_id)
+        self._state_service.clear_system_prompt(channel_id)
         logger.info(
             f"[/systemprompt reset] Channel {channel_id}: custom prompt removed, reverting to default.")
 
@@ -282,7 +295,7 @@ class SystemCommands:
             await interaction.response.defer(ephemeral=False, thinking=True)
 
             # Queue the command for FIFO processing
-            queued = await queue_service.queue_command(interaction, self._handle_restart_command)
+            queued = await self._queue_service.queue_command(interaction, self._handle_restart_command)
 
             if not queued:
                 logger.warning(
@@ -357,7 +370,11 @@ class SystemCommands:
         )
 
         # Trigger restart through auto-update service
-        success = await auto_update_service.trigger_restart(manual=True)
+        if not self._auto_update_service:
+            await interaction.followup.send("❌ Restart service is not configured.", ephemeral=True)
+            return
+
+        success = await self._auto_update_service.trigger_restart(manual=True)
 
         if not success:
             logger.error("Failed to trigger restart")

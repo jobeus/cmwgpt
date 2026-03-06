@@ -103,7 +103,11 @@ class TestInteractionDefer(unittest.TestCase):
                     return_value=False)
 
                 # Create the model command
-                model_command = self.system_commands._create_model_command()
+                system_commands = SystemCommands(
+                    self.mock_bot,
+                    queue_service_instance=mock_queue_service,
+                )
+                model_command = system_commands._create_model_command()
 
                 # Execute the command
                 await model_command.callback(mock_interaction, "gpt-5-mini")

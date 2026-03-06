@@ -11,9 +11,10 @@ This module provides the restart functionality that:
 import asyncio
 import logging
 import sys
+from typing import Callable
 
-from src.services.state_service import state_service
-from src.utils.git_utils import perform_git_pull
+from src.services.state_service import state_service as default_state_service
+from src.utils.git_utils import perform_git_pull as default_perform_git_pull
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,15 @@ logger = logging.getLogger(__name__)
 class RestartHandler:
     """Handles bot restart operations with state persistence."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        state_service=default_state_service,
+        git_pull: Callable[[], bool] = default_perform_git_pull,
+    ):
         """Initialize the restart handler."""
+        self._state_service = state_service
+        self._git_pull = git_pull
         self._restart_in_progress = False
         self._skip_cleanup = False  # Flag to prevent cleanup during restart
 
@@ -55,7 +63,7 @@ class RestartHandler:
             # update
             print("💾 Saving bot state...")
             restart_info = {"manual_restart": manual}
-            temp_file = state_service.save_state_to_temp_file(restart_info)
+            temp_file = self._state_service.save_state_to_temp_file(restart_info)
             if temp_file:
                 print("✅ State saved")
             else:
@@ -63,7 +71,7 @@ class RestartHandler:
 
             # Step 2: Perform git pull
             print("📥 Updating code...")
-            if perform_git_pull():
+            if self._git_pull():
                 print("✅ Code updated")
             else:
                 print("⚠️  Git pull failed, continuing anyway")
@@ -116,7 +124,7 @@ class RestartHandler:
             shutdown_info = {
                 "manual_restart": False,
                 "graceful_shutdown": True}
-            temp_file = state_service.save_state_to_temp_file(shutdown_info)
+            temp_file = self._state_service.save_state_to_temp_file(shutdown_info)
             if temp_file:
                 print("✅ State saved")
             else:
@@ -131,7 +139,3 @@ class RestartHandler:
             logger.error(f"Error during graceful shutdown: {e}")
             print(f"⚠️  Error during graceful shutdown: {e}")
             raise
-
-
-# Global restart handler instance
-restart_handler = RestartHandler()

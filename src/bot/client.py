@@ -5,25 +5,17 @@ Discord Bot Client - Main bot setup and event handling
 import asyncio
 import logging
 import subprocess
-from typing import Optional
+from typing import Any, Optional
 
 import discord
 from discord.ext import commands
 
-from src.config import DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, DEFAULT_MODEL, REPLY_TO_MENTIONS
-from src.bot.handlers.mention import mention_handler
+from src.config import AppConfig, DEFAULT_MODEL, load_config
 from src.bot.commands.chat import ChatCommands
 from src.bot.commands.image import ImageCommands
 from src.bot.commands.system import SystemCommands
 from src.bot.commands.interject import InterjectCommands
 from src.bot.commands.death import DeathCommands
-from src.services.queue_service import queue_service
-from src.services.state_service import state_service
-from src.services.auto_update_service import auto_update_service
-from src.services.restart_handler import restart_handler
-from src.services.announcement_service import announcement_service
-from src.services.interject_service import interject_service
-from src.services.death_service import death_service
 
 from src.utils.logger import setup_logger
 
@@ -35,7 +27,11 @@ logger = logging.getLogger("discord_bot")
 class DiscordBotClient:
     """Main Discord bot client with event handling and command setup."""
 
-    def __init__(self):
+    def __init__(self, *, config: Optional[AppConfig] = None, services: Any, mention_handler=None):
+        self.config = config or load_config()
+        self.services = services
+        self.mention_handler = mention_handler or services.mention_handler
+
         # Configure Discord bot with intents
         intents = discord.Intents.default()
         intents.message_content = True
@@ -52,13 +48,13 @@ class DiscordBotClient:
         self._setup_auto_update()
 
         # Set up announcement service
-        announcement_service.set_bot(self.bot)
+        self.services.announcement_service.set_bot(self.bot)
 
         # Set up interject service
-        interject_service.set_bot(self.bot)
+        self.services.interject_service.set_bot(self.bot)
 
         # Set up death service
-        death_service.set_bot(self.bot)
+        self.services.death_service.set_bot(self.bot)
 
         # Set up event handlers
         self._setup_events()
@@ -69,7 +65,7 @@ class DiscordBotClient:
     def _load_saved_state(self) -> None:
         """Load any saved state from previous restart."""
         try:
-            if state_service.load_state_from_temp_files():
+            if self.services.state_service.load_state_from_temp_files():
                 print("✅ Restored previous state")
             else:
                 print("🆕 Starting with fresh state")
@@ -86,8 +82,8 @@ class DiscordBotClient:
                 # Only update if we don't already have a SHA (from loaded state)
                 # This preserves the previous SHA for comparison by the
                 # announcement service
-                if not state_service.get_last_git_sha():
-                    state_service.set_last_git_sha(current_sha)
+                if not self.services.state_service.get_last_git_sha():
+                    self.services.state_service.set_last_git_sha(current_sha)
                     logger.info(f"Set initial git SHA: {current_sha[:7]}")
                 else:
                     # Don't update - let the announcement service handle the
@@ -122,8 +118,8 @@ class DiscordBotClient:
         """Set up the auto-update service."""
         try:
             # Set the restart callback
-            auto_update_service.set_restart_callback(
-                restart_handler.perform_restart)
+            self.services.auto_update_service.set_restart_callback(
+                self.services.restart_handler.perform_restart)
             logger.info("Auto-update service configured")
         except Exception as e:
             logger.error(f"Error setting up auto-update service: {e}")
@@ -132,7 +128,7 @@ class DiscordBotClient:
         """Send update announcement if this was a restart."""
         try:
             # Check if we have active channels and this looks like a restart
-            active_channels = state_service.get_active_channels()
+            active_channels = self.services.state_service.get_active_channels()
             if not active_channels:
                 logger.info(
                     "No active channels found, skipping update announcement")
@@ -145,7 +141,7 @@ class DiscordBotClient:
             was_manual = self._check_for_restart_info()
 
             # Send announcement
-            await announcement_service.announce_update(was_manual=was_manual)
+            await self.services.announcement_service.announce_update(was_manual=was_manual)
             logger.info(
                 f"Sent update announcements to active channels (manual: {was_manual})")
 
@@ -202,31 +198,31 @@ class DiscordBotClient:
         async def on_ready():
             # Sync commands - guild-specific if configured (instant),
             # otherwise global (can take up to 1 hour)
-            if DISCORD_GUILD_ID:
-                guild = discord.Object(id=int(DISCORD_GUILD_ID))
+            if self.config.discord_guild_id:
+                guild = discord.Object(id=int(self.config.discord_guild_id))
                 self.bot.tree.copy_global_to(guild=guild)
                 await self.bot.tree.sync(guild=guild)
-                logger.info(f"Commands synced instantly to guild {DISCORD_GUILD_ID}")
+                logger.info(f"Commands synced instantly to guild {self.config.discord_guild_id}")
             else:
                 await self.bot.tree.sync()
                 logger.info("Commands synced globally (may take up to 1 hour to propagate)")
 
             # Start the message queue service
-            await queue_service.start()
+            await self.services.queue_service.start()
 
             # Start the auto-update service
-            auto_update_service.start()
+            self.services.auto_update_service.start()
 
             # Start the interject service
-            interject_service.start()
+            self.services.interject_service.start()
 
             # Start the death service
-            death_service.start()
+            self.services.death_service.start()
 
             print(f"🤖 Logged in as {self.bot.user}")
 
             # Log auto-update status
-            status = auto_update_service.get_status()
+            status = self.services.auto_update_service.get_status()
             if status["enabled"]:
                 print(
                     f"🔄 Auto-update enabled (checking every {status['check_interval']}s)")
@@ -255,10 +251,17 @@ class DiscordBotClient:
         image_commands = ImageCommands(self.bot)
         image_commands.setup_commands()
 
-        system_commands = SystemCommands(self.bot)
+        system_commands = SystemCommands(
+            self.bot,
+            auto_update_service=self.services.auto_update_service,
+            default_model=self.config.default_model,
+        )
         system_commands.setup_commands()
 
-        interject_commands = InterjectCommands(self.bot)
+        interject_commands = InterjectCommands(
+            self.bot,
+            interject_service=self.services.interject_service,
+        )
         interject_commands.setup_commands()
 
         death_commands = DeathCommands(self.bot)
@@ -277,12 +280,12 @@ class DiscordBotClient:
             return
 
         # Handle bot mentions
-        if self.bot.user and self.bot.user in message.mentions and REPLY_TO_MENTIONS:
-            model = state_service.get_model(
-                message.channel.id) or DEFAULT_MODEL
+        if self.bot.user and self.bot.user in message.mentions and self.config.reply_to_mentions:
+            model = self.services.state_service.get_model(
+                message.channel.id) or self.config.default_model or DEFAULT_MODEL
 
             # Queue the mention for FIFO processing
-            queued = await mention_handler.queue_mention(message, self.bot.user, model)
+            queued = await self.mention_handler.queue_mention(message, self.bot.user, model)
 
             if not queued:
                 logger.warning(
@@ -295,7 +298,7 @@ class DiscordBotClient:
                 # model)
 
         # Check for interjection opportunity (event-driven, no polling)
-        await interject_service.on_new_message(message)
+        await self.services.interject_service.on_new_message(message)
 
         # Ensure other commands are still processed
         await self.bot.process_commands(message)
@@ -304,7 +307,7 @@ class DiscordBotClient:
         """Start the Discord bot."""
         print("🔌 Starting Discord bot...")
         try:
-            self.bot.run(DISCORD_BOT_TOKEN)
+            self.bot.run(self.config.discord_bot_token)
         except Exception as e:
             logger.error(f"Bot failed to start: {e}")
             raise
@@ -312,7 +315,7 @@ class DiscordBotClient:
             # Only perform cleanup if not already handled by signal handler
             # The signal handler sets skip_cleanup flag to prevent duplicate
             # cleanup
-            if not restart_handler.should_skip_cleanup():
+            if not self.services.restart_handler.should_skip_cleanup():
                 logger.info("Performing bot shutdown cleanup...")
 
                 # Ensure services are properly shut down
@@ -320,27 +323,28 @@ class DiscordBotClient:
 
                 try:
                     # Stop auto-update service
-                    auto_update_service.stop()
+                    self.services.auto_update_service.stop()
                     logger.info("Auto-update service stopped")
                 except Exception as e:
                     logger.error(
                         f"Error shutting down auto-update service: {e}")
 
                 try:
-                    death_service.stop()
-                    logger.info("Death service stopped")
+                    self.services.interject_service.stop()
+                    self.services.death_service.stop()
+                    logger.info("Background services stopped")
                 except Exception as e:
                     logger.error(
-                        f"Error shutting down death service: {e}")
+                        f"Error shutting down background services: {e}")
 
                 try:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         # If we're in an async context, schedule the shutdown
-                        asyncio.create_task(queue_service.stop())
+                        asyncio.create_task(self.services.queue_service.stop())
                     else:
                         # If we're not in an async context, run it
-                        loop.run_until_complete(queue_service.stop())
+                        loop.run_until_complete(self.services.queue_service.stop())
                 except Exception as e:
                     logger.error(f"Error shutting down queue service: {e}")
 
@@ -358,4 +362,6 @@ class DiscordBotClient:
 
 def create_bot() -> DiscordBotClient:
     """Create and return a new Discord bot client."""
-    return DiscordBotClient()
+    from src.startup import create_bot_client
+
+    return create_bot_client()

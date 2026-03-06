@@ -1,20 +1,15 @@
-"""
-Pasters utility - Legacy compatibility module
+"""Stateless paste helpers."""
 
-This module provides backward compatibility for the old pasters interface
-while using the new refactored service architecture.
-"""
+from typing import Protocol
 
-from src.services.paste_service import paste_service
-
-# For testing compatibility, expose requests module
 import requests  # noqa: F401
 
 
-async def upload_to_pasters(markdown_text: str) -> str:
-    """
-    Upload markdown text to paste service.
+class MarkdownPasteUploader(Protocol):
+    async def upload_markdown(self, markdown_text: str) -> str:
+        """Upload markdown and return a URL."""
 
-    Legacy compatibility function that delegates to the new service.
-    """
-    return await paste_service.upload_markdown(markdown_text)
+
+async def upload_to_pasters(markdown_text: str, uploader: MarkdownPasteUploader) -> str:
+    """Upload markdown text using an injected uploader dependency."""
+    return await uploader.upload_markdown(markdown_text)

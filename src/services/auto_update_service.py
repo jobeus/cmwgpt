@@ -11,8 +11,13 @@ import threading
 from typing import Optional, Callable, Awaitable
 
 from src.config import KEEP_UP_TO_DATE_WITH_GIT
-from src.services.queue_service import queue_service
-from src.utils.git_utils import is_git_repository, get_current_commit_hash, fetch_updates, check_for_new_commits
+from src.services.queue_service import queue_service as default_queue_service
+from src.utils.git_utils import (
+    check_for_new_commits as default_check_for_new_commits,
+    fetch_updates as default_fetch_updates,
+    get_current_commit_hash as default_get_current_commit_hash,
+    is_git_repository as default_is_git_repository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +25,29 @@ logger = logging.getLogger(__name__)
 class AutoUpdateService:
     """Service for automatic git-based updates and restarts."""
 
-    def __init__(self, check_interval: int = 60):
+    def __init__(
+        self,
+        check_interval: int = 60,
+        *,
+        enabled: Optional[bool] = None,
+        queue_service=default_queue_service,
+        is_git_repository_fn: Callable[[], bool] = default_is_git_repository,
+        get_current_commit_hash_fn: Callable[[], Optional[str]] = default_get_current_commit_hash,
+        fetch_updates_fn: Callable[[], bool] = default_fetch_updates,
+        check_for_new_commits_fn: Callable[[], bool] = default_check_for_new_commits,
+    ):
         """Initialize the auto-update service."""
         self.check_interval = check_interval
+        self._enabled = KEEP_UP_TO_DATE_WITH_GIT if enabled is None else enabled
+        self._queue_service = queue_service
+        self._is_git_repository = is_git_repository_fn
+        self._get_current_commit_hash = get_current_commit_hash_fn
+        self._fetch_updates = fetch_updates_fn
+        self._check_for_new_commits = check_for_new_commits_fn
         self._monitoring_thread: Optional[threading.Thread] = None
         self._stop_monitoring = threading.Event()
         self._is_running = False
-        self._restart_callback: Optional[Callable[[], Awaitable[None]]] = None
+        self._restart_callback: Optional[Callable[..., Awaitable[None]]] = None
         self._consecutive_failures = 0
         self._max_consecutive_failures = 5
         self._last_known_commit: Optional[str] = None
@@ -44,11 +65,11 @@ class AutoUpdateService:
 
     def start(self) -> None:
         """Start the auto-update monitoring if enabled."""
-        if not KEEP_UP_TO_DATE_WITH_GIT:
+        if not self._enabled:
             logger.info("Auto-update disabled by configuration")
             return
 
-        if not is_git_repository():
+        if not self._is_git_repository():
             logger.warning("Not in a git repository, auto-update disabled")
             return
 
@@ -62,10 +83,13 @@ class AutoUpdateService:
         # Capture the main event loop so the background thread can schedule
         # coroutines on it (asyncio.run() from a thread creates a throwaway
         # loop that tears down before sys.exit can fire).
-        self._loop = asyncio.get_running_loop()
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = asyncio.get_event_loop()
 
         # Get initial commit hash
-        self._last_known_commit = get_current_commit_hash()
+        self._last_known_commit = self._get_current_commit_hash()
         if self._last_known_commit:
             logger.info(
                 f"Starting auto-update monitoring from commit: {self._last_known_commit[:7]}")
@@ -109,7 +133,7 @@ class AutoUpdateService:
             await self._restart_callback(manual=manual)
 
         # Queue the restart through the queue service
-        return await queue_service.queue_restart(restart_wrapper)
+        return await self._queue_service.queue_restart(restart_wrapper)
 
     def _monitor_git_updates(self) -> None:
         """Main monitoring loop running in background thread."""
@@ -118,9 +142,9 @@ class AutoUpdateService:
         while not self._stop_monitoring.is_set():
             try:
                 # Fetch updates from origin
-                if fetch_updates():
+                if self._fetch_updates():
                     # Check for new commits
-                    if check_for_new_commits():
+                    if self._check_for_new_commits():
                         logger.info("New commits detected, triggering restart")
                         # Schedule restart on the main event loop
                         asyncio.run_coroutine_threadsafe(
@@ -158,15 +182,11 @@ class AutoUpdateService:
     def get_status(self) -> dict:
         """Get the current status of the auto-update service."""
         return {
-            "enabled": KEEP_UP_TO_DATE_WITH_GIT,
+            "enabled": self._enabled,
             "running": self._is_running,
             "check_interval": self.check_interval,
             "consecutive_failures": self._consecutive_failures,
             "max_failures": self._max_consecutive_failures,
             "last_known_commit": self._last_known_commit,
-            "is_git_repo": is_git_repository(),
+            "is_git_repo": self._is_git_repository(),
         }
-
-
-# Global auto-update service instance
-auto_update_service = AutoUpdateService()

@@ -5,16 +5,16 @@ Mention Handler - Handles bot mentions and context preparation
 import logging
 import re
 import time
-from typing import List, Dict, Any
+from typing import Any, Awaitable, Callable, Dict, List
 
 import discord
 
 from src.config import get_system_prompt, INCLUDE_NUM_CHATLINES
-from src.services.state_service import state_service
+from src.services.state_service import state_service as default_state_service
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url
-from src.services.openai_service import openai_service, OpenAIServiceError
-from src.services.message_service import message_service
-from src.services.queue_service import queue_service
+from src.services.openai_service import openai_service as default_openai_service, OpenAIServiceError
+from src.services.message_service import message_service as default_message_service
+from src.services.queue_service import queue_service as default_queue_service
 import asyncio
 from src.utils.downloader_utils import fetch_all_url_content
 
@@ -27,7 +27,30 @@ logger = logging.getLogger(__name__)
 class MentionHandler:
     """Handles bot mentions and context preparation."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        state_service=default_state_service,
+        openai_service=default_openai_service,
+        message_service=default_message_service,
+        queue_service=default_queue_service,
+        system_prompt_loader: Callable[[], str] = get_system_prompt,
+        include_num_chatlines: int = INCLUDE_NUM_CHATLINES,
+        mention_legend_provider: Callable[[discord.TextChannel, discord.User], Awaitable[str]] = get_mention_legend,
+        attachment_converter: Callable[[discord.Attachment], Awaitable[str]] = attachment_to_base64_data_url,
+        url_converter: Callable[[str], Awaitable[str]] = url_to_base64_data_url,
+        url_content_fetcher: Callable[[str], Awaitable[str]] = fetch_all_url_content,
+    ):
+        self._state_service = state_service
+        self._openai_service = openai_service
+        self._message_service = message_service
+        self._queue_service = queue_service
+        self._system_prompt_loader = system_prompt_loader
+        self._include_num_chatlines = include_num_chatlines
+        self._mention_legend_provider = mention_legend_provider
+        self._attachment_converter = attachment_converter
+        self._url_converter = url_converter
+        self._url_content_fetcher = url_content_fetcher
         # Cache for history fetching optimization
         # channel_id -> {"timestamp": float, "oldest_message": discord.Message}
         self._history_cache = {}
@@ -51,14 +74,14 @@ class MentionHandler:
         async with message.channel.typing():
             try:
                 # Mark channel as active
-                state_service.mark_channel_active(message.channel.id)
+                self._state_service.mark_channel_active(message.channel.id)
 
                 recent_messages, system_prompt = await self._prepare_mention_context(message, bot_user)
                 logger.info(
                     f"Context prepared for mention by {
                         message.author}, sending to OpenRouter...")
                 channel_id = message.channel.id
-                reply_content = await openai_service.get_chat_completion(
+                reply_content = await self._openai_service.get_chat_completion(
                     model=model,
                     messages=recent_messages,
                     system_prompt=system_prompt,
@@ -68,7 +91,7 @@ class MentionHandler:
 
                 if reply_content is None:
                     logger.error(f"❌ Received None from get_chat_completion for model {model}.")
-                    await message_service.send_channel_reply(
+                    await self._message_service.send_channel_reply(
                         message.channel, 
                         f"I'm sorry, I failed to get a response from the model '{model}'. It returned an empty result."
                     )
@@ -82,19 +105,19 @@ class MentionHandler:
                     files_to_upload = reply_content.get("files", [])
 
                     if files_to_upload:
-                        await message_service.send_channel_reply_with_files(message.channel, reply_text, files_to_upload)
+                        await self._message_service.send_channel_reply_with_files(message.channel, reply_text, files_to_upload)
                     else:
-                        await message_service.send_channel_reply(message.channel, reply_text)
+                        await self._message_service.send_channel_reply(message.channel, reply_text)
                 else:
                     # Regular text response
-                    await message_service.send_channel_reply(message.channel, reply_content)
+                    await self._message_service.send_channel_reply(message.channel, reply_content)
 
             except OpenAIServiceError as e:
                 logger.error(f"❌ OpenAI API error in mention handler:\\n{e}")
                 error_message = f"Sorry, I encountered an error while processing your mention: {str(e)}"
 
                 try:
-                    await message_service.send_channel_reply(message.channel, error_message)
+                    await self._message_service.send_channel_reply(message.channel, error_message)
                 except Exception as discord_error:
                     logger.error(f"⚠️ Failed to send error message to Discord: {discord_error}")
                     # Try to send a simpler error message
@@ -114,7 +137,7 @@ class MentionHandler:
                 )
 
                 try:
-                    await message_service.send_channel_reply(message.channel, error_message)
+                    await self._message_service.send_channel_reply(message.channel, error_message)
                 except Exception as discord_error:
                     logger.error(f"⚠️ Failed to send error message to Discord: {discord_error}")
                     # Try to send a simpler error message
@@ -144,7 +167,7 @@ class MentionHandler:
         Returns:
             True if the mention was successfully queued, False if queue is full
         """
-        return await queue_service.queue_mention(
+        return await self._queue_service.queue_mention(
             message=message, bot_user=bot_user, model=model, handler=self.handle_mention
         )
 
@@ -184,7 +207,7 @@ class MentionHandler:
             # Update timestamp for this channel
             self._history_cache[channel_id]["timestamp"] = current_time
         else:
-            async for msg in message.channel.history(limit=INCLUDE_NUM_CHATLINES):
+            async for msg in message.channel.history(limit=self._include_num_chatlines):
                 history_msgs.append(msg)
             history_msgs.reverse()
 
@@ -195,15 +218,15 @@ class MentionHandler:
                 }
 
         # Get user legend for the channel
-        legend_section = await get_mention_legend(message.channel, bot_user)
+        legend_section = await self._mention_legend_provider(message.channel, bot_user)
 
         # Prepare system prompt
-        channel_system_prompt = state_service.get_system_prompt(
+        channel_system_prompt = self._state_service.get_system_prompt(
             message.channel.id)
         if channel_system_prompt:
             current_channel_system_prompt = channel_system_prompt
         else:
-            current_channel_system_prompt = get_system_prompt()
+            current_channel_system_prompt = self._system_prompt_loader()
 
         current_channel_system_prompt += (
             f"In the channel you are <@{bot_user.id}>!\n\n"
@@ -300,7 +323,7 @@ class MentionHandler:
 
             # Fetch all supported URLs automatically
             if role == "user":
-                url_content = await fetch_all_url_content(final_text)
+                url_content = await self._url_content_fetcher(final_text)
                 if url_content:
                     final_text = url_content + final_text
 
@@ -315,7 +338,7 @@ class MentionHandler:
                 try:
                     # We only convert attachments for user messages
                     if role == "user":
-                        file_data_url = await attachment_to_base64_data_url(attach)
+                        file_data_url = await self._attachment_converter(attach)
                         if attach.content_type and attach.content_type.startswith(
                                 'image/'):
                             file_payloads.append(
@@ -342,7 +365,7 @@ class MentionHandler:
                     try:
                         logger.debug(
                             f"Fetching embed preview image from: {embed_url}")
-                        image_data_url = await url_to_base64_data_url(embed_url)
+                        image_data_url = await self._url_converter(embed_url)
                         file_payloads.append(
                             {"type": "image_url", "image_url": {"url": image_data_url}}
                         )

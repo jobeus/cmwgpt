@@ -9,7 +9,6 @@ from typing import Optional
 import discord
 from discord import app_commands
 
-from src.services.queue_service import queue_service
 from src.services.state_service import state_service
 from src.services.interject_service import (
     INTERJECT_CHANCE_PERCENT, COOLDOWN_MINUTES, MIN_MESSAGES,
@@ -24,8 +23,10 @@ logger = logging.getLogger(__name__)
 class InterjectCommands:
     """Handles /interject Discord commands."""
 
-    def __init__(self, bot: discord.ext.commands.Bot):
+    def __init__(self, bot: discord.ext.commands.Bot, *, state_service_instance=state_service, interject_service=None):
         self.bot = bot
+        self._state_service = state_service_instance
+        self._interject_service = interject_service
 
     def setup_commands(self) -> None:
         """Set up all interject-related commands."""
@@ -112,13 +113,13 @@ class InterjectCommands:
             exclude_embeds: Optional[bool]) -> None:
         """Handle the /interject set command."""
         channel_id = interaction.channel.id
-        state_service.mark_channel_active(channel_id)
+        self._state_service.mark_channel_active(channel_id)
 
         if all(x is None for x in [chance, cooldown, min_messages, min_authors, window_mins, context_lines, daily_max, exclude_embeds]):
             await interaction.followup.send("You must provide at least one setting to change.", ephemeral=True)
             return
 
-        current_settings = state_service.get_interject_settings(channel_id) or {}
+        current_settings = self._state_service.get_interject_settings(channel_id) or {}
         
         if chance is not None:
             current_settings["chance"] = chance
@@ -137,7 +138,7 @@ class InterjectCommands:
         if exclude_embeds is not None:
             current_settings["exclude_embeds"] = exclude_embeds
 
-        state_service.set_interject_settings(channel_id, current_settings)
+        self._state_service.set_interject_settings(channel_id, current_settings)
 
         logger.info(f"[/interject set] Channel {channel_id}: settings updated to {current_settings}.")
         await interaction.followup.send(
@@ -156,9 +157,9 @@ class InterjectCommands:
     async def _handle_interject_reset(self, interaction: discord.Interaction) -> None:
         """Handle the /interject reset command."""
         channel_id = interaction.channel.id
-        state_service.mark_channel_active(channel_id)
+        self._state_service.mark_channel_active(channel_id)
 
-        state_service.clear_interject_settings(channel_id)
+        self._state_service.clear_interject_settings(channel_id)
         
         logger.info(f"[/interject reset] Channel {channel_id}: settings reset to defaults.")
         await interaction.followup.send("Interjection settings for this channel have been reset to defaults.", ephemeral=True)
@@ -166,7 +167,7 @@ class InterjectCommands:
     async def _handle_interject_view(self, interaction: discord.Interaction) -> None:
         """Handle the /interject view command."""
         channel_id = interaction.channel.id
-        settings = state_service.get_interject_settings(channel_id) or {}
+        settings = self._state_service.get_interject_settings(channel_id) or {}
         
         chance = settings.get("chance", INTERJECT_CHANCE_PERCENT)
         cooldown = settings.get("cooldown", COOLDOWN_MINUTES)
@@ -194,9 +195,12 @@ class InterjectCommands:
 
     async def _handle_interject_count(self, interaction: discord.Interaction) -> None:
         """Handle the /interject count command."""
+        if not self._interject_service:
+            await interaction.followup.send("Interject service is not configured.", ephemeral=True)
+            return
+
         channel_id = interaction.channel.id
-        from src.services.interject_service import interject_service
-        current_count, daily_max = interject_service.get_daily_status(channel_id)
+        current_count, daily_max = self._interject_service.get_daily_status(channel_id)
         
         remaining = max(0, daily_max - current_count)
         msg = (

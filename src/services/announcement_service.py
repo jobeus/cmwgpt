@@ -8,13 +8,13 @@ particularly for update notifications after restarts.
 import asyncio
 import logging
 import subprocess
-from typing import Optional
+from typing import Callable, Optional
 
 import discord
 from discord.ext import commands
 
 from src.config import QUIET_UPDATES
-from src.services.state_service import state_service
+from src.services.state_service import state_service as default_state_service
 from src.utils.pasters import upload_to_pasters
 
 logger = logging.getLogger(__name__)
@@ -23,9 +23,22 @@ logger = logging.getLogger(__name__)
 class AnnouncementService:
     """Service for sending announcements to active channels."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        state_service=default_state_service,
+        paste_service=None,
+        quiet_updates: bool = QUIET_UPDATES,
+        current_git_sha_loader: Optional[Callable[[], Optional[str]]] = None,
+        changelog_loader: Optional[Callable[[str, str], Optional[str]]] = None,
+    ):
         """Initialize the announcement service."""
         self._bot: Optional[commands.Bot] = None
+        self._state_service = state_service
+        self._paste_service = paste_service
+        self._quiet_updates = quiet_updates
+        self._current_git_sha_loader = current_git_sha_loader or self._get_current_git_sha
+        self._changelog_loader = changelog_loader or self._get_complete_changelog
 
     def set_bot(self, bot: commands.Bot) -> None:
         """
@@ -87,6 +100,14 @@ class AnnouncementService:
             logger.debug(f"Error getting changelog: {e}")
             return None
 
+    @staticmethod
+    def _build_truncated_message(base_message: str, changelog: str) -> str:
+        lines = changelog.split("\n")
+        truncated_changelog = "\n".join(lines[:5])
+        if len(lines) > 5:
+            truncated_changelog += f"\n• ... and {len(lines) - 5} more commits"
+        return f"{base_message} Recent changes:\n{truncated_changelog}"
+
     async def announce_update(self, was_manual: bool = False) -> None:
         """
         Announce bot update to all active channels.
@@ -100,20 +121,20 @@ class AnnouncementService:
             return
 
         # Check if quiet updates are enabled
-        if QUIET_UPDATES:
+        if self._quiet_updates:
             logger.info(
                 "QUIET_UPDATES is enabled, skipping update announcement")
             return
 
         # Get current git SHA
-        current_sha = self._get_current_git_sha()
+        current_sha = self._current_git_sha_loader()
         if not current_sha:
             logger.warning(
                 "Could not determine git SHA, skipping update announcement")
             return
 
         # Get previous SHA from state
-        previous_sha = state_service.get_last_git_sha()
+        previous_sha = self._state_service.get_last_git_sha()
 
         # If we have a previous SHA and it's the same as current, skip
         # announcement
@@ -123,7 +144,7 @@ class AnnouncementService:
             return
 
         # Get active channels
-        active_channels = state_service.get_active_channels()
+        active_channels = self._state_service.get_active_channels()
         if not active_channels:
             logger.info("No active channels to announce to")
             return
@@ -131,13 +152,13 @@ class AnnouncementService:
         # Get complete changelog if we have a previous SHA
         changelog = None
         if previous_sha:
-            changelog = self._get_complete_changelog(previous_sha, current_sha)
+            changelog = self._changelog_loader(previous_sha, current_sha)
 
         # Skip announcement if there is no changelog containing #announce
         if not changelog:
             logger.info(
                 "No commits with #announce found, skipping announcement")
-            state_service.set_last_git_sha(current_sha)
+            self._state_service.set_last_git_sha(current_sha)
             return
 
         # Prepare announcement message
@@ -151,20 +172,16 @@ class AnnouncementService:
         if len(full_message) <= 2000:
             message = full_message
         else:
-            # Message too long, upload to paste service
-            try:
-                paste_url = await upload_to_pasters(changelog)
-                message = f"{base_message} Changes:\n[View complete changelog]({paste_url})"
-            except Exception as e:
-                logger.error(
-                    f"Failed to upload changelog to paste service: {e}")
-                # Fallback to truncated message
-                lines = changelog.split("\n")
-                truncated_changelog = "\n".join(lines[:5])
-                if len(lines) > 5:
-                    truncated_changelog += f"\n• ... and {
-                        len(lines) - 5} more commits"
-                message = f"{base_message} Recent changes:\n{truncated_changelog}"
+            if self._paste_service:
+                try:
+                    paste_url = await upload_to_pasters(changelog, uploader=self._paste_service)
+                    message = f"{base_message} Changes:\n[View complete changelog]({paste_url})"
+                except Exception as e:
+                    logger.error(
+                        f"Failed to upload changelog to paste service: {e}")
+                    message = self._build_truncated_message(base_message, changelog)
+            else:
+                message = self._build_truncated_message(base_message, changelog)
 
         logger.info(
             f"Announcing update to {
@@ -177,7 +194,7 @@ class AnnouncementService:
         for channel_id in active_channels:
             try:
                 channel = self._bot.get_channel(channel_id)
-                if channel and isinstance(channel, discord.TextChannel):
+                if channel and hasattr(channel, "send"):
                     await channel.send(message)
                     successful_announcements += 1
                     logger.debug(
@@ -208,9 +225,5 @@ class AnnouncementService:
             f"Update announcements sent: {successful_announcements} successful, {failed_announcements} failed")
 
         # Update the git SHA in state now that we've announced the update
-        state_service.set_last_git_sha(current_sha)
+        self._state_service.set_last_git_sha(current_sha)
         logger.debug(f"Updated last git SHA to: {current_sha[:7]}")
-
-
-# Global announcement service instance
-announcement_service = AnnouncementService()

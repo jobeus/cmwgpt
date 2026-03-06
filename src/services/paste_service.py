@@ -1,9 +1,8 @@
-"""
-Paste Service - Handles uploading long content to paste services
-"""
+"""Paste Service - Handles uploading long content to paste services."""
 
-import io
 import logging
+from typing import Callable, Optional
+
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -12,8 +11,16 @@ logger = logging.getLogger(__name__)
 class PasteService:
     """Service for handling paste operations."""
 
-    def __init__(self, base_url: str = "https://paste.rs"):
+    def __init__(
+        self,
+        base_url: str = "https://paste.rs",
+        *,
+        cache_injector: Optional[Callable[[str, str], None]] = None,
+        client_factory=httpx.AsyncClient,
+    ):
         self.base_url = base_url
+        self._cache_injector = cache_injector
+        self._client_factory = client_factory
 
     async def upload_text(self, text: str) -> str:
         """
@@ -29,14 +36,14 @@ class PasteService:
             Exception: If upload fails
         """
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with self._client_factory(timeout=10.0) as client:
                 response = await client.post(
                     self.base_url, content=text.encode("utf-8"))
 
                 if response.status_code == 201:
                     paste_url = response.text.strip() + ".md"
-                    from src.utils.url_utils import inject_article_cache
-                    inject_article_cache(paste_url, text)
+                    if self._cache_injector:
+                        self._cache_injector(paste_url, text)
                     return paste_url
                 else:
                     raise Exception(
@@ -57,6 +64,6 @@ class PasteService:
         """
         return await self.upload_text(markdown_text)
 
+from src.utils.url_utils import inject_article_cache
 
-# Global service instance
-paste_service = PasteService()
+paste_service = PasteService(cache_injector=inject_article_cache)
