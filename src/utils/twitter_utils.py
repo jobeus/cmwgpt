@@ -174,12 +174,13 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
 
                     if transcript_text:
                         video_transcript = transcript_text
+                        await groq_resp.request.aread()
                         await log_api_request(
                             service_name="groq/whisper-large-v3-turbo",
                             method=groq_resp.request.method,
                             endpoint_url=str(groq_resp.request.url),
                             request_headers=dict(groq_resp.request.headers),
-                            request_body=audio_bytes.hex() if audio_bytes else "",
+                            request_body=groq_resp.request.content.hex() if groq_resp.request.content else b''.hex(),
                             response_status=groq_resp.status_code,
                             response_headers=dict(groq_resp.headers),
                             response_body=transcript_text,

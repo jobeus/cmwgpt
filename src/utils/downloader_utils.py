@@ -69,6 +69,7 @@ async def fetch_all_url_content(message_text: str) -> str:
                     if groq_resp:
                         # Log exact HTTP multipart request as it went over the wire
                         actual_req = groq_resp.request
+                        actual_req.read()
                         req_body_bytes = actual_req.content if actual_req.content else b""
                         
                         await log_api_request(
