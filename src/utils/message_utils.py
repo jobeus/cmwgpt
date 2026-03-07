@@ -5,10 +5,29 @@ Extracted from service classes to follow the principle of separating
 stateless utility functions from stateful service classes.
 """
 
+import os
+from datetime import datetime
+
 import discord
 import re
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from typing import Union, List
+
+
+PROMPT_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+def format_discord_timestamp(timestamp: datetime) -> str:
+    """Format a Discord timestamp in the timezone requested by the process."""
+    tz_name = os.environ.get("TZ", "").strip()
+    if tz_name:
+        try:
+            return timestamp.astimezone(ZoneInfo(tz_name)).strftime(PROMPT_TIMESTAMP_FORMAT)
+        except ZoneInfoNotFoundError:
+            pass
+
+    return timestamp.astimezone().strftime(PROMPT_TIMESTAMP_FORMAT)
 
 
 def format_attachment_message(

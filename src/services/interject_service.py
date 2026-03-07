@@ -21,6 +21,7 @@ from discord.ext import commands
 
 from src.config import get_system_prompt, DEFAULT_MODEL
 from src.utils.discord_helper import get_mention_legend
+from src.utils.message_utils import format_discord_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -282,7 +283,7 @@ class InterjectService:
         chat_context: list[dict] = []
         for msg in context_messages:
             role = "assistant" if msg.author.id == bot_id else "user"
-            timestamp_str = msg.created_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+            timestamp_str = format_discord_timestamp(msg.created_at)
             text = f"[{timestamp_str}] [{msg.id}] <@{msg.author.id}>:"
             if msg.content:
                 content = msg.content
@@ -301,13 +302,13 @@ class InterjectService:
                 ref_author_id = None
                 if isinstance(ref_msg, discord.Message) and ref_msg.content:
                     ref_text = ref_msg.content
-                    ref_timestamp = ref_msg.created_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+                    ref_timestamp = format_discord_timestamp(ref_msg.created_at)
                     ref_author_id = ref_msg.author.id
                 else:
                     for h_msg in context_messages:
                         if h_msg.id == msg.reference.message_id:
                             ref_text = h_msg.content
-                            ref_timestamp = h_msg.created_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+                            ref_timestamp = format_discord_timestamp(h_msg.created_at)
                             ref_author_id = h_msg.author.id
                             break
 

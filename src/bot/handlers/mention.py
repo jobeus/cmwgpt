@@ -12,6 +12,7 @@ import discord
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url
 from src.services.openai_service import OpenAIServiceError
 from src.utils.downloader_utils import fetch_all_url_content
+from src.utils.message_utils import format_discord_timestamp
 
 # Pattern to strip cost prefixes like [$0.011] or [$0.005 @ z-image] from the start of bot messages
 COST_PREFIX_PATTERN = re.compile(r'^\[\$[\d.]+(?:\s*@\s*[^\]]+)?\]\s*')
@@ -242,7 +243,7 @@ class MentionHandler:
             text_lines = []
             # Prefix with timestamp, message ID and discord ID for ALL messages
             # so the bot knows who is speaking and can map replies
-            timestamp_str = msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            timestamp_str = format_discord_timestamp(msg.created_at)
             text_lines.append(
                 f"[{timestamp_str}] [{msg.id}] <@{msg.author.id}>:")
 
@@ -268,13 +269,13 @@ class MentionHandler:
                 ref_author_id = None
                 if isinstance(ref_msg, discord.Message) and ref_msg.content:
                     ref_text = ref_msg.content
-                    ref_timestamp = ref_msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                    ref_timestamp = format_discord_timestamp(ref_msg.created_at)
                     ref_author_id = ref_msg.author.id
                 else:
                     for h_msg in history_msgs:
                         if h_msg.id == msg.reference.message_id:
                             ref_text = h_msg.content
-                            ref_timestamp = h_msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                            ref_timestamp = format_discord_timestamp(h_msg.created_at)
                             ref_author_id = h_msg.author.id
                             break
 

@@ -116,12 +116,18 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         channel.history = history
 
-        context, system_prompt = await handler._prepare_mention_context(mention_msg, bot_user)
+        with patch.dict("os.environ", {"TZ": "America/Denver"}, clear=False):
+            context, system_prompt = await handler._prepare_mention_context(mention_msg, bot_user)
 
         self.assertEqual(len(context), 4)
         self.assertEqual(context[1]["role"], "assistant")
         self.assertEqual(context[2]["role"], "user")
         self.assertEqual(context[2]["content"][1]["type"], "image_url")
+        self.assertIn("[2024-01-01 05:00:00] [3] <@222>:", context[-1]["content"][0]["text"])
+        self.assertIn(
+            '[Replying to message: "[2024-01-01 05:00:00] [1] <@111>: earlier text"]',
+            context[-1]["content"][0]["text"],
+        )
         self.assertIn("earlier text", context[-1]["content"][0]["text"])
         self.assertIn("[fetched-url]", context[-1]["content"][0]["text"])
         self.assertIn("legend text", system_prompt)
