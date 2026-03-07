@@ -1,241 +1,87 @@
-# Discord Bot Test Suite
+# Test suite overview
 
-Comprehensive unit tests for the Discord Bot project, covering all major functionality and edge cases.
+This repository includes a Python test suite for the bot, services, utilities, and downloader pipeline.
 
-## 📁 Test Structure
+## Main ways to run tests
 
-```
-tests/
-├── __init__.py                    # Test package initialization
-├── README.md                      # This file
-├── run_tests.py                   # Test runner script
-├── test_config.py                 # Configuration module tests
-├── test_openai_handler.py         # OpenAI API integration tests
-├── test_utils_discord_helper.py   # Discord utility function tests
-├── test_utils_pasters.py          # Paste service integration tests
-└── test_bot_functions.py          # Bot helper function tests
-```
-
-## 🧪 Test Coverage
-
-### `test_config.py`
-- ✅ Environment variable loading
-- ✅ Default value fallbacks
-- ✅ Boolean parsing (`true`/`false`, `1`/`0`)
-- ✅ Integer parsing and validation
-- ✅ Configuration validation
-
-### `test_openai_handler.py`
-- ✅ Chat completion API calls
-- ✅ Multiple model support (GPT-5, GPT-5-mini, GPT-5-nano)
-- ✅ Image generation (GPT-Image-1.5)
-- ✅ Image editing functionality
-- ✅ Base64 encoding/decoding
-- ✅ Error handling for API failures
-- ✅ Complex message structure handling
-
-### `test_utils_discord_helper.py`
-- ✅ Mention legend generation
-- ✅ Guild member fetching
-- ✅ Special character handling in usernames
-- ✅ Large guild support
-- ✅ Duplicate username handling
-- ✅ Output format consistency
-
-### `test_utils_pasters.py`
-- ✅ Successful paste uploads
-- ✅ Error handling (400, 500 status codes)
-- ✅ Unicode and special character support
-- ✅ Large text handling
-- ✅ Network error handling
-- ✅ Response text processing
-
-### `test_bot_functions.py`
-- ✅ Mention context preparation
-- ✅ Channel reply handling (short/long messages)
-- ✅ Interaction followup handling
-- ✅ Paste service integration
-- ✅ Discord message length limits
-- ✅ JSON content serialization
-- ✅ Username formatting
-- ✅ Attachment URL formatting
-
-## 🚀 Running Tests
-
-### Using the Custom Test Runner
+### Make targets
 
 ```bash
-# Run all tests
-python tests/run_tests.py
-
-# Run specific test module
-python tests/run_tests.py config
-python tests/run_tests.py openai_handler
+make test
+make test-verbose
+make test-coverage
+make test-specific TEST=config
 ```
 
-### Using unittest (Built-in)
+### Direct commands
 
 ```bash
-# Run all tests
-python -m unittest discover tests
-
-# Run specific test file
-python -m unittest tests.test_config
-python -m unittest tests.test_openai_handler
-
-# Run specific test class
-python -m unittest tests.test_config.TestConfig
-
-# Run specific test method
-python -m unittest tests.test_config.TestConfig.test_default_values
+.venv/bin/python tests/run_tests.py
+.venv/bin/python -m unittest discover tests -v
+.venv/bin/python -m pytest
 ```
 
-### Using pytest (Recommended)
+`make test` uses `tests/run_tests.py`, which discovers `test_*.py` modules and prints a summary.
 
-First install test dependencies:
+## What is covered
+
+Representative test modules currently include:
+
+- startup/client wiring
+  - `test_main.py`
+  - `test_startup.py`
+  - `test_bot_client.py`
+- commands
+  - `test_system_commands.py`
+  - `test_image_commands.py`
+  - `test_interject_commands.py`
+  - `test_death_commands.py`
+- services
+  - `test_queue_service.py`
+  - `test_state_service.py`
+  - `test_message_service.py`
+  - `test_runpod_service.py`
+  - `test_death_service.py`
+  - `test_interject_service.py`
+  - `test_auto_update.py`
+- mention and prompt handling
+  - `test_mention_handler.py`
+  - `test_openai_handler.py`
+  - `test_message_utils.py`
+  - `test_discord_helper.py`
+- downloader/media helpers
+  - `test_downloader_utils.py`
+  - `test_youtube_utils.py`
+  - `test_tiktok_utils.py`
+  - `test_twitter_utils.py`
+  - `test_facebook_utils.py`
+  - `test_url_utils.py`
+- database/logging
+  - `test_db_connection.py`
+  - `test_db_logger.py`
+
+## Current downloader/provider flow under test
+
+The URL-enrichment stack now works like this:
+
+- **YouTube**: `youtube_transcript_api`, optional `TRANSCRIPT_PROXY`, persistent cache
+- **TikTok**: `yt-dlp` download -> ffmpeg audio extraction -> Groq Whisper transcription, with proxy fallback and persistent cache
+- **Twitter/X**: RapidAPI tweet detail/context lookup -> optional Groq Whisper transcription for embedded video audio -> persistent cache
+- **Facebook**: `yt-dlp` download -> ffmpeg audio extraction -> Groq Whisper transcription, with proxy fallback and persistent cache
+- **Articles**: `httpx` fetch -> `trafilatura` extraction -> `newspaper3k` fallback -> persistent cache
+
+`test_downloader_utils.py` verifies the aggregation/orchestration layer, while the source-specific test modules validate the individual helper behaviors.
+
+## Notes on dependencies
+
+Some tests patch external integrations rather than making live network calls. If you see failures related to missing packages, make sure `test_requirements.txt` has been installed.
+
+## Focused runs
+
+Examples:
+
 ```bash
-pip install -r test_requirements.txt
+make test-specific TEST=downloader_utils
+.venv/bin/python -m pytest tests/test_mention_handler.py
+.venv/bin/python -m pytest tests/test_twitter_utils.py -q
 ```
-
-Then run tests:
-```bash
-# Run all tests with coverage
-pytest
-
-# Run specific test file
-pytest tests/test_config.py
-
-# Run tests with specific markers
-pytest -m unit
-pytest -m "not slow"
-
-# Run tests with verbose output
-pytest -v
-
-# Run tests with coverage report
-pytest --cov=. --cov-report=html
-```
-
-## 📊 Test Metrics
-
-- **Total Test Files**: 6
-- **Total Test Methods**: 50+
-- **Code Coverage**: Targets 90%+ for core functionality
-- **Test Categories**: Unit tests, Integration tests, Error handling
-
-## 🔧 Test Configuration
-
-### Environment Setup
-Tests automatically handle environment variable mocking and cleanup to ensure isolation between test runs.
-
-### Async Testing
-Async functions are properly tested using `asyncio` event loops and `AsyncMock` objects.
-
-### Mocking Strategy
-- **External APIs**: OpenAI API calls are mocked
-- **Discord Objects**: Discord.py objects are mocked for testing
-- **Network Requests**: HTTP requests are mocked
-- **File Operations**: File I/O is mocked where appropriate
-
-## 🐛 Debugging Tests
-
-### Verbose Output
-```bash
-python tests/run_tests.py  # Shows detailed output
-pytest -v -s               # Shows print statements
-```
-
-### Coverage Reports
-```bash
-pytest --cov=. --cov-report=html
-# Open htmlcov/index.html in browser
-```
-
-### Individual Test Debugging
-```bash
-python -m unittest tests.test_config.TestConfig.test_default_values -v
-```
-
-## 📝 Writing New Tests
-
-### Test Naming Convention
-- Test files: `test_<module_name>.py`
-- Test classes: `Test<ClassName>`
-- Test methods: `test_<functionality_description>`
-
-### Example Test Structure
-```python
-import unittest
-from unittest.mock import patch, MagicMock
-
-class TestNewFeature(unittest.TestCase):
-    def setUp(self):
-        """Set up test fixtures before each test method."""
-        pass
-
-    def tearDown(self):
-        """Clean up after each test method."""
-        pass
-
-    def test_basic_functionality(self):
-        """Test basic functionality with valid input."""
-        # Arrange
-        # Act
-        # Assert
-        pass
-
-    def test_error_handling(self):
-        """Test error handling with invalid input."""
-        with self.assertRaises(ExpectedException):
-            # Test code that should raise exception
-            pass
-```
-
-### Async Test Structure
-```python
-import asyncio
-import unittest
-from unittest.mock import AsyncMock
-
-class TestAsyncFeature(unittest.TestCase):
-    def setUp(self):
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-
-    def tearDown(self):
-        self.loop.close()
-
-    def test_async_function(self):
-        async def run_test():
-            # Your async test code here
-            pass
-
-        self.loop.run_until_complete(run_test())
-```
-
-## 🎯 Best Practices
-
-1. **Test Isolation**: Each test should be independent
-2. **Mock External Dependencies**: Don't make real API calls
-3. **Test Edge Cases**: Include boundary conditions and error cases
-4. **Clear Test Names**: Test names should describe what they test
-5. **Arrange-Act-Assert**: Structure tests clearly
-6. **Clean Up**: Always clean up resources in tearDown
-7. **Use Subtests**: For testing multiple similar scenarios
-
-## 🔍 Continuous Integration
-
-These tests are designed to run in CI/CD environments. They:
-- Don't require external network access (mocked)
-- Don't require real Discord tokens
-- Don't require real OpenAI API keys
-- Clean up after themselves
-- Provide clear pass/fail indicators
-
-## 📈 Future Test Enhancements
-
-- [ ] Integration tests with real Discord bot (optional)
-- [ ] Performance benchmarking tests
-- [ ] Load testing for conversation storage
-- [ ] End-to-end workflow tests
-- [ ] Security testing for input validation

@@ -1,63 +1,87 @@
-# MariaDB Setup Guide
+# MariaDB setup
 
-This guide describes how to configure the MariaDB server for the CMWGPT bot.
+This project logs API requests and pipeline steps to MariaDB. The schema is defined in `init_db.sql`.
 
-## 1. Access the MariaDB Console
+## What uses MariaDB
 
-If you are running MariaDB on your server natively, SSH into your server and run:
+- the Python bot logging layer in `src/db/logger.py`
+- the Python connection pool in `src/db/connection.py`
+- the log-viewer backend in `log-viewer/backend`
+
+## Required variables
+
+- `DB_HOST`
+- `DB_PORT`
+- `DB_USER`
+- `DB_PASSWORD`
+- `DB_NAME`
+
+## Option 1: Docker compose
+
+The easiest development setup is the repository compose stack.
 
 ```bash
-mysql -u root -p
-```
-*(Enter your root password when prompted)*
-
-## 2. Create the Database
-
-Create the `cmwgpt` database with proper character encoding for emojis and international text:
-
-```sql
-CREATE DATABASE IF NOT EXISTS cmwgpt CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+cp .env.development.example .env.development
+docker compose --env-file .env.development up --build db
 ```
 
-## 3. Create the Database User
+Compose mounts `init_db.sql` into MariaDB's init directory, so a fresh volume gets the schema automatically.
 
-Create a dedicated user for the bot. Replace `'your_secure_password'` with a strong password.
+Default dev image/version in the compose file:
+
+- `mariadb:11.7`
+
+## Option 2: Existing/local MariaDB instance
+
+Create the database and user, then apply `init_db.sql`.
+
+Example:
 
 ```sql
-CREATE USER 'cmwgpt_user'@'localhost' IDENTIFIED BY 'your_secure_password';
-```
-
-## 4. Grant Privileges
-
-Give the new user all necessary permissions on the `cmwgpt` database:
-
-```sql
-GRANT ALL PRIVILEGES ON cmwgpt.* TO 'cmwgpt_user'@'localhost';
+CREATE DATABASE cmwgpt CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'cmwgpt_user'@'%' IDENTIFIED BY 'change-me-db';
+GRANT ALL PRIVILEGES ON cmwgpt.* TO 'cmwgpt_user'@'%';
 FLUSH PRIVILEGES;
 ```
 
-## 5. Initialize the Schema
+Then run:
 
-Exit the MariaDB console:
-```sql
-EXIT;
-```
-
-Now, import the provided database schema:
 ```bash
-# Assuming you are in the cmwgpt project directory on the server
-mysql -u cmwgpt_user -p cmwgpt < init_db.sql
+mariadb -u root -p cmwgpt < init_db.sql
 ```
-*(Enter the password you created in Step 3)*
 
-## 6. Update `.env`
+## Current schema responsibilities
 
-Update your `.env` file in the project directory to include these credentials:
+`init_db.sql` creates the tables required for request logging and pipeline tracing. Those rows are later consumed by the log viewer.
 
-```ini
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_USER=cmwgpt_user
-DB_PASSWORD=your_secure_password
-DB_NAME=cmwgpt
-```
+If the schema is missing or incompatible, you will typically see failures when:
+
+- downloader or model calls attempt to log API requests
+- pipeline steps try to persist artifacts/replay metadata
+- the log-viewer backend queries recent logs
+
+## Connectivity checklist
+
+Before starting the bot, verify:
+
+1. the database is reachable at `DB_HOST:DB_PORT`
+2. the configured user can connect
+3. the configured database exists
+4. `init_db.sql` has been applied
+
+## Common local values
+
+For local development without Docker:
+
+- `DB_HOST=127.0.0.1`
+- `DB_PORT=3306`
+- `DB_USER=cmwgpt_user`
+- `DB_NAME=cmwgpt`
+
+## Troubleshooting
+
+- `Access denied`: re-check `DB_USER`/`DB_PASSWORD` and grants
+- connection timeout/refused: verify host, port, and container/service health
+- missing log rows: confirm the schema exists and that the bot can write to it
+
+See also `docs/troubleshooting.md`.

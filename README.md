@@ -1,204 +1,152 @@
-# 🤖 AI Discord Bot
+# CMWGPT
 
-[![CI](https://github.com/jobeus/cmwgpt/actions/workflows/ci.yml/badge.svg)](https://github.com/jobeus/cmwgpt/actions/workflows/ci.yml)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+Discord bot for mention-driven chat, image generation/editing, automatic URL enrichment, and MariaDB-backed request logging.
 
-An intelligent Discord bot that brings OpenRouter's powerful AI models directly to your Discord server. Chat with AI, generate images, and get contextual responses - all through simple Discord commands and mentions.
+## What it does
 
-## ✨ Key Features
+- Responds when the bot is mentioned in Discord.
+- Augments prompts with content pulled from supported URLs:
+  - YouTube transcripts
+  - TikTok audio transcripts
+  - Twitter/X post context, plus embedded video transcription when available
+  - Facebook video transcripts
+  - Generic article extraction
+- Supports slash commands for model selection, system prompts, image generation/editing, interjections, deathwatch posts, and restart.
+- Logs API and pipeline activity to MariaDB for the log viewer.
 
-- **Two Interaction Modes**: Use `/chat` for private conversations or `@mention` for contextual channel responses
-- **Multi-Model AI**: Uses Google's Gemini Flash model locally and multiple others available via OpenRouter
-- **Image Generation**: Create images with Seedream
-- **🔍 Web Search**: AI can search the web in real-time for current information and answers
-- **🎨 AI Image Creation**: Generate images directly in conversations using the latest tools
-- **Image Analysis**: Upload images for AI analysis and understanding
-- **Channel-Specific Personalities**: Set custom AI behavior per channel
-- **Smart Context**: Bot understands channel history when mentioned
-- **Conversation Continuity**: Maintains conversation flow across interactions using API response tracking
-- **Auto-Update**: Automatically updates from git and restarts with state preservation
-- **Smart Restart**: Built-in restart script with automatic recovery and clean console output
+## Architecture at a glance
 
-## 🎯 How It Works
+- `main.py` starts the app and delegates wiring to `src/startup.py`.
+- `src/bot/client.py` owns the Discord client, slash-command registration, and startup/shutdown lifecycle.
+- `src/bot/handlers/mention.py` builds mention context, injects downloader output, and calls the model.
+- `src/services/openai_service.py` talks to OpenRouter for text responses.
+- `src/services/runpod_service.py` handles image generation and image editing models.
+- `src/db/logger.py` and `src/db/connection.py` persist request and pipeline logs to MariaDB.
+- `log-viewer/backend` and `log-viewer/frontend` provide the web UI for those logs.
 
-The bot operates in two distinct modes:
+See also:
 
-### 💬 **Separate Conversations** (`/chat`)
-- Start private conversations with the AI using `/chat [message]`
-- Each channel maintains its own conversation history
-- Perfect for focused discussions and extended conversations
-- Upload images for analysis alongside your messages
+- `docs/architecture.md`
+- `docs/commands.md`
+- `docs/configuration.md`
+- `docs/deployment.md`
+- `docs/development.md`
+- `docs/mariadb_setup.md`
 
-### 🗣️ **Contextual Responses** (`@mention`)
-- Mention the bot (`@YourBot`) in any channel message
-- Bot analyzes recent channel history for context
-- Provides relevant responses based on ongoing discussions
-- Great for getting AI input on current conversations
+## Quick start
 
-## 🚀 Quick Start
+### Local Python bot
 
-### Prerequisites
-- **Python 3.9 or later**
-- **Discord Bot Token** (from Discord Developer Portal)
-- **OpenRouter API Key** (from OpenRouter Platform)
+1. Create an env file from `env.example`.
+2. Create a virtualenv and install dependencies.
+3. Start MariaDB and initialize `init_db.sql`.
+4. Run the bot.
 
-### Installation
+Suggested commands:
 
-1. **Clone and Setup**
-   ```bash
-   git clone https://github.com/jobeus/cmwgpt.git
-   cd cmwgpt
-   pip3 install -r requirements.txt
-   ```
+```bash
+cp env.example .env
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r test_requirements.txt
+.venv/bin/python main.py
+```
 
-2. **Environment Configuration**
-   ```bash
-   cp env.example .env
-   # Edit .env with your Discord bot token and OpenRouter API key
-
-   # Optional: Customize the AI system prompt
-   cp system_prompt.txt.example system_prompt.txt
-   # Edit system_prompt.txt to customize the AI's personality and behavior
-   ```
-
-   For non-Docker production deployments you can also use `.env.production`.
-   If both files exist, the app prefers `.env.production`. You can override the
-   file explicitly with `CMWGPT_ENV_FILE=/path/to/your.env`.
-
-3. **Run the Bot**
-   ```bash
-   # With auto-restart support (recommended)
-   make run
-
-   # Or run directly
-   python3 main.py
-   ```
+`make venv install install-test` also works for setup. For local runs, prefer `make run-direct` over `make run`; the auto-restart wrapper in `start.sh` assumes a `venv/` path, while the Makefile creates `.venv/` by default.
 
 ### Docker development stack
 
-If you want the bot, log-viewer backend, log-viewer frontend, and MariaDB together in Docker:
+The repo includes a compose stack for:
+
+- `db` (MariaDB)
+- `bot` (Python bot)
+- `backend` (log-viewer API/socket server)
+- `frontend` (Vite React UI)
+
+Suggested flow:
 
 ```bash
 cp .env.development.example .env.development
-# Fill in .env.development
-
 docker compose --env-file .env.development up --build
 ```
 
-- Frontend: `http://localhost:5173`
-- Backend API: `http://localhost:3001/api`
-- Log viewer login uses `LOG_VIEWER_DEV_USERNAME` / `LOG_VIEWER_DEV_PASSWORD` when `LOG_VIEWER_DEV_AUTH_ENABLED=true`
+Default dev ports:
 
-## 🔧 Setup Guide
+- MariaDB: `3306`
+- Log viewer backend: `3001`
+- Log viewer frontend: `5173`
 
-### 1. Discord Bot Setup
+## Core environment variables
 
-1. Visit [Discord Developer Portal](https://discord.com/developers/applications)
-2. Create a new application and bot
-3. Copy the bot token from the "Bot" section
-4. Enable "SERVER MEMBERS INTENT" In Bot settings
-5. Enable "MESSAGE CONTENT INTENT" in Bot settings
-6. Use OAuth2 URL Generator to invite the bot to your server
-   - Required permissions: Send Messages, Use Slash Commands, Read Message History
+Required for the bot:
 
-### 2. OpenRouter API Setup
+- `DISCORD_BOT_TOKEN`
+- `OPENROUTER_API_KEY`
 
-1. Get your API key from [OpenRouter](https://openrouter.ai/keys)
-2. Add both tokens to your `.env` file:
+Required for specific downloader features:
 
-```env
-DISCORD_BOT_TOKEN=your_discord_bot_token_here
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-```
+- `GROQ_API_KEY` for TikTok/Facebook audio transcription and Twitter video transcription
+- `RAPIDAPI_KEY` for Twitter/X context fetches
 
-### 3. Runpod API Setup (Optional)
+Required for database-backed logging:
 
-1. Register an account and get your API key at [Runpod Settings](https://console.runpod.io/user/settings)
-2. Add your token to your `.env` file along with your Discord and OpenAI tokens:
+- `DB_HOST`
+- `DB_PORT`
+- `DB_USER`
+- `DB_PASSWORD`
+- `DB_NAME`
 
-```env
-DISCORD_BOT_TOKEN=your_discord_bot_token_here
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-RUNPOD_IO_API_KEY=your_runpod_api_key_here
-```
+Important optional values:
 
-## 📖 Basic Commands
+- `DEFAULT_MODEL`
+- `DEFAULT_DRAW_MODEL`
+- `DEFAULT_EDIT_MODEL`
+- `REPLY_TO_MENTIONS`
+- `INCLUDE_USERNAMES`
+- `INCLUDE_NUM_CHATLINES`
+- `TRANSCRIPT_PROXY`
+- `KEEP_UP_TO_DATE_WITH_GIT`
+- `QUIET_UPDATES`
+- `DISCORD_GUILD_ID`
+- `DEATH_CHANNEL_ID`
+- `MAX_CACHE_SIZE`
 
-### Essential Commands
+See `docs/configuration.md` for the full grouped reference, including log-viewer variables.
 
-- **`/chat [message]`** - Start a conversation with the AI
-  - Add images for analysis by attaching them to your message
-  - Each channel maintains separate conversation history
+## Current slash commands
 
-- **`@YourBot [message]`** - Mention the bot for contextual responses
-  - Bot analyzes recent channel messages for context
-  - Great for getting AI input on ongoing discussions
+- `/help`
+- `/model`
+- `/systemprompt set|view|reset`
+- `/draw`
+- `/drawmodel`
+- `/edit`
+- `/editmodel`
+- `/interject set|view|reset|count`
+- `/death set|view|reset`
+- `/restart`
 
-- **`/draw [prompt]`** - Generate images with AI
-  - Uses the seedream model by default
-  - Supports other Runpod models (`z-image`, `wan-2.6`, `pruna`, `qwen`, `flux`) if configured
+The main chat path is still mention-based: mention the bot in a message rather than using a `/chat` command.
 
-- **`/edit [prompt] [edit_image]`** - Edit existing images with AI
-  - Uses the seedream model by default
-  - Supports other Runpod multi-image models (`qwen`, `pruna`) if configured
+## Tests
 
-### Management Commands
+Run the Python test suite with one of:
 
-- **`/help`** - View all commands privately in the channel
-- **`/reset`** - Clear conversation history for the current channel
-- **`/model [name]`** - View or change AI model (anthropic/claude-haiku-4.5)
-- **`/drawmodel [name]`** - View or change AI image generation model
-- **`/editmodel [name]`** - View or change AI image editing model
-- **`/systemprompt set [prompt]`** - Set custom AI personality for the channel
-- **`/systemprompt view`** - View current system prompt
-- **`/systemprompt reset`** - Reset to default system prompt
-- **`/restart`** - Restart the bot with latest updates (admin only)
-
-> 💡 **Tip**: Each Discord channel has its own conversation history and settings!
-
-## 📚 Documentation
-
-For detailed information, see the [docs/](docs/) folder:
-
-- **[Architecture](docs/architecture.md)** - Technical architecture and design patterns
-- **[Development](docs/development.md)** - Development setup, testing, and contributing
-- **[Deployment](docs/deployment.md)** - CI/CD, Docker, and production deployment
-- **[Configuration](docs/configuration.md)** - Detailed configuration options
-- **[Commands](docs/commands.md)** - Complete command reference
-- **[Auto-Update](docs/auto-update.md)** - Automatic git-based updates and restarts
-- **[Function Calling](docs/function-calling.md)** - OpenAI function calling for dynamic user context
-- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
-
-## 🚀 Quick Examples
-
-### Custom AI Personalities
 ```bash
-# Create a coding assistant
-/systemprompt set You are a Python expert who provides concise, executable code examples
-
-# Create a creative writing helper
-/systemprompt set You are a creative writing assistant who helps with storytelling
-```
-
-### Testing Your Setup
-```bash
-# Run tests to make sure everything works
 make test
+make test-verbose
+.venv/bin/python -m pytest
 ```
 
-## 🤝 Contributing
+More detail: `tests/README.md`
 
-Interested in contributing? Check out [docs/development.md](docs/development.md) for the complete development guide including:
-- Development environment setup
-- Testing procedures
-- Code quality standards
-- Git workflow
+## Log viewer
 
-## 📄 License
+- Backend: `log-viewer/backend`
+- Frontend: `log-viewer/frontend`
 
-This project is open source and available under the MIT License.
+The frontend talks to the backend over HTTP and Socket.IO and expects the MariaDB log tables created by `init_db.sql`.
 
----
+## Status of the docs
 
-**Ready to enhance your Discord server with AI?** Follow the setup guide above and start chatting with your new AI assistant! 🚀
+This README and the files under `docs/`, `tests/README.md`, and `log-viewer/frontend/README.md` are intended to match the current codebase layout and behavior.
