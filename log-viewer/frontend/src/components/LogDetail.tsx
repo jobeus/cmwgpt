@@ -5,6 +5,7 @@ import { ArrowLeft, Code, MessageSquare, Clock, Server, Hash } from 'lucide-reac
 import { format } from 'date-fns';
 import { ConversationView } from './ConversationView';
 import { RawDetailPanels } from './RawDetailPanels';
+import { getPipelineTitle, isPipelinePayload } from '../utils/pipeline';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -39,6 +40,8 @@ export default function LogDetail() {
     const reqHeaders = parseJsonSafe(log.request_headers);
     const resBody = parseJsonSafe(log.response_body);
     const resHeaders = parseJsonSafe(log.response_headers);
+    const pipelineTitle = getPipelineTitle(reqBody, resBody, log.service_name);
+    const isPipeline = isPipelinePayload(reqBody) || isPipelinePayload(resBody);
 
     return (
         <div className="pb-20">
@@ -75,7 +78,10 @@ export default function LogDetail() {
                         <div className="text-xs text-gray-500 uppercase font-bold tracking-wider mb-1">Service</div>
                         <div className="flex items-center space-x-2 text-white">
                             <Server className="w-4 h-4 text-blue-400" />
-                            <span className="font-semibold text-lg">{log.service_name}</span>
+                            <div>
+                                <div className="font-semibold text-lg">{pipelineTitle}</div>
+                                {isPipeline && <div className="text-xs text-gray-500 font-mono mt-1">{log.service_name}</div>}
+                            </div>
                         </div>
                     </div>
                     <div>

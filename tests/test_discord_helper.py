@@ -40,7 +40,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result, bytes)
         self.assertNotEqual(result, buf.getvalue())
 
-    async def test_attachment_to_base64_data_url_caches_success_and_failure(self):
+    async def test_attachment_to_base64_data_url_caches_success_but_not_failures(self):
         attachment = MagicMock()
         attachment.id = 1
         attachment.filename = "image.png"
@@ -60,11 +60,30 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         broken.id = 2
         broken.filename = "broken.png"
         broken.read = AsyncMock(side_effect=RuntimeError("nope"))
-        with patch("src.utils.discord_helper._attachment_base64_cache", {}):
+        with patch("src.utils.discord_helper._attachment_base64_cache", {}) as failure_cache:
             with self.assertRaises(RuntimeError):
                 await discord_helper.attachment_to_base64_data_url(broken)
-            with self.assertRaises(Exception):
+            with self.assertRaises(RuntimeError):
                 await discord_helper.attachment_to_base64_data_url(broken)
+
+        self.assertNotIn(2, failure_cache)
+        self.assertEqual(broken.read.await_count, 2)
+
+    async def test_attachment_to_base64_data_url_discards_legacy_failure_sentinel(self):
+        attachment = MagicMock()
+        attachment.id = 2
+        attachment.filename = "recovered.png"
+        attachment.read = AsyncMock(return_value=b"image-bytes")
+        legacy_cache = {2: None}
+
+        with patch("src.utils.discord_helper._attachment_base64_cache", legacy_cache), patch(
+            "src.utils.discord_helper.compress_image", return_value=b"jpeg"
+        ):
+            result = await discord_helper.attachment_to_base64_data_url(attachment)
+
+        self.assertTrue(result.startswith("data:image/jpeg;base64,"))
+        self.assertEqual(legacy_cache[2], result)
+        attachment.read.assert_awaited_once()
 
     async def test_attachment_to_base64_data_url_evicts_oldest_cache_entries(self):
         attachment = MagicMock()
@@ -81,20 +100,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(0, full_cache)
         self.assertIn(999, full_cache)
 
-        broken = MagicMock()
-        broken.id = 1000
-        broken.filename = "broken.png"
-        broken.read = AsyncMock(side_effect=RuntimeError("nope"))
-        full_failure_cache = {i: f"cached-{i}" for i in range(discord_helper.MAX_CACHE_SIZE)}
-
-        with patch("src.utils.discord_helper._attachment_base64_cache", full_failure_cache):
-            with self.assertRaises(RuntimeError):
-                await discord_helper.attachment_to_base64_data_url(broken)
-
-        self.assertNotIn(0, full_failure_cache)
-        self.assertIsNone(full_failure_cache[1000])
-
-    async def test_url_to_base64_data_url_caches_success_and_timeout_failure(self):
+    async def test_url_to_base64_data_url_caches_success_but_not_timeout_failures(self):
         fake_client = MagicMock()
         fake_client.get = AsyncMock(return_value=SimpleNamespace(
             content=b"image-bytes",
@@ -113,15 +119,18 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
 
         timeout_client = MagicMock()
         timeout_client.get = AsyncMock(side_effect=httpx.TimeoutException("slow"))
-        with patch("src.utils.discord_helper._url_base64_cache", {}), patch(
+        with patch("src.utils.discord_helper._url_base64_cache", {}) as failure_cache, patch(
             "httpx.AsyncClient", side_effect=lambda **kwargs: FakeAsyncClientContext(timeout_client)
         ):
             with self.assertRaises(httpx.TimeoutException):
                 await discord_helper.url_to_base64_data_url("https://example.com/slow.png")
-            with self.assertRaises(Exception):
+            with self.assertRaises(httpx.TimeoutException):
                 await discord_helper.url_to_base64_data_url("https://example.com/slow.png")
 
-    async def test_url_to_base64_data_url_evicts_and_caches_http_and_generic_failures(self):
+        self.assertNotIn("https://example.com/slow.png", failure_cache)
+        self.assertEqual(timeout_client.get.await_count, 2)
+
+    async def test_url_to_base64_data_url_evicts_and_does_not_cache_http_or_generic_failures(self):
         fake_client = MagicMock()
         fake_client.get = AsyncMock(return_value=SimpleNamespace(
             content=b"image-bytes",
@@ -151,11 +160,12 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(httpx.HTTPError):
                 await discord_helper.url_to_base64_data_url("https://example.com/fail.png")
-            with self.assertRaises(Exception):
+            with self.assertRaises(httpx.HTTPError):
                 await discord_helper.url_to_base64_data_url("https://example.com/fail.png")
 
-        self.assertNotIn("https://cached/0", http_failure_cache)
-        self.assertIsNone(http_failure_cache["https://example.com/fail.png"])
+        self.assertIn("https://cached/0", http_failure_cache)
+        self.assertNotIn("https://example.com/fail.png", http_failure_cache)
+        self.assertEqual(http_error_client.get.await_count, 2)
 
         generic_client = MagicMock()
         generic_client.get = AsyncMock(return_value=SimpleNamespace(
@@ -170,7 +180,24 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(RuntimeError):
                 await discord_helper.url_to_base64_data_url("https://example.com/generic.png")
 
-        self.assertIsNone(generic_failure_cache["https://example.com/generic.png"])
+        self.assertNotIn("https://example.com/generic.png", generic_failure_cache)
+
+    async def test_url_to_base64_data_url_discards_legacy_failure_sentinel(self):
+        fake_client = MagicMock()
+        fake_client.get = AsyncMock(return_value=SimpleNamespace(
+            content=b"image-bytes",
+            raise_for_status=lambda: None,
+        ))
+        legacy_cache = {"https://example.com/image.png": None}
+
+        with patch("src.utils.discord_helper._url_base64_cache", legacy_cache), patch(
+            "httpx.AsyncClient", side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client)
+        ), patch("src.utils.discord_helper.compress_image", return_value=b"jpeg"):
+            result = await discord_helper.url_to_base64_data_url("https://example.com/image.png")
+
+        self.assertTrue(result.startswith("data:image/jpeg;base64,"))
+        self.assertEqual(legacy_cache["https://example.com/image.png"], result)
+        fake_client.get.assert_awaited_once()
 
     async def test_get_mention_legend_formats_members(self):
         channel = SimpleNamespace(members=[SimpleNamespace(display_name="Alice", id=1), SimpleNamespace(display_name="Bob", id=2)])

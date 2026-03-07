@@ -12,6 +12,16 @@ class BadString:
 
 
 class TestDbLogger(unittest.IsolatedAsyncioTestCase):
+    def test_build_artifact_and_pipeline_payload_helpers(self):
+        artifact = db_logger.build_artifact(name="audio.mp3", media_type="audio/mpeg", data=b"abc")
+        payload = db_logger.build_pipeline_payload(title="Title", step="demo", data={"ok": True}, artifacts=[artifact])
+
+        self.assertEqual(payload["format"], db_logger.PIPELINE_STEP_FORMAT)
+        self.assertEqual(payload["title"], "Title")
+        self.assertEqual(payload["step"], "demo")
+        self.assertEqual(payload["artifacts"][0]["size_bytes"], 3)
+        self.assertIn("sha256", payload["artifacts"][0])
+
     def test_serialize_json_handles_common_inputs(self):
         self.assertIsNone(db_logger._serialize_json(None))
         self.assertEqual(db_logger._serialize_json("raw"), "raw")
@@ -59,3 +69,21 @@ class TestDbLogger(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args[8], 1.5)
         self.assertEqual(args[9], 12)
         self.assertEqual(args[10], 34)
+
+    async def test_log_pipeline_step_uses_step_method_and_structured_payloads(self):
+        with patch("src.db.logger.log_api_request", new=AsyncMock()) as mock_log_api_request:
+            await db_logger.log_pipeline_step(
+                service_name="downloader/demo",
+                endpoint_url="https://example.com/demo",
+                title="Demo step",
+                step="demo_step",
+                input_data={"input": 1},
+                output_data={"output": 2},
+                input_summary="demo input",
+                output_summary="demo output",
+            )
+
+        kwargs = mock_log_api_request.await_args.kwargs
+        self.assertEqual(kwargs["method"], "STEP")
+        self.assertEqual(kwargs["request_body"]["format"], db_logger.PIPELINE_STEP_FORMAT)
+        self.assertEqual(kwargs["response_body"]["data"], {"output": 2})

@@ -24,10 +24,21 @@ class TestYoutubeUtils(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, ["abcdefghijk", "lmnopqrstuv"])
 
-    async def test_get_transcript_returns_cached_values(self):
-        with patch("src.utils.youtube_utils._transcript_cache", {"abc": "cached", "bad": None}):
+    async def test_get_transcript_returns_cached_values_and_retries_legacy_failure_sentinels(self):
+        legacy_cache = {"abc": "cached", "bad": None}
+
+        async def fake_to_thread(fn):
+            return fn()
+
+        with patch("src.utils.youtube_utils._transcript_cache", legacy_cache), patch(
+            "src.utils.youtube_utils.TRANSCRIPT_PROXY", ""
+        ), patch("src.utils.youtube_utils.YouTubeTranscriptApi", return_value=FakeYoutubeApi()), patch(
+            "src.utils.youtube_utils.asyncio.to_thread", new=AsyncMock(side_effect=fake_to_thread)
+        ), patch("src.utils.youtube_utils.log_pipeline_step", new=AsyncMock()):
             self.assertEqual(await youtube_utils.get_transcript("abc"), "cached")
-            self.assertIsNone(await youtube_utils.get_transcript("bad"))
+            self.assertEqual(await youtube_utils.get_transcript("bad"), "hello world")
+
+        self.assertEqual(legacy_cache["bad"], "hello world")
 
     async def test_get_transcript_fetches_and_logs(self):
         fake_cache = {}
@@ -39,12 +50,12 @@ class TestYoutubeUtils(unittest.IsolatedAsyncioTestCase):
             "src.utils.youtube_utils.TRANSCRIPT_PROXY", ""
         ), patch("src.utils.youtube_utils.YouTubeTranscriptApi", return_value=FakeYoutubeApi()), patch(
             "src.utils.youtube_utils.asyncio.to_thread", new=AsyncMock(side_effect=fake_to_thread)
-        ), patch("src.utils.youtube_utils.log_api_request", new=AsyncMock()) as mock_log:
+        ), patch("src.utils.youtube_utils.log_pipeline_step", new=AsyncMock()) as mock_log:
             result = await youtube_utils.get_transcript("abcdefghijk")
 
         self.assertEqual(result, "hello world")
         self.assertEqual(fake_cache["abcdefghijk"], "hello world")
-        self.assertIn("video_id = \"abcdefghijk\"", mock_log.await_args.kwargs["request_body"])
+        self.assertIn("video_id = \"abcdefghijk\"", mock_log.await_args.kwargs["request_replay"]["python"])
 
     async def test_get_transcript_returns_none_on_failure(self):
         with patch("src.utils.youtube_utils._transcript_cache", {}), patch(

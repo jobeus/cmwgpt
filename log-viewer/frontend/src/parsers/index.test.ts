@@ -37,4 +37,43 @@ describe('parseServiceMessages', () => {
             { role: 'response', content: 'raw response' }
         ]);
     });
+
+    it('renders structured downloader pipeline steps as input/output cards', () => {
+        const messages = parseServiceMessages(
+            'downloader/tiktok/transcript',
+            {
+                format: 'pipeline_step.v1',
+                title: 'TikTok audio → transcript',
+                step: 'tiktok_transcript',
+                summary: 'Prepared TikTok audio for transcription',
+                data: { source_url: 'https://vt.tiktok.com/abc' }
+            },
+            {
+                format: 'pipeline_step.v1',
+                title: 'TikTok audio → transcript',
+                step: 'tiktok_transcript',
+                summary: 'Produced transcript text for TikTok content',
+                data: { transcript_text: 'hello world' }
+            }
+        );
+
+        expect(messages).toEqual([
+            {
+                role: 'request',
+                content: {
+                    type: 'pipeline_step',
+                    side: 'input',
+                    payload: expect.objectContaining({ title: 'TikTok audio → transcript' })
+                }
+            },
+            {
+                role: 'response',
+                content: {
+                    type: 'pipeline_step',
+                    side: 'output',
+                    payload: expect.objectContaining({ data: { transcript_text: 'hello world' } })
+                }
+            }
+        ]);
+    });
 });

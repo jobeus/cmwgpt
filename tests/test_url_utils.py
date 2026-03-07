@@ -49,10 +49,21 @@ class TestUrlUtils(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(fake_cache["https://example.com"], "hello")
 
-    async def test_get_article_text_returns_cached_values(self):
-        with patch("src.utils.url_utils._article_cache", {"https://ok": "cached", "https://bad": None}):
+    async def test_get_article_text_returns_cached_values_and_retries_legacy_failure_sentinels(self):
+        fake_client = MagicMock()
+        fake_client.get = AsyncMock(return_value=FakeResponse(text="<html>content</html>"))
+        legacy_cache = {"https://ok": "cached", "https://bad": None}
+
+        with patch("src.utils.url_utils._article_cache", legacy_cache), patch(
+            "src.utils.url_utils.httpx.AsyncClient",
+            side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client),
+        ), patch("src.utils.url_utils.trafilatura.extract", return_value="parsed text"), patch(
+            "src.utils.url_utils.log_pipeline_step", new=AsyncMock()
+        ):
             self.assertEqual(await url_utils.get_article_text("https://ok"), "cached")
-            self.assertIsNone(await url_utils.get_article_text("https://bad"))
+            self.assertEqual(await url_utils.get_article_text("https://bad"), "parsed text")
+
+        self.assertEqual(legacy_cache["https://bad"], "parsed text")
 
     async def test_get_article_text_uses_trafilatura_and_logs(self):
         fake_cache = {}
@@ -63,13 +74,13 @@ class TestUrlUtils(unittest.IsolatedAsyncioTestCase):
             "src.utils.url_utils.httpx.AsyncClient",
             side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client),
         ), patch("src.utils.url_utils.trafilatura.extract", return_value="parsed text"), patch(
-            "src.utils.url_utils.log_api_request", new=AsyncMock()
+            "src.utils.url_utils.log_pipeline_step", new=AsyncMock()
         ) as mock_log:
             result = await url_utils.get_article_text("https://example.com/page")
 
         self.assertEqual(result, "parsed text")
         self.assertEqual(fake_cache["https://example.com/page"], "parsed text")
-        mock_log.assert_awaited_once()
+        self.assertEqual(mock_log.await_count, 2)
 
     async def test_get_article_text_falls_back_to_newspaper(self):
         fake_cache = {}
@@ -83,7 +94,7 @@ class TestUrlUtils(unittest.IsolatedAsyncioTestCase):
             side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client),
         ), patch("src.utils.url_utils.trafilatura.extract", return_value=""), patch(
             "src.utils.url_utils.Article", return_value=article
-        ), patch("src.utils.url_utils.log_api_request", new=AsyncMock()):
+        ), patch("src.utils.url_utils.log_pipeline_step", new=AsyncMock()):
             result = await url_utils.get_article_text("https://example.com/fallback")
 
         self.assertEqual(result, "article text")

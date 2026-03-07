@@ -13,6 +13,13 @@ _attachment_base64_cache = {}
 MAX_CACHE_SIZE = 100
 
 
+def _delete_cache_entry(cache, key) -> None:
+    if hasattr(cache, 'delete'):
+        cache.delete(key)
+    elif key in cache:
+        del cache[key]
+
+
 def compress_image(
         image_bytes: bytes,
         max_size: int = 1024,
@@ -57,10 +64,11 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
     if attachment.id in _attachment_base64_cache:
         cached_result = _attachment_base64_cache[attachment.id]
         if cached_result is None:
-            raise Exception(
-                "Attachment previously failed to convert and is cached as a failure.")
-        logger.debug(f"Cache hit for attachment base64: {attachment.filename}")
-        return cached_result
+            logger.debug(f"Discarding legacy attachment failure sentinel for: {attachment.filename}")
+            _delete_cache_entry(_attachment_base64_cache, attachment.id)
+        else:
+            logger.debug(f"Cache hit for attachment base64: {attachment.filename}")
+            return cached_result
 
     try:
         # Download the attachment
@@ -92,12 +100,6 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
     except Exception as e:
         logger.error(
             f"Failed to convert attachment {attachment.filename} to base64: {e}")
-        # Cache the failure state so we don't retry a completely broken
-        # attachment repeatedly
-        if len(_attachment_base64_cache) >= MAX_CACHE_SIZE:
-            oldest_key = next(iter(_attachment_base64_cache))
-            del _attachment_base64_cache[oldest_key]
-        _attachment_base64_cache[attachment.id] = None
         raise e
 
 
@@ -118,18 +120,13 @@ async def url_to_base64_data_url(url: str) -> str:
     if url in _url_base64_cache:
         cached_result = _url_base64_cache[url]
         if cached_result is None:
-            raise Exception(
-                "URL previously failed to download and is cached as a failure.")
-        logger.debug(f"Cache hit for URL base64: {url}")
-        return cached_result
+            logger.debug(f"Discarding legacy URL failure sentinel for: {url}")
+            _delete_cache_entry(_url_base64_cache, url)
+        else:
+            logger.debug(f"Cache hit for URL base64: {url}")
+            return cached_result
 
     import httpx
-
-    def cache_failure(target_url: str):
-        if len(_url_base64_cache) >= MAX_CACHE_SIZE:
-            oldest_key = next(iter(_url_base64_cache))
-            del _url_base64_cache[oldest_key]
-        _url_base64_cache[target_url] = None
 
     try:
         # Follow redirects in case embeds resolve through URL shorteners or
@@ -164,15 +161,12 @@ async def url_to_base64_data_url(url: str) -> str:
 
     except httpx.TimeoutException as e:
         logger.warning(f"Timeout while fetching image URL '{url}': {e}")
-        cache_failure(url)
         raise e
     except httpx.HTTPError as e:
         logger.error(f"HTTP Error while fetching image URL '{url}': {e}")
-        cache_failure(url)
         raise e
     except Exception as e:
         logger.error(f"Failed to fetch embed URL to base64: {e}")
-        cache_failure(url)
         raise e
 
 

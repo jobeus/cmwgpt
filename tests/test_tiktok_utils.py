@@ -46,10 +46,25 @@ class TestTikTokUtils(unittest.TestCase):
 
         self.assertEqual(urls, ["https://vt.tiktok.com/abc123/", "https://www.tiktok.com/@user/video/123"])
 
-    def test_get_tiktok_transcript_returns_cached_values(self):
-        with patch("src.utils.tiktok_utils._tiktok_cache", {"u1": "cached", "u2": None}):
-            self.assertEqual(tiktok_utils.get_tiktok_transcript("u1"), ("cached", None))
-            self.assertIsNone(tiktok_utils.get_tiktok_transcript("u2"))
+    def test_get_tiktok_transcript_returns_cached_values_and_retries_legacy_failure_sentinels(self):
+        legacy_cache = {"u1": "cached", "u2": None}
+        fake_response = MagicMock()
+        fake_response.raise_for_status.return_value = None
+        fake_response.text = "transcribed text"
+        fake_client = MagicMock()
+        fake_client.post.return_value = fake_response
+
+        with patch("src.utils.tiktok_utils._tiktok_cache", legacy_cache), patch(
+            "src.utils.tiktok_utils.GROQ_API_KEY", "groq-key"
+        ), patch("src.utils.tiktok_utils.yt_dlp.YoutubeDL", side_effect=lambda opts: FakeYoutubeDL(opts)), patch(
+            "src.utils.tiktok_utils.os.path.exists", return_value=True
+        ), patch("builtins.open", mock_open(read_data=b"audio-bytes")), patch(
+            "src.utils.tiktok_utils.httpx.Client", side_effect=lambda **kwargs: FakeHttpxClientContext(fake_client)
+        ), patch("src.utils.tiktok_utils.os.remove"):
+            self.assertEqual(tiktok_utils.get_tiktok_transcript("u1")["transcript_text"], "cached")
+            self.assertEqual(tiktok_utils.get_tiktok_transcript("u2")["transcript_text"], "transcribed text")
+
+        self.assertEqual(legacy_cache["u2"], "transcribed text")
 
     def test_get_tiktok_transcript_requires_api_key(self):
         with patch("src.utils.tiktok_utils.GROQ_API_KEY", ""):
@@ -72,7 +87,9 @@ class TestTikTokUtils(unittest.TestCase):
         ), patch("src.utils.tiktok_utils.os.remove") as mock_remove:
             result = tiktok_utils.get_tiktok_transcript("https://vt.tiktok.com/abc123/")
 
-        self.assertEqual(result, ("transcribed text", fake_response))
+        self.assertEqual(result["transcript_text"], "transcribed text")
+        self.assertIs(result["groq_response"], fake_response)
+        self.assertEqual(result["audio_artifact"]["media_type"], "audio/mpeg")
         self.assertEqual(fake_cache["https://vt.tiktok.com/abc123/"], "transcribed text")
         mock_remove.assert_called_once()
 

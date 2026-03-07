@@ -10,7 +10,7 @@ import httpx
 from typing import List, Optional
 from src.config import RAPIDAPI_KEY, GROQ_API_KEY
 from src.utils.cache_utils import PersistentCache
-from src.db.logger import log_api_request
+from src.db.logger import build_artifact, log_api_request, log_pipeline_step
 
 logger = logging.getLogger(__name__)
 
@@ -154,8 +154,44 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
                 
                 if os.path.exists(mp3_path):
                     logger.info(f"Transcribing {mp3_path} using Groq via httpx...")
+                    with open(mp4_path, "rb") as file:
+                        video_bytes = file.read()
                     with open(mp3_path, "rb") as file:
                         audio_bytes = file.read()
+
+                    await log_pipeline_step(
+                        service_name="downloader/twitter/video_audio",
+                        endpoint_url=tweet_url,
+                        title="Twitter video URL → audio artifact",
+                        step="twitter_video_audio",
+                        input_summary="Downloaded tweet video and converted it to MP3",
+                        input_data={
+                            "tweet_url": tweet_url,
+                            "video_url": video_url,
+                            "ffmpeg": ["-vn", "-ar", "44100", "-ac", "2", "-b:a", "64k"],
+                        },
+                        output_summary="Produced local video and audio artifacts for transcription",
+                        output_data={
+                            "tweet_url": tweet_url,
+                            "video_url": video_url,
+                            "mp4_path": mp4_path,
+                            "mp3_path": mp3_path,
+                        },
+                        response_artifacts=[
+                            build_artifact(
+                                name=os.path.basename(mp4_path),
+                                media_type="video/mp4",
+                                data=video_bytes,
+                                extra={"tweet_url": tweet_url, "video_url": video_url},
+                            ),
+                            build_artifact(
+                                name=os.path.basename(mp3_path),
+                                media_type="audio/mpeg",
+                                data=audio_bytes,
+                                extra={"tweet_url": tweet_url},
+                            ),
+                        ],
+                    )
                         
                     async with httpx.AsyncClient(timeout=60.0) as client:
                         files = {'file': (os.path.basename(mp3_path), audio_bytes, 'audio/mpeg')}
@@ -177,6 +213,39 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
 
                     if transcript_text:
                         video_transcript = transcript_text
+                        await log_pipeline_step(
+                            service_name="downloader/twitter/transcript",
+                            endpoint_url=tweet_url,
+                            title="Tweet audio → transcript",
+                            step="twitter_transcript",
+                            input_summary="Transcribed tweet audio with Groq Whisper",
+                            input_data={
+                                "tweet_url": tweet_url,
+                                "video_url": video_url,
+                                "model": "whisper-large-v3-turbo",
+                            },
+                            output_summary="Produced transcript text for embedded tweet video",
+                            output_data={
+                                "tweet_url": tweet_url,
+                                "transcript_text": transcript_text,
+                            },
+                            request_artifacts=[
+                                build_artifact(
+                                    name=os.path.basename(mp3_path),
+                                    media_type="audio/mpeg",
+                                    data=audio_bytes,
+                                    extra={"tweet_url": tweet_url},
+                                )
+                            ],
+                            response_artifacts=[
+                                build_artifact(
+                                    name="tweet_video_transcript.txt",
+                                    media_type="text/plain",
+                                    text=transcript_text,
+                                    extra={"tweet_url": tweet_url},
+                                )
+                            ],
+                        )
                         await groq_resp.request.aread()
                         await log_api_request(
                             service_name="groq/whisper-large-v3-turbo",
@@ -227,6 +296,36 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
             
         if replies:
             context += "\n\nTop replies:\n" + "\n".join(replies)
+
+        await log_pipeline_step(
+            service_name="downloader/twitter/context",
+            endpoint_url=tweet_url,
+            title="Tweet detail JSON → final context",
+            step="twitter_context",
+            input_summary="Built tweet context from RapidAPI response, replies, and optional video transcript",
+            input_data={
+                "tweet_url": tweet_url,
+                "tweet_id": tweet_id,
+                "main_author": main_author,
+                "main_text": main_text,
+                "reply_count": len(replies),
+                "video_url": video_url,
+                "video_transcript": video_transcript,
+            },
+            output_summary="Produced the tweet context string injected into the prompt",
+            output_data={
+                "tweet_url": tweet_url,
+                "context": context,
+            },
+            response_artifacts=[
+                build_artifact(
+                    name="tweet_context.txt",
+                    media_type="text/plain",
+                    text=context,
+                    extra={"tweet_url": tweet_url},
+                )
+            ],
+        )
         
         _twitter_cache[tweet_url] = context
         return context

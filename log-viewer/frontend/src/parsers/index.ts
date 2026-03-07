@@ -5,6 +5,7 @@ import { parseYoutube } from './youtube';
 import { parseGroq } from './groq';
 import { parseTwitter } from './twitter';
 import { parseUrlUtils } from './urlUtils';
+import { parsePipelineStep } from './pipeline';
 
 /**
  * Dispatch to the right service parser based on service name.
@@ -16,6 +17,9 @@ export function parseServiceMessages(
     responseBody: any,
     endpointUrl?: string | null
 ): ServiceMessage[] {
+    if (requestBody?.format === 'pipeline_step.v1' || responseBody?.format === 'pipeline_step.v1') {
+        return parsePipelineStep(requestBody, responseBody);
+    }
     if (serviceName.startsWith('openai/') || serviceName.startsWith('anthropic/')) {
         return parseOpenAI(requestBody, responseBody);
     }

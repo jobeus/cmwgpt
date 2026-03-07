@@ -3,7 +3,7 @@ import logging
 import httpx
 from typing import List, Optional
 from urllib.parse import urlparse
-from src.db.logger import log_api_request
+from src.db.logger import build_artifact, log_pipeline_step
 
 import trafilatura
 from newspaper import Article
@@ -12,8 +12,15 @@ from src.utils.cache_utils import PersistentCache
 
 logger = logging.getLogger(__name__)
 
-# Bounded persistent cache for articles: url -> text or None
+# Bounded persistent cache for articles: url -> extracted text
 _article_cache = PersistentCache('articles')
+
+
+def _delete_cache_entry(cache, key: str) -> None:
+    if hasattr(cache, 'delete'):
+        cache.delete(key)
+    elif key in cache:
+        del cache[key]
 
 EXCLUDED_DOMAINS = {
     'youtube.com', 'youtu.be',
@@ -71,10 +78,11 @@ async def get_article_text(url: str) -> Optional[str]:
     if url in _article_cache:
         cached_result = _article_cache[url]
         if cached_result is None:
-            logger.debug(f"Cache hit for article failure: {url}")
-            return None
-        logger.debug(f"Cache hit for article: {url}")
-        return cached_result
+            logger.debug(f"Discarding legacy article failure sentinel for: {url}")
+            _delete_cache_entry(_article_cache, url)
+        else:
+            logger.debug(f"Cache hit for article: {url}")
+            return cached_result
         
 
     try:
@@ -94,11 +102,43 @@ async def get_article_text(url: str) -> Optional[str]:
             actual_response_status = response.status_code
             actual_response_headers = dict(response.headers)
         
+        await log_pipeline_step(
+            service_name="downloader/article/fetch",
+            endpoint_url=url,
+            title="Article URL → HTML",
+            step="article_fetch",
+            input_summary="Fetched article HTML from URL",
+            input_data={
+                "url": url,
+                "proxy": proxy,
+                "headers": headers,
+            },
+            output_summary="Received raw article HTML",
+            output_data={
+                "url": url,
+                "html": html,
+                "status_code": actual_response_status,
+            },
+            request_headers=actual_request_headers,
+            response_headers=actual_response_headers,
+            response_status=actual_response_status,
+            response_artifacts=[
+                build_artifact(
+                    name="article.html",
+                    media_type="text/html",
+                    text=html,
+                    extra={"url": url},
+                )
+            ],
+        )
+
         # Try trafilatura first
+        extractor_used = "trafilatura"
         text = trafilatura.extract(html)
         
         if not text:
             logger.info(f"Trafilatura failed or returned empty for {url}, falling back to newspaper3k")
+            extractor_used = "newspaper3k"
             article = Article(url)
             article.set_html(html)
             article.parse()
@@ -109,40 +149,41 @@ async def get_article_text(url: str) -> Optional[str]:
             return None
 
         _article_cache[url] = text
-        
-        python_snippet = f'''import httpx
-import trafilatura
-from newspaper import Article
 
-url = "{url}"
-proxy = "{TRANSCRIPT_PROXY}" if "{TRANSCRIPT_PROXY}" else None
-headers = {{'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}}
-
-with httpx.Client(proxies=proxy, timeout=15.0) as client:
-    response = client.get(url, headers=headers)
-    response.raise_for_status()
-    html = response.text
-
-text = trafilatura.extract(html)
-if not text:
-    article = Article(url)
-    article.set_html(html)
-    article.parse()
-    text = article.text
-
-print(text)
-'''
-
-        await log_api_request(
-            service_name="url_utils/get_article_text",
-            method="PYTHON",
+        await log_pipeline_step(
+            service_name="downloader/article/extract",
             endpoint_url=url,
-            request_headers=actual_request_headers, # keeping real headers for accuracy tracking
-            request_body=python_snippet,
-            response_status=actual_response_status,
-            response_headers=actual_response_headers,
-            response_body=text,
-            cost=0.0
+            title="Article HTML → extracted text",
+            step="article_extract",
+            input_summary="Ran article extraction on fetched HTML",
+            input_data={
+                "url": url,
+                "html": html,
+                "extractor_attempt_order": ["trafilatura", "newspaper3k"],
+            },
+            output_summary=f"Extracted article text using {extractor_used}",
+            output_data={
+                "url": url,
+                "extractor_used": extractor_used,
+                "text": text,
+            },
+            response_status=200,
+            request_artifacts=[
+                build_artifact(
+                    name="article.html",
+                    media_type="text/html",
+                    text=html,
+                    extra={"url": url},
+                )
+            ],
+            response_artifacts=[
+                build_artifact(
+                    name="article.txt",
+                    media_type="text/plain",
+                    text=text,
+                    extra={"url": url, "extractor_used": extractor_used},
+                )
+            ],
         )
         
         return text

@@ -5,12 +5,19 @@ from typing import List, Optional
 from youtube_transcript_api import YouTubeTranscriptApi
 from src.config import TRANSCRIPT_PROXY
 from src.utils.cache_utils import PersistentCache
-from src.db.logger import log_api_request
+from src.db.logger import build_artifact, log_pipeline_step
 
 logger = logging.getLogger(__name__)
 
-# Bounded persistent cache for transcripts: video_id -> transcript text or None
+# Bounded persistent cache for transcripts: video_id -> transcript text
 _transcript_cache = PersistentCache('youtube_transcripts')
+
+
+def _delete_cache_entry(cache, key: str) -> None:
+    if hasattr(cache, 'delete'):
+        cache.delete(key)
+    elif key in cache:
+        del cache[key]
 
 
 def extract_video_ids(text: str) -> List[str]:
@@ -44,10 +51,11 @@ async def get_transcript(video_id: str) -> Optional[str]:
     if video_id in _transcript_cache:
         cached_result = _transcript_cache[video_id]
         if cached_result is None:
-            logger.debug(f"Cache hit for transcript failure: {video_id}")
-            return None
-        logger.debug(f"Cache hit for transcript: {video_id}")
-        return cached_result
+            logger.debug(f"Discarding legacy transcript failure sentinel for: {video_id}")
+            _delete_cache_entry(_transcript_cache, video_id)
+        else:
+            logger.debug(f"Cache hit for transcript: {video_id}")
+            return cached_result
 
 
     try:
@@ -89,16 +97,31 @@ except Exception:
 print(TextFormatter().format_transcript(transcript.fetch()))
 '''
 
-        await log_api_request(
-            service_name="youtube/transcript",
-            method="PYTHON",
+        await log_pipeline_step(
+            service_name="downloader/youtube/transcript",
             endpoint_url=f"https://www.youtube.com/watch?v={video_id}",
-            request_headers={},
-            request_body=python_snippet,
-            response_status=200,
-            response_headers={},
-            response_body=transcript_text,
-            cost=0.0
+            title="YouTube video → transcript",
+            step="youtube_transcript",
+            input_summary=f"Fetched transcript for YouTube video `{video_id}`",
+            input_data={
+                "video_id": video_id,
+                "proxy": TRANSCRIPT_PROXY or None,
+                "library": "youtube_transcript_api",
+            },
+            output_summary="Produced transcript text from YouTube transcript snippets",
+            output_data={
+                "video_id": video_id,
+                "transcript_text": transcript_text,
+            },
+            request_replay={"python": python_snippet},
+            response_artifacts=[
+                build_artifact(
+                    name=f"youtube_{video_id}_transcript.txt",
+                    media_type="text/plain",
+                    text=transcript_text,
+                    extra={"video_id": video_id},
+                )
+            ],
         )
 
         _transcript_cache[video_id] = transcript_text

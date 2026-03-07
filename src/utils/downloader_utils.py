@@ -6,15 +6,13 @@ Unifies URL downloading from YouTube, TikTok, and general websites
 import sys
 import logging
 import asyncio
-from typing import Optional
 
 from src.utils.youtube_utils import extract_video_ids, get_transcript
 from src.utils.tiktok_utils import extract_tiktok_urls, get_tiktok_transcript
 from src.utils.twitter_utils import extract_twitter_urls, get_tweet_context
 from src.utils.facebook_utils import extract_facebook_urls, get_facebook_transcript
 from src.utils.url_utils import extract_target_urls, get_article_text
-from src.db.logger import log_api_request
-from src.config import GROQ_API_KEY
+from src.db.logger import build_artifact, log_api_request, log_pipeline_step
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +32,33 @@ async def fetch_all_url_content(message_text: str) -> str:
         return ""
         
     aggregated_content = []
+    video_ids = extract_video_ids(message_text)
+    tiktok_urls = extract_tiktok_urls(message_text)
+    twitter_urls = extract_twitter_urls(message_text)
+    facebook_urls = extract_facebook_urls(message_text)
+    target_urls = extract_target_urls(message_text)
+
+    discovered_sources = {
+        "youtube_video_ids": video_ids,
+        "tiktok_urls": tiktok_urls,
+        "twitter_urls": twitter_urls,
+        "facebook_urls": facebook_urls,
+        "article_urls": target_urls,
+    }
+
+    if any(discovered_sources.values()):
+        await log_pipeline_step(
+            service_name="downloader/url_discovery",
+            endpoint_url="message://url-discovery",
+            title="Message text → discovered downloader targets",
+            step="url_discovery",
+            input_summary="Scanned the incoming message for supported URLs and IDs",
+            input_data={"message_text": message_text},
+            output_summary="Detected downloader targets grouped by source type",
+            output_data=discovered_sources,
+        )
 
     # 1. YouTube Transcripts
-    video_ids = extract_video_ids(message_text)
     if video_ids:
         transcripts = []
         for vid_id in video_ids:
@@ -55,17 +77,66 @@ async def fetch_all_url_content(message_text: str) -> str:
             )
 
     # 2. TikTok Transcripts
-    tiktok_urls = extract_tiktok_urls(message_text)
     if tiktok_urls:
         tiktok_transcripts = []
         for t_url in tiktok_urls:
             try:
                 result = await asyncio.to_thread(get_tiktok_transcript, t_url)
                 if result:
-                    transcript_text, groq_resp = result
+                    transcript_text = result["transcript_text"]
+                    groq_resp = result.get("groq_response")
+                    from_cache = result.get("from_cache", False)
                     if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
                        logger.info(f"Target TikTok Video {t_url} Transcript grabbed successfully.") 
                     tiktok_transcripts.append(f"Target TikTok Video {t_url} Transcript:\n{transcript_text}")
+
+                    if result.get("audio_artifact"):
+                        await log_pipeline_step(
+                            service_name="downloader/tiktok/audio",
+                            endpoint_url=t_url,
+                            title="TikTok URL → audio artifact",
+                            step="tiktok_audio",
+                            input_summary="Downloaded TikTok media and extracted audio",
+                            input_data={
+                                "source_url": t_url,
+                                "download_strategy": result.get("download_strategy"),
+                                "source_metadata": result.get("source_metadata"),
+                            },
+                            output_summary="Produced an audio artifact for transcription",
+                            output_data={
+                                "source_url": t_url,
+                                "download_strategy": result.get("download_strategy"),
+                            },
+                            response_artifacts=[result["audio_artifact"]],
+                        )
+
+                    if not from_cache:
+                        await log_pipeline_step(
+                            service_name="downloader/tiktok/transcript",
+                            endpoint_url=t_url,
+                            title="TikTok audio → transcript",
+                            step="tiktok_transcript",
+                            input_summary="Prepared TikTok audio for transcription",
+                            input_data={
+                                "source_url": t_url,
+                                "from_cache": False,
+                                "download_strategy": result.get("download_strategy"),
+                            },
+                            output_summary="Produced transcript text for TikTok content",
+                            output_data={
+                                "source_url": t_url,
+                                "transcript_text": transcript_text,
+                            },
+                            request_artifacts=[result["audio_artifact"]] if result.get("audio_artifact") else None,
+                            response_artifacts=[
+                                build_artifact(
+                                    name="tiktok_transcript.txt",
+                                    media_type="text/plain",
+                                    text=transcript_text,
+                                    extra={"source_url": t_url},
+                                )
+                            ],
+                        )
                     
                     if groq_resp:
                         # Log exact HTTP multipart request as it went over the wire
@@ -93,7 +164,6 @@ async def fetch_all_url_content(message_text: str) -> str:
             )
 
     # 3. Twitter / X Context
-    twitter_urls = extract_twitter_urls(message_text)
     if twitter_urls:
         twitter_contexts = []
         for t_url in twitter_urls:
@@ -112,17 +182,66 @@ async def fetch_all_url_content(message_text: str) -> str:
             )
 
     # 4. Facebook Video Transcripts
-    facebook_urls = extract_facebook_urls(message_text)
     if facebook_urls:
         facebook_transcripts = []
         for fb_url in facebook_urls:
             try:
                 result = await asyncio.to_thread(get_facebook_transcript, fb_url)
                 if result:
-                    transcript_text, groq_resp = result
+                    transcript_text = result["transcript_text"]
+                    groq_resp = result.get("groq_response")
+                    from_cache = result.get("from_cache", False)
                     if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
                        logger.info(f"Target Facebook Video {fb_url} Transcript grabbed successfully.") 
                     facebook_transcripts.append(f"Target Facebook Video {fb_url} Transcript:\n{transcript_text}")
+
+                    if result.get("audio_artifact"):
+                        await log_pipeline_step(
+                            service_name="downloader/facebook/audio",
+                            endpoint_url=fb_url,
+                            title="Facebook URL → audio artifact",
+                            step="facebook_audio",
+                            input_summary="Downloaded Facebook media and extracted audio",
+                            input_data={
+                                "source_url": fb_url,
+                                "download_strategy": result.get("download_strategy"),
+                                "source_metadata": result.get("source_metadata"),
+                            },
+                            output_summary="Produced an audio artifact for transcription",
+                            output_data={
+                                "source_url": fb_url,
+                                "download_strategy": result.get("download_strategy"),
+                            },
+                            response_artifacts=[result["audio_artifact"]],
+                        )
+
+                    if not from_cache:
+                        await log_pipeline_step(
+                            service_name="downloader/facebook/transcript",
+                            endpoint_url=fb_url,
+                            title="Facebook audio → transcript",
+                            step="facebook_transcript",
+                            input_summary="Prepared Facebook audio for transcription",
+                            input_data={
+                                "source_url": fb_url,
+                                "from_cache": False,
+                                "download_strategy": result.get("download_strategy"),
+                            },
+                            output_summary="Produced transcript text for Facebook video content",
+                            output_data={
+                                "source_url": fb_url,
+                                "transcript_text": transcript_text,
+                            },
+                            request_artifacts=[result["audio_artifact"]] if result.get("audio_artifact") else None,
+                            response_artifacts=[
+                                build_artifact(
+                                    name="facebook_transcript.txt",
+                                    media_type="text/plain",
+                                    text=transcript_text,
+                                    extra={"source_url": fb_url},
+                                )
+                            ],
+                        )
                     
                     if groq_resp:
                         actual_req = groq_resp.request
@@ -149,7 +268,6 @@ async def fetch_all_url_content(message_text: str) -> str:
             )
 
     # 5. General Articles
-    target_urls = extract_target_urls(message_text)
     if target_urls:
         articles = []
         for t_url in target_urls:
@@ -167,6 +285,26 @@ async def fetch_all_url_content(message_text: str) -> str:
                 "------\nIncluded article content follows:\n\n" + "\n\n".join(articles)
             )
     if aggregated_content:
-        return "\n\n".join(aggregated_content) + "\n\n"
+        final_content = "\n\n".join(aggregated_content) + "\n\n"
+        await log_pipeline_step(
+            service_name="downloader/aggregate",
+            endpoint_url="message://downloader-aggregate",
+            title="Downloader outputs → injected prompt context",
+            step="downloader_aggregate",
+            input_summary="Combined all successful downloader outputs into the final context block",
+            input_data=discovered_sources,
+            output_summary="Produced the exact text block injected into the model prompt",
+            output_data={
+                "aggregated_content": final_content,
+            },
+            response_artifacts=[
+                build_artifact(
+                    name="downloader_aggregate.txt",
+                    media_type="text/plain",
+                    text=final_content,
+                )
+            ],
+        )
+        return final_content
     
     return ""

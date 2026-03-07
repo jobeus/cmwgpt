@@ -6,6 +6,7 @@ import { useAuth } from '../AuthContext';
 import { Terminal, ChevronRight, Server, Check, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import userMap from '../userMap';
+import { getPipelineSnippet, getPipelineTitle, isPipelinePayload } from '../utils/pipeline';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || '/';
@@ -27,6 +28,10 @@ const extractLastMessageSnippet = (bodyStr: string | null, serviceName: string, 
     if (!bodyStr) return '';
     try {
         const parsed = JSON.parse(bodyStr);
+
+        if (isPipelinePayload(parsed)) {
+            return getPipelineSnippet(parsed, type === 'request' ? '[Pipeline step input]' : '[Pipeline step output]');
+        }
 
         if (serviceName.startsWith('runpod/')) {
             if (type === 'request') return parsed.input?.prompt || '[Image Gen Request]';
@@ -185,10 +190,22 @@ export default function LogList() {
         return 'text-gray-400 bg-gray-400/10 border-gray-400/20';
     };
 
+    const getDisplayTitle = (log: LogEntry) => {
+        try {
+            return getPipelineTitle(
+                log.request_body_snippet ? JSON.parse(log.request_body_snippet) : null,
+                log.response_body_snippet ? JSON.parse(log.response_body_snippet) : null,
+                log.service_name,
+            );
+        } catch {
+            return log.service_name;
+        }
+    };
+
     return (
         <div className="space-y-6 pb-20">
             <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">Recent Requests</h2>
+                <h2 className="text-2xl font-bold bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">Recent Logs</h2>
                 <span className="bg-gray-800 text-gray-300 py-1 px-3 rounded-full text-sm font-medium border border-gray-700">
                     Showing {logs.length} of {total}
                 </span>
@@ -208,7 +225,10 @@ export default function LogList() {
                                 </span>
                                 <div className="flex items-center space-x-2 text-gray-300">
                                     <Server className="w-4 h-4 text-blue-400" />
-                                    <span className="font-semibold text-white">{log.service_name}</span>
+                                    <div>
+                                        <div className="font-semibold text-white">{getDisplayTitle(log)}</div>
+                                        {getDisplayTitle(log) !== log.service_name && <div className="text-[11px] text-gray-500 font-mono">{log.service_name}</div>}
+                                    </div>
                                     <span className="text-gray-500 text-sm font-mono px-2 py-0.5 bg-gray-950 rounded border border-gray-800">{log.method}</span>
                                 </div>
                             </div>
