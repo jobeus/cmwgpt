@@ -220,4 +220,3 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_log.await_count, 2)
         groq_request.aread.assert_awaited_once()
         self.assertEqual(mock_remove.call_count, 2)
-

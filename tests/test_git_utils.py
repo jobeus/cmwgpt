@@ -138,4 +138,3 @@ class TestGitUtils(unittest.TestCase):
             side_effect=OSError("git missing"),
         ):
             self.assertFalse(git_utils.perform_git_pull())
-

@@ -5,12 +5,12 @@ Cache Utilities - Persistent cross-restart caching
 import os
 import json
 import logging
-import time
-from typing import Optional, Any, Dict
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
 CACHE_DIR = ".cache"
+
 
 class PersistentCache:
     """A dictionary-like cache that automatically saves to disk."""
@@ -63,7 +63,7 @@ class PersistentCache:
         if len(self._cache) >= self.max_size and key not in self._cache:
             oldest_key = next(iter(self._cache))
             del self._cache[oldest_key]
-            
+
         self._cache[key] = value
         self._save()
 

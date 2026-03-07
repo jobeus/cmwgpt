@@ -1,10 +1,9 @@
 import os
 import re
 import uuid
-import base64
 import logging
-import requests
-import subprocess
+import tempfile
+import subprocess  # nosec B404
 import asyncio
 import httpx
 from typing import List, Optional
@@ -70,7 +69,6 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
         logger.debug(f"Cache hit for Twitter fetch: {tweet_url}")
         return cached_result
 
-
     if not RAPIDAPI_KEY:
         logger.error("RAPIDAPI_KEY is not set. Cannot fetch Twitter content.")
         return None
@@ -127,11 +125,14 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
         video_url = extract_video_url(data)
         video_transcript = None
         if video_url and GROQ_API_KEY:
+            mp4_path = None
+            mp3_path = None
             try:
                 tmp_id = uuid.uuid4().hex
-                mp4_path = f"/tmp/twit_vid_{tmp_id}.mp4"
-                mp3_path = f"/tmp/twit_aud_{tmp_id}.mp3"
-                
+                temp_dir = tempfile.gettempdir()
+                mp4_path = os.path.join(temp_dir, f"twit_vid_{tmp_id}.mp4")
+                mp3_path = os.path.join(temp_dir, f"twit_aud_{tmp_id}.mp3")
+
                 logger.info(f"Downloading Twitter video: {video_url}")
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     async with client.stream('GET', video_url) as r:
@@ -192,7 +193,7 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
                             ),
                         ],
                     )
-                        
+
                     async with httpx.AsyncClient(timeout=60.0) as client:
                         files = {'file': (os.path.basename(mp3_path), audio_bytes, 'audio/mpeg')}
                         data_payload = {
@@ -261,16 +262,16 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
             except Exception as e:
                 logger.warning(f"Failed to process video for tweet {tweet_url}: {e}")
             finally:
-                if 'mp4_path' in locals() and os.path.exists(mp4_path):
+                if mp4_path and os.path.exists(mp4_path):
                     try:
                         os.remove(mp4_path)
-                    except Exception:
-                        pass
-                if 'mp3_path' in locals() and os.path.exists(mp3_path):
+                    except OSError as exc:
+                        logger.warning(f"Failed to remove temporary file {mp4_path}: {exc}")
+                if mp3_path and os.path.exists(mp3_path):
                     try:
                         os.remove(mp3_path)
-                    except Exception:
-                        pass
+                    except OSError as exc:
+                        logger.warning(f"Failed to remove temporary file {mp3_path}: {exc}")
         
         # Top replies - grab first 5
         replies = []

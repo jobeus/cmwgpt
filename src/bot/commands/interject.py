@@ -37,8 +37,10 @@ class InterjectCommands:
             name="interject",
             description="Manage interjection settings for this channel")
 
-        @interject_group.command(name="set",
-                                description="Set interjection configuration for this channel")
+        @interject_group.command(
+            name="set",
+            description="Set interjection configuration for this channel",
+        )
         @app_commands.describe(
             chance="Percentage chance (0-100) to interject when conditions are met",
             cooldown="Per-channel cooldown in minutes after an interjection or failed roll",
@@ -60,13 +62,23 @@ class InterjectCommands:
                 daily_max: Optional[app_commands.Range[int, 1, 1000]] = None,
                 exclude_embeds: Optional[bool] = None):
             await interaction.response.defer(ephemeral=True, thinking=True)
-            
+
             # Since this is a lightweight state mutation and doesn't call OpenAI or long processes,
             # we can run it safely without putting it through the heavy queue
             asyncio.create_task(
-                safe_run(interaction, self._handle_interject_set, interaction, 
-                         chance, cooldown, min_messages, min_authors, window_mins, 
-                         context_lines, daily_max, exclude_embeds)
+                safe_run(
+                    interaction,
+                    self._handle_interject_set,
+                    interaction,
+                    chance,
+                    cooldown,
+                    min_messages,
+                    min_authors,
+                    window_mins,
+                    context_lines,
+                    daily_max,
+                    exclude_embeds,
+                )
             )
 
         @interject_group.command(
@@ -119,7 +131,7 @@ class InterjectCommands:
             return
 
         current_settings = self._state_service.get_interject_settings(channel_id) or {}
-        
+
         if chance is not None:
             current_settings["chance"] = chance
         if cooldown is not None:
@@ -159,7 +171,7 @@ class InterjectCommands:
         self._state_service.mark_channel_active(channel_id)
 
         self._state_service.clear_interject_settings(channel_id)
-        
+
         logger.info(f"[/interject reset] Channel {channel_id}: settings reset to defaults.")
         await interaction.followup.send("Interjection settings for this channel have been reset to defaults.", ephemeral=True)
 
@@ -167,7 +179,7 @@ class InterjectCommands:
         """Handle the /interject view command."""
         channel_id = interaction.channel.id
         settings = self._state_service.get_interject_settings(channel_id) or {}
-        
+
         chance = settings.get("chance", INTERJECT_CHANCE_PERCENT)
         cooldown = settings.get("cooldown", COOLDOWN_MINUTES)
         min_messages = settings.get("min_messages", MIN_MESSAGES)
@@ -200,7 +212,7 @@ class InterjectCommands:
 
         channel_id = interaction.channel.id
         current_count, daily_max = self._interject_service.get_daily_status(channel_id)
-        
+
         remaining = max(0, daily_max - current_count)
         msg = (
             f"**Interjection Count for #{interaction.channel.name}**\n"

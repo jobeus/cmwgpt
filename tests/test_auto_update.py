@@ -179,7 +179,6 @@ class TestAutoUpdateService(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(status["is_git_repo"])
 
 
-
 class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
     async def test_restart_status_accessors_default_false(self):
         handler = RestartHandler(state_service=MagicMock(), git_pull=MagicMock())

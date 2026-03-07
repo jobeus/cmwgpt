@@ -5,6 +5,8 @@ from typing import Callable, Optional
 
 import httpx
 
+from src.utils.url_utils import inject_article_cache
+
 logger = logging.getLogger(__name__)
 
 
@@ -64,6 +66,5 @@ class PasteService:
         """
         return await self.upload_text(markdown_text)
 
-from src.utils.url_utils import inject_article_cache
 
 paste_service = PasteService(cache_injector=inject_article_cache)

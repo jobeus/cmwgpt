@@ -16,12 +16,12 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from html.parser import HTMLParser
 from typing import Optional, Set, Tuple, Any
 from urllib.parse import unquote
 
 import aiohttp
 import discord
+from bs4 import BeautifulSoup
 from discord.ext import commands
 
 logger = logging.getLogger(__name__)
@@ -45,36 +45,30 @@ USER_AGENT = "cmwgpt-bot/1.0 (jobeus@gmail.com)"
 STATE_FILE = ".cache/cmwgpt_death_names.json"
 
 
-# ---------------------------------------------------------------------------
-# HTML parser for the deaths page
-# ---------------------------------------------------------------------------
-
-from bs4 import BeautifulSoup
-
 def parse_deaths_html(html: str) -> list[Tuple[str, str]]:
     """Return a list of (display_name, article_title) from deaths-page HTML."""
     results = []
     soup = BeautifulSoup(html, "html.parser")
-    
+
     # Restrict to list items within the main content area to avoid nav menus
     for li in soup.find_all("li"):
         # The primary link is usually the first anchor tag
         a_tag = li.find("a")
         if not a_tag:
             continue
-            
+
         href = a_tag.get("href", "")
         # Only process internal wiki links that are not categories, files, or anchors
         if (href.startswith("/wiki/") or href.startswith("./")) and ":" not in href and "#" not in href:
             title = href.split("/wiki/", 1)[1] if href.startswith("/wiki/") else href.split("./", 1)[1]
             title = unquote(title)
             name = a_tag.get_text(strip=True)
-            
+
             # Check if there is an age-like pattern (comma space digits) to filter out nav links
             desc = li.get_text(strip=True)
             if name and re.search(r',\s*\d+[\s,]', desc):
                 results.append((name, title))
-                
+
     return results
 
 
@@ -192,7 +186,7 @@ class DeathService:
                     raise
                 except Exception:
                     logger.exception("Error during death-page poll")
-                
+
                 interval = self._get_setting("interval", POLL_INTERVAL_SECONDS)
                 await asyncio.sleep(interval)
         except asyncio.CancelledError:
@@ -239,10 +233,10 @@ class DeathService:
             try:
                 min_views = self._get_setting("min_views", MIN_AVG_MONTHLY_VIEWS)
                 avg_views = await self._get_avg_monthly_views(article_title, session)
-                
+
                 if avg_views is None:
                     continue
-                    
+
                 if avg_views >= min_views:
                     logger.info(
                         f"Met threshold: {display_name} ({avg_views:,} avg monthly views) -> ANNOUNCING"
@@ -266,7 +260,7 @@ class DeathService:
         """
         now = datetime.now(timezone.utc)
         months = self._get_setting("pageview_months", PAGEVIEW_MONTHS)
-        
+
         # End = last full month
         end_year = now.year
         end_month = now.month - 1
@@ -307,10 +301,10 @@ class DeathService:
                         return 0
                     total = sum(item.get("views", 0) for item in items)
                     return total // len(items)
-                
+
                 if resp.status == 404:
                     return 0  # No data / page doesn't exist
-                    
+
                 if resp.status == 429:
                     delay = base_delay * (2 ** attempt)
                     logger.warning(
@@ -318,13 +312,13 @@ class DeathService:
                     )
                     await asyncio.sleep(delay)
                     continue
-                    
+
                 text = await resp.text()
                 logger.warning(
                     f"Pageviews API returned {resp.status} for {article_title}: {text}"
                 )
                 return None
-                
+
         logger.error(f"Failed to fetch pageviews for {article_title} after {max_retries} attempts.")
         return None
 
@@ -353,5 +347,3 @@ class DeathService:
             await channel.send(message)
         except discord.HTTPException as exc:
             logger.error(f"Failed to send death announcement: {exc}")
-
-

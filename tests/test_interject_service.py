@@ -4,7 +4,7 @@ Tests activity checking, cooldown logic, daily cap, and chance roll.
 """
 
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 import asyncio
 import time
 from datetime import datetime, timezone

@@ -86,7 +86,7 @@ class MentionHandler:
                 if reply_content is None:
                     logger.error(f"❌ Received None from get_chat_completion for model {model}.")
                     await self._message_service.send_channel_reply(
-                        message.channel, 
+                        message.channel,
                         f"I'm sorry, I failed to get a response from the model '{model}'. It returned an empty result."
                     )
                     return
@@ -122,10 +122,8 @@ class MentionHandler:
                     except Exception:
                         logger.error("Failed to send fallback error message")
 
-            except Exception as e:
-                import traceback
-                error_dump = traceback.format_exc()
-                logger.error(f"🚨 Unexpected error in mention handler! Pretty-formatted dump:\\n====== ERROR DUMP ======\\n{error_dump}\\n========================")
+            except Exception:
+                logger.exception("🚨 Unexpected error in mention handler")
                 error_message = (
                     "Sorry, I encountered an unexpected error while processing your mention. Please try again later."
                 )
@@ -259,12 +257,12 @@ class MentionHandler:
             # Note any replies
             if msg.reference and msg.reference.message_id:
                 reply_text = f"[Replying to message ID: {msg.reference.message_id}]"
-                
+
                 # Try to extract the original message text via resolved message or history buffer
                 ref_msg = getattr(msg.reference, 'resolved', None)
                 if ref_msg is None:
                     ref_msg = getattr(msg.reference, 'cached_message', None)
-                
+
                 ref_text = None
                 ref_timestamp = None
                 ref_author_id = None
@@ -279,12 +277,12 @@ class MentionHandler:
                             ref_timestamp = h_msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
                             ref_author_id = h_msg.author.id
                             break
-                            
+
                 if ref_text is not None and ref_timestamp and ref_author_id:
                     reply_text = f"[Replying to message: \"[{ref_timestamp}] [{msg.reference.message_id}] <@{ref_author_id}>: {ref_text}\"]"
                 elif ref_text is not None:
                     reply_text = f"[Replying to message: \"{ref_text}\"]"
-                    
+
                 text_lines.insert(0, reply_text + "\n\n")
 
             # Note single-text representations for embeds

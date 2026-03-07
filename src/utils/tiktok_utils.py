@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+import tempfile
 import yt_dlp
 import httpx
 from typing import List, Optional
@@ -20,6 +21,7 @@ def _delete_cache_entry(cache, key: str) -> None:
         cache.delete(key)
     elif key in cache:
         del cache[key]
+
 
 def extract_tiktok_urls(text: str) -> List[str]:
     """
@@ -42,6 +44,7 @@ def extract_tiktok_urls(text: str) -> List[str]:
 
     return urls
 
+
 def get_tiktok_transcript(url: str) -> Optional[dict]:
     """
     Fetch the transcript for a TikTok video by downloading audio and processing with Groq via httpx.
@@ -62,17 +65,16 @@ def get_tiktok_transcript(url: str) -> Optional[dict]:
                 "from_cache": True,
             }
 
-
     if not GROQ_API_KEY:
         logger.error("GROQ_API_KEY is not set. Cannot transcribe TikTok videos.")
         return None
 
     logger.info(f"Fetching TikTok transcript for URL: {url}")
-    
+
     # yt-dlp options (without proxy first)
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': '/tmp/tiktok_%(id)s.%(ext)s',
+        'outtmpl': os.path.join(tempfile.gettempdir(), 'tiktok_%(id)s.%(ext)s'),
         'quiet': True,
         'no_warnings': True,
         'postprocessors': [{
@@ -183,5 +185,5 @@ def get_tiktok_transcript(url: str) -> Optional[dict]:
             try:
                 os.remove(audio_file)
                 logger.debug(f"Removed temporary audio file: {audio_file}")
-            except Exception as e:
+            except OSError as e:
                 logger.warning(f"Failed to remove temporary file {audio_file}: {e}")

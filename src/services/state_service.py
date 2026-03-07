@@ -297,7 +297,8 @@ class StateService:
                     'edit_model',
                     'system_prompt',
                     'response_id',
-                    'interject_settings']:
+                    'interject_settings',
+                ]:
                     if field in ['conversation', 'interject_settings'] and isinstance(value, (list, dict)):
                         self._channel_data[channel_id][field] = value.copy() if value is not None else None
                     else:

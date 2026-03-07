@@ -1,8 +1,7 @@
 """Tests for aggregated downloader utility behavior."""
 
 import unittest
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from src.utils import downloader_utils
 

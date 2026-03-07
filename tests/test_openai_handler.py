@@ -210,11 +210,13 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
     def test_dump_bad_request_writes_json_and_script(self):
         with patch("builtins.open", mock_open()) as mock_file, patch(
             "src.services.openai_service.json.dump"
-        ) as mock_dump, patch("os.chmod") as mock_chmod:
+        ) as mock_dump, patch("os.chmod") as mock_chmod, patch(
+            "src.services.openai_service.tempfile.gettempdir", return_value="/tmp"
+        ):
             self.service._dump_bad_request({"model": "x"}, self.client)
 
         mock_dump.assert_called_once()
-        mock_chmod.assert_called_once_with("/tmp/bad_request.sh", 0o755)
+        mock_chmod.assert_called_once_with("/tmp/bad_request.sh", 0o700)
         script_handle = mock_file()
         written = "".join(call.args[0] for call in script_handle.write.call_args_list)
         self.assertIn("curl https://openrouter.ai/api/v1/chat/completions", written)
@@ -228,7 +230,9 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
 
         with patch("src.services.openai_service.OPENROUTER_API_KEY", "config-key"), patch(
             "builtins.open", mock_open()
-        ) as mock_file, patch("src.services.openai_service.json.dump"), patch("os.chmod"):
+        ) as mock_file, patch("src.services.openai_service.json.dump"), patch("os.chmod"), patch(
+            "src.services.openai_service.tempfile.gettempdir", return_value="/tmp"
+        ):
             self.service._dump_bad_request({"model": "x"}, client)
 
         written = "".join(call.args[0] for call in mock_file().write.call_args_list)

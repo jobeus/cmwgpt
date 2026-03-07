@@ -22,6 +22,7 @@ def _delete_cache_entry(cache, key: str) -> None:
     elif key in cache:
         del cache[key]
 
+
 EXCLUDED_DOMAINS = {
     'youtube.com', 'youtu.be',
     'tiktok.com', 'vm.tiktok.com',
@@ -48,6 +49,7 @@ def _is_excluded_media_url(parsed) -> bool:
     path = parsed.path.lower()
     return any(path.endswith(ext) for ext in EXCLUDED_MEDIA_EXTENSIONS)
 
+
 def extract_target_urls(text: str) -> List[str]:
     """
     Extract URLs from text, ignoring specific excluded domains.
@@ -65,19 +67,17 @@ def extract_target_urls(text: str) -> List[str]:
         url = match.group(0)
         # Add http:// if it starts with www. (needed for urlparse to work well)
         parse_url = url if url.startswith('http') else 'http://' + url
-        try:
-            parsed = urlparse(parse_url)
-            domain = parsed.netloc.lower()
-            
-            # Exclude domains with dedicated downloader/media handling and obvious binary media URLs
-            is_excluded = _is_excluded_domain(domain) or _is_excluded_media_url(parsed)
-            
-            if not is_excluded and url not in urls:
-                urls.append(url)
-        except Exception:
-            pass
+        parsed = urlparse(parse_url)
+        domain = parsed.netloc.lower()
+
+        # Exclude domains with dedicated downloader/media handling and obvious binary media URLs
+        is_excluded = _is_excluded_domain(domain) or _is_excluded_media_url(parsed)
+
+        if not is_excluded and url not in urls:
+            urls.append(url)
 
     return urls
+
 
 def inject_article_cache(url: str, text: str) -> None:
     """
@@ -86,6 +86,7 @@ def inject_article_cache(url: str, text: str) -> None:
     """
     _article_cache[url] = text
     logger.debug(f"Directly injected cache for article: {url}")
+
 
 async def get_article_text(url: str) -> Optional[str]:
     """
@@ -100,7 +101,6 @@ async def get_article_text(url: str) -> Optional[str]:
         else:
             logger.debug(f"Cache hit for article: {url}")
             return cached_result
-        
 
     try:
         logger.info(f"Fetching article for URL: {url}")

@@ -5,6 +5,8 @@ OpenAI Service - Handles all OpenAI API interactions
 import asyncio
 import json
 import logging
+import os
+import tempfile
 import httpx
 from typing import List, Dict, Any, Optional, Callable
 
@@ -68,15 +70,19 @@ class OpenAIService:
         return self._client
 
     def _dump_bad_request(self, kwargs_dict: Dict[str, Any], client: AsyncOpenAI) -> None:
-        """Dumps the request payload to /tmp/bad_request.json and a curl command to /tmp/bad_request.sh"""
-        import os
+        """Dump the payload and a replay script to the system temp directory."""
         import shlex
+
+        temp_dir = tempfile.gettempdir()
+        payload_path = os.path.join(temp_dir, "bad_request.json")
+        script_path = os.path.join(temp_dir, "bad_request.sh")
+
         try:
-            with open('/tmp/bad_request.json', 'w') as f:
+            with open(payload_path, "w", encoding="utf-8") as f:
                 json.dump(kwargs_dict, f, indent=2)
-                
-            curl_cmd = f"curl https://openrouter.ai/api/v1/chat/completions \\\n"
-            
+
+            curl_cmd = "curl https://openrouter.ai/api/v1/chat/completions \\\n"
+
             # Extract headers
             headers_dict = dict(client.default_headers) if hasattr(client, 'default_headers') else {}
             # Ensure Auth is present
@@ -84,22 +90,22 @@ class OpenAIService:
                 headers_dict['Authorization'] = f"Bearer {client.api_key}"
             elif OPENROUTER_API_KEY:
                 headers_dict['Authorization'] = f"Bearer {OPENROUTER_API_KEY}"
-                
+
             for k, v in headers_dict.items():
                 if 'Omit' in str(type(v)):
                     continue
                 header_str = f"{k}: {v}"
                 curl_cmd += f"  -H {shlex.quote(header_str)} \\\n"
-                
-            curl_cmd += f"  -d @/tmp/bad_request.json\n"
-            
-            with open('/tmp/bad_request.sh', 'w') as f:
+
+            curl_cmd += f"  -d {shlex.quote(f'@{payload_path}')}\n"
+
+            with open(script_path, "w", encoding="utf-8") as f:
                 f.write("#!/bin/bash\n\n" + curl_cmd)
-                
-            os.chmod('/tmp/bad_request.sh', 0o755)
-            logger.info("Saved bad request dump to /tmp/bad_request.json and /tmp/bad_request.sh")
-        except Exception as e:
-            logger.error(f"Failed to dump bad request: {e}")
+
+            os.chmod(script_path, 0o700)
+            logger.info("Saved bad request dump to %s and %s", payload_path, script_path)
+        except (OSError, TypeError, ValueError) as exc:
+            logger.error(f"Failed to dump bad request: {exc}")
 
     async def close(self) -> None:
         """Close the OpenAI client and clean up resources."""
@@ -177,8 +183,8 @@ class OpenAIService:
                                 last_msg_snippet = part.get('text', '').replace("\n", " ")
                                 break
                     elif isinstance(last_msg_ptr, str):
-                         last_msg_snippet = last_msg_ptr.replace("\n", " ")
-                
+                        last_msg_snippet = last_msg_ptr.replace("\n", " ")
+
                 snippet_trunc = last_msg_snippet[:150] + ("..." if len(last_msg_snippet) > 150 else "")
                 logger.info(f"[{actual_model}] Prompt Snippet: {snippet_trunc}")
                 logger.info(f"api headers: {client.default_headers}")
@@ -206,16 +212,16 @@ class OpenAIService:
                     if isinstance(error_data, dict):
                         error_code = error_data.get('code')
                         error_message = error_data.get('message', 'Unknown Error')
-                        
+
                         logger.error(f"Captured Soft-Error Payload in HTTP 200: {error_code} - {error_message}")
                         logger.error(f"Full soft-error data: {json.dumps(error_data, indent=2, default=str)}")
                         logger.error(f"Full raw response object: {response}")
                         self._dump_bad_request(kwargs, client)
-                        
+
                         if error_code in [429, 500, 502, 503, 504]:
-                           # Force this up to the retry loop catcher
-                           raise APIError(message=f"Upstream provider error: {error_code}", request=None, body=error_data)
-                           
+                            # Force this up to the retry loop catcher
+                            raise APIError(message=f"Upstream provider error: {error_code}", request=None, body=error_data)
+
                         raise OpenAIServiceError(f"Non-retryable soft-error {error_code}: {error_message}")
 
                 # Safely inspect choices to avoid "object of type NoneType has no len()"
@@ -225,16 +231,15 @@ class OpenAIService:
 
                 if getattr(response, 'choices', None):
                     response_text = response.choices[0].message.content
-                    
+
                     # Print response snippet
                     text_snippet = response_text.strip().replace("\n", " ")[:150] if response_text else "(empty)"
                     logger.info(f"[{actual_model}] response snippet: {text_snippet}{'...' if len(response_text or '') > 150 else ''}")
-                    
+
                     if not response_text:
                         logger.error(f"⚠️ OpenAI response text was empty! Raw response object: {response}")
-                        raise ValueError("The model API returned an empty response.") # Changed from OpenAIServiceError to allow caught retry
+                        raise ValueError("The model API returned an empty response.")  # Changed from OpenAIServiceError to allow caught retry
 
-                    
                     # Attempt to get the bot_id if not explicitly provided
                     effective_bot_id = bot_id
                     if not effective_bot_id:

@@ -21,6 +21,7 @@ def _delete_cache_entry(cache, key: str) -> None:
     elif key in cache:
         del cache[key]
 
+
 def extract_facebook_urls(text: str) -> List[str]:
     """
     Extract Facebook video URLs from a block of text.
@@ -41,6 +42,7 @@ def extract_facebook_urls(text: str) -> List[str]:
             urls.append(url)
 
     return urls
+
 
 def get_facebook_transcript(url: str) -> Optional[dict]:
     """

@@ -57,7 +57,6 @@ async def get_transcript(video_id: str) -> Optional[str]:
             logger.debug(f"Cache hit for transcript: {video_id}")
             return cached_result
 
-
     try:
         def _fetch():
             if TRANSCRIPT_PROXY:

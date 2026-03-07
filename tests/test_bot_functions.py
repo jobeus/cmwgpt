@@ -4,7 +4,7 @@ Tests helper functions and logic that can be tested without Discord integration.
 """
 
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 import asyncio
 import sys
 import os

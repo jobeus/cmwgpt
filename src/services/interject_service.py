@@ -89,7 +89,7 @@ class InterjectService:
         # Lock to prevent concurrent interjection attempts
         self._lock = asyncio.Lock()
         self._running = False
-        
+
         # Load state from file if it exists
         self._load_state()
 
@@ -189,7 +189,7 @@ class InterjectService:
         window_mins = self._get_setting(channel.id, "window_mins", ACTIVITY_WINDOW_MINUTES)
         exclude_embeds = self._get_setting(channel.id, "exclude_embeds", EXCLUDE_EMBEDS)
         min_authors = self._get_setting(channel.id, "min_authors", MIN_UNIQUE_AUTHORS)
-        
+
         fetch_limit = min_messages + 1
         cutoff = time.time() - (window_mins * 60)
         unique_authors: set[int] = set()
@@ -247,7 +247,7 @@ class InterjectService:
 
         # Fetch context messages
         context_lines_cfg = self._get_setting(channel.id, "context_lines", CONTEXT_LINES)
-        
+
         context_messages: list[discord.Message] = []
         async for msg in channel.history(limit=context_lines_cfg):
             context_messages.append(msg)
@@ -384,34 +384,36 @@ class InterjectService:
             # New day — reset
             self._daily_tracker = {"date": today, "counts": {}}
             self._save_state()
-            
+
         daily_max = self._get_setting(channel_id, "daily_max", MAX_INTERJECTIONS_PER_DAY)
-        # Handle string keys from JSON loading
-        current_count = self._daily_tracker["counts"].get(str(channel_id), self._daily_tracker["counts"].get(channel_id, 0))
-        return current_count >= daily_max
+        return self._get_daily_count(channel_id) >= daily_max
+
+    def _get_daily_count(self, channel_id: int) -> int:
+        """Return the persisted daily count for a channel, handling legacy key types."""
+        counts = self._daily_tracker["counts"]
+        return counts.get(str(channel_id), counts.get(channel_id, 0))
 
     def _increment_daily_count(self, channel_id: int) -> None:
         """Increment the daily interjection counter for the channel."""
         today = datetime.now().strftime("%Y-%m-%d")
-        channel_key = str(channel_id) # consistently use strings for json
-        
+        channel_key = str(channel_id)  # Persist JSON-friendly string keys.
+
         if self._daily_tracker["date"] != today:
             self._daily_tracker = {"date": today, "counts": {channel_key: 1}}
         else:
-            current = self._daily_tracker["counts"].get(channel_key, self._daily_tracker["counts"].get(channel_id, 0))
+            current = self._get_daily_count(channel_id)
             self._daily_tracker["counts"][channel_key] = current + 1
-            
+
         self._save_state()
 
     def get_daily_status(self, channel_id: int) -> tuple[int, int]:
         """Return the current daily count and maximum cap for the given channel."""
         today = datetime.now().strftime("%Y-%m-%d")
         if self._daily_tracker["date"] != today:
-             return 0, self._get_setting(channel_id, "daily_max", MAX_INTERJECTIONS_PER_DAY)
-             
+            return 0, self._get_setting(channel_id, "daily_max", MAX_INTERJECTIONS_PER_DAY)
+
         daily_max = self._get_setting(channel_id, "daily_max", MAX_INTERJECTIONS_PER_DAY)
-        current_count = self._daily_tracker["counts"].get(str(channel_id), self._daily_tracker["counts"].get(channel_id, 0))
-        return current_count, daily_max
+        return self._get_daily_count(channel_id), daily_max
 
     def _save_state(self) -> None:
         """Save the daily tracker to disk."""
@@ -423,7 +425,7 @@ class InterjectService:
                 json.dump(self._daily_tracker, f)
         except (OSError, ValueError) as exc:
             logger.error(f"Failed to save interject counts state: {exc}")
-            
+
     def _load_state(self) -> None:
         """Load daily tracker from disk."""
         if not self._state_file or not os.path.exists(self._state_file):
@@ -439,5 +441,3 @@ class InterjectService:
     def _roll_chance(chance: int) -> bool:
         """Roll a random number and return True if we should interject."""
         return random.randint(1, 100) <= chance
-
-

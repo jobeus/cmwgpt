@@ -66,7 +66,7 @@ async def fetch_all_url_content(message_text: str) -> str:
                 transcript_text = await get_transcript(vid_id)
                 if transcript_text:
                     if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
-                       logger.info(f"Target Video ID {vid_id} Transcript grabbed successfully.") 
+                        logger.info(f"Target Video ID {vid_id} Transcript grabbed successfully.")
                     transcripts.append(f"Target Video ID {vid_id} Transcript:\n{transcript_text}")
             except Exception as e:
                 logger.warning(f"Failed to fetch transcript for {vid_id}: {e}")
@@ -87,7 +87,7 @@ async def fetch_all_url_content(message_text: str) -> str:
                     groq_resp = result.get("groq_response")
                     from_cache = result.get("from_cache", False)
                     if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
-                       logger.info(f"Target TikTok Video {t_url} Transcript grabbed successfully.") 
+                        logger.info(f"Target TikTok Video {t_url} Transcript grabbed successfully.")
                     tiktok_transcripts.append(f"Target TikTok Video {t_url} Transcript:\n{transcript_text}")
 
                     if result.get("audio_artifact"):
@@ -171,7 +171,7 @@ async def fetch_all_url_content(message_text: str) -> str:
                 tweet_text = await get_tweet_context(t_url)
                 if tweet_text:
                     if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
-                       logger.info(f"Target Tweet {t_url} context grabbed successfully.") 
+                        logger.info(f"Target Tweet {t_url} context grabbed successfully.")
                     twitter_contexts.append(f"Target Tweet {t_url} Context:\n{tweet_text}")
             except Exception as e:
                 logger.warning(f"Failed to fetch Tweet context for {t_url}: {e}")
@@ -192,7 +192,7 @@ async def fetch_all_url_content(message_text: str) -> str:
                     groq_resp = result.get("groq_response")
                     from_cache = result.get("from_cache", False)
                     if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
-                       logger.info(f"Target Facebook Video {fb_url} Transcript grabbed successfully.") 
+                        logger.info(f"Target Facebook Video {fb_url} Transcript grabbed successfully.")
                     facebook_transcripts.append(f"Target Facebook Video {fb_url} Transcript:\n{transcript_text}")
 
                     if result.get("audio_artifact"):
@@ -275,7 +275,7 @@ async def fetch_all_url_content(message_text: str) -> str:
                 article_text = await get_article_text(t_url)
                 if article_text:
                     if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
-                       logger.info(f"URL content for {t_url} grabbed successfully.") 
+                        logger.info(f"URL content for {t_url} grabbed successfully.")
                     articles.append(f"URL content:\n{article_text}")
             except Exception as e:
                 logger.warning(f"Failed to fetch article for {t_url}: {e}")

@@ -23,6 +23,7 @@ class TestAsyncUtils(unittest.IsolatedAsyncioTestCase):
         await safe_run(interaction, handler)
 
         interaction.followup.send.assert_awaited_once()
+
         sent_message = interaction.followup.send.await_args.kwargs["content"]
         self.assertIn("unexpected error", sent_message.lower())
 

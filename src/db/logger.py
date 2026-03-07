@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 PIPELINE_STEP_FORMAT = "pipeline_step.v1"
 
+
 def _serialize_json(data: Any) -> Optional[str]:
     """Helper to safely serialize dictionaries/lists to JSON strings."""
     if data is None:
@@ -83,6 +84,7 @@ def build_pipeline_payload(
         payload["meta"] = meta
     return payload
 
+
 async def log_api_request(
     service_name: str,
     method: str,
@@ -108,13 +110,13 @@ async def log_api_request(
 
     query = """
         INSERT INTO api_request_logs (
-            service_name, method, endpoint_url, 
+            service_name, method, endpoint_url,
             request_headers, request_body,
             response_status, response_headers, response_body,
             cost, discord_user_id, discord_channel_id
         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
-    
+
     args = (
         service_name,
         method.upper(),
@@ -188,4 +190,3 @@ async def log_pipeline_step(
         discord_user_id=discord_user_id,
         discord_channel_id=discord_channel_id,
     )
-

@@ -121,7 +121,7 @@ class ImageCommands:
                 # Generate the image
                 if self._runpod_service.has_model(active_model):
                     img_bytes, cost = await self._runpod_service.generate_image(
-                        prompt=prompt, 
+                        prompt=prompt,
                         model=active_model,
                         discord_user_id=interaction.user.id,
                         discord_channel_id=channel_id
@@ -332,8 +332,8 @@ class ImageCommands:
                                 base64.b64encode(img_bytes).decode('utf-8'))
 
                     img_bytes, cost = await self._runpod_service.edit_image(
-                        prompt=prompt, 
-                        model=active_model, 
+                        prompt=prompt,
+                        model=active_model,
                         images=images_b64,
                         discord_user_id=interaction.user.id,
                         discord_channel_id=channel_id

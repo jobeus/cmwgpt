@@ -6,7 +6,6 @@ Tests HTML parsing, name diffing, pageview threshold, announcements, and state p
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch, mock_open
 import asyncio
-import json
 import os
 import sys
 from types import SimpleNamespace

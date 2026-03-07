@@ -1,6 +1,7 @@
 """Unit tests for the stateless paste utility helpers."""
 
 import unittest
+from typing import List
 
 from src.utils.pasters import upload_to_pasters
 
@@ -8,7 +9,7 @@ from src.utils.pasters import upload_to_pasters
 class StubUploader:
     def __init__(self, url: str):
         self.url = url
-        self.calls = []
+        self.calls: List[str] = []
 
     async def upload_markdown(self, markdown_text: str) -> str:
         self.calls.append(markdown_text)

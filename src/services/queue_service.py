@@ -12,7 +12,7 @@ This service provides a queue-based message processing system to ensure:
 import asyncio
 import logging
 import os
-from typing import Dict, Any, Callable, Awaitable, Optional
+from typing import Dict, Any, Callable, Awaitable
 from dataclasses import dataclass
 from enum import Enum
 import discord
