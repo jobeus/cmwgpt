@@ -41,6 +41,19 @@ class TestUrlUtils(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(urls, ["https://example.com/post", "www.example.com/post"])
 
+    def test_extract_target_urls_skips_discord_cdn_and_direct_media_urls(self):
+        text = (
+            "https://cdn.discordapp.com/ephemeral-attachments/1/2/image.png?ex=abc "
+            "https://media.discordapp.net/attachments/1/2/photo.jpg "
+            "https://example.com/image.webp?width=1024&height=768 "
+            "https://example.com/article "
+            "https://example.com/post.html"
+        )
+
+        urls = url_utils.extract_target_urls(text)
+
+        self.assertEqual(urls, ["https://example.com/article", "https://example.com/post.html"])
+
     def test_inject_article_cache_writes_directly(self):
         fake_cache = {}
 

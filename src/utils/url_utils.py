@@ -28,8 +28,25 @@ EXCLUDED_DOMAINS = {
     'instagram.com', 'www.instagram.com',
     'facebook.com', 'www.facebook.com', 'fb.watch',
     'x.com', 'www.x.com', 'twitter.com', 'www.twitter.com',
-    'xcancel.com', 'www.xcancel.com'
+    'xcancel.com', 'www.xcancel.com',
+    'cdn.discordapp.com', 'media.discordapp.net',
+    'images-ext-1.discordapp.net', 'images-ext-2.discordapp.net'
 }
+
+EXCLUDED_MEDIA_EXTENSIONS = {
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.ico',
+    '.mp4', '.webm', '.mov', '.avi', '.mkv',
+    '.mp3', '.wav', '.m4a', '.ogg', '.flac', '.aac'
+}
+
+
+def _is_excluded_domain(domain: str) -> bool:
+    return any(domain == ex or domain.endswith('.' + ex) for ex in EXCLUDED_DOMAINS)
+
+
+def _is_excluded_media_url(parsed) -> bool:
+    path = parsed.path.lower()
+    return any(path.endswith(ext) for ext in EXCLUDED_MEDIA_EXTENSIONS)
 
 def extract_target_urls(text: str) -> List[str]:
     """
@@ -52,8 +69,8 @@ def extract_target_urls(text: str) -> List[str]:
             parsed = urlparse(parse_url)
             domain = parsed.netloc.lower()
             
-            # Simple check to see if domain ends with any excluded domain
-            is_excluded = any(domain == ex or domain.endswith('.' + ex) for ex in EXCLUDED_DOMAINS)
+            # Exclude domains with dedicated downloader/media handling and obvious binary media URLs
+            is_excluded = _is_excluded_domain(domain) or _is_excluded_media_url(parsed)
             
             if not is_excluded and url not in urls:
                 urls.append(url)
