@@ -1,41 +1,95 @@
-# Deployment and runtime notes
+# Deployment and runtime guide
 
-## Supported runtime shapes
+This page is about **how to run the system responsibly**, not just how to start a process.
 
-The repository currently supports two practical modes:
+## Choose a deployment shape
 
-1. **Python bot only** with an external or local MariaDB instance
-2. **Full Docker development stack** with bot, MariaDB, log-viewer backend, and log-viewer frontend
+| Shape | Good for | What you run |
+| --- | --- | --- |
+| Bot-only runtime | Hosting the Python bot with an existing/local MariaDB instance | `python main.py` under a supervisor |
+| Full Docker stack | Development and local end-to-end testing | `docker compose --env-file .env.development up --build` |
 
-## Python bot deployment
+## Important expectation-setting
 
-### Requirements
+The repository ships a **good development stack**, not a hardened production platform.
 
-- Python 3.11+
-- MariaDB reachable from the bot
-- valid Discord/OpenRouter credentials
+What it does provide well:
 
-### Basic steps
+- a runnable Python bot
+- MariaDB-backed request/pipeline logging
+- a separate backend/frontend log viewer
+- a compose setup that brings the whole stack up together
 
-1. Create and populate an env file.
-2. Install Python dependencies from `requirements.txt`.
-3. Initialize the database with `init_db.sql`.
-4. Run `python main.py` under a process manager.
+What it does **not** currently try to be:
 
-Recommended process managers include `systemd`, `supervisord`, `pm2`, or any other service runner that will restart the process when it exits.
+- a Kubernetes deployment
+- a full production IaC package
+- a migration-managed database platform
+- a security-hardened, production-ready compose bundle
 
-### Why a process manager matters
+## Bot-only deployment checklist
 
-The restart path exits the process with code `42`. That is intentional and is how the bot signals a self-restart after saving state and pulling new code.
+### Prerequisites
 
-## Docker stack
+| Requirement | Why it matters |
+| --- | --- |
+| Python 3.11+ | Required runtime for the bot |
+| Reachable MariaDB instance | Logging and viewer data depend on it |
+| `DISCORD_BOT_TOKEN` | Discord authentication |
+| `OPENROUTER_API_KEY` | Text completions |
+| `RUNPOD_IO_API_KEY` | Needed if image commands are used |
+| Optional `RAPIDAPI_KEY` / `GROQ_API_KEY` | Needed for some URL-enrichment providers |
 
-`docker-compose.yml` defines:
+### Core rollout steps
 
-- `db` - MariaDB 11.7
-- `bot` - Python bot container
-- `backend` - log-viewer backend
-- `frontend` - Vite frontend
+1. Create and populate the env file.
+2. Install Python dependencies.
+3. Apply `init_db.sql` to the target database.
+4. Start the bot under a real process supervisor.
+
+Typical install/run shape:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python main.py
+```
+
+## Why a process supervisor is not optional
+
+The restart flow intentionally exits with code `42`.
+
+That means the bot expects an outer process manager to bring it back up after:
+
+- a manual `/restart`
+- an auto-update restart
+
+Recommended supervisors include:
+
+- `systemd`
+- `supervisord`
+- `pm2`
+- any equivalent service manager that reliably restarts on exit
+
+### Supervisor behavior you want
+
+| Behavior | Why |
+| --- | --- |
+| Restart on non-zero exit | Handles intentional restart exit `42` |
+| Start on boot | Keeps the bot available after host restarts |
+| Persistent logs | Makes startup/restart issues much easier to debug |
+| Controlled working directory | Important if git-based restart/update is enabled |
+
+## Full Docker stack
+
+`docker-compose.yml` defines the local full-stack environment:
+
+| Service | Purpose |
+| --- | --- |
+| `db` | MariaDB 11.7 |
+| `bot` | Python Discord bot |
+| `backend` | Log-viewer API + Socket.IO service |
+| `frontend` | Vite/React UI |
 
 Bring it up with:
 
@@ -43,44 +97,55 @@ Bring it up with:
 docker compose --env-file .env.development up --build
 ```
 
-The compose file mounts the repo into containers for development-oriented workflows.
+### Default dev ports
 
-## Ports
+| Port | Service |
+| --- | --- |
+| `3306` | MariaDB |
+| `3001` | Log-viewer backend |
+| `5173` | Log-viewer frontend |
 
-Default exposed ports in the development stack:
+### Runtime notes for the backend/frontend side
 
-- `3306` - MariaDB
-- `3001` - log-viewer backend
-- `5173` - log-viewer frontend
+- In Docker, the backend container maps `PORT` from `LOG_VIEWER_PORT`.
+- The backend host is typically `0.0.0.0` in Docker and `127.0.0.1` by default outside it.
+- The frontend dev server proxies `/api` and `/socket.io` to the backend target.
 
-## Production considerations
+## Production-minded checklist
 
-### Secrets
+Even if you are not doing “real production,” these are the minimum responsible checks.
 
-- set strong `JWT_SECRET`
-- set real database credentials
-- do not rely on development auth settings in production
+| Area | What to verify |
+| --- | --- |
+| Secrets | Strong `JWT_SECRET`, real DB credentials, real API keys |
+| Origins | `LOG_VIEWER_ALLOWED_ORIGINS` set correctly |
+| Database | `init_db.sql` applied before services expect logs |
+| Restart behavior | Supervisor restarts the bot after exit `42` |
+| Git-based updates | Only enable `KEEP_UP_TO_DATE_WITH_GIT` where `git pull` is safe and expected |
+| Auth mode | Do not rely on dev auth settings in production |
 
-### CORS/origins
+## Auto-update and git-based restart considerations
 
-Set `LOG_VIEWER_ALLOWED_ORIGINS` for the deployed frontend host(s).
+If you enable `KEEP_UP_TO_DATE_WITH_GIT`, the deployment must satisfy all of these:
 
-### Database initialization
+| Requirement | Why |
+| --- | --- |
+| Valid git checkout | Restart flow performs `git pull` |
+| Correct remote/auth setup | Update path must be able to fetch/pull |
+| Writable working tree | Pulls will fail in read-only or locked environments |
+| Process supervisor | Bot exits after restart preparation |
 
-Run `init_db.sql` before starting services that need request logging.
+If those assumptions are not true, keep `KEEP_UP_TO_DATE_WITH_GIT=false`.
 
-### Restarts and updates
+## Recommended mental model
 
-If you enable `KEEP_UP_TO_DATE_WITH_GIT`, make sure the deployment environment:
+- Use the included Docker stack as a **development baseline**.
+- Use a supervised Python process plus MariaDB for a **simple hosted runtime**.
+- Treat auto-update as an **operational choice**, not a default convenience.
 
-- has a valid git checkout
-- can perform `git pull`
-- is supervised by a process manager that restarts the bot after exit
+## See also
 
-## What this repo does not currently provide
-
-- Kubernetes manifests
-- a hardened production compose profile
-- automated migrations beyond the current SQL initialization file
-
-Use the included compose stack as a development baseline, not as a drop-in production blueprint.
+- `docs/development.md`
+- `docs/configuration.md`
+- `docs/mariadb_setup.md`
+- `docs/auto-update.md`

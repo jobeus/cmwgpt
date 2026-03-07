@@ -1,174 +1,282 @@
 # Architecture
 
-## High-level flow
-
-The bot is a mention-first Discord application with a separate MariaDB-backed logging stack.
-
-1. `main.py` starts the process.
-2. `src/startup.py` loads config, creates shared services, and constructs the Discord client.
-3. `src/bot/client.py` registers slash commands and message handlers.
-4. `src/bot/handlers/mention.py` assembles conversation context for mentions.
-5. `src/utils/downloader_utils.py` enriches prompts with transcripts/article text for supported URLs.
-6. `src/services/openai_service.py` sends text requests to OpenRouter.
-7. `src/services/runpod_service.py` handles image generation/editing.
-8. `src/db/logger.py` writes API and pipeline events to MariaDB for the log viewer.
-
-## Main Python entry points
-
-- `main.py` - async startup/shutdown wrapper
-- `src/startup.py` - service wiring and client construction
-- `src/config.py` - environment loading and config defaults
-
-## Discord layer
-
-### Client
-
-`src/bot/client.py` is responsible for:
-
-- connecting to Discord
-- registering slash commands
-- routing messages to the mention pipeline
-- starting auxiliary services on ready
-- coordinating graceful shutdown and restart handling
-
-### Command modules
-
-- `src/bot/commands/system.py`
-- `src/bot/commands/image.py`
-- `src/bot/commands/interject.py`
-- `src/bot/commands/death.py`
-
-The current bot does not expose a `/chat` command. User chat requests happen by mentioning the bot.
-
-### Mention handling
-
-`src/bot/handlers/mention.py` is the central request pipeline for conversational replies. It:
-
-- detects and queues mention work
-- optionally includes usernames and reply-chain context
-- pulls recent channel history according to `INCLUDE_NUM_CHATLINES`
-- injects downloader output for supported URLs
-- forwards the assembled prompt to `OpenAIService`
-- persists response continuity through `StateService`
-
-## Services
-
-### `StateService`
-
-`src/services/state_service.py` stores per-channel state, including:
-
-- selected text model
-- selected draw/edit models
-- custom system prompt
-- response continuity IDs for the mention flow
-- persisted settings for interject/death services
-
-### `QueueService`
-
-`src/services/queue_service.py` serializes command and mention work and enforces a bounded queue.
-
-### `OpenAIService`
-
-`src/services/openai_service.py` currently handles text responses through OpenRouter chat completions.
-
-- default fallback model: `anthropic/claude-haiku-4.5`
-- optional web-search tool support for select Gemini models
-
-### `RunpodService`
-
-`src/services/runpod_service.py` handles image work.
-
-Supported draw/edit model keys are defined in code and exposed through slash-command choices.
-
-### `PasteService`
-
-`src/services/paste_service.py` uploads oversized content and can inject resulting paste text into the article cache.
-
-### `MessageService`
-
-`src/services/message_service.py` centralizes Discord response/edit/send helpers.
-
-### `AutoUpdateService` and `RestartHandler`
-
-- `src/services/auto_update_service.py` polls git for updates when enabled
-- `src/services/restart_handler.py` saves state, performs `git pull`, and exits with restart code `42`
-
-### `AnnouncementService`
-
-`src/services/announcement_service.py` restores pending restart/update announcements on startup.
-
-### `InterjectService`
-
-`src/services/interject_service.py` can occasionally inject bot messages into active channels based on configurable probability and cooldown settings.
-
-### `DeathService`
-
-`src/services/death_service.py` periodically checks the configured guild's members against the Wikipedia death feed/pageview thresholds and can post notifications to `DEATH_CHANNEL_ID`.
-
-## Downloader and enrichment pipeline
-
-`src/utils/downloader_utils.py` discovers supported URLs in a message and aggregates any successful fetches into a text block that gets prepended to the model prompt.
-
-Current supported enrichments:
-
-- YouTube transcripts via `src/utils/youtube_utils.py`
-- TikTok transcripts via `src/utils/tiktok_utils.py`
-- Twitter/X context via `src/utils/twitter_utils.py`
-- Facebook video transcripts via `src/utils/facebook_utils.py`
-- Generic article extraction via `src/utils/url_utils.py`
-
-Most downloader helpers use `PersistentCache` from `src/utils/cache_utils.py` so successful fetches survive process restarts.
-
-## Database and observability
-
-### MariaDB connection
-
-- `src/db/connection.py` builds the async MariaDB pool
-- `init_db.sql` creates the required tables
-
-### Logging model
-
-`src/db/logger.py` writes two main kinds of records:
-
-- API request logs
-- pipeline step logs, including replay snippets and artifacts
-
-This logging is what powers the log viewer.
-
-## Log viewer
-
-### Backend
-
-`log-viewer/backend` is the Node/TypeScript service that:
-
-- authenticates viewers
-- queries MariaDB log rows
-- serves media through proxy routes
-- streams updates over Socket.IO
-
-### Frontend
-
-`log-viewer/frontend` is the React/Vite UI that:
-
-- provides login
-- shows recent logs
-- opens per-log detail views
-- renders conversation/pipeline panels and replay helpers
-
-## Runtime layouts
-
-### Local bot-only development
-
-- Python process started directly from `main.py`
-- external MariaDB instance or local DB
-
-### Docker development stack
-
-`docker-compose.yml` runs:
-
-- `db`
-- `bot`
-- `backend`
-- `frontend`
-
-This is the simplest way to run the whole observability stack together.
+This page is meant to answer four questions quickly:
+
+1. **What are the main moving parts?**
+2. **How does a mention turn into a reply?**
+3. **Which services are wired together at startup?**
+4. **How do the bot, database, and log viewer fit together in development?**
+
+## Read this page like a map
+
+| Section | Use it when you want to... |
+| --- | --- |
+| System architecture | Orient yourself to the whole stack |
+| Service wiring at startup | See what `src/startup.py` actually constructs |
+| Mention pipeline | Understand the primary request path |
+| Downloader enrichment flow | Understand where transcript/article data comes from |
+| Docker/runtime layout | Visualize the development stack |
+| Component map | Jump straight to the file you likely need |
+
+## Diagram: system architecture
+
+What it shows:
+
+- the Python bot as the center of Discord interaction
+- OpenRouter/Runpod/downloader work feeding MariaDB logging
+- the separate log-viewer backend/frontend path
+
+```mermaid
+flowchart LR
+    classDef edge fill:#334155,color:#f8fafc,stroke:#475569,stroke-width:1px;
+    classDef bot fill:#2563eb,color:#eff6ff,stroke:#1d4ed8,stroke-width:1.5px;
+    classDef service fill:#0f766e,color:#ecfeff,stroke:#115e59,stroke-width:1.5px;
+    classDef data fill:#7c3aed,color:#f5f3ff,stroke:#6d28d9,stroke-width:1.5px;
+    classDef viewer fill:#ea580c,color:#fff7ed,stroke:#c2410c,stroke-width:1.5px;
+
+    User((Discord users)):::edge --> Discord[Discord API / Gateway]:::edge
+
+    subgraph BotApp[Python bot]
+        Client[DiscordBotClient]:::bot
+        Mention[MentionHandler]:::service
+        Commands[Slash command modules]:::service
+        Queue[QueueService]:::service
+        State[StateService]:::service
+        OpenAI[OpenAIService<br/>OpenRouter text]:::service
+        Runpod[RunpodService<br/>image draw/edit]:::service
+        Downloader[Downloader pipeline]:::service
+        MsgSvc[MessageService]:::service
+        Restart[Restart + update services]:::service
+    end
+
+    Discord --> Client
+    Client --> Mention
+    Client --> Commands
+    Mention --> Queue
+    Queue --> OpenAI
+    Mention --> Downloader
+    Mention --> State
+    Mention --> MsgSvc
+    Commands --> State
+    Commands --> Runpod
+    Commands --> MsgSvc
+    Client --> Restart
+
+    DB[(MariaDB<br/>request + pipeline logs)]:::data
+    OpenAI --> DB
+    Downloader --> DB
+    Runpod --> DB
+    Client --> DB
+
+    subgraph Viewer[Log viewer]
+        Backend[Node/TS backend<br/>API + Socket.IO]:::viewer
+        Frontend[React/Vite frontend]:::viewer
+        Browser((Browser)):::edge
+    end
+
+    Browser --> Frontend
+    Frontend --> Backend
+    Backend --> DB
+```
+
+## Diagram: service wiring at startup
+
+What it shows:
+
+- `main.py` -> `src/startup.py`
+- the services created by `create_services()`
+- how those services are injected into the Discord client
+
+```mermaid
+flowchart TB
+    classDef core fill:#1d4ed8,color:#eff6ff,stroke:#1e40af,stroke-width:1.5px;
+    classDef svc fill:#0f766e,color:#ecfeff,stroke:#115e59,stroke-width:1.2px;
+    classDef aux fill:#7c3aed,color:#f5f3ff,stroke:#6d28d9,stroke-width:1.2px;
+
+    Main[main.py]:::core --> Startup[src/startup.py]:::core
+    Startup --> Config[load_config AppConfig]:::core
+    Startup --> Factory[create_services]:::core
+    Factory --> State[StateService]:::svc
+    Factory --> Queue[QueueService]:::svc
+    Factory --> OpenAI[OpenAIService]:::svc
+    Factory --> Paste[PasteService]:::svc
+    Factory --> Message[MessageService]:::svc
+    Factory --> Runpod[RunpodService]:::svc
+    Factory --> Restart[RestartHandler]:::aux
+    Factory --> AutoUpdate[AutoUpdateService]:::aux
+    Factory --> Announce[AnnouncementService]:::aux
+    Factory --> Interject[InterjectService]:::aux
+    Factory --> Death[DeathService]:::aux
+    Factory --> Mention[MentionHandler]:::svc
+
+    State --> Interject
+    State --> Death
+    State --> Mention
+    Queue --> Mention
+    OpenAI --> Interject
+    OpenAI --> Mention
+    Message --> Interject
+    Message --> Mention
+
+    Startup --> Client[DiscordBotClient]:::core
+    Client --> Mention
+    Client --> AutoUpdate
+    Client --> Announce
+    Client --> Interject
+    Client --> Death
+```
+
+## Diagram: mention pipeline
+
+This is the single most important runtime path in the app.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Discord user
+    participant C as DiscordBotClient
+    participant Q as QueueService
+    participant M as MentionHandler
+    participant S as StateService
+    participant D as downloader_utils
+    participant O as OpenAIService
+    participant MS as MessageService
+    participant DB as MariaDB logger
+
+    U->>C: Mention bot in channel
+    C->>S: get_model(channel)
+    C->>Q: queue_mention(message, bot_user, model)
+    Q->>M: handle_mention(...)
+    M->>S: mark_channel_active(channel)
+    M->>M: load history + reply context + embeds + attachments
+    M->>S: get_system_prompt(channel)
+    M->>D: fetch_all_url_content(message text)
+    D->>D: discover YouTube / TikTok / Twitter / Facebook / articles
+    D->>DB: log pipeline steps and API calls
+    D-->>M: aggregated enrichment block
+    M->>O: get_chat_completion(messages, system_prompt, model)
+    O->>DB: log request / response metadata
+    O-->>M: reply content
+    M->>MS: send_channel_reply(...)
+    MS-->>U: Discord reply
+```
+
+### What matters about this flow
+
+- Mentions are **queued**, not processed in parallel ad hoc.
+- Prompt context is more than just the latest message: it includes recent history, reply metadata, embeds, and attachments.
+- URL enrichment happens **before** the LLM call and can materially change the prompt content.
+- Logging is first-class: downloader and model activity both emit records consumed later by the log viewer.
+
+## Diagram: downloader enrichment flow
+
+```mermaid
+flowchart LR
+    classDef in fill:#334155,color:#f8fafc,stroke:#475569,stroke-width:1px;
+    classDef src fill:#0f766e,color:#ecfeff,stroke:#115e59,stroke-width:1.2px;
+    classDef cache fill:#7c3aed,color:#f5f3ff,stroke:#6d28d9,stroke-width:1.2px;
+    classDef out fill:#ea580c,color:#fff7ed,stroke:#c2410c,stroke-width:1.2px;
+
+    Msg[Incoming message text]:::in --> Discover[fetch_all_url_content]:::src
+    Discover --> YT[YouTube transcript]:::src
+    Discover --> TT[TikTok transcript]:::src
+    Discover --> TW[Twitter/X context]:::src
+    Discover --> FB[Facebook transcript]:::src
+    Discover --> AR[Article extraction]:::src
+
+    YT --> Cache[Persistent caches]:::cache
+    TT --> Cache
+    TW --> Cache
+    FB --> Cache
+    AR --> Cache
+
+    YT --> Logs[Pipeline/API logging]:::cache
+    TT --> Logs
+    TW --> Logs
+    FB --> Logs
+    AR --> Logs
+
+    Cache --> Aggregate[Aggregated injected text block]:::out
+    Logs --> Aggregate
+    Aggregate --> Prompt[Prompt sent to model]:::out
+```
+
+### Current enrichment sources
+
+| Source | Helper | Notes |
+| --- | --- | --- |
+| YouTube | `src/utils/youtube_utils.py` | Transcript extraction with optional proxy assistance |
+| TikTok | `src/utils/tiktok_utils.py` | Media download -> audio extraction -> Groq transcription |
+| Twitter/X | `src/utils/twitter_utils.py` | Tweet/context lookup, with optional video transcription path |
+| Facebook | `src/utils/facebook_utils.py` | Media download -> audio extraction -> Groq transcription |
+| Generic articles | `src/utils/url_utils.py` | `httpx` fetch plus content extraction/fallbacks |
+
+## Diagram: docker/runtime layout
+
+```mermaid
+flowchart LR
+    classDef ext fill:#334155,color:#f8fafc,stroke:#475569,stroke-width:1px;
+    classDef ctr fill:#111827,color:#f9fafb,stroke:#374151,stroke-width:1.4px;
+    classDef db fill:#7c3aed,color:#f5f3ff,stroke:#6d28d9,stroke-width:1.4px;
+
+    Discord[Discord API]:::ext --> Bot[bot container<br/>python main.py]:::ctr
+    Browser[Browser]:::ext --> Frontend[frontend container<br/>Vite dev server :5173]:::ctr
+    Frontend --> Backend[backend container<br/>Node API + Socket.IO :3001]:::ctr
+    Bot --> Maria[(db container<br/>MariaDB 11.7 :3306)]:::db
+    Backend --> Maria
+
+    Env[.env.development]:::ext --> Bot
+    Env --> Backend
+    Env --> Frontend
+    SQL[init_db.sql]:::ext --> Maria
+```
+
+## Component map
+
+| Path | Role | Open this when you need to... |
+| --- | --- | --- |
+| `main.py` | Boot entrypoint | See how process startup/shutdown begins |
+| `src/startup.py` | Service factory | Understand the dependency graph |
+| `src/config.py` | Config loading/defaults | Confirm env vars and defaults |
+| `src/bot/client.py` | Discord client orchestration | See event handlers, command setup, service startup/shutdown |
+| `src/bot/handlers/mention.py` | Main conversational path | Debug context assembly or mention behavior |
+| `src/bot/commands/` | Slash commands | Inspect user-facing command behavior |
+| `src/services/openai_service.py` | Text-model integration | Understand OpenRouter calls |
+| `src/services/runpod_service.py` | Image integration | Understand draw/edit requests |
+| `src/services/state_service.py` | Per-channel persistence | See where model/system-prompt/service settings live |
+| `src/services/queue_service.py` | FIFO work queue | Understand serialized mention processing |
+| `src/db/logger.py` | Request/pipeline logging | Understand what reaches MariaDB |
+| `src/db/connection.py` | DB pool wiring | Debug MariaDB connectivity |
+| `log-viewer/backend/` | Log API service | Debug auth, socket streaming, DB reads |
+| `log-viewer/frontend/` | Log UI | Debug frontend behavior and envs |
+
+## End-to-end narrative
+
+### Startup
+
+1. `main.py` loads configuration and starts the app.
+2. `src/startup.py` constructs the service graph.
+3. `DiscordBotClient` receives those services, sets callbacks, registers commands, and boots Discord event handling.
+
+### Mention reply
+
+1. A user mentions the bot.
+2. `DiscordBotClient` chooses the active model for the channel and queues the work.
+3. `MentionHandler` gathers recent message history and reply context.
+4. The handler enriches user text with downloader output for supported URLs.
+5. `OpenAIService` sends the assembled context to OpenRouter.
+6. `MessageService` sends the final reply back to Discord.
+7. Request and pipeline details are written to MariaDB.
+
+### Observability
+
+1. The log-viewer backend reads MariaDB logs and serves them over HTTP.
+2. It also emits realtime updates over Socket.IO.
+3. The React frontend authenticates, fetches recent logs, and subscribes to updates.
+
+## Key architectural traits
+
+- **Mention-first UX:** the primary conversational surface is normal Discord chat, not a slash command.
+- **Service composition over globals:** `src/startup.py` explicitly wires the main collaborators.
+- **Logging as a product feature:** MariaDB logging is not incidental; it powers a dedicated inspection UI.
+- **Hybrid stack:** Python handles bot/runtime behavior, while Node/React handle log inspection.

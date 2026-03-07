@@ -1,48 +1,43 @@
 # CMWGPT
 
-Discord bot for mention-driven chat, image generation/editing, automatic URL enrichment, and MariaDB-backed request logging.
+Mention-first Discord bot with URL-aware prompt enrichment, image generation/editing, and a MariaDB-backed log viewer.
 
-## What it does
+## Start here
 
-- Responds when the bot is mentioned in Discord.
-- Augments prompts with content pulled from supported URLs:
-  - YouTube transcripts
-  - TikTok audio transcripts
-  - Twitter/X post context, plus embedded video transcription when available
-  - Facebook video transcripts
-  - Generic article extraction
-- Supports slash commands for model selection, system prompts, image generation/editing, interjections, deathwatch posts, and restart.
-- Logs API and pipeline activity to MariaDB for the log viewer.
+| If you want to... | Read this |
+| --- | --- |
+| Understand the whole system quickly | `docs/architecture.md` |
+| See the current command surface | `docs/commands.md` |
+| Configure env vars correctly | `docs/configuration.md` |
+| Run the project locally or in Docker | `docs/development.md` |
+| Understand the docs set at a glance | `docs/README.md` |
 
-## Architecture at a glance
+## What lives in this repo
 
-- `main.py` starts the app and delegates wiring to `src/startup.py`.
-- `src/bot/client.py` owns the Discord client, slash-command registration, and startup/shutdown lifecycle.
-- `src/bot/handlers/mention.py` builds mention context, injects downloader output, and calls the model.
-- `src/services/openai_service.py` talks to OpenRouter for text responses.
-- `src/services/runpod_service.py` handles image generation and image editing models.
-- `src/db/logger.py` and `src/db/connection.py` persist request and pipeline logs to MariaDB.
-- `log-viewer/backend` and `log-viewer/frontend` provide the web UI for those logs.
+| Area | Purpose |
+| --- | --- |
+| `src/` | Python Discord bot, services, startup wiring, downloader utilities, DB logging |
+| `tests/` | Python unit/integration-style coverage for the bot and utilities |
+| `log-viewer/backend/` | Node/TypeScript API + Socket.IO service for reading logs |
+| `log-viewer/frontend/` | React/Vite UI for browsing API and pipeline logs |
+| `docs/` | Architecture, commands, configuration, development, deployment, and troubleshooting docs |
 
-See also:
+## What the bot actually does
 
-- `docs/architecture.md`
-- `docs/commands.md`
-- `docs/configuration.md`
-- `docs/deployment.md`
-- `docs/development.md`
-- `docs/mariadb_setup.md`
+| Capability | Current behavior |
+| --- | --- |
+| Chat | Users mention the bot in Discord; there is no current `/chat` command |
+| Context building | Recent channel history, reply context, embeds, and attachments are folded into the prompt |
+| URL enrichment | The bot can inject transcripts/context from YouTube, TikTok, Twitter/X, Facebook, and generic articles |
+| Images | Slash commands support image generation and image editing through `RunpodService` |
+| Logging | API requests and pipeline steps are written to MariaDB |
+| Observability | The log viewer backend/frontend read and stream those logs |
 
-## Quick start
+## Choose a workflow
 
-### Local Python bot
+### 1. Local bot development
 
-1. Create an env file from `env.example`.
-2. Create a virtualenv and install dependencies.
-3. Start MariaDB and initialize `init_db.sql`.
-4. Run the bot.
-
-Suggested commands:
+Use this if you mainly want to work on the Python bot.
 
 ```bash
 cp env.example .env
@@ -52,18 +47,9 @@ python3 -m venv .venv
 .venv/bin/python main.py
 ```
 
-`make venv install install-test` also works for setup. For local runs, prefer `make run-direct` over `make run`; the auto-restart wrapper in `start.sh` assumes a `venv/` path, while the Makefile creates `.venv/` by default.
+### 2. Full-stack development with Docker
 
-### Docker development stack
-
-The repo includes a compose stack for:
-
-- `db` (MariaDB)
-- `bot` (Python bot)
-- `backend` (log-viewer API/socket server)
-- `frontend` (Vite React UI)
-
-Suggested flow:
+Use this if you want bot + MariaDB + log viewer together.
 
 ```bash
 cp .env.development.example .env.development
@@ -72,81 +58,87 @@ docker compose --env-file .env.development up --build
 
 Default dev ports:
 
-- MariaDB: `3306`
-- Log viewer backend: `3001`
-- Log viewer frontend: `5173`
+| Service | Port |
+| --- | --- |
+| MariaDB | `3306` |
+| Log viewer backend | `3001` |
+| Log viewer frontend | `5173` |
 
-## Core environment variables
+## Current user-facing commands
 
-Required for the bot:
+| Group | Commands |
+| --- | --- |
+| General | `/help`, `/model`, `/restart` |
+| Prompting | `/systemprompt set`, `/systemprompt view`, `/systemprompt reset` |
+| Images | `/draw`, `/drawmodel`, `/edit`, `/editmodel` |
+| Interjections | `/interject set`, `/interject view`, `/interject reset`, `/interject count` |
+| Deathwatch | `/death set`, `/death view`, `/death reset` |
 
-- `DISCORD_BOT_TOKEN`
-- `OPENROUTER_API_KEY`
+Chat itself remains mention-based.
 
-Required for specific downloader features:
+## Environment essentials
 
-- `GROQ_API_KEY` for TikTok/Facebook audio transcription and Twitter video transcription
-- `RAPIDAPI_KEY` for Twitter/X context fetches
+### Bot essentials
 
-Required for database-backed logging:
+| Variable | Required | Why |
+| --- | --- | --- |
+| `DISCORD_BOT_TOKEN` | Yes | Connects the bot to Discord |
+| `OPENROUTER_API_KEY` | Yes | Powers text-model completions |
+| `RUNPOD_IO_API_KEY` | If using image commands | Powers draw/edit requests |
 
-- `DB_HOST`
-- `DB_PORT`
-- `DB_USER`
-- `DB_PASSWORD`
-- `DB_NAME`
+### Downloader/provider essentials
 
-Important optional values:
+| Variable | Required when | Why |
+| --- | --- | --- |
+| `RAPIDAPI_KEY` | Using Twitter/X enrichment | Fetches tweet/context data |
+| `GROQ_API_KEY` | Using TikTok/Facebook/Twitter-video transcription | Runs audio transcription |
+| `TRANSCRIPT_PROXY` | Optional | Helps when direct transcript/media fetches fail |
 
-- `DEFAULT_MODEL`
-- `DEFAULT_DRAW_MODEL`
-- `DEFAULT_EDIT_MODEL`
-- `REPLY_TO_MENTIONS`
-- `INCLUDE_USERNAMES`
-- `INCLUDE_NUM_CHATLINES`
-- `TRANSCRIPT_PROXY`
-- `KEEP_UP_TO_DATE_WITH_GIT`
-- `QUIET_UPDATES`
-- `DISCORD_GUILD_ID`
-- `DEATH_CHANNEL_ID`
-- `MAX_CACHE_SIZE`
+### Database essentials
 
-See `docs/configuration.md` for the full grouped reference, including log-viewer variables.
+| Variable | Default | Why |
+| --- | --- | --- |
+| `DB_HOST` | `127.0.0.1` | MariaDB host |
+| `DB_PORT` | `3306` | MariaDB port |
+| `DB_USER` | `cmwgpt_user` | MariaDB user |
+| `DB_PASSWORD` | empty | MariaDB password |
+| `DB_NAME` | `cmwgpt` | Database name |
 
-## Current slash commands
+For the full reference, see `docs/configuration.md`.
 
-- `/help`
-- `/model`
-- `/systemprompt set|view|reset`
-- `/draw`
-- `/drawmodel`
-- `/edit`
-- `/editmodel`
-- `/interject set|view|reset|count`
-- `/death set|view|reset`
-- `/restart`
+## Architecture in one paragraph
 
-The main chat path is still mention-based: mention the bot in a message rather than using a `/chat` command.
+`main.py` boots `src/startup.py`, which wires services like `StateService`, `QueueService`, `OpenAIService`, `RunpodService`, `InterjectService`, `DeathService`, and `MentionHandler` into `DiscordBotClient`. Mention replies are assembled by `src/bot/handlers/mention.py`, enriched through `src/utils/downloader_utils.py`, sent to OpenRouter for text output, and logged into MariaDB. The log-viewer backend and frontend then query and stream those logs for inspection.
 
-## Tests
+For diagrams and a deeper walkthrough, see `docs/architecture.md`.
 
-Run the Python test suite with one of:
+## Testing
 
-```bash
-make test
-make test-verbose
-.venv/bin/python -m pytest
-```
+| What you want | Command |
+| --- | --- |
+| Default Python suite | `make test` |
+| Verbose Python suite | `make test-verbose` |
+| Coverage run | `make test-coverage` |
+| Direct pytest | `.venv/bin/python -m pytest` |
+| Frontend tests | `cd log-viewer/frontend && npm run test` |
 
-More detail: `tests/README.md`
+More detail: `tests/README.md` and `log-viewer/frontend/README.md`.
 
-## Log viewer
+## Important operational notes
 
-- Backend: `log-viewer/backend`
-- Frontend: `log-viewer/frontend`
+- Prefer `make run-direct` for local bot development.
+- `make run` uses `start.sh`, and the current wrapper assumes a `venv/` path while the Makefile creates `.venv/` by default.
+- `/restart` triggers the restart handler, which saves state, performs a `git pull`, and exits with code `42`.
 
-The frontend talks to the backend over HTTP and Socket.IO and expects the MariaDB log tables created by `init_db.sql`.
+## Documentation map
 
-## Status of the docs
+The docs are meant to be read as a small system, not as isolated files:
 
-This README and the files under `docs/`, `tests/README.md`, and `log-viewer/frontend/README.md` are intended to match the current codebase layout and behavior.
+- `docs/README.md` - docs index
+- `docs/architecture.md` - diagrams + component map + request flow
+- `docs/commands.md` - current command surface
+- `docs/configuration.md` - env vars and defaults
+- `docs/development.md` - local and Docker workflows
+- `docs/deployment.md` - runtime/deployment notes
+- `docs/mariadb_setup.md` - schema and DB setup
+- `docs/troubleshooting.md` - common failure modes

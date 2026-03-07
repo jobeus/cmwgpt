@@ -1,41 +1,56 @@
 # MariaDB setup
 
-This project logs API requests and pipeline steps to MariaDB. The schema is defined in `init_db.sql`.
+MariaDB is the shared storage layer for **request logs** and **pipeline logs**. If the database is wrong, the bot may still run, but your observability story gets much worse.
 
-## What uses MariaDB
+## What MariaDB is used for
 
-- the Python bot logging layer in `src/db/logger.py`
-- the Python connection pool in `src/db/connection.py`
-- the log-viewer backend in `log-viewer/backend`
+| Consumer | What it uses the DB for |
+| --- | --- |
+| `src/db/logger.py` | Writing API request logs and pipeline-step logs |
+| `src/db/connection.py` | Creating the async connection pool |
+| `log-viewer/backend` | Reading log rows for the API and realtime stream |
 
-## Required variables
+## Core configuration variables
 
-- `DB_HOST`
-- `DB_PORT`
-- `DB_USER`
-- `DB_PASSWORD`
-- `DB_NAME`
+| Variable | Meaning |
+| --- | --- |
+| `DB_HOST` | MariaDB host |
+| `DB_PORT` | MariaDB port |
+| `DB_USER` | App user |
+| `DB_PASSWORD` | App password |
+| `DB_NAME` | Database containing the log schema |
 
-## Option 1: Docker compose
+## Two setup paths
 
-The easiest development setup is the repository compose stack.
+| Path | Best for |
+| --- | --- |
+| Docker Compose | Fast local development |
+| Existing/local MariaDB instance | Direct local hosting or external DB setups |
+
+## Option 1: Docker Compose
+
+This is the easiest path for local development.
 
 ```bash
 cp .env.development.example .env.development
 docker compose --env-file .env.development up --build db
 ```
 
-Compose mounts `init_db.sql` into MariaDB's init directory, so a fresh volume gets the schema automatically.
+### What Compose does for you
 
-Default dev image/version in the compose file:
+- starts MariaDB 11.7
+- mounts `init_db.sql` into the init directory
+- applies the schema automatically for a **fresh** database volume
 
-- `mariadb:11.7`
+### Important note
+
+If you reuse an existing volume, MariaDB init scripts do not re-run automatically. In that case, treat schema changes explicitly.
 
 ## Option 2: Existing/local MariaDB instance
 
 Create the database and user, then apply `init_db.sql`.
 
-Example:
+Example bootstrap:
 
 ```sql
 CREATE DATABASE cmwgpt CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -44,44 +59,68 @@ GRANT ALL PRIVILEGES ON cmwgpt.* TO 'cmwgpt_user'@'%';
 FLUSH PRIVILEGES;
 ```
 
-Then run:
+Apply the schema with:
 
 ```bash
 mariadb -u root -p cmwgpt < init_db.sql
 ```
 
-## Current schema responsibilities
+## What the schema is responsible for
 
-`init_db.sql` creates the tables required for request logging and pipeline tracing. Those rows are later consumed by the log viewer.
+`init_db.sql` creates the tables required for:
 
-If the schema is missing or incompatible, you will typically see failures when:
+- API request logging
+- pipeline-step logging
+- artifacts/replay metadata consumed by the log viewer
 
-- downloader or model calls attempt to log API requests
-- pipeline steps try to persist artifacts/replay metadata
-- the log-viewer backend queries recent logs
+If the schema is missing or incompatible, failures often appear later and indirectly, for example when:
 
-## Connectivity checklist
+- a downloader or model request tries to log metadata
+- a pipeline step tries to persist replay information
+- the log-viewer backend queries recent logs and finds nothing usable
 
-Before starting the bot, verify:
+## Preflight checklist before starting the app
 
-1. the database is reachable at `DB_HOST:DB_PORT`
-2. the configured user can connect
-3. the configured database exists
-4. `init_db.sql` has been applied
+| Check | Why |
+| --- | --- |
+| Database is reachable at `DB_HOST:DB_PORT` | Basic connectivity |
+| `DB_USER` can authenticate | Prevents write/read failures |
+| `DB_NAME` exists | Avoids connection or query errors |
+| `init_db.sql` has been applied | Required for logging and viewer functionality |
 
 ## Common local values
 
-For local development without Docker:
+| Variable | Typical local value |
+| --- | --- |
+| `DB_HOST` | `127.0.0.1` |
+| `DB_PORT` | `3306` |
+| `DB_USER` | `cmwgpt_user` |
+| `DB_NAME` | `cmwgpt` |
 
-- `DB_HOST=127.0.0.1`
-- `DB_PORT=3306`
-- `DB_USER=cmwgpt_user`
-- `DB_NAME=cmwgpt`
+## Quick validation ideas
 
-## Troubleshooting
+After setup, validate the DB path before blaming higher layers.
 
-- `Access denied`: re-check `DB_USER`/`DB_PASSWORD` and grants
-- connection timeout/refused: verify host, port, and container/service health
-- missing log rows: confirm the schema exists and that the bot can write to it
+### Useful questions to answer
 
-See also `docs/troubleshooting.md`.
+| Question | Why it helps |
+| --- | --- |
+| Can the app user connect? | Confirms credentials/grants |
+| Does the schema exist? | Confirms init ran successfully |
+| Do new requests create rows? | Confirms the write path works |
+| Can the log-viewer backend read those rows? | Confirms observability end-to-end |
+
+## Troubleshooting shortcuts
+
+| Symptom | First thing to check |
+| --- | --- |
+| `Access denied` | `DB_USER`, `DB_PASSWORD`, grants |
+| Connection refused/timeout | host, port, container/service health |
+| Missing logs | schema applied and bot write path |
+| Viewer empty but bot runs | backend DB access and schema presence |
+
+## See also
+
+- `docs/configuration.md`
+- `docs/development.md`
+- `docs/troubleshooting.md`
