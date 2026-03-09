@@ -219,7 +219,8 @@ class MentionHandler:
             current_channel_system_prompt = self._system_prompt_loader()
 
         current_channel_system_prompt += (
-            f"In the channel you are <@{bot_user.id}>!\n\n"
+            f"\n\nErrata about how to chat in this channel:\n"
+            f"In the channel you are <@{bot_user.id}>!\n"
             f"You will receive a chat history containing user messages and your own assistant messages. "
             f"Each message is prefixed with its timestamp, message ID, and the sender's Discord ID (e.g. `[2024-01-01 12:00:00] [123456789] <@12345>: ...`). "
             f"Please respond naturally to the very last message in the conversation, as it mentions you. "
