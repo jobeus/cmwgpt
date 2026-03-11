@@ -291,6 +291,10 @@ class InterjectService:
                     content = COST_PREFIX_PATTERN.sub("", content)
                 text += f" {content}"
 
+            if msg.attachments:
+                for attach in msg.attachments:
+                    text += f"\n[Attached file: {attach.filename}]"
+
             # Append reply context if applicable
             if msg.reference and msg.reference.message_id:
                 ref_msg = getattr(msg.reference, 'resolved', None)

@@ -175,7 +175,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         channel.id = 777
         channel.name = "mixed"
         bot_user = SimpleNamespace(id=999)
-        attachment = SimpleNamespace(content_type="text/plain")
+        attachment = SimpleNamespace(content_type="text/plain", filename="test.txt")
         embed = SimpleNamespace(
             title="embed title",
             description="embed desc",
@@ -202,8 +202,8 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         context, _ = await handler._prepare_mention_context(mention_msg, bot_user)
 
         self.assertIn("[Embeds:", context[0]["content"][0]["text"])
-        self.assertEqual(context[0]["content"][1]["type"], "file")
-        self.assertEqual(context[0]["content"][2]["type"], "image_url")
+        self.assertIn("[Attached file:", context[0]["content"][0]["text"])
+        self.assertEqual(context[0]["content"][1]["type"], "image_url")
 
     async def test_prepare_context_uses_cached_history_custom_prompt_and_image_attachments(self):
         handler, state_service, _, _, _ = self.make_handler(
@@ -254,7 +254,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             channel.history = second_history
             cached_context, _ = await handler._prepare_mention_context(mention_msg, bot_user)
 
-        self.assertTrue(system_prompt.startswith("channel promptIn the channel you are"))
+        self.assertTrue(system_prompt.startswith("channel prompt\n\nErrata about how to chat in this channel:\nIn the channel you are"))
         self.assertEqual(context[-1]["content"][1]["type"], "image_url")
         self.assertEqual(history_calls[0], (10, None))
         self.assertEqual(history_calls[1], (None, older_msg))

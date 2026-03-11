@@ -329,16 +329,13 @@ class MentionHandler:
                 try:
                     # We only convert attachments for user messages
                     if role == "user":
-                        file_data_url = await self._attachment_converter(attach)
-                        if attach.content_type and attach.content_type.startswith(
-                                'image/'):
+                        if attach.content_type and attach.content_type.startswith('image/'):
+                            file_data_url = await self._attachment_converter(attach)
                             file_payloads.append(
                                 {"type": "image_url", "image_url": {"url": file_data_url}}
                             )
                         else:
-                            file_payloads.append(
-                                {"type": "file", "file": {"url": file_data_url}}
-                            )
+                            text_payload[0]["text"] += f"\n[Attached file: {attach.filename}]"
                 except Exception as e:
                     logger.error(
                         f"Failed to convert attachment context for msg {msg.id}: {e}")

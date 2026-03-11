@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from src.db.logger import build_artifact, log_pipeline_step
 
 import trafilatura
-from newspaper import Article
+from newspaper import Article, Config
 from src.config import TRANSCRIPT_PROXY
 from src.utils.cache_utils import PersistentCache
 
@@ -108,10 +108,38 @@ async def get_article_text(url: str) -> Optional[str]:
         proxy = TRANSCRIPT_PROXY if TRANSCRIPT_PROXY else None
             
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+            'Dnt': '1',
+            'Cache-Control': 'max-age=0'
         }
+
+        # Handle v.redd.it redirects manually first to avoid hitting Reddit's bot block on www.reddit.com
+        parsed = urlparse(url)
+        if parsed.netloc.lower() == 'v.redd.it':
+            async with httpx.AsyncClient(proxy=proxy, timeout=10.0, follow_redirects=False) as preflight:
+                try:
+                    pre_resp = await preflight.get(url, headers=headers)
+                    if pre_resp.status_code in (301, 302, 303, 307, 308) and "Location" in pre_resp.headers:
+                        url = pre_resp.headers["Location"]
+                        parsed = urlparse(url)  # update parsed for next step
+                except Exception as e:
+                    logger.debug(f"Failed to resolve v.redd.it redirect for {url}: {e}")
+
+        # Swap reddit to old.reddit to bypass blocks and login walls
+        if 'reddit.com' in parsed.netloc.lower() and parsed.netloc.lower() != 'old.reddit.com':
+            url = url.replace(parsed.netloc, 'old.reddit.com')
         
-        async with httpx.AsyncClient(proxy=proxy, timeout=15.0) as client:
+        async with httpx.AsyncClient(proxy=proxy, timeout=15.0, follow_redirects=True) as client:
             response = await client.get(url, headers=headers)
             response.raise_for_status()
             html = response.text
@@ -156,7 +184,13 @@ async def get_article_text(url: str) -> Optional[str]:
         if not text:
             logger.info(f"Trafilatura failed or returned empty for {url}, falling back to newspaper3k")
             extractor_used = "newspaper3k"
-            article = Article(url)
+            config = Config()
+            config.browser_user_agent = headers['User-Agent']
+            config.headers = headers
+            config.request_timeout = 15
+            if proxy:
+                config.proxies = {'http': proxy, 'https': proxy}
+            article = Article(url, config=config)
             article.set_html(html)
             article.parse()
             text = article.text
