@@ -11,6 +11,7 @@ import discord
 
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url
 from src.services.openai_service import OpenAIServiceError
+from src.services.gemini_service import GeminiServiceError, is_gemini_model, get_thinking_level
 from src.utils.downloader_utils import fetch_all_url_content
 from src.utils.message_utils import format_discord_timestamp
 
@@ -32,6 +33,7 @@ class MentionHandler:
         queue_service: Any,
         system_prompt_loader: Callable[[], str],
         include_num_chatlines: int,
+        gemini_service: Any = None,
         mention_legend_provider: Callable[[discord.TextChannel, discord.User], Awaitable[str]] = get_mention_legend,
         attachment_converter: Callable[[discord.Attachment], Awaitable[str]] = attachment_to_base64_data_url,
         url_converter: Callable[[str], Awaitable[str]] = url_to_base64_data_url,
@@ -39,6 +41,7 @@ class MentionHandler:
     ):
         self._state_service = state_service
         self._openai_service = openai_service
+        self._gemini_service = gemini_service
         self._message_service = message_service
         self._queue_service = queue_service
         self._system_prompt_loader = system_prompt_loader
@@ -74,15 +77,26 @@ class MentionHandler:
 
                 recent_messages, system_prompt = await self._prepare_mention_context(message, bot_user)
                 logger.info(
-                    f"Context prepared for mention by {message.author}, sending to OpenRouter...")
+                    f"Context prepared for mention by {message.author}, sending to {'Gemini' if is_gemini_model(model) else 'OpenRouter'}...")
                 channel_id = message.channel.id
-                reply_content = await self._openai_service.get_chat_completion(
-                    model=model,
-                    messages=recent_messages,
-                    system_prompt=system_prompt,
-                    channel_id=channel_id,
-                    discord_user_id=message.author.id,
-                )
+
+                if is_gemini_model(model) and self._gemini_service:
+                    reply_content = await self._gemini_service.get_chat_completion(
+                        model=model,
+                        messages=recent_messages,
+                        system_prompt=system_prompt,
+                        channel_id=channel_id,
+                        discord_user_id=message.author.id,
+                        thinking_level=get_thinking_level(model),
+                    )
+                else:
+                    reply_content = await self._openai_service.get_chat_completion(
+                        model=model,
+                        messages=recent_messages,
+                        system_prompt=system_prompt,
+                        channel_id=channel_id,
+                        discord_user_id=message.author.id,
+                    )
 
                 if reply_content is None:
                     logger.error(f"❌ Received None from get_chat_completion for model {model}.")
@@ -107,8 +121,8 @@ class MentionHandler:
                     # Regular text response
                     await self._message_service.send_channel_reply(message.channel, reply_content)
 
-            except OpenAIServiceError as e:
-                logger.error(f"❌ OpenAI API error in mention handler:\\n{e}")
+            except (OpenAIServiceError, GeminiServiceError) as e:
+                logger.error(f"❌ API error in mention handler:\\n{e}")
                 error_message = f"Sorry, I encountered an error while processing your mention: {str(e)}"
 
                 try:
@@ -197,6 +211,10 @@ class MentionHandler:
             # Update timestamp for this channel
             self._history_cache[channel_id]["timestamp"] = current_time
         else:
+            # History window reset — also clear Gemini conversation cache
+            if self._gemini_service:
+                self._gemini_service.clear_channel_cache(channel_id)
+
             async for msg in message.channel.history(limit=self._include_num_chatlines):
                 history_msgs.append(msg)
             history_msgs.reverse()

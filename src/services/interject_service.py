@@ -20,6 +20,7 @@ import discord
 from discord.ext import commands
 
 from src.config import get_system_prompt, DEFAULT_MODEL
+from src.services.gemini_service import is_gemini_model, get_thinking_level
 from src.utils.discord_helper import get_mention_legend
 from src.utils.message_utils import format_discord_timestamp
 
@@ -74,9 +75,11 @@ class InterjectService:
         default_model: str = DEFAULT_MODEL,
         state_file: str = STATE_FILE,
         mention_legend_provider: Callable[[discord.TextChannel, discord.User], Awaitable[str]] = get_mention_legend,
+        gemini_service=None,
     ):
         self._state_service = state_service
         self._openai_service = openai_service
+        self._gemini_service = gemini_service
         self._message_service = message_service
         self._system_prompt_loader = system_prompt_loader
         self._default_model = default_model
@@ -331,13 +334,23 @@ class InterjectService:
         model = self._state_service.get_model(channel.id) or self._default_model
 
         try:
-            reply_content = await self._openai_service.get_chat_completion(
-                model=model,
-                messages=chat_context,
-                system_prompt=system_prompt,
-                bot_id=bot_id,
-                discord_user_id=context_messages[-1].author.id if context_messages else None,
-            )
+            if is_gemini_model(model) and self._gemini_service:
+                reply_content = await self._gemini_service.get_chat_completion(
+                    model=model,
+                    messages=chat_context,
+                    system_prompt=system_prompt,
+                    bot_id=bot_id,
+                    discord_user_id=context_messages[-1].author.id if context_messages else None,
+                    thinking_level=get_thinking_level(model),
+                )
+            else:
+                reply_content = await self._openai_service.get_chat_completion(
+                    model=model,
+                    messages=chat_context,
+                    system_prompt=system_prompt,
+                    bot_id=bot_id,
+                    discord_user_id=context_messages[-1].author.id if context_messages else None,
+                )
 
             if reply_content is None:
                 logger.warning("Interject got None from AI, skipping")

@@ -11,6 +11,7 @@ from src.services.death_service import DeathService
 from src.services.interject_service import InterjectService
 from src.services.message_service import MessageService
 from src.services.openai_service import OpenAIService
+from src.services.gemini_service import GeminiService
 from src.services.paste_service import PasteService
 from src.services.queue_service import QueueService
 from src.services.restart_handler import RestartHandler
@@ -24,6 +25,7 @@ class AppServices:
     state_service: Any
     queue_service: Any
     openai_service: Any
+    gemini_service: Any
     message_service: Any
     paste_service: Any
     runpod_service: Any
@@ -41,6 +43,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     state_service = StateService()
     queue_service = QueueService()
     openai_service = OpenAIService()
+    gemini_service = GeminiService(api_key=app_config.gemini_api_key)
     paste_service = PasteService(cache_injector=inject_article_cache)
     message_service = MessageService(paste_service_instance=paste_service)
     runpod_service = RunpodService()
@@ -58,6 +61,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     interject_service = InterjectService(
         state_service=state_service,
         openai_service=openai_service,
+        gemini_service=gemini_service,
         message_service=message_service,
         system_prompt_loader=lambda: get_system_prompt(app_config.system_prompt_path),
         default_model=app_config.default_model,
@@ -69,6 +73,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     mention_handler = MentionHandler(
         state_service=state_service,
         openai_service=openai_service,
+        gemini_service=gemini_service,
         message_service=message_service,
         queue_service=queue_service,
         system_prompt_loader=lambda: get_system_prompt(app_config.system_prompt_path),
@@ -79,6 +84,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         state_service=state_service,
         queue_service=queue_service,
         openai_service=openai_service,
+        gemini_service=gemini_service,
         message_service=message_service,
         paste_service=paste_service,
         runpod_service=runpod_service,
