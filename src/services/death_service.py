@@ -33,10 +33,10 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = 15
 
 # Minimum average monthly pageviews to qualify for an announcement
-MIN_AVG_MONTHLY_VIEWS = 90_000
+MIN_AVG_MONTHLY_VIEWS = 40_000
 
 # How many months of pageview data to average
-PAGEVIEW_MONTHS = 12
+PAGEVIEW_MONTHS = 3
 
 # User-Agent per Wikimedia policy
 USER_AGENT = "cmwgpt-bot/1.0 (jobeus@gmail.com)"
