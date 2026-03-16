@@ -11,6 +11,7 @@ import io
 import logging
 import os
 import time
+import warnings
 from typing import Any, Dict, List, Optional, Union
 
 import discord
@@ -20,6 +21,10 @@ from src.db.logger import log_api_request
 from src.utils.message_utils import clean_openai_response
 
 logger = logging.getLogger(__name__)
+
+# Suppress known google-genai SDK warnings that are expected/harmless
+warnings.filterwarnings("ignore", message="Interactions usage is experimental")
+warnings.filterwarnings("ignore", message="Async interactions client cannot use aiohttp")
 
 # Gemini 3.1 Flash Lite pricing (paid tier, per 1M tokens)
 PRICE_INPUT_PER_M = 0.25   # text / image / video

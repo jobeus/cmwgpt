@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS api_request_logs (
     response_status INT,
     response_headers JSON,
     response_body LONGTEXT COMMENT 'JSON alias / validation via checks where applicable',
-    cost DECIMAL(10, 6) DEFAULT 0.0,
+    cost DECIMAL(12, 8) DEFAULT 0.0,
     discord_user_id BIGINT UNSIGNED NULL,
     discord_channel_id BIGINT UNSIGNED NULL,
     
