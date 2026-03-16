@@ -240,7 +240,10 @@ class GeminiService:
                 kwargs = {
                     "model": GEMINI_MODEL,
                     "input": input_turns,
-                    "tools": [{"type": "google_search"}],
+                    "tools": [
+                        {"type": "google_search"},
+                        {"type": "code_execution"},
+                        {"type": "url_context"}],
                     "store": True,
                 }
 
