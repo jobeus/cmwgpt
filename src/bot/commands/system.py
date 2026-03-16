@@ -69,6 +69,9 @@ class SystemCommands:
                 Choice(
                     name="anthropic/claude-haiku-4.5 (search, web aware)",
                     value="anthropic/claude-haiku-4.5"),
+                Choice(
+                    name="google/gemini-3.1-flash-lite-preview",
+                    value="google/gemini-3.1-flash-lite-preview"),
             ])
         async def model_command(
                 interaction: discord.Interaction,
