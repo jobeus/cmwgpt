@@ -280,11 +280,19 @@ class LoggingSyncTransport(httpx.BaseTransport):
         self._transport.close()
 
 
-async def flush_pending_logs(transport: LoggingSyncTransport) -> None:
-    """Flush buffered log entries from a sync transport to the DB."""
-    for entry in transport.pending_logs:
+async def flush_pending_logs(target: Any) -> None:
+    """
+    Flush buffered log entries to the DB.
+    Target can be either a LoggingSyncTransport or a direct list of log dicts.
+    """
+    if hasattr(target, "pending_logs"):
+        logs = target.pending_logs
+    else:
+        logs = target
+
+    for entry in logs:
         await log_api_request(**entry)
-    transport.pending_logs.clear()
+    logs.clear()
 
 
 # ---------------------------------------------------------------------------

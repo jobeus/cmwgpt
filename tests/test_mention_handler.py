@@ -37,7 +37,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             mention_legend_provider=AsyncMock(return_value="legend text"),
             attachment_converter=attachment_converter or AsyncMock(return_value="data:file/plain;base64,AAA"),
             url_converter=url_converter or AsyncMock(return_value="data:image/png;base64,BBB"),
-            url_content_fetcher=url_content_fetcher or AsyncMock(return_value=""),
+            url_content_fetcher=url_content_fetcher or AsyncMock(return_value=("", [])),
         )
         return handler, state_service, queue_service, openai_service, message_service
 
@@ -58,7 +58,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_prepare_context_handles_reply_urls_and_assistant_image_split(self):
         async def url_content_fetcher(text):
-            return "[fetched-url]\n" if "https://site.example" in text else ""
+            return ("[fetched-url]\n", []) if "https://site.example" in text else ("", [])
 
         url_converter = AsyncMock(return_value="data:image/png;base64,IMG")
         handler, _, _, _, _ = self.make_handler(
