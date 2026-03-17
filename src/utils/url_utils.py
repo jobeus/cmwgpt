@@ -32,7 +32,10 @@ EXCLUDED_DOMAINS = {
     'x.com', 'www.x.com', 'twitter.com', 'www.twitter.com',
     'xcancel.com', 'www.xcancel.com',
     'cdn.discordapp.com', 'media.discordapp.net',
-    'images-ext-1.discordapp.net', 'images-ext-2.discordapp.net'
+    'images-ext-1.discordapp.net', 'images-ext-2.discordapp.net',
+    'instagram.com','www.instagram.com',
+    'threads.com','www.threads.com',
+    'threads.net','www.threads.net',
 }
 
 EXCLUDED_MEDIA_EXTENSIONS = {

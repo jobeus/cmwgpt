@@ -7,10 +7,12 @@ import sys
 import logging
 import asyncio
 
+from typing import Tuple, List, Dict, Any
 from src.utils.youtube_utils import extract_video_ids, get_transcript
 from src.utils.tiktok_utils import extract_tiktok_urls, get_tiktok_transcript
 from src.utils.twitter_utils import extract_twitter_urls, get_tweet_context
 from src.utils.facebook_utils import extract_facebook_urls, get_facebook_transcript
+from src.utils.instagram_utils import extract_instagram_urls, get_instagram_context
 from src.utils.url_utils import extract_target_urls, get_article_text
 from src.db.logger import build_artifact, log_pipeline_step
 from src.utils.http_client import flush_pending_logs
@@ -18,7 +20,7 @@ from src.utils.http_client import flush_pending_logs
 logger = logging.getLogger(__name__)
 
 
-async def fetch_all_url_content(message_text: str) -> str:
+async def fetch_all_url_content(message_text: str) -> Tuple[str, List[Dict[str, Any]]]:
     """
     Extracts all supported URLs (YouTube, TikTok, General Articles) from the text,
     fetches their content, and returns an aggregated formatted string to prepend to context.
@@ -30,13 +32,15 @@ async def fetch_all_url_content(message_text: str) -> str:
         A formatted string with the fetched content. Empty string if no URLs were found or all failed.
     """
     if not message_text:
-        return ""
+        return "", []
         
     aggregated_content = []
+    aggregated_images = []
     video_ids = extract_video_ids(message_text)
     tiktok_urls = extract_tiktok_urls(message_text)
     twitter_urls = extract_twitter_urls(message_text)
     facebook_urls = extract_facebook_urls(message_text)
+    instagram_urls = extract_instagram_urls(message_text)
     target_urls = extract_target_urls(message_text)
 
     discovered_sources = {
@@ -44,6 +48,7 @@ async def fetch_all_url_content(message_text: str) -> str:
         "tiktok_urls": tiktok_urls,
         "twitter_urls": twitter_urls,
         "facebook_urls": facebook_urls,
+        "instagram_urls": instagram_urls,
         "article_urls": target_urls,
     }
 
@@ -158,11 +163,14 @@ async def fetch_all_url_content(message_text: str) -> str:
         twitter_contexts = []
         for t_url in twitter_urls:
             try:
-                tweet_text = await get_tweet_context(t_url)
-                if tweet_text:
+                tweet_res = await get_tweet_context(t_url)
+                if tweet_res:
+                    tweet_text, tweet_images = tweet_res
                     if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
                         logger.info(f"Target Tweet {t_url} context grabbed successfully.")
                     twitter_contexts.append(f"Target Tweet {t_url} Context:\n{tweet_text}")
+                    for img_url in tweet_images:
+                        aggregated_images.append({"type": "image_url", "image_url": {"url": img_url}})
             except Exception as e:
                 logger.warning(f"Failed to fetch Tweet context for {t_url}: {e}")
 
@@ -247,6 +255,27 @@ async def fetch_all_url_content(message_text: str) -> str:
                 "------\nIncluded Facebook video transcript follows:\n\n" + "\n\n".join(facebook_transcripts)
             )
 
+    # 4.5. Instagram / Threads
+    if instagram_urls:
+        instagram_contexts = []
+        for i_url in instagram_urls:
+            try:
+                insta_res = await get_instagram_context(i_url)
+                if insta_res:
+                    insta_text, insta_img = insta_res
+                    if hasattr(sys, 'stdout') and 'pytest' not in sys.modules:
+                        logger.info(f"Target Instagram/Threads {i_url} grabbed successfully.")
+                    instagram_contexts.append(f"Instagram/Threads Post {i_url}:\n{insta_text}")
+                    if insta_img:
+                        aggregated_images.append({"type": "image_url", "image_url": {"url": insta_img}})
+            except Exception as e:
+                logger.warning(f"Failed to fetch Instagram context for {i_url}: {e}")
+                
+        if instagram_contexts:
+            aggregated_content.append(
+                "------\nIncluded Instagram/Threads posts follow:\n\n" + "\n\n".join(instagram_contexts)
+            )
+
     # 5. General Articles
     if target_urls:
         articles = []
@@ -285,6 +314,6 @@ async def fetch_all_url_content(message_text: str) -> str:
                 )
             ],
         )
-        return final_content
+        return final_content, aggregated_images
     
-    return ""
+    return "", aggregated_images

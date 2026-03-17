@@ -47,7 +47,7 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(urls, ["https://x.com/a/status/1"])
 
-    def test_extract_video_url_returns_lowest_bitrate_mp4(self):
+    def test_extract_media_returns_lowest_bitrate_mp4(self):
         data = {
             "data": {
                 "threaded_conversation_with_injections_v2": {
@@ -86,8 +86,10 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
             }
         }
 
-        self.assertEqual(twitter_utils.extract_video_url(data), "low")
-        self.assertIsNone(twitter_utils.extract_video_url({}))
+        media = twitter_utils.extract_media(data)
+        self.assertEqual(len(media), 1)
+        self.assertEqual(media[0]["url"], "low")
+        self.assertEqual(twitter_utils.extract_media({}), [])
 
     async def test_get_tweet_context_returns_cached_values(self):
         with patch("src.utils.twitter_utils._twitter_cache", {"https://x.com/ok": "cached", "https://x.com/bad": None}):
@@ -126,11 +128,13 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         ), patch("src.utils.twitter_utils.GROQ_API_KEY", ""), patch(
             "src.utils.twitter_utils.create_async_client",
             side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client),
-        ), patch("src.utils.twitter_utils.extract_video_url", return_value=None):
+        ), patch("src.utils.twitter_utils.extract_media", return_value=[]):
             result = await twitter_utils.get_tweet_context("https://x.com/a/status/123?foo=bar")
 
-        self.assertIn("Tweet by Alice:\nMain post", result)
-        self.assertIn("↳ Bob: Reply one", result)
+        # result is a tuple: (context, [])
+        context = result[0]
+        self.assertIn("Tweet by Alice:\nMain post", context)
+        self.assertIn("↳ Bob: Reply one", context)
         self.assertEqual(fake_cache["https://x.com/a/status/123?foo=bar"], result)
 
     async def test_get_tweet_context_returns_none_on_parse_error(self):
@@ -204,7 +208,7 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
             "src.utils.twitter_utils.RAPIDAPI_KEY", "rapid-key"
         ), patch("src.utils.twitter_utils.GROQ_API_KEY", "groq-key"), patch(
             "src.utils.twitter_utils.create_async_client", side_effect=contexts
-        ), patch("src.utils.twitter_utils.extract_video_url", return_value="https://cdn.example/video.mp4"), patch(
+        ), patch("src.utils.twitter_utils.extract_media", return_value=[{"type": "video", "url": "https://cdn.example/video.mp4"}]), patch(
             "src.utils.twitter_utils.asyncio.to_thread", new=AsyncMock(return_value=None)
         ), patch("src.utils.twitter_utils.os.path.exists", return_value=True), patch(
             "src.utils.twitter_utils.os.remove"
@@ -213,5 +217,6 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         ):
             result = await twitter_utils.get_tweet_context("https://x.com/a/status/123")
 
-        self.assertIn("transcript of video: video words", result)
+        context = result[0]
+        self.assertIn("transcript of video: video words", context)
         self.assertEqual(mock_remove.call_count, 2)

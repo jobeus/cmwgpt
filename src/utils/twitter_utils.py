@@ -11,6 +11,8 @@ from src.config import RAPIDAPI_KEY, GROQ_API_KEY
 from src.utils.cache_utils import PersistentCache
 from src.db.logger import build_artifact, log_pipeline_step
 from src.utils.http_client import create_async_client
+from src.utils.discord_helper import url_to_base64_data_url
+from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -42,22 +44,30 @@ def extract_twitter_urls(text: str) -> List[str]:
     return urls
 
 
-def extract_video_url(data):
+def extract_media(data):
+    media_items = []
     try:
         entries = data['data']['threaded_conversation_with_injections_v2']['instructions'][1]['entries']
         result = entries[0]['content']['itemContent']['tweet_results']['result']
-        media = result['legacy']['extended_entities']['media']
+        media = result['legacy'].get('extended_entities', {}).get('media', [])
+        
         for m in media:
-            if m.get('video_info'):
+            if m.get('type') == 'photo' and m.get('media_url_https'):
+                media_items.append({'type': 'photo', 'url': m['media_url_https']})
+            elif m.get('video_info'):
                 variants = m['video_info']['variants']
                 mp4s = [v for v in variants if v.get('content_type') == 'video/mp4']
                 if mp4s:
-                    return min(mp4s, key=lambda v: v.get('bitrate', 999999))['url']
+                    # Pick smallest bitrate video for transcription efficiency if multiple exist
+                    # Wait, do we want best video for download? Smallest is fine for audio extraction.
+                    video_url = min(mp4s, key=lambda v: v.get('bitrate', 999999))['url']
+                    media_items.append({'type': 'video', 'url': video_url})
     except (KeyError, TypeError, IndexError):
-        return None
+        pass
+    return media_items
 
 
-async def get_tweet_context(tweet_url: str) -> Optional[str]:
+async def get_tweet_context(tweet_url: str) -> Optional[Tuple[str, List[str]]]:
     """
     Fetch the text content of a tweet and its top replies using RapidAPI.
     Results are cached to persistent disk.
@@ -111,8 +121,15 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
         main_author = extract_author(main_result)
         main_text = extract_tweet_text(main_result)
         
-        # Check for video and transcribe
-        video_url = extract_video_url(data)
+        # Check for media (video or photos)
+        media_items = extract_media(data)
+        
+        video_url = None
+        for m in media_items:
+            if m['type'] == 'video':
+                video_url = m['url']
+                break
+                
         video_transcript = None
         if video_url and GROQ_API_KEY:
             mp4_path = None
@@ -250,6 +267,25 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
                         os.remove(mp3_path)
                     except OSError as exc:
                         logger.warning(f"Failed to remove temporary file {mp3_path}: {exc}")
+                        
+        # Download and encode images
+        image_data_urls = []
+        for m in media_items:
+            if m['type'] == 'photo':
+                try:
+                    data_url = await url_to_base64_data_url(m['url'])
+                    image_data_urls.append(data_url)
+                    await log_pipeline_step(
+                        service_name="downloader/twitter/image",
+                        endpoint_url=tweet_url,
+                        title="Tweet photo URL → data URL",
+                        step="twitter_image",
+                        input_summary="Downloaded tweet photo",
+                        input_data={"tweet_url": tweet_url, "photo_url": m['url']},
+                        output_summary="Produced an image data URL for the bot context",
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to fetch image data url for {tweet_url}: {e}")
         
         # Top replies - grab first 5
         replies = []
@@ -306,8 +342,9 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
             ],
         )
         
-        _twitter_cache[tweet_url] = context
-        return context
+        result_tuple = (context, image_data_urls)
+        _twitter_cache[tweet_url] = result_tuple
+        return result_tuple
 
     except KeyError as ke:
         logger.warning(f"Failed to parse RapidAPI JSON response for {tweet_url}: {ke}")

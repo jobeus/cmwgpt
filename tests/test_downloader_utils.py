@@ -27,7 +27,7 @@ class FakeGroqResponse:
 
 class TestDownloaderUtils(unittest.IsolatedAsyncioTestCase):
     async def test_fetch_all_url_content_returns_empty_for_no_text(self):
-        self.assertEqual(await downloader_utils.fetch_all_url_content(""), "")
+        self.assertEqual(await downloader_utils.fetch_all_url_content(""), ("", []))
 
     async def test_fetch_all_url_content_aggregates_all_supported_sources(self):
         groq_response = FakeGroqResponse()
@@ -56,23 +56,27 @@ class TestDownloaderUtils(unittest.IsolatedAsyncioTestCase):
         ), patch("src.utils.downloader_utils.extract_tiktok_urls", return_value=["https://vt.tiktok.com/1"]), patch(
             "src.utils.downloader_utils.extract_twitter_urls", return_value=["https://x.com/a/status/1"]
         ), patch(
-            "src.utils.downloader_utils.get_tweet_context", new=AsyncMock(return_value="tweet context")
+            "src.utils.downloader_utils.get_tweet_context", new=AsyncMock(return_value=("tweet context", []))
         ), patch("src.utils.downloader_utils.extract_facebook_urls", return_value=["https://fb.watch/1"]), patch(
             "src.utils.downloader_utils.extract_target_urls", return_value=["https://example.com/article"]
         ), patch(
             "src.utils.downloader_utils.get_article_text", new=AsyncMock(return_value="article text")
+        ), patch("src.utils.downloader_utils.extract_instagram_urls", return_value=["https://instagram.com/p/1"]), patch(
+            "src.utils.downloader_utils.get_instagram_context", new=AsyncMock(return_value=("instagram context", []))
         ), patch("src.utils.downloader_utils.asyncio.to_thread", new=AsyncMock(side_effect=fake_to_thread)), patch(
             "src.utils.downloader_utils.log_pipeline_step", new=AsyncMock()
         ) as mock_log_step:
             result = await downloader_utils.fetch_all_url_content("look at these links")
 
-        self.assertIn("Included youtube link transcript", result)
-        self.assertIn("youtube transcript", result)
-        self.assertIn("Included TikTok video transcript", result)
-        self.assertIn("tweet context", result)
-        self.assertIn("Included Facebook video transcript", result)
-        self.assertIn("Included article content follows", result)
-        self.assertTrue(result.endswith("\n\n"))
+        text_result = result[0]
+        self.assertIn("Included youtube link transcript", text_result)
+        self.assertIn("youtube transcript", text_result)
+        self.assertIn("Included TikTok video transcript", text_result)
+        self.assertIn("tweet context", text_result)
+        self.assertIn("Included Facebook video transcript", text_result)
+        self.assertIn("instagram context", text_result)
+        self.assertIn("Included article content follows", text_result)
+        self.assertTrue(text_result.endswith("\n\n"))
         self.assertEqual(mock_log_step.await_count, 6)
 
     async def test_fetch_all_url_content_continues_when_some_sources_fail(self):
@@ -84,7 +88,7 @@ class TestDownloaderUtils(unittest.IsolatedAsyncioTestCase):
         ), patch("src.utils.downloader_utils.extract_tiktok_urls", return_value=["https://vt.tiktok.com/1"]), patch(
             "src.utils.downloader_utils.extract_twitter_urls", return_value=["https://x.com/a/status/1"]
         ), patch(
-            "src.utils.downloader_utils.get_tweet_context", new=AsyncMock(return_value="tweet ok")
+            "src.utils.downloader_utils.get_tweet_context", new=AsyncMock(return_value=("tweet ok", []))
         ), patch("src.utils.downloader_utils.extract_facebook_urls", return_value=["https://fb.watch/1"]), patch(
             "src.utils.downloader_utils.extract_target_urls", return_value=["https://example.com/article"]
         ), patch(
@@ -92,5 +96,6 @@ class TestDownloaderUtils(unittest.IsolatedAsyncioTestCase):
         ), patch("src.utils.downloader_utils.asyncio.to_thread", new=AsyncMock(side_effect=fake_to_thread)):
             result = await downloader_utils.fetch_all_url_content("mixed")
 
-        self.assertIn("tweet ok", result)
-        self.assertNotIn("youtube transcript", result)
+        text_result = result[0]
+        self.assertIn("tweet ok", text_result)
+        self.assertNotIn("youtube transcript", text_result)

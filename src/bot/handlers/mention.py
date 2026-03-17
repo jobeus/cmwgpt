@@ -37,7 +37,7 @@ class MentionHandler:
         mention_legend_provider: Callable[[discord.TextChannel, discord.User], Awaitable[str]] = get_mention_legend,
         attachment_converter: Callable[[discord.Attachment], Awaitable[str]] = attachment_to_base64_data_url,
         url_converter: Callable[[str], Awaitable[str]] = url_to_base64_data_url,
-        url_content_fetcher: Callable[[str], Awaitable[str]] = fetch_all_url_content,
+        url_content_fetcher: Callable[[str], Awaitable[tuple[str, List[Dict[str, Any]]]]] = fetch_all_url_content,
     ):
         self._state_service = state_service
         self._openai_service = openai_service
@@ -332,9 +332,11 @@ class MentionHandler:
 
             # Fetch all supported URLs automatically
             if role == "user":
-                url_content = await self._url_content_fetcher(final_text)
+                url_content, url_images = await self._url_content_fetcher(final_text)
                 if url_content:
                     final_text = url_content + final_text
+                if url_images:
+                    file_payloads.extend(url_images)
 
             # No need for fallback handling here since we always prepend the
             # sender prefix above
