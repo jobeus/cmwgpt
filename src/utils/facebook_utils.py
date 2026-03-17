@@ -8,6 +8,7 @@ from typing import List, Optional
 from src.config import TRANSCRIPT_PROXY, GROQ_API_KEY
 from src.utils.cache_utils import PersistentCache
 from src.db.logger import build_artifact
+from src.utils.http_client import create_sync_client
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,8 @@ def get_facebook_transcript(url: str) -> Optional[dict]:
         with open(audio_file, "rb") as file:
             audio_bytes = file.read()
 
-        with httpx.Client(timeout=60.0) as client:
+        sync_client = create_sync_client(timeout=httpx.Timeout(60.0))
+        with sync_client:
             files = {'file': (os.path.basename(audio_file), audio_bytes, 'audio/mpeg')}
             data_payload = {
                 'model': 'whisper-large-v3-turbo',
@@ -131,7 +133,7 @@ def get_facebook_transcript(url: str) -> Optional[dict]:
             }
             groq_headers = {'Authorization': f'Bearer {GROQ_API_KEY}'}
 
-            groq_resp = client.post(
+            groq_resp = sync_client.post(
                 "https://api.groq.com/openai/v1/audio/transcriptions",
                 headers=groq_headers,
                 data=data_payload,
@@ -148,6 +150,7 @@ def get_facebook_transcript(url: str) -> Optional[dict]:
         return {
             "transcript_text": transcript_text,
             "groq_response": groq_resp,
+            "pending_logs": sync_client._transport.pending_logs.copy(),
             "source_url": url,
             "download_strategy": download_strategy,
             "from_cache": False,

@@ -246,7 +246,7 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("Failed to dump bad request", mock_error.call_args.args[0])
 
-    async def test_get_chat_completion_prefixes_cost_and_logs_wire_request(self):
+    async def test_get_chat_completion_prefixes_cost(self):
         http_response = SimpleNamespace(
             request=SimpleNamespace(
                 headers={"X-Req": "1"},
@@ -263,9 +263,7 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
             http_response=http_response,
         )
 
-        with patch("src.services.openai_service.clean_openai_response", return_value="cleaned"), patch(
-            "src.services.openai_service.log_api_request", new=AsyncMock()
-        ) as mock_log:
+        with patch("src.services.openai_service.clean_openai_response", return_value="cleaned"):
             result = await self.service.get_chat_completion(
                 "gpt-test",
                 [{"role": "user", "content": "hi"}],
@@ -275,12 +273,6 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, "[$1.234] cleaned")
         self.client.chat.completions.create.assert_awaited_once()
-        logged = mock_log.await_args.kwargs
-        self.assertEqual(logged["service_name"], "openai/gpt-test")
-        self.assertEqual(logged["method"], "POST")
-        self.assertEqual(logged["response_status"], 200)
-        self.assertEqual(logged["discord_user_id"], 42)
-        self.assertEqual(logged["discord_channel_id"], 7)
 
     async def test_get_chat_completion_preserves_invalid_json_and_uses_state_service_bot_id(self):
         self.client.chat.completions.create.return_value = make_response("hello")
@@ -291,9 +283,7 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
             {"role": "user", "content": [{"type": "text", "text": "hello\nworld"}]},
         ]
 
-        with patch("src.services.openai_service.clean_openai_response", return_value="cleaned") as mock_clean, patch(
-            "src.services.openai_service.log_api_request", new=AsyncMock()
-        ):
+        with patch("src.services.openai_service.clean_openai_response", return_value="cleaned") as mock_clean:
             result = await self.service.get_chat_completion(
                 "gpt-test", messages, system_prompt="system", state_service=state_service
             )
@@ -314,9 +304,8 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
         self.client.chat.completions.create.return_value = response
         self.service.set_bot_id_loader(lambda: (_ for _ in ()).throw(RuntimeError("no bot")))
 
-        with patch("src.services.openai_service.clean_openai_response", return_value="cleaned") as mock_clean, patch(
-            "src.services.openai_service.log_api_request", new=AsyncMock()
-        ), patch("src.services.openai_service.logger.warning") as mock_warning:
+        with patch("src.services.openai_service.clean_openai_response", return_value="cleaned") as mock_clean, \
+            patch("src.services.openai_service.logger.warning") as mock_warning:
             result = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
 
         self.assertEqual(result, "cleaned")
@@ -333,7 +322,7 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
 
         with patch("src.services.openai_service.RateLimitError", FakeRateLimitError), patch(
             "src.services.openai_service.clean_openai_response", return_value="done"
-        ), patch("src.services.openai_service.log_api_request", new=AsyncMock()), patch(
+        ), patch(
             "src.services.openai_service.asyncio.sleep", new=AsyncMock()
         ) as mock_sleep:
             result = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
@@ -390,7 +379,7 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
 
         with patch("src.services.openai_service.APIError", FakeAPIError), patch(
             "src.services.openai_service.clean_openai_response", return_value="ok"
-        ), patch("src.services.openai_service.log_api_request", new=AsyncMock()), patch(
+        ), patch(
             "src.services.openai_service.asyncio.sleep", new=AsyncMock()
         ) as mock_sleep:
             result = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])

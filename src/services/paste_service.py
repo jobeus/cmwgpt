@@ -6,6 +6,7 @@ from typing import Callable, Optional
 import httpx
 
 from src.utils.url_utils import inject_article_cache
+from src.utils.http_client import create_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ class PasteService:
         base_url: str = "https://paste.rs",
         *,
         cache_injector: Optional[Callable[[str, str], None]] = None,
-        client_factory=httpx.AsyncClient,
+        client_factory=create_async_client,
     ):
         self.base_url = base_url
         self._cache_injector = cache_injector
@@ -38,7 +39,7 @@ class PasteService:
             Exception: If upload fails
         """
         try:
-            async with self._client_factory(timeout=10.0) as client:
+            async with self._client_factory(timeout=httpx.Timeout(10.0)) as client:
                 response = await client.post(
                     self.base_url, content=text.encode("utf-8"))
 

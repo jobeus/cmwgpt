@@ -39,6 +39,7 @@ class TestDownloaderUtils(unittest.IsolatedAsyncioTestCase):
                     "groq_response": groq_response,
                     "audio_artifact": {"name": "tik.mp3", "media_type": "audio/mpeg"},
                     "download_strategy": "direct",
+                    "pending_logs": [],
                 }
             if func is downloader_utils.get_facebook_transcript:
                 return {
@@ -46,6 +47,7 @@ class TestDownloaderUtils(unittest.IsolatedAsyncioTestCase):
                     "groq_response": groq_response,
                     "audio_artifact": {"name": "fb.mp3", "media_type": "audio/mpeg"},
                     "download_strategy": "direct",
+                    "pending_logs": [],
                 }
             raise AssertionError("unexpected to_thread call")
 
@@ -60,8 +62,6 @@ class TestDownloaderUtils(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "src.utils.downloader_utils.get_article_text", new=AsyncMock(return_value="article text")
         ), patch("src.utils.downloader_utils.asyncio.to_thread", new=AsyncMock(side_effect=fake_to_thread)), patch(
-            "src.utils.downloader_utils.log_api_request", new=AsyncMock()
-        ) as mock_log_api, patch(
             "src.utils.downloader_utils.log_pipeline_step", new=AsyncMock()
         ) as mock_log_step:
             result = await downloader_utils.fetch_all_url_content("look at these links")
@@ -73,9 +73,7 @@ class TestDownloaderUtils(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Included Facebook video transcript", result)
         self.assertIn("Included article content follows", result)
         self.assertTrue(result.endswith("\n\n"))
-        self.assertEqual(mock_log_api.await_count, 2)
         self.assertEqual(mock_log_step.await_count, 6)
-        self.assertTrue(groq_response.request.was_read)
 
     async def test_fetch_all_url_content_continues_when_some_sources_fail(self):
         async def fake_to_thread(func, url):

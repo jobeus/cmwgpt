@@ -22,7 +22,7 @@ from openai import (
 
 from src.config import OPENROUTER_API_KEY, IS_TESTING
 from src.utils.message_utils import clean_openai_response
-from src.db.logger import log_api_request
+from src.utils.http_client import create_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,10 @@ class OpenAIService:
                     default_headers={
                         "HTTP-Referer": "https://github.com/jobeus/cmwgpt",
                         "X-Title": "CMWGPT Discord Bot"
-                    }
+                    },
+                    http_client=create_async_client(
+                        service_name="openrouter",
+                    ),
                 )
         return self._client
 
@@ -265,39 +268,7 @@ class OpenAIService:
                             cleaned_text = f"[${cost:.3f}] {cleaned_text}"
                     except Exception as e:
                         logger.warning(f"Failed to parse cost: {e}")
-                        
-                    # Extract the actual wire-level request from the httpx response
-                    http_resp = getattr(response, 'http_response', None)
-                    if http_resp and hasattr(http_resp, 'request'):
-                        actual_req = http_resp.request
-                        req_headers = dict(actual_req.headers)
-                        req_body = actual_req.content.decode('utf-8', errors='replace') if actual_req.content else ""
-                        req_url = str(actual_req.url)
-                        req_method = actual_req.method
-                        resp_status = http_resp.status_code
-                        resp_headers = dict(http_resp.headers)
-                    else:
-                        req_headers = {}
-                        req_body = kwargs
-                        req_url = "https://openrouter.ai/api/v1/chat/completions"
-                        req_method = "POST"
-                        resp_status = 200
-                        resp_headers = {}
 
-                    await log_api_request(
-                        service_name=f"openai/{actual_model}",
-                        method=req_method,
-                        endpoint_url=req_url,
-                        request_headers=req_headers,
-                        request_body=req_body,
-                        response_status=resp_status,
-                        response_headers=resp_headers,
-                        response_body=response.model_dump() if hasattr(response, 'model_dump') else {},
-                        cost=cost,
-                        discord_user_id=discord_user_id,
-                        discord_channel_id=channel_id
-                    )
-                        
                     return cleaned_text
                 
                 logger.error(f"❌ Failed to get a proper response from the model. Raw response: {response}")

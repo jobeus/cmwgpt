@@ -124,17 +124,14 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         with patch("src.utils.twitter_utils._twitter_cache", fake_cache), patch(
             "src.utils.twitter_utils.RAPIDAPI_KEY", "rapid-key"
         ), patch("src.utils.twitter_utils.GROQ_API_KEY", ""), patch(
-            "src.utils.twitter_utils.httpx.AsyncClient",
+            "src.utils.twitter_utils.create_async_client",
             side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client),
-        ), patch("src.utils.twitter_utils.log_api_request", new=AsyncMock()) as mock_log, patch(
-            "src.utils.twitter_utils.extract_video_url", return_value=None
-        ):
+        ), patch("src.utils.twitter_utils.extract_video_url", return_value=None):
             result = await twitter_utils.get_tweet_context("https://x.com/a/status/123?foo=bar")
 
         self.assertIn("Tweet by Alice:\nMain post", result)
         self.assertIn("↳ Bob: Reply one", result)
         self.assertEqual(fake_cache["https://x.com/a/status/123?foo=bar"], result)
-        mock_log.assert_awaited_once()
 
     async def test_get_tweet_context_returns_none_on_parse_error(self):
         fake_response = MagicMock()
@@ -148,7 +145,7 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
 
         with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
             "src.utils.twitter_utils.RAPIDAPI_KEY", "rapid-key"
-        ), patch("src.utils.twitter_utils.httpx.AsyncClient", side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client)):
+        ), patch("src.utils.twitter_utils.create_async_client", side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client)):
             result = await twitter_utils.get_tweet_context("https://x.com/a/status/123")
 
         self.assertIsNone(result)
@@ -206,17 +203,15 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         with patch("src.utils.twitter_utils._twitter_cache", fake_cache), patch(
             "src.utils.twitter_utils.RAPIDAPI_KEY", "rapid-key"
         ), patch("src.utils.twitter_utils.GROQ_API_KEY", "groq-key"), patch(
-            "src.utils.twitter_utils.httpx.AsyncClient", side_effect=contexts
+            "src.utils.twitter_utils.create_async_client", side_effect=contexts
         ), patch("src.utils.twitter_utils.extract_video_url", return_value="https://cdn.example/video.mp4"), patch(
             "src.utils.twitter_utils.asyncio.to_thread", new=AsyncMock(return_value=None)
         ), patch("src.utils.twitter_utils.os.path.exists", return_value=True), patch(
             "src.utils.twitter_utils.os.remove"
         ) as mock_remove, patch("builtins.open", mock_open(read_data=b"audio-bytes")), patch(
             "src.utils.twitter_utils.uuid.uuid4", return_value=SimpleNamespace(hex="abc123")
-        ), patch("src.utils.twitter_utils.log_api_request", new=AsyncMock()) as mock_log:
+        ):
             result = await twitter_utils.get_tweet_context("https://x.com/a/status/123")
 
         self.assertIn("transcript of video: video words", result)
-        self.assertEqual(mock_log.await_count, 2)
-        groq_request.aread.assert_awaited_once()
         self.assertEqual(mock_remove.call_count, 2)

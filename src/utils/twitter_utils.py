@@ -9,7 +9,8 @@ import httpx
 from typing import List, Optional
 from src.config import RAPIDAPI_KEY, GROQ_API_KEY
 from src.utils.cache_utils import PersistentCache
-from src.db.logger import build_artifact, log_api_request, log_pipeline_step
+from src.db.logger import build_artifact, log_pipeline_step
+from src.utils.http_client import create_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
             "x-rapidapi-key": RAPIDAPI_KEY
         }
         
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with create_async_client(timeout=httpx.Timeout(15.0)) as client:
             response = await client.get(
                 "https://x-com2.p.rapidapi.com/v2/TweetDetail/",
                 headers=headers,
@@ -92,17 +93,6 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
             
             data = response.json()
 
-            await log_api_request(
-                service_name="rapidapi/twitter",
-                method=response.request.method,
-                endpoint_url=str(response.request.url),
-                request_headers=dict(response.request.headers),
-                request_body=response.request.content.decode('utf-8', errors='replace') if response.request.content else "",
-                response_status=response.status_code,
-                response_headers=dict(response.headers),
-                response_body=data,
-                cost=0.0
-            )
         entries = data['data']['threaded_conversation_with_injections_v2']['instructions'][1]['entries']
         
         # Helper to get exact main tweet text
@@ -134,7 +124,7 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
                 mp3_path = os.path.join(temp_dir, f"twit_aud_{tmp_id}.mp3")
 
                 logger.info(f"Downloading Twitter video: {video_url}")
-                async with httpx.AsyncClient(timeout=30.0) as client:
+                async with create_async_client(timeout=httpx.Timeout(30.0)) as client:
                     async with client.stream('GET', video_url) as r:
                         r.raise_for_status()
                         with open(mp4_path, 'wb') as f:
@@ -194,7 +184,7 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
                         ],
                     )
 
-                    async with httpx.AsyncClient(timeout=60.0) as client:
+                    async with create_async_client(timeout=httpx.Timeout(60.0)) as client:
                         files = {'file': (os.path.basename(mp3_path), audio_bytes, 'audio/mpeg')}
                         data_payload = {
                             'model': 'whisper-large-v3-turbo',
@@ -246,18 +236,6 @@ async def get_tweet_context(tweet_url: str) -> Optional[str]:
                                     extra={"tweet_url": tweet_url},
                                 )
                             ],
-                        )
-                        await groq_resp.request.aread()
-                        await log_api_request(
-                            service_name="groq/whisper-large-v3-turbo",
-                            method=groq_resp.request.method,
-                            endpoint_url=str(groq_resp.request.url),
-                            request_headers=dict(groq_resp.request.headers),
-                            request_body=groq_resp.request.content.hex() if groq_resp.request.content else b''.hex(),
-                            response_status=groq_resp.status_code,
-                            response_headers=dict(groq_resp.headers),
-                            response_body=transcript_text,
-                            cost=0.0
                         )
             except Exception as e:
                 logger.warning(f"Failed to process video for tweet {tweet_url}: {e}")

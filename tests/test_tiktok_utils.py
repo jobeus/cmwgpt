@@ -30,12 +30,17 @@ class FakeYoutubeDL:
 class FakeHttpxClientContext:
     def __init__(self, client):
         self._client = client
+        self._transport = MagicMock()
+        self._transport.pending_logs = []
 
     def __enter__(self):
         return self._client
 
     def __exit__(self, exc_type, exc, tb):
         return False
+
+    def post(self, *args, **kwargs):
+        return self._client.post(*args, **kwargs)
 
 
 class TestTikTokUtils(unittest.TestCase):
@@ -59,7 +64,7 @@ class TestTikTokUtils(unittest.TestCase):
         ), patch("src.utils.tiktok_utils.yt_dlp.YoutubeDL", side_effect=lambda opts: FakeYoutubeDL(opts)), patch(
             "src.utils.tiktok_utils.os.path.exists", return_value=True
         ), patch("builtins.open", mock_open(read_data=b"audio-bytes")), patch(
-            "src.utils.tiktok_utils.httpx.Client", side_effect=lambda **kwargs: FakeHttpxClientContext(fake_client)
+            "src.utils.tiktok_utils.create_sync_client", return_value=FakeHttpxClientContext(fake_client)
         ), patch("src.utils.tiktok_utils.os.remove"):
             self.assertEqual(tiktok_utils.get_tiktok_transcript("u1")["transcript_text"], "cached")
             self.assertEqual(tiktok_utils.get_tiktok_transcript("u2")["transcript_text"], "transcribed text")
@@ -83,7 +88,7 @@ class TestTikTokUtils(unittest.TestCase):
         ), patch("src.utils.tiktok_utils.yt_dlp.YoutubeDL", side_effect=lambda opts: FakeYoutubeDL(opts)), patch(
             "src.utils.tiktok_utils.os.path.exists", return_value=True
         ), patch("builtins.open", mock_open(read_data=b"audio-bytes")), patch(
-            "src.utils.tiktok_utils.httpx.Client", side_effect=lambda **kwargs: FakeHttpxClientContext(fake_client)
+            "src.utils.tiktok_utils.create_sync_client", return_value=FakeHttpxClientContext(fake_client)
         ), patch("src.utils.tiktok_utils.os.remove") as mock_remove:
             result = tiktok_utils.get_tiktok_transcript("https://vt.tiktok.com/abc123/")
 
@@ -120,7 +125,7 @@ class TestTikTokUtils(unittest.TestCase):
         ), patch("src.utils.tiktok_utils.os.path.exists", return_value=True), patch(
             "builtins.open", mock_open(read_data=b"audio-bytes")
         ), patch(
-            "src.utils.tiktok_utils.httpx.Client", side_effect=lambda **kwargs: FakeHttpxClientContext(fake_client)
+            "src.utils.tiktok_utils.create_sync_client", return_value=FakeHttpxClientContext(fake_client)
         ):
             result = tiktok_utils.get_tiktok_transcript("https://vt.tiktok.com/xyz987/")
 

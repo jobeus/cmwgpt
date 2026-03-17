@@ -3,11 +3,12 @@ import logging
 import httpx
 from typing import List, Optional
 from urllib.parse import urlparse
+from src.config import MAX_CACHE_SIZE, TRANSCRIPT_PROXY
 from src.db.logger import build_artifact, log_pipeline_step
+from src.utils.http_client import create_async_client
 
 import trafilatura
 from newspaper import Article, Config
-from src.config import TRANSCRIPT_PROXY
 from src.utils.cache_utils import PersistentCache
 
 logger = logging.getLogger(__name__)
@@ -139,7 +140,7 @@ async def get_article_text(url: str) -> Optional[str]:
         if 'reddit.com' in parsed.netloc.lower() and parsed.netloc.lower() != 'old.reddit.com':
             url = url.replace(parsed.netloc, 'old.reddit.com')
         
-        async with httpx.AsyncClient(proxy=proxy, timeout=15.0, follow_redirects=True) as client:
+        async with create_async_client(proxy=proxy, timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
             response = await client.get(url, headers=headers)
             response.raise_for_status()
             html = response.text

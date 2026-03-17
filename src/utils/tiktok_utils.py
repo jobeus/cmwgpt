@@ -9,6 +9,7 @@ from typing import List, Optional
 from src.config import TRANSCRIPT_PROXY, GROQ_API_KEY
 from src.utils.cache_utils import PersistentCache
 from src.db.logger import build_artifact
+from src.utils.http_client import create_sync_client
 
 logger = logging.getLogger(__name__)
 
@@ -124,8 +125,9 @@ def get_tiktok_transcript(url: str) -> Optional[dict]:
         logger.info(f"Transcribing {audio_file} using Groq via httpx...")
         with open(audio_file, "rb") as file:
             audio_bytes = file.read()
-            
-        with httpx.Client(timeout=60.0) as client:
+
+        sync_client = create_sync_client(timeout=httpx.Timeout(60.0))
+        with sync_client:
             files = {'file': (os.path.basename(audio_file), audio_bytes, 'audio/mpeg')}
             data_payload = {
                 'model': 'whisper-large-v3-turbo',
@@ -134,7 +136,7 @@ def get_tiktok_transcript(url: str) -> Optional[dict]:
             }
             groq_headers = {'Authorization': f'Bearer {GROQ_API_KEY}'}
             
-            groq_resp = client.post(
+            groq_resp = sync_client.post(
                 "https://api.groq.com/openai/v1/audio/transcriptions",
                 headers=groq_headers,
                 data=data_payload,
@@ -147,13 +149,11 @@ def get_tiktok_transcript(url: str) -> Optional[dict]:
             logger.warning(f"Groq returned an empty transcript for {url}")
             return None
 
-        # Log it right here synchronously, but wait, log_api_request is async.
-        # I need to return the request/response data to downloader_utils to log asynchronously.
-        
         _tiktok_cache[url] = transcript_text
         return {
             "transcript_text": transcript_text,
             "groq_response": groq_resp,
+            "pending_logs": sync_client._transport.pending_logs.copy(),
             "source_url": url,
             "download_strategy": download_strategy,
             "from_cache": False,

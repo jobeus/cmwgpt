@@ -30,12 +30,17 @@ class FakeYoutubeDL:
 class FakeHttpxClientContext:
     def __init__(self, client):
         self._client = client
+        self._transport = MagicMock()
+        self._transport.pending_logs = []
 
     def __enter__(self):
         return self._client
 
     def __exit__(self, exc_type, exc, tb):
         return False
+
+    def post(self, *args, **kwargs):
+        return self._client.post(*args, **kwargs)
 
 
 class TestFacebookUtils(unittest.TestCase):
@@ -59,7 +64,7 @@ class TestFacebookUtils(unittest.TestCase):
         ), patch("src.utils.facebook_utils.yt_dlp.YoutubeDL", side_effect=lambda opts: FakeYoutubeDL(opts)), patch(
             "src.utils.facebook_utils.os.path.exists", return_value=True
         ), patch("builtins.open", mock_open(read_data=b"audio-bytes")), patch(
-            "src.utils.facebook_utils.httpx.Client", side_effect=lambda **kwargs: FakeHttpxClientContext(fake_client)
+            "src.utils.facebook_utils.create_sync_client", return_value=FakeHttpxClientContext(fake_client)
         ), patch("src.utils.facebook_utils.os.remove"):
             self.assertEqual(facebook_utils.get_facebook_transcript("u1")["transcript_text"], "cached")
             self.assertEqual(facebook_utils.get_facebook_transcript("u2")["transcript_text"], "transcribed text")
@@ -83,7 +88,7 @@ class TestFacebookUtils(unittest.TestCase):
         ), patch("src.utils.facebook_utils.yt_dlp.YoutubeDL", side_effect=lambda opts: FakeYoutubeDL(opts)), patch(
             "src.utils.facebook_utils.os.path.exists", return_value=True
         ), patch("builtins.open", mock_open(read_data=b"audio-bytes")), patch(
-            "src.utils.facebook_utils.httpx.Client", side_effect=lambda **kwargs: FakeHttpxClientContext(fake_client)
+            "src.utils.facebook_utils.create_sync_client", return_value=FakeHttpxClientContext(fake_client)
         ), patch("src.utils.facebook_utils.os.remove") as mock_remove:
             result = facebook_utils.get_facebook_transcript("https://facebook.com/a/videos/1")
 
@@ -120,7 +125,7 @@ class TestFacebookUtils(unittest.TestCase):
         ), patch("src.utils.facebook_utils.os.path.exists", return_value=True), patch(
             "builtins.open", mock_open(read_data=b"audio-bytes")
         ), patch(
-            "src.utils.facebook_utils.httpx.Client", side_effect=lambda **kwargs: FakeHttpxClientContext(fake_client)
+            "src.utils.facebook_utils.create_sync_client", return_value=FakeHttpxClientContext(fake_client)
         ):
             result = facebook_utils.get_facebook_transcript("https://facebook.com/a/videos/2")
 

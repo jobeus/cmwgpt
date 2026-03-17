@@ -6,7 +6,7 @@ import httpx
 import logging
 from typing import Optional
 from src.config import RUNPOD_IO_API_KEY
-from src.db.logger import log_api_request
+from src.utils.http_client import create_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +158,7 @@ class RunpodService:
         }
 
         timeout = httpx.Timeout(90.0)
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        async with create_async_client(timeout=timeout, follow_redirects=True, service_name="runpod") as client:
             try:
                 logger.info(f"Sending {operation} request to Runpod: {url}...")
                 response = await client.post(url, headers=headers, json=payload)
@@ -180,19 +180,6 @@ class RunpodService:
                     img_response = await client.get(image_url)
                     img_response.raise_for_status()
 
-                    await log_api_request(
-                        service_name=f"runpod/{operation}",
-                        method=response.request.method,
-                        endpoint_url=str(response.request.url),
-                        request_headers=dict(response.request.headers),
-                        request_body=response.request.content.decode('utf-8', errors='replace') if response.request.content else "",
-                        response_status=response.status_code,
-                        response_headers=dict(response.headers),
-                        response_body=data,
-                        cost=cost or 0.0,
-                        discord_user_id=discord_user_id,
-                        discord_channel_id=discord_channel_id
-                    )
 
                     return img_response.content, cost
                 elif status == "FAILED":

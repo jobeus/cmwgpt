@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Union
 import discord
 
 from src.config import IS_TESTING
-from src.db.logger import log_api_request
+from src.utils.http_client import create_async_client
 from src.utils.message_utils import clean_openai_response
 
 logger = logging.getLogger(__name__)
@@ -98,7 +98,15 @@ class GeminiService:
                 self._client = MockClient()
             else:
                 from google import genai
-                self._client = genai.Client(api_key=self._api_key)
+                from google.genai import types as genai_types
+                self._client = genai.Client(
+                    api_key=self._api_key,
+                    http_options=genai_types.HttpOptions(
+                        httpxAsyncClient=create_async_client(
+                            service_name="gemini",
+                        ),
+                    ),
+                )
         return self._client
 
     def _convert_messages_to_input(
@@ -348,20 +356,6 @@ class GeminiService:
                 text_snippet = response_text.strip().replace("\n", " ")[:150] if response_text else "(empty)"
                 logger.info(f"[gemini/{GEMINI_MODEL}] response snippet: {text_snippet}{'...' if len(response_text or '') > 150 else ''}")
 
-                # Log to DB
-                await log_api_request(
-                    service_name=f"gemini/{GEMINI_MODEL}",
-                    method="POST",
-                    endpoint_url="https://generativelanguage.googleapis.com/v1beta/interactions",
-                    request_headers={},
-                    request_body={"model": GEMINI_MODEL, "input_turns": len(input_turns), "thinking_level": thinking_level},
-                    response_status=200,
-                    response_headers={},
-                    response_body={"text_length": len(response_text), "image_count": len(image_files), "usage": str(usage)},
-                    cost=cost,
-                    discord_user_id=discord_user_id,
-                    discord_channel_id=channel_id,
-                )
 
                 # Cache the interaction ID for future turns
                 interaction_id = getattr(interaction, 'id', None)

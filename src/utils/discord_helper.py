@@ -2,6 +2,7 @@ import base64
 import logging
 import discord
 import io
+import httpx
 from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -126,12 +127,12 @@ async def url_to_base64_data_url(url: str) -> str:
             logger.debug(f"Cache hit for URL base64: {url}")
             return cached_result
 
-    import httpx
+    from src.utils.http_client import create_async_client
 
     try:
         # Follow redirects in case embeds resolve through URL shorteners or
         # edge network bounces
-        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+        async with create_async_client(timeout=httpx.Timeout(5.0), follow_redirects=True, service_name="discord_cdn") as client:
             response = await client.get(url)
             response.raise_for_status()
             image_bytes = response.content

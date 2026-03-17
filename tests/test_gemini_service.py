@@ -171,8 +171,7 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
 
     # ── get_chat_completion ──
 
-    @patch("src.services.gemini_service.log_api_request", new_callable=AsyncMock)
-    async def test_get_chat_completion_text_response(self, mock_log):
+    async def test_get_chat_completion_text_response(self):
         service = self.make_service()
         text_output = SimpleNamespace(type="text", text="Hello from Gemini!")
         thought_output = SimpleNamespace(type="thought", summary="I thought about it")
@@ -206,8 +205,7 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_kwargs["store"], True)
         self.assertIn({"type": "google_search"}, call_kwargs["tools"])
 
-    @patch("src.services.gemini_service.log_api_request", new_callable=AsyncMock)
-    async def test_get_chat_completion_with_thinking_level(self, mock_log):
+    async def test_get_chat_completion_with_thinking_level(self):
         service = self.make_service()
         text_output = SimpleNamespace(type="text", text="Deep answer")
         interaction = SimpleNamespace(
@@ -230,8 +228,7 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
         call_kwargs = mock_create.call_args.kwargs
         self.assertEqual(call_kwargs["generation_config"]["thinking_level"], "high")
 
-    @patch("src.services.gemini_service.log_api_request", new_callable=AsyncMock)
-    async def test_get_chat_completion_image_response(self, mock_log):
+    async def test_get_chat_completion_image_response(self):
         import base64
 
         service = self.make_service()
@@ -261,8 +258,7 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result["files"]), 1)
         self.assertEqual(result["files"][0].filename, "gemini_output.png")
 
-    @patch("src.services.gemini_service.log_api_request", new_callable=AsyncMock)
-    async def test_get_chat_completion_empty_response_raises(self, mock_log):
+    async def test_get_chat_completion_empty_response_raises(self):
         service = self.make_service()
         # Response with only a thought, no text
         thought_output = SimpleNamespace(type="thought", summary="just thinking")
@@ -283,8 +279,7 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
                 system_prompt="",
             )
 
-    @patch("src.services.gemini_service.log_api_request", new_callable=AsyncMock)
-    async def test_get_chat_completion_google_search_output_skipped(self, mock_log):
+    async def test_get_chat_completion_google_search_output_skipped(self):
         service = self.make_service()
         search_output = SimpleNamespace(type="google_search_result")
         text_output = SimpleNamespace(type="text", text="The answer is 42")
