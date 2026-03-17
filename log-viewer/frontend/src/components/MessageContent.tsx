@@ -3,6 +3,7 @@ import { parseDiscordPrefix, GUILD_ID } from '../utils/discord';
 import { getPipelineReplay } from '../utils/pipeline';
 import { TweetCard } from './TweetCard';
 import { AuthenticatedVideo } from './AuthenticatedMedia';
+import { DataUrlViewer } from './DataUrlViewer';
 
 const prettyLabel = (key: string) => key.replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
 
@@ -170,6 +171,10 @@ const PipelineStepCard = ({ content }: { content: any }) => {
  */
 export const MessageContent = ({ content, channelId }: { content: any, channelId: string | null }) => {
     if (typeof content === 'string') {
+        if (content.startsWith('data:')) {
+            return <DataUrlViewer dataUrl={content} />;
+        }
+        
         const parsed = parseDiscordPrefix(content);
         return (
             <div className="text-gray-200 text-sm whitespace-pre-wrap font-sans">

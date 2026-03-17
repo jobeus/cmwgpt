@@ -2,6 +2,7 @@ import { Terminal, Code, ExternalLink } from 'lucide-react';
 import { sanitizeJsonForRawView } from '../utils/format';
 import { getPipelineReplay } from '../utils/pipeline';
 import { CopyButton } from './CopyButton';
+import { DataUrlViewer } from './DataUrlViewer';
 
 interface RawDetailPanelsProps {
     log: any;
@@ -99,7 +100,11 @@ export const RawDetailPanels = ({ log, reqBody, reqHeaders, resBody, resHeaders 
                                 </div>
                             </div>
                             <pre className="text-xs font-mono text-gray-300 bg-gray-900/50 p-3 rounded-lg border border-gray-800/60 overflow-x-auto whitespace-pre-wrap break-all">
-                                {typeof reqBody === 'object' ? JSON.stringify(sanitizeJsonForRawView(reqBody), null, 2) : reqBody}
+                                {typeof reqBody === 'string' && reqBody.startsWith('data:') ? (
+                                    <DataUrlViewer dataUrl={reqBody} />
+                                ) : (
+                                    typeof reqBody === 'object' ? JSON.stringify(sanitizeJsonForRawView(reqBody), null, 2) : reqBody
+                                )}
                             </pre>
                         </div>
                     </div>
@@ -136,7 +141,11 @@ export const RawDetailPanels = ({ log, reqBody, reqHeaders, resBody, resHeaders 
                                 </div>
                             </div>
                             <pre className="text-xs font-mono text-emerald-200/80 bg-gray-900/50 p-3 rounded-lg border border-gray-800/60 overflow-x-auto whitespace-pre-wrap break-all">
-                                {typeof resBody === 'object' ? JSON.stringify(sanitizeJsonForRawView(resBody), null, 2) : resBody}
+                                {typeof resBody === 'string' && resBody.startsWith('data:') ? (
+                                    <DataUrlViewer dataUrl={resBody} />
+                                ) : (
+                                    typeof resBody === 'object' ? JSON.stringify(sanitizeJsonForRawView(resBody), null, 2) : resBody
+                                )}
                             </pre>
                         </div>
                     </div>
