@@ -330,19 +330,21 @@ class MentionHandler:
             if role == "assistant":
                 final_text = COST_PREFIX_PATTERN.sub("", final_text)
 
+            text_payload = [{"type": "text", "text": final_text}]
+            file_payloads = []
+
             # Fetch all supported URLs automatically
             if role == "user":
                 url_content, url_images = await self._url_content_fetcher(final_text)
                 if url_content:
                     final_text = url_content + final_text
+                    # Updating the text payload text with the fetched url content
+                    text_payload[0]["text"] = final_text
                 if url_images:
                     file_payloads.extend(url_images)
 
             # No need for fallback handling here since we always prepend the
             # sender prefix above
-
-            text_payload = [{"type": "text", "text": final_text}]
-            file_payloads = []
 
             # 2. Add native image and file components
             for attach in msg.attachments:
