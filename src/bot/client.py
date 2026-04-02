@@ -296,7 +296,8 @@ class DiscordBotClient:
         # Check for X/Twitter links to provide xcancel.com alternatives
         import re
         pattern = r'\b(?:https?://)?(?:www\.)?(?:x|twitter)\.com/([^\s>)]+)'
-        matches = re.finditer(pattern, message.content, re.IGNORECASE)
+        content = getattr(message, 'content', '')
+        matches = re.finditer(pattern, content, re.IGNORECASE)
         xcancel_links = []
         for match in matches:
             path = match.group(1)
