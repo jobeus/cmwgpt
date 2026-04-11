@@ -75,6 +75,9 @@ class SystemCommands:
                 Choice(
                     name="google-high (gemini-3.1-flash-lite, search, thinking)",
                     value="google-high"),
+                Choice(
+                    name="hybrid (google-high + haiku)",
+                    value="hybrid"),
             ])
         async def model_command(
                 interaction: discord.Interaction,

@@ -80,7 +80,54 @@ class MentionHandler:
                     f"Context prepared for mention by {message.author}, sending to {'Gemini' if is_gemini_model(model) else 'OpenRouter'}...")
                 channel_id = message.channel.id
 
-                if is_gemini_model(model) and self._gemini_service:
+                reply_content = None
+                if model == "hybrid" and self._gemini_service:
+                    # Phase 1: Google-High to summarize and search
+                    hybrid_summary_prompt = system_prompt + (
+                        "\n\n[HYBRID MODE PHASE 1] Instructions for you (Context Gatherer):\n"
+                        "Do not reply directly to the user as the final bot. Instead, review the entire chat buffer above. "
+                        "You must summarize all the available information, perform any web searches needed to enrich the context, "
+                        "and extract the main points or questions. "
+                        "CRITICAL: Be sure to include the <@Discord_User_IDs> of the participants in your summary so the final responder knows exactly who said what, and clearly point out who is asking what question or mentioning the bot at the very end of the chat log. "
+                        "Provide a comprehensive briefing that another AI model will use to write the final response."
+                    )
+                    
+                    logger.info("Hybrid phase 1: Sending to Google-High for summary...")
+                    summary_content = await self._gemini_service.get_chat_completion(
+                        model="google-high",
+                        messages=recent_messages,
+                        system_prompt=hybrid_summary_prompt,
+                        channel_id=channel_id,
+                        discord_user_id=message.author.id,
+                        thinking_level=get_thinking_level("google-high"),
+                    )
+                    
+                    if summary_content:
+                        if isinstance(summary_content, dict) and "text" in summary_content:
+                            summary_text = summary_content["text"]
+                        else:
+                            summary_text = str(summary_content)
+                            
+                        # Phase 2: Haiku to write response
+                        logger.info("Hybrid phase 2: Passing summary to Haiku...")
+                        haiku_messages = [
+                            {
+                                "role": "user", 
+                                "content": [{
+                                    "type": "text", 
+                                    "text": f"Here is the context and gathered search results for the current conversation. Please use this information to write the final response to the channel. Remember your personality from the system prompt.\n\nContext & Search Results:\n{summary_text}"
+                                }]
+                            }
+                        ]
+                        
+                        reply_content = await self._openai_service.get_chat_completion(
+                            model="anthropic/claude-haiku-4.5",
+                            messages=haiku_messages,
+                            system_prompt=system_prompt,
+                            channel_id=channel_id,
+                            discord_user_id=message.author.id,
+                        )
+                elif is_gemini_model(model) and self._gemini_service:
                     reply_content = await self._gemini_service.get_chat_completion(
                         model=model,
                         messages=recent_messages,
