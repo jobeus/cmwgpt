@@ -83,13 +83,16 @@ class MentionHandler:
                 reply_content = None
                 if model == "hybrid" and self._gemini_service:
                     # Phase 1: Google-High to summarize and search
-                    hybrid_summary_prompt = system_prompt + (
-                        "\n\n[HYBRID MODE PHASE 1] Instructions for you (Context Gatherer):\n"
-                        "Do not reply directly to the user as the final bot. Instead, review the entire chat buffer above. "
+                    hybrid_summary_prompt = (
+                        "\n\nYou are a chat CONTEXT GATHERER only, you are not participating in the chat:\n"
+                        "Do not reply directly to the user. Instead, review the entire chat buffer provided. "
                         "You must summarize all the available information, perform any web searches needed to enrich the context, "
-                        "and extract the main points or questions. "
-                        "CRITICAL: Be sure to include the <@Discord_User_IDs> of the participants in your summary so the final responder knows exactly who said what, and clearly point out who is asking what question or mentioning the bot at the very end of the chat log. "
-                        "Provide a comprehensive briefing that another AI model will use to write the final response."
+                        "and extract the main points or questions.\n"
+                        "CRITICAL: Be sure to include the <@Discord_User_IDs> of the participants in your summary so the final responder knows exactly who said what, and clearly point out who is asking what question or mentioning the bot at the very end of the chat log.\n\n"
+                        "CRITICAL: DO NOT MAKE THINGS UP, IF YOU CAN'T SEE CONTENT OR A VIDEO OR DON'T KNOW SOMETHING, SAY SO. No hallucinating allowed!!!\n\n"
+                        "Provide a comprehensive briefing of information from the channel conversation, any relevant urls or summaries (summarized by you), "
+                        "and who asked what (YOU ARE *NOT* REPLYING IN THE CHANNEL -- you are SUMMARIZING THE CONVERSATION TO ANOTHER AI AGENT). "
+                        "Another AI model will use this briefing to write the final response."
                     )
                     
                     logger.info("Hybrid phase 1: Sending to Google-High for summary...")
