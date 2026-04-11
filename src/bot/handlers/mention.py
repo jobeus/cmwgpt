@@ -14,6 +14,7 @@ from src.services.openai_service import OpenAIServiceError
 from src.services.gemini_service import GeminiServiceError, is_gemini_model, get_thinking_level
 from src.utils.downloader_utils import fetch_all_url_content
 from src.utils.message_utils import format_discord_timestamp
+from src.config import load_system_prompt
 
 # Pattern to strip cost prefixes like [$0.011] or [$0.005 @ z-image] from the start of bot messages
 COST_PREFIX_PATTERN = re.compile(r'^\[\$[\d.]+(?:\s*@\s*[^\]]+)?\]\s*')
@@ -90,6 +91,8 @@ class MentionHandler:
                         "and extract the main points or questions.\n"
                         "CRITICAL: Be sure to include the <@Discord_User_IDs> of the participants in your summary so the final responder knows exactly who said what, and clearly point out who is asking what question or mentioning the bot at the very end of the chat log.\n\n"
                         "CRITICAL: DO NOT MAKE THINGS UP, IF YOU CAN'T SEE CONTENT OR A VIDEO OR DON'T KNOW SOMETHING, SAY SO. No hallucinating allowed!!!\n\n"
+                        "CRITICAL: If no one is mentioning you (No <@[your id]> in the preceding few lines, you're to act as a casual viewer to the conversation. Interject if you have something to add to the current conversation, but feel free to stay silent and return an empty response if you have nothing that would add or change the current conversation happening between others)\n\n"
+                        "CRITICAL: Include relevant times and dates!\n\n"
                         "Provide a *detailed*, unfiltered, comprehensive briefing of information from the channel conversation, any relevant urls or summaries (summarized by you), "
                         "search results you found to do with the conversation + mention, and who asked what (YOU ARE *NOT* REPLYING IN THE CHANNEL -- you are SUMMARIZING THE CONVERSATION TO ANOTHER AI AGENT). "
                         "Another AI model will use this briefing to write the final response."
@@ -126,7 +129,7 @@ class MentionHandler:
                         reply_content = await self._openai_service.get_chat_completion(
                             model="anthropic/claude-haiku-4.5",
                             messages=haiku_messages,
-                            system_prompt=system_prompt,
+                            system_prompt=load_system_prompt(prompt_path="system_prompt_hybrid.txt"),
                             channel_id=channel_id,
                             discord_user_id=message.author.id,
                             search=False,
