@@ -90,8 +90,8 @@ class MentionHandler:
                         "and extract the main points or questions.\n"
                         "CRITICAL: Be sure to include the <@Discord_User_IDs> of the participants in your summary so the final responder knows exactly who said what, and clearly point out who is asking what question or mentioning the bot at the very end of the chat log.\n\n"
                         "CRITICAL: DO NOT MAKE THINGS UP, IF YOU CAN'T SEE CONTENT OR A VIDEO OR DON'T KNOW SOMETHING, SAY SO. No hallucinating allowed!!!\n\n"
-                        "Provide a comprehensive briefing of information from the channel conversation, any relevant urls or summaries (summarized by you), "
-                        "and who asked what (YOU ARE *NOT* REPLYING IN THE CHANNEL -- you are SUMMARIZING THE CONVERSATION TO ANOTHER AI AGENT). "
+                        "Provide a *detailed*, unfiltered, comprehensive briefing of information from the channel conversation, any relevant urls or summaries (summarized by you), "
+                        "search results you found to do with the conversation + mention, and who asked what (YOU ARE *NOT* REPLYING IN THE CHANNEL -- you are SUMMARIZING THE CONVERSATION TO ANOTHER AI AGENT). "
                         "Another AI model will use this briefing to write the final response."
                     )
                     
@@ -129,6 +129,7 @@ class MentionHandler:
                             system_prompt=system_prompt,
                             channel_id=channel_id,
                             discord_user_id=message.author.id,
+                            search=False,
                         )
                 elif is_gemini_model(model) and self._gemini_service:
                     reply_content = await self._gemini_service.get_chat_completion(

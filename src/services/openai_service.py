@@ -130,6 +130,7 @@ class OpenAIService:
         state_service: Any = None,
         bot_id: int = None,
         discord_user_id: Optional[int] = None,
+        search: bool = True,
     ) -> str:
         """
         Gets a chat completion using the standard Chat Completions API.
@@ -202,7 +203,7 @@ class OpenAIService:
                     }
                 }
 
-                if actual_model == "anthropic/claude-haiku-4.5":
+                if search and actual_model == "anthropic/claude-haiku-4.5":
                     kwargs["extra_body"]["plugins"] = [{
                         "id": "web",
                         "engine": "native"
