@@ -228,7 +228,7 @@ class GeminiService:
         thinking_level: Optional[str] = None,
         # Accept and ignore extra kwargs for compatibility
         state_service: Any = None,
-    ) -> Union[str, Dict[str, Any], None]:
+    ) -> tuple[Union[str, Dict[str, Any], None], float]:
         """
         Get a chat completion using the Gemini Interactions API.
 
@@ -349,9 +349,6 @@ class GeminiService:
                     cost = self._estimate_cost(usage)
                     logger.info(f"[gemini] Usage: {usage}, Estimated cost: ${cost:.4f}")
 
-                if cost > 0 and response_text:
-                    response_text = f"[${cost:.3f}] {response_text}"
-
                 # Log snippet
                 text_snippet = response_text.strip().replace("\n", " ")[:150] if response_text else "(empty)"
                 logger.info(f"[gemini/{GEMINI_MODEL}] response snippet: {text_snippet}{'...' if len(response_text or '') > 150 else ''}")
@@ -365,8 +362,8 @@ class GeminiService:
 
                 # Return according to response format
                 if image_files:
-                    return {"text": response_text or "Here's what I generated:", "files": image_files}
-                return response_text
+                    return {"text": response_text or "Here's what I generated:", "files": image_files}, cost
+                return response_text, cost
 
             except GeminiServiceError:
                 # On error, clear the cache in case the interaction ID is stale

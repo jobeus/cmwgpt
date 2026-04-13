@@ -335,7 +335,7 @@ class InterjectService:
 
         try:
             if is_gemini_model(model) and self._gemini_service:
-                reply_content = await self._gemini_service.get_chat_completion(
+                reply_content, cost = await self._gemini_service.get_chat_completion(
                     model=model,
                     messages=chat_context,
                     system_prompt=system_prompt,
@@ -344,7 +344,7 @@ class InterjectService:
                     thinking_level=get_thinking_level(model),
                 )
             else:
-                reply_content = await self._openai_service.get_chat_completion(
+                reply_content, cost = await self._openai_service.get_chat_completion(
                     model=model,
                     messages=chat_context,
                     system_prompt=system_prompt,
@@ -363,6 +363,8 @@ class InterjectService:
                 reply_text = reply_content
 
             if reply_text and reply_text.strip():
+                if cost > 0:
+                    reply_text = f"[${cost:.3f}] {reply_text}"
                 await self._message_service.send_channel_reply(channel, reply_text)
                 logger.info(f"💬 Interjected in #{channel.name}: {reply_text[:80]}...")
 

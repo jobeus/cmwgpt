@@ -131,7 +131,7 @@ class OpenAIService:
         bot_id: int = None,
         discord_user_id: Optional[int] = None,
         search: bool = True,
-    ) -> str:
+    ) -> tuple[str, float]:
         """
         Gets a chat completion using the standard Chat Completions API.
         """
@@ -265,16 +265,14 @@ class OpenAIService:
                                 cost_details = model_extra.get('cost_details', {})
                                 if isinstance(cost_details, dict):
                                     cost = cost_details.get('upstream_inference_cost', 0.0)
-                        if cost > 0:
-                            cleaned_text = f"[${cost:.3f}] {cleaned_text}"
                     except Exception as e:
                         logger.warning(f"Failed to parse cost: {e}")
 
-                    return cleaned_text
+                    return cleaned_text, cost
                 
                 logger.error(f"❌ Failed to get a proper response from the model. Raw response: {response}")
                 self._dump_bad_request(kwargs, client)
-                return "Failed to get a response from the model."
+                return "Failed to get a response from the model.", 0.0
 
             except RateLimitError as e:
                 logger.warning(f"Rate limit hit on attempt {attempt + 1}: {e}")

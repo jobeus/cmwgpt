@@ -82,6 +82,7 @@ class MentionHandler:
                 channel_id = message.channel.id
 
                 reply_content = None
+                cost = 0.0
                 if model == "hybrid" and self._gemini_service:
                     # Phase 1: Google-High to summarize and search
                     hybrid_summary_prompt = (
@@ -99,7 +100,7 @@ class MentionHandler:
                     )
                     
                     logger.info("Hybrid phase 1: Sending to Google-High for summary...")
-                    summary_content = await self._gemini_service.get_chat_completion(
+                    summary_content, gemini_cost = await self._gemini_service.get_chat_completion(
                         model="google-high",
                         messages=recent_messages,
                         system_prompt=hybrid_summary_prompt,
@@ -107,13 +108,13 @@ class MentionHandler:
                         discord_user_id=message.author.id,
                         thinking_level=get_thinking_level("google-high"),
                     )
-                    
+
                     if summary_content:
                         if isinstance(summary_content, dict) and "text" in summary_content:
                             summary_text = summary_content["text"]
                         else:
                             summary_text = str(summary_content)
-                            
+
                         # Phase 2: Haiku to write response
                         logger.info("Hybrid phase 2: Passing summary to Haiku...")
                         haiku_messages = [
@@ -125,8 +126,8 @@ class MentionHandler:
                                 }]
                             }
                         ]
-                        
-                        reply_content = await self._openai_service.get_chat_completion(
+
+                        reply_content, haiku_cost = await self._openai_service.get_chat_completion(
                             model="anthropic/claude-haiku-4.5",
                             messages=haiku_messages,
                             system_prompt=load_system_prompt(prompt_path="system_prompt_hybrid.txt"),
@@ -134,8 +135,11 @@ class MentionHandler:
                             discord_user_id=message.author.id,
                             search=False,
                         )
+
+                        cost = gemini_cost + haiku_cost
+
                 elif is_gemini_model(model) and self._gemini_service:
-                    reply_content = await self._gemini_service.get_chat_completion(
+                    reply_content, cost = await self._gemini_service.get_chat_completion(
                         model=model,
                         messages=recent_messages,
                         system_prompt=system_prompt,
@@ -144,7 +148,7 @@ class MentionHandler:
                         thinking_level=get_thinking_level(model),
                     )
                 else:
-                    reply_content = await self._openai_service.get_chat_completion(
+                    reply_content, cost = await self._openai_service.get_chat_completion(
                         model=model,
                         messages=recent_messages,
                         system_prompt=system_prompt,
@@ -166,14 +170,18 @@ class MentionHandler:
                     # tools)
                     reply_text = reply_content["text"]
                     files_to_upload = reply_content.get("files", [])
-
-                    if files_to_upload:
-                        await self._message_service.send_channel_reply_with_files(message.channel, reply_text, files_to_upload)
-                    else:
-                        await self._message_service.send_channel_reply(message.channel, reply_text)
                 else:
                     # Regular text response
-                    await self._message_service.send_channel_reply(message.channel, reply_content)
+                    reply_text = str(reply_content)
+                    files_to_upload = []
+
+                if cost > 0:
+                    reply_text = f"[${cost:.3f}] {reply_text}"
+
+                if files_to_upload:
+                    await self._message_service.send_channel_reply_with_files(message.channel, reply_text, files_to_upload)
+                else:
+                    await self._message_service.send_channel_reply(message.channel, reply_text)
 
             except (OpenAIServiceError, GeminiServiceError) as e:
                 logger.error(f"❌ API error in mention handler:\\n{e}")
