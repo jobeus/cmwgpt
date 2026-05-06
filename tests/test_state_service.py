@@ -21,11 +21,17 @@ class TestStateService(unittest.TestCase):
 
     def setUp(self):
         """Set up test environment."""
+        self.temp_settings_file = tempfile.NamedTemporaryFile(delete=False).name
+        os.environ["CMWGPT_SETTINGS_FILE"] = self.temp_settings_file
         self.state_service = StateService()
 
     def tearDown(self):
         """Clean up test environment."""
         self.state_service.clear_all_data()
+        if os.path.exists(self.temp_settings_file):
+            os.remove(self.temp_settings_file)
+        if "CMWGPT_SETTINGS_FILE" in os.environ:
+            del os.environ["CMWGPT_SETTINGS_FILE"]
 
     def test_conversation_management(self):
         """Test conversation storage and retrieval."""
@@ -430,9 +436,6 @@ class TestStateService(unittest.TestCase):
         with open(temp_file, "r", encoding="utf-8") as f:
             state = json.load(f)
         self.assertEqual(state["restart_info"], {"manual_restart": True})
-        self.assertEqual(state["draw_models"]["1"], "seedream")
-        self.assertEqual(state["edit_models"]["1"], "qwen")
-        self.assertEqual(state["interject_settings"]["1"], {"chance": 10})
         self.assertEqual(state["last_git_sha"], "abc123")
         os.remove(temp_file)
 
@@ -448,13 +451,7 @@ class TestStateService(unittest.TestCase):
             json.dump(
                 {
                     "conversations": {"5": [{"role": "user", "content": "hello"}]},
-                    "models": {"5": "gpt-test"},
-                    "draw_models": {"5": "seedream"},
-                    "edit_models": {"5": "qwen"},
-                    "system_prompts": {"5": "be helpful"},
                     "response_ids": {"5": "resp-5"},
-                    "interject_settings": {"5": {"chance": 10}},
-                    "death_settings": {"interval": 30},
                     "last_git_sha": "abc123",
                 },
                 valid,
@@ -466,11 +463,6 @@ class TestStateService(unittest.TestCase):
 
             self.assertTrue(loaded)
             self.assertEqual(self.state_service.get_conversation(5)[0]["content"], "hello")
-            self.assertEqual(self.state_service.get_model(5), "gpt-test")
-            self.assertEqual(self.state_service.get_draw_model(5), "seedream")
-            self.assertEqual(self.state_service.get_edit_model(5), "qwen")
-            self.assertEqual(self.state_service.get_interject_settings(5), {"chance": 10})
-            self.assertEqual(self.state_service.get_death_settings(), {"interval": 30})
             self.assertEqual(self.state_service.get_last_git_sha(), "abc123")
             self.assertEqual(self.state_service.get_active_channels(), {5})
             self.assertFalse(os.path.exists(invalid.name))

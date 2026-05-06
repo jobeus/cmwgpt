@@ -38,6 +38,9 @@ class StateService:
         # efficient)
         self._channel_data_lock = threading.RLock()
         self._global_data_lock = threading.RLock()
+        
+        self._settings_file = os.environ.get("CMWGPT_SETTINGS_FILE", ".cache/cmwgpt_settings.json")
+        self._load_settings()
 
         logger.info(
             "StateService initialized with optimized thread-safe storage")
@@ -148,6 +151,7 @@ class StateService:
             self._ensure_channel_data(channel_id)
             self._channel_data[channel_id]['model'] = model
             logger.debug(f"Set model for channel {channel_id} to {model}")
+        self._save_settings()
 
     def get_all_models(self) -> Dict[int, str]:
         """Get all model settings."""
@@ -167,6 +171,7 @@ class StateService:
             self._ensure_channel_data(channel_id)
             self._channel_data[channel_id]['draw_model'] = model
             logger.debug(f"Set draw model for channel {channel_id} to {model}")
+        self._save_settings()
 
     def get_all_draw_models(self) -> Dict[int, str]:
         """Get all draw model settings."""
@@ -186,6 +191,7 @@ class StateService:
             self._ensure_channel_data(channel_id)
             self._channel_data[channel_id]['edit_model'] = model
             logger.debug(f"Set edit model for channel {channel_id} to {model}")
+        self._save_settings()
 
     def get_all_edit_models(self) -> Dict[int, str]:
         """Get all edit model settings."""
@@ -205,6 +211,7 @@ class StateService:
             self._ensure_channel_data(channel_id)
             self._channel_data[channel_id]['system_prompt'] = prompt
             logger.debug(f"Set system prompt for channel {channel_id}")
+        self._save_settings()
 
     def clear_system_prompt(self, channel_id: int) -> None:
         """Clear the system prompt for a channel."""
@@ -212,6 +219,7 @@ class StateService:
             if channel_id in self._channel_data:
                 self._channel_data[channel_id]['system_prompt'] = None
                 logger.debug(f"Cleared system prompt for channel {channel_id}")
+        self._save_settings()
 
     def get_all_system_prompts(self) -> Dict[int, str]:
         """Get all system prompts."""
@@ -231,6 +239,7 @@ class StateService:
             self._ensure_channel_data(channel_id)
             self._channel_data[channel_id]['interject_settings'] = settings.copy()
             logger.debug(f"Set interject settings for channel {channel_id}")
+        self._save_settings()
 
     def clear_interject_settings(self, channel_id: int) -> None:
         """Clear the interject settings for a channel."""
@@ -238,6 +247,7 @@ class StateService:
             if channel_id in self._channel_data:
                 self._channel_data[channel_id]['interject_settings'] = None
                 logger.debug(f"Cleared interject settings for channel {channel_id}")
+        self._save_settings()
                 
     # Death settings management (global)
     def get_death_settings(self) -> Optional[Dict[str, Any]]:
@@ -250,12 +260,14 @@ class StateService:
         with self._global_data_lock:
             self._death_settings = settings.copy()
             logger.debug("Set global death settings")
+        self._save_settings()
 
     def clear_death_settings(self) -> None:
         """Clear the global death settings."""
         with self._global_data_lock:
             self._death_settings = None
             logger.debug("Cleared global death settings")
+        self._save_settings()
 
     # Optimized batch operations
     def get_channel_context(self, channel_id: int) -> Dict[str, Any]:
@@ -304,6 +316,7 @@ class StateService:
                     else:
                         self._channel_data[channel_id][field] = value
                     logger.debug(f"Updated {field} for channel {channel_id}")
+        self._save_settings()
 
     def add_message_and_update_response_id(
             self, channel_id: int, message: Dict[str, Any], response_id: str) -> None:
@@ -429,33 +442,13 @@ class StateService:
                 conversations = {
                     k: v['conversation'] for k,
                     v in self._channel_data.items() if v['conversation']}
-                models = {k: v['model']
-                          for k, v in self._channel_data.items() if v['model']}
-                draw_models = {
-                    k: v['draw_model'] for k,
-                    v in self._channel_data.items() if v['draw_model']}
-                edit_models = {
-                    k: v['edit_model'] for k,
-                    v in self._channel_data.items() if v['edit_model']}
-                system_prompts = {
-                    k: v['system_prompt'] for k,
-                    v in self._channel_data.items() if v['system_prompt']}
                 response_ids = {
                     k: v['response_id'] for k,
                     v in self._channel_data.items() if v['response_id']}
-                interject_settings = {
-                    k: v['interject_settings'] for k,
-                    v in self._channel_data.items() if v.get('interject_settings')}
 
                 state_data = {
                     "conversations": conversations,
-                    "models": models,
-                    "draw_models": draw_models,
-                    "edit_models": edit_models,
-                    "system_prompts": system_prompts,
                     "response_ids": response_ids,
-                    "interject_settings": interject_settings,
-                    "death_settings": self._death_settings,
                     "active_channels": list(self._active_channels),
                     "last_git_sha": self._last_git_sha,
                     "timestamp": timestamp,
@@ -507,56 +500,30 @@ class StateService:
                         state_data = json.load(f)
 
                     # Validate the data structure
-                    if not all(
-                        key in state_data for key in [
-                            "conversations",
-                            "models",
-                            "system_prompts"]):
+                    if "conversations" not in state_data:
                         logger.warning(
                             f"Invalid state file format: {temp_file}")
                         continue
 
                     # Load the state under consolidated locks
                     with self._channel_data_lock, self._global_data_lock:
-                        # Clear existing data
-                        self._channel_data.clear()
-
-                        # Rebuild consolidated channel data structure
+                        # Rebuild consolidated channel data structure for transient state
                         conversations = state_data.get("conversations", {})
-                        models = state_data.get("models", {})
-                        draw_models = state_data.get("draw_models", {})
-                        edit_models = state_data.get("edit_models", {})
-                        system_prompts = state_data.get("system_prompts", {})
                         response_ids = state_data.get("response_ids", {})
-                        interject_settings = state_data.get("interject_settings", {})
-                        self._death_settings = state_data.get("death_settings", None)
 
-                        # Get all channel IDs from all data sources
+                        # Get all channel IDs from transient data sources
                         all_channel_ids = set()
                         all_channel_ids.update(int(k)
                                                for k in conversations.keys())
-                        all_channel_ids.update(int(k) for k in models.keys())
-                        all_channel_ids.update(int(k)
-                                               for k in draw_models.keys())
-                        all_channel_ids.update(int(k)
-                                               for k in edit_models.keys())
-                        all_channel_ids.update(int(k)
-                                               for k in system_prompts.keys())
                         all_channel_ids.update(int(k)
                                                for k in response_ids.keys())
-                        all_channel_ids.update(int(k)
-                                               for k in interject_settings.keys())
 
                         for channel_id in all_channel_ids:
-                            self._channel_data[channel_id] = {
-                                'conversation': conversations.get(
-                                    str(channel_id), []), 'model': models.get(
-                                    str(channel_id)), 'draw_model': draw_models.get(
-                                    str(channel_id)), 'edit_model': edit_models.get(
-                                    str(channel_id)), 'system_prompt': system_prompts.get(
-                                    str(channel_id)), 'response_id': response_ids.get(
-                                    str(channel_id)), 'interject_settings': interject_settings.get(
-                                    str(channel_id))}
+                            self._ensure_channel_data(channel_id)
+                            if str(channel_id) in conversations:
+                                self._channel_data[channel_id]['conversation'] = conversations[str(channel_id)]
+                            if str(channel_id) in response_ids:
+                                self._channel_data[channel_id]['response_id'] = response_ids[str(channel_id)]
 
                         # Load active channels
                         if "active_channels" in state_data:
@@ -578,20 +545,11 @@ class StateService:
                     # Count restored data
                     conversations_count = sum(
                         1 for v in self._channel_data.values() if v['conversation'])
-                    models_count = sum(
-                        1 for v in self._channel_data.values() if v['model'])
-                    draw_models_count = sum(
-                        1 for v in self._channel_data.values() if v['draw_model'])
-                    edit_models_count = sum(
-                        1 for v in self._channel_data.values() if v['edit_model'])
-                    prompts_count = sum(
-                        1 for v in self._channel_data.values() if v['system_prompt'])
                     response_ids_count = sum(
                         1 for v in self._channel_data.values() if v['response_id'])
 
                     logger.info(
-                        f"Restored {conversations_count} conversations, {models_count} models, {draw_models_count} draw_models, {edit_models_count} edit_models, "
-                        f"{prompts_count} system prompts, {len(self._active_channels)} active channels, "
+                        f"Restored {conversations_count} conversations, {len(self._active_channels)} active channels, "
                         f"{response_ids_count} response IDs{sha_info}"
                     )
 
@@ -639,6 +597,71 @@ class StateService:
 
         except (OSError, ValueError) as e:
             logger.error(f"Error during temp file cleanup: {e}")
+
+    def _save_settings(self) -> None:
+        """Save persistent settings to disk."""
+        try:
+            os.makedirs(os.path.dirname(self._settings_file) or ".", exist_ok=True)
+            with self._channel_data_lock, self._global_data_lock:
+                settings_data = {
+                    "models": {str(k): v['model'] for k, v in self._channel_data.items() if v.get('model')},
+                    "draw_models": {str(k): v['draw_model'] for k, v in self._channel_data.items() if v.get('draw_model')},
+                    "edit_models": {str(k): v['edit_model'] for k, v in self._channel_data.items() if v.get('edit_model')},
+                    "system_prompts": {str(k): v['system_prompt'] for k, v in self._channel_data.items() if v.get('system_prompt')},
+                    "interject_settings": {str(k): v['interject_settings'] for k, v in self._channel_data.items() if v.get('interject_settings')},
+                    "death_settings": self._death_settings,
+                }
+            
+            # Write atomically
+            temp_file = f"{self._settings_file}.tmp"
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(settings_data, f, indent=2)
+            os.replace(temp_file, self._settings_file)
+            
+        except (OSError, ValueError) as e:
+            logger.error(f"Failed to save settings: {e}")
+
+    def _load_settings(self) -> None:
+        """Load persistent settings from disk."""
+        if not hasattr(self, '_settings_file') or not os.path.exists(self._settings_file):
+            return
+            
+        try:
+            with open(self._settings_file, "r", encoding="utf-8") as f:
+                settings_data = json.load(f)
+                
+            with self._channel_data_lock, self._global_data_lock:
+                # Load models
+                for k, v in settings_data.get("models", {}).items():
+                    self._ensure_channel_data(int(k))
+                    self._channel_data[int(k)]['model'] = v
+                    
+                # Load draw_models
+                for k, v in settings_data.get("draw_models", {}).items():
+                    self._ensure_channel_data(int(k))
+                    self._channel_data[int(k)]['draw_model'] = v
+                    
+                # Load edit_models
+                for k, v in settings_data.get("edit_models", {}).items():
+                    self._ensure_channel_data(int(k))
+                    self._channel_data[int(k)]['edit_model'] = v
+                    
+                # Load system_prompts
+                for k, v in settings_data.get("system_prompts", {}).items():
+                    self._ensure_channel_data(int(k))
+                    self._channel_data[int(k)]['system_prompt'] = v
+                    
+                # Load interject_settings
+                for k, v in settings_data.get("interject_settings", {}).items():
+                    self._ensure_channel_data(int(k))
+                    self._channel_data[int(k)]['interject_settings'] = v
+                    
+                # Load death_settings
+                self._death_settings = settings_data.get("death_settings")
+                
+            logger.info("Loaded persistent settings from disk")
+        except (OSError, json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Failed to load settings: {e}")
 
 
 # Global state service instance
