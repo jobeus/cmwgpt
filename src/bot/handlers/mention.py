@@ -86,17 +86,18 @@ class MentionHandler:
                 if model == "hybrid" and self._gemini_service:
                     # Phase 1: Google-High to summarize and search
                     hybrid_summary_prompt = (
-                        "\n\nYou are a chat CONTEXT GATHERER only, you are not participating in the chat:\n"
-                        "Do not reply directly to the user. Instead, review the entire chat buffer provided. "
-                        "You must summarize all the available information, perform any web searches needed to enrich the context, "
-                        "and extract the main points or questions.\n"
-                        "CRITICAL: Be sure to include the <@Discord_User_IDs> of the participants in your summary so the final responder knows exactly who said what, and clearly point out who is asking what question or mentioning the bot at the very end of the chat log.\n\n"
-                        "CRITICAL: DO NOT MAKE THINGS UP, IF YOU CAN'T SEE CONTENT OR A VIDEO OR DON'T KNOW SOMETHING, SAY SO. No hallucinating allowed!!!\n\n"
-                        "CRITICAL: If no one is mentioning you (No <@[your id]> in the preceding few lines, you're to act as a casual viewer to the conversation. Interject if you have something to add to the current conversation, but feel free to stay silent and return an empty response if you have nothing that would add or change the current conversation happening between others)\n\n"
-                        "CRITICAL: Include relevant times and dates!\n\n"
-                        "Provide a *detailed*, unfiltered, comprehensive briefing of information from the channel conversation, any relevant urls or summaries (summarized by you), "
-                        "search results you found to do with the conversation + mention, and who asked what (YOU ARE *NOT* REPLYING IN THE CHANNEL -- you are SUMMARIZING THE CONVERSATION TO ANOTHER AI AGENT). "
-                        "Another AI model will use this briefing to write the final response."
+                        f"\n\nYou are a chat CONTEXT GATHERER only, you are not participating in the chat:\n"
+                        f"Do not reply directly to the user. Instead, review the entire chat buffer provided. "
+                        f"You must summarize all the available information, perform any web searches needed to enrich the context, "
+                        f"and extract the main points or questions.\n"
+                        f"CRITICAL: Be sure to include the <@Discord_User_IDs> of the participants in your summary so the final responder knows exactly who said what, and clearly point out who is asking what question or mentioning the bot at the very end of the chat log.\n"
+                        f"CRITICAL: When referring to the bot in your summary, speak directly to the final responder as 'YOU' (e.g. 'User <@ID> asked YOU a question'). Do NOT refer to the bot in the third person (like '<@{bot_user.id}>' or 'the bot') so the final responder doesn't get confused.\n\n"
+                        f"CRITICAL: DO NOT MAKE THINGS UP, IF YOU CAN'T SEE CONTENT OR A VIDEO OR DON'T KNOW SOMETHING, SAY SO. No hallucinating allowed!!!\n\n"
+                        f"CRITICAL: If no one is mentioning you (No <@{bot_user.id}> in the preceding few lines, you're to act as a casual viewer to the conversation. Interject if you have something to add to the current conversation, but feel free to stay silent and return an empty response if you have nothing that would add or change the current conversation happening between others)\n\n"
+                        f"CRITICAL: Include relevant times and dates!\n\n"
+                        f"Provide a *detailed*, unfiltered, comprehensive briefing of information from the channel conversation, any relevant urls or summaries (summarized by you), "
+                        f"search results you found to do with the conversation + mention, and who asked what (YOU ARE *NOT* REPLYING IN THE CHANNEL -- you are SUMMARIZING THE CONVERSATION TO ANOTHER AI AGENT). "
+                        f"Another AI model will use this briefing to write the final response."
                     )
                     
                     logger.info("Hybrid phase 1: Sending to Google-High for summary...")
@@ -122,7 +123,7 @@ class MentionHandler:
                                 "role": "user", 
                                 "content": [{
                                     "type": "text", 
-                                    "text": f"Here is the context and gathered search results for the current conversation. Please use this information to write the final response to the channel. Remember your personality from the system prompt.\n\nContext & Search Results:\n{summary_text}"
+                                    "text": f"Here is the context and gathered search results for the current conversation. Please use this information to write the final response to the channel. Remember your personality from the system prompt. CRITICAL: You ARE the bot in this conversation. If the summary refers to the bot or <@{bot_user.id}>, it is referring to YOU. Do not refer to yourself in the third person.\n\nContext & Search Results:\n{summary_text}"
                                 }]
                             }
                         ]
