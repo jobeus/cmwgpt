@@ -508,8 +508,8 @@ class TestInterjectService(unittest.TestCase):
             channel.history = history
             self.mock_bot.user = SimpleNamespace(id=99999)
 
-            self.service._openai_service.get_chat_completion = AsyncMock(side_effect=[None, {"text": "dict reply"}, RuntimeError("boom")])
-            self.service._mention_legend_provider = AsyncMock(return_value="legend text")
+            self.service._openai_service.get_chat_completion = AsyncMock(side_effect=[(None, 0.0), ({"text": "dict reply"}, 0.0), RuntimeError("boom")])
+            self.service._mention_legend_provider = AsyncMock(return_value=("legend text", 0.0))
 
             await self.service._do_interject(channel, 99999)
             self.service._message_service.send_channel_reply.assert_not_awaited()

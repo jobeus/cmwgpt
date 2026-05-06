@@ -41,7 +41,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         messages = [{"role": "user", "content": "Hello"}]
         system_prompt = "You are a helpful assistant."
 
-        result = await openai_service.get_chat_completion(model, messages, system_prompt)
+        result, _ = await openai_service.get_chat_completion(model, messages, system_prompt)
 
         self.assertEqual(result, "Hello! How can I help you today?")
 
@@ -77,7 +77,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
                 messages = [{"role": "user", "content": "Test"}]
 
-                result = await openai_service.get_chat_completion(model, messages)
+                result, _ = await openai_service.get_chat_completion(model, messages)
 
                 self.assertEqual(result, f"Response from {model}")
 
@@ -89,7 +89,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         mock_response.choices = [mock_choice]
         self.mock_client.chat.completions.create.return_value = mock_response
 
-        result = await openai_service.get_chat_completion("google/gemini-2.5-flash", [])
+        result, _ = await openai_service.get_chat_completion("google/gemini-2.5-flash", [])
         self.assertEqual(result, "I'm ready to help!")
 
     async def test_chat_completion_complex_messages(self):
@@ -110,7 +110,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         ]
         system_prompt = "You are a helpful assistant."
 
-        result = await openai_service.get_chat_completion("google/gemini-2.5-flash", messages, system_prompt)
+        result, _ = await openai_service.get_chat_completion("google/gemini-2.5-flash", messages, system_prompt)
 
         self.assertEqual(result, "Complex response")
 
@@ -123,7 +123,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.mock_client.chat.completions.create.return_value = mock_response
         openai_service.set_bot_id_loader(lambda: 12345)
 
-        result = await openai_service.get_chat_completion("gpt-5-mini", [{"role": "user", "content": "hi"}])
+        result, _ = await openai_service.get_chat_completion("gpt-5-mini", [{"role": "user", "content": "hi"}])
 
         self.assertEqual(result, "cleaned")
         mock_clean.assert_called_once_with("<@12345> Hello", bot_id=12345)
@@ -264,14 +264,14 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch("src.services.openai_service.clean_openai_response", return_value="cleaned"):
-            result = await self.service.get_chat_completion(
+            result, _ = await self.service.get_chat_completion(
                 "gpt-test",
                 [{"role": "user", "content": "hi"}],
                 discord_user_id=42,
                 channel_id=7,
             )
 
-        self.assertEqual(result, "[$1.234] cleaned")
+        self.assertEqual(result, "cleaned")
         self.client.chat.completions.create.assert_awaited_once()
 
     async def test_get_chat_completion_preserves_invalid_json_and_uses_state_service_bot_id(self):
@@ -284,7 +284,7 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
         ]
 
         with patch("src.services.openai_service.clean_openai_response", return_value="cleaned") as mock_clean:
-            result = await self.service.get_chat_completion(
+            result, _ = await self.service.get_chat_completion(
                 "gpt-test", messages, system_prompt="system", state_service=state_service
             )
 
@@ -306,7 +306,7 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
 
         with patch("src.services.openai_service.clean_openai_response", return_value="cleaned") as mock_clean, \
             patch("src.services.openai_service.logger.warning") as mock_warning:
-            result = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+            result, _ = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
 
         self.assertEqual(result, "cleaned")
         mock_clean.assert_called_once_with("hello", bot_id=None)
@@ -325,7 +325,7 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "src.services.openai_service.asyncio.sleep", new=AsyncMock()
         ) as mock_sleep:
-            result = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+            result, _ = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
 
         self.assertEqual(result, "done")
         mock_sleep.assert_awaited_once_with(1.0)
@@ -382,7 +382,7 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "src.services.openai_service.asyncio.sleep", new=AsyncMock()
         ) as mock_sleep:
-            result = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+            result, _ = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
 
         self.assertEqual(result, "ok")
         mock_sleep.assert_awaited_once_with(1.0)
@@ -432,7 +432,7 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
         self.client.chat.completions.create.return_value = make_response(text=None)
 
         with patch.object(self.service, "_dump_bad_request") as mock_dump:
-            result = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+            result, _ = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
 
         self.assertEqual(result, "Failed to get a response from the model.")
         mock_dump.assert_called_once()

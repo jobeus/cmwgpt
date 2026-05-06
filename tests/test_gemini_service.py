@@ -188,7 +188,7 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
         mock_client.aio.interactions.create = mock_create
         service._client = mock_client
 
-        result = await service.get_chat_completion(
+        result, _ = await service.get_chat_completion(
             model="google",
             messages=[{"role": "user", "content": "Hi"}],
             system_prompt="Be helpful",
@@ -198,7 +198,6 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(result, str)
         self.assertIn("Hello from Gemini!", result)
-        self.assertIn("[$", result)  # Cost prefix
         mock_create.assert_awaited_once()
         call_kwargs = mock_create.call_args.kwargs
         self.assertEqual(call_kwargs["model"], "gemini-3.1-flash-lite-preview")
@@ -246,7 +245,7 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
         mock_client.aio.interactions.create = mock_create
         service._client = mock_client
 
-        result = await service.get_chat_completion(
+        result, _ = await service.get_chat_completion(
             model="google",
             messages=[{"role": "user", "content": "Draw something"}],
             system_prompt="",
@@ -293,7 +292,7 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
         mock_client.aio.interactions.create = mock_create
         service._client = mock_client
 
-        result = await service.get_chat_completion(
+        result, _ = await service.get_chat_completion(
             model="google",
             messages=[{"role": "user", "content": "What is?"}],
             system_prompt="",

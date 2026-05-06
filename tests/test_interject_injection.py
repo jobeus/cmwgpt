@@ -13,7 +13,7 @@ class TestInterjectServiceInjection(unittest.IsolatedAsyncioTestCase):
         state_service.get_model.return_value = None
 
         openai_service = MagicMock()
-        openai_service.get_chat_completion = AsyncMock(return_value="injected response")
+        openai_service.get_chat_completion = AsyncMock(return_value=("injected response", 0.0))
 
         message_service = MagicMock()
         message_service.send_channel_reply = AsyncMock()

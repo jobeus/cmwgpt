@@ -34,7 +34,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             queue_service=queue_service,
             system_prompt_loader=lambda: "base system prompt",
             include_num_chatlines=10,
-            mention_legend_provider=AsyncMock(return_value="legend text"),
+            mention_legend_provider=AsyncMock(return_value=("legend text", 0.0)),
             attachment_converter=attachment_converter or AsyncMock(return_value="data:file/plain;base64,AAA"),
             url_converter=url_converter or AsyncMock(return_value="data:image/png;base64,BBB"),
             url_content_fetcher=url_content_fetcher or AsyncMock(return_value=("", [])),
@@ -322,7 +322,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
     async def test_handle_mention_sends_plain_text_reply(self):
         handler, state_service, _, openai_service, message_service = self.make_handler()
         handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
-        openai_service.get_chat_completion = AsyncMock(return_value="hello there")
+        openai_service.get_chat_completion = AsyncMock(return_value=("hello there", 0.0))
         channel = MagicMock()
         channel.id = 1
         channel.typing.return_value = AsyncTyping()
@@ -338,7 +338,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         handler, _, _, openai_service, message_service = self.make_handler()
         handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
         openai_service.get_chat_completion = AsyncMock(
-            return_value={"text": "here you go", "files": ["file-a"]}
+            return_value=({"text": "here you go", "files": ["file-a"]}, 0.0)
         )
         channel = MagicMock()
         channel.id = 2
@@ -352,7 +352,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
     async def test_handle_mention_sends_text_reply_when_response_dict_has_no_files(self):
         handler, _, _, openai_service, message_service = self.make_handler()
         handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
-        openai_service.get_chat_completion = AsyncMock(return_value={"text": "just text", "files": []})
+        openai_service.get_chat_completion = AsyncMock(return_value=({"text": "just text", "files": []}, 0.0))
         channel = MagicMock()
         channel.id = 6
         channel.typing.return_value = AsyncTyping()
@@ -365,7 +365,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
     async def test_handle_mention_handles_none_response(self):
         handler, _, _, openai_service, message_service = self.make_handler()
         handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
-        openai_service.get_chat_completion = AsyncMock(return_value=None)
+        openai_service.get_chat_completion = AsyncMock(return_value=(None, 0.0))
         channel = MagicMock()
         channel.id = 3
         channel.typing.return_value = AsyncTyping()
