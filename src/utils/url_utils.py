@@ -129,6 +129,37 @@ async def get_article_text(url: str) -> Optional[str]:
 
         # Handle v.redd.it redirects manually first to avoid hitting Reddit's bot block on www.reddit.com
         parsed = urlparse(url)
+        
+        # Fast-path for Wikipedia using official API instead of scraping (avoids 403s on proxies/datacenters)
+        if parsed.netloc.endswith('wikipedia.org') and parsed.path.startswith('/wiki/'):
+            try:
+                from urllib.parse import unquote
+                title = unquote(parsed.path[6:])
+                lang = parsed.netloc.split('.')[0]
+                api_url = f"https://{lang}.wikipedia.org/w/api.php"
+                api_params = {
+                    "action": "query",
+                    "prop": "extracts",
+                    "explaintext": "1",
+                    "titles": title,
+                    "format": "json"
+                }
+                api_headers = {"User-Agent": "CMWGPT/1.0 (https://github.com/jobeus/cmwgpt)"}
+                
+                async with create_async_client(proxy=proxy, timeout=httpx.Timeout(10.0), follow_redirects=True) as api_client:
+                    api_resp = await api_client.get(api_url, params=api_params, headers=api_headers)
+                    api_resp.raise_for_status()
+                    data = api_resp.json()
+                    pages = data.get("query", {}).get("pages", {})
+                    for _, page_data in pages.items():
+                        if "extract" in page_data and page_data["extract"]:
+                            text = page_data["extract"]
+                            _article_cache[url] = text
+                            logger.info(f"Successfully fetched Wikipedia article via API: {url}")
+                            return text
+            except Exception as e:
+                logger.warning(f"Failed to fetch Wikipedia via API for {url}, falling back to scraper: {e}")
+
         if parsed.netloc.lower() == 'v.redd.it':
             async with httpx.AsyncClient(proxy=proxy, timeout=10.0, follow_redirects=False) as preflight:
                 try:

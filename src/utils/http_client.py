@@ -311,7 +311,7 @@ def create_async_client(
     """
     # Extract transport kwargs that should go to the underlying transport
     transport_kwargs = {}
-    for key in ("verify", "cert", "trust_env"):
+    for key in ("verify", "cert", "trust_env", "proxy"):
         if key in kwargs:
             transport_kwargs[key] = kwargs.pop(key)
 
@@ -339,7 +339,7 @@ def create_sync_client(
     (httpx stores it there internally), or you can keep a reference to it.
     """
     transport_kwargs = {}
-    for key in ("verify", "cert", "trust_env"):
+    for key in ("verify", "cert", "trust_env", "proxy"):
         if key in kwargs:
             transport_kwargs[key] = kwargs.pop(key)
 
