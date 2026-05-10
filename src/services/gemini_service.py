@@ -252,7 +252,10 @@ class GeminiService:
                 # Build kwargs for interactions.create
                 kwargs = {
                     "model": GEMINI_MODEL,
-                    "input": {"step_list": {"steps": input_turns}},
+                    "input": {
+                        "type": "step_list",
+                        "steps": input_turns
+                    },
                     "tools": [
                         {"type": "google_search"},
                         {"type": "code_execution"},
