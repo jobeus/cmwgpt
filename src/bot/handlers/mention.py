@@ -268,11 +268,32 @@ class MentionHandler:
         if cache_entry and (current_time - cache_entry["timestamp"]) <= 600:
             oldest_message = cache_entry["oldest_message"]
             history_msgs.append(oldest_message)
-            async for msg in message.channel.history(limit=None, after=oldest_message):
+            
+            # Fetch up to 40 messages after the oldest message
+            async for msg in message.channel.history(limit=40, after=oldest_message):
                 history_msgs.append(msg)
 
-            # Update timestamp for this channel
-            self._history_cache[channel_id]["timestamp"] = current_time
+            if len(history_msgs) >= 40:
+                # The gap is too large (40+ messages since last bot interaction).
+                # To save cost and avoid giant context windows, we abandon the old 
+                # interaction and start a fresh context from the most recent messages.
+                logger.info(f"Massive message gap detected in #{message.channel.name}. Resetting context.")
+                history_msgs = []
+                if self._gemini_service:
+                    self._gemini_service.clear_channel_cache(channel_id)
+                    
+                async for msg in message.channel.history(limit=self._include_num_chatlines):
+                    history_msgs.append(msg)
+                history_msgs.reverse()
+                
+                if history_msgs:
+                    self._history_cache[channel_id] = {
+                        "timestamp": current_time,
+                        "oldest_message": history_msgs[0]
+                    }
+            else:
+                # Update timestamp for this channel
+                self._history_cache[channel_id]["timestamp"] = current_time
         else:
             # History window reset — also clear Gemini conversation cache
             if self._gemini_service:

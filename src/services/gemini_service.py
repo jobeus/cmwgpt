@@ -109,84 +109,102 @@ class GeminiService:
                 )
         return self._client
 
-    def _convert_messages_to_input(
-        self, messages: List[Dict[str, Any]], system_prompt: str
-    ) -> list:
+    def _build_input(self, messages: List[Dict[str, Any]], has_prev_interaction: bool) -> list:
         """
-        Convert OpenAI-format messages to Interactions API input format.
-
-        The Interactions API expects input as a list of turns with 'role' and 'content'.
-        Roles: 'user' or 'model' (not 'assistant').
-        Content can be a string or a list of content objects with 'type' field.
+        Build the input array for Gemini 3 Interactions API.
+        The Interactions API only expects the *current* user turn.
+        If we don't have a previous_interaction_id but we have conversation history,
+        we synthesize the history into the current turn.
         """
-        input_turns = []
+        if not messages:
+            return [{"type": "text", "text": " "}]
+            
+        current_msg = messages[-1]
+        
+        # If no previous interaction but we have history, prepend transcript
+        messages_to_transcript = []
+        if has_prev_interaction:
+            # Find the last 'assistant' or 'model' message
+            last_bot_idx = -1
+            for i in range(len(messages) - 1, -1, -1):
+                if messages[i].get("role") in ("assistant", "model"):
+                    last_bot_idx = i
+                    break
+            
+            if last_bot_idx != -1:
+                # Include everything AFTER the last bot message, EXCEPT the current message
+                messages_to_transcript = messages[last_bot_idx + 1:-1]
+            else:
+                messages_to_transcript = messages[:-1]
+        elif len(messages) > 1:
+            # Include ALL past messages EXCEPT the current message
+            messages_to_transcript = messages[:-1]
 
-        # Add system prompt as first user turn (Interactions API doesn't have
-        # a dedicated system instruction field — we prepend it)
-        if system_prompt:
-            input_turns.append({
-                "role": "user",
-                "content": f"[System Instructions — follow these for all responses]\n{system_prompt}"
-            })
-            input_turns.append({
-                "role": "model",
-                "content": "Understood. I'll follow those instructions."
-            })
+        transcript = ""
+        if messages_to_transcript:
+            transcript = "The following messages occurred since your last response:\n\n"
+            for msg in messages_to_transcript:
+                role = "User" if msg.get("role") == "user" else "Assistant"
+                # simplify content to string for transcript
+                content_str = ""
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    for part in content:
+                        if isinstance(part, dict) and part.get("type") == "text":
+                            content_str += part.get("text", "") + "\n"
+                        elif isinstance(part, str):
+                            content_str += part + "\n"
+                        else:
+                            content_str += "[Media attachment]\n"
+                else:
+                    content_str = str(content)
+                transcript += f"{role}: {content_str.strip()}\n\n"
+            transcript += "--- End missed context ---\n\n"
 
-        for msg in messages:
-            role = msg.get("role", "user")
-            if role == "system":
-                continue  # Already handled above
-            # Map 'assistant' -> 'model' for Gemini
-            if role == "assistant":
-                role = "model"
-
-            content = msg.get("content", "")
-
-            # Handle list-of-parts content (OpenAI multimodal format)
-            if isinstance(content, list):
-                parts = []
-                for part in content:
-                    if isinstance(part, dict):
-                        if part.get("type") == "text":
-                            parts.append({
-                                "type": "text",
-                                "text": part.get("text", "")
-                            })
-                        elif part.get("type") == "image_url":
-                            image_url = part.get("image_url", {}).get("url", "")
-                            if image_url.startswith("data:"):
-                                # Parse data URL: data:mime_type;base64,DATA
-                                try:
-                                    header, b64data = image_url.split(",", 1)
-                                    mime_type = header.split(":")[1].split(";")[0]
-                                    parts.append({
-                                        "type": "image",
-                                        "data": b64data,
-                                        "mime_type": mime_type,
-                                    })
-                                except (ValueError, IndexError):
-                                    logger.warning(f"Failed to parse image data URL, skipping")
-                            else:
-                                # Remote URL
+        # Build parts for current message
+        parts = []
+        content = current_msg.get("content", "")
+        if isinstance(content, list):
+            for i, part in enumerate(content):
+                if isinstance(part, dict):
+                    if part.get("type") == "text":
+                        text_val = part.get("text", "")
+                        if i == 0 and transcript:
+                            text_val = transcript + text_val
+                            transcript = "" # only prepend once
+                        parts.append({"type": "text", "text": text_val})
+                    elif part.get("type") == "image_url":
+                        image_url = part.get("image_url", {}).get("url", "")
+                        if image_url.startswith("data:"):
+                            try:
+                                header, b64data = image_url.split(",", 1)
+                                mime_type = header.split(":")[1].split(";")[0]
                                 parts.append({
                                     "type": "image",
-                                    "uri": image_url,
-                                    "mime_type": "image/jpeg",
+                                    "data": b64data,
+                                    "mime_type": mime_type,
                                 })
-                    elif isinstance(part, str):
-                        parts.append({"type": "text", "text": part})
-
-                if parts:
-                    input_turns.append({"role": role, "content": parts})
-            elif isinstance(content, str):
-                if content.strip():
-                    input_turns.append({"role": role, "content": content})
-            else:
-                # Fallback
-                input_turns.append({"role": role, "content": str(content)})
-
-        return input_turns
+                            except (ValueError, IndexError):
+                                pass
+                        else:
+                            parts.append({
+                                "type": "image",
+                                "uri": image_url,
+                                "mime_type": "image/jpeg",
+                            })
+                elif isinstance(part, str):
+                    text_val = part
+                    if i == 0 and transcript:
+                        text_val = transcript + text_val
+                        transcript = ""
+                    parts.append({"type": "text", "text": text_val})
+        else:
+            text_val = str(content)
+            if transcript:
+                text_val = transcript + text_val
+            parts.append({"type": "text", "text": text_val})
+            
+        return parts
 
     def _estimate_cost(self, usage: Any) -> float:
         """Estimate cost from Interactions API usage metadata."""
@@ -237,8 +255,6 @@ class GeminiService:
         """
         client = self._get_client()
 
-        input_turns = self._convert_messages_to_input(messages, system_prompt)
-
         max_retries = 3
         base_delay = 1.0
 
@@ -247,21 +263,24 @@ class GeminiService:
         if prev_interaction_id:
             logger.info(f"[gemini] Continuing conversation with previous_interaction_id={prev_interaction_id[:20]}...")
 
+        # Build input for the current turn
+        input_parts = self._build_input(messages, bool(prev_interaction_id))
+
         for attempt in range(max_retries):
             try:
                 # Build kwargs for interactions.create
                 kwargs = {
                     "model": GEMINI_MODEL,
-                    "input": {
-                        "type": "step_list",
-                        "steps": input_turns
-                    },
+                    "input": input_parts,
                     "tools": [
                         {"type": "google_search"},
                         {"type": "code_execution"},
                         {"type": "url_context"}],
                     "store": True,
                 }
+
+                if system_prompt:
+                    kwargs["system_instruction"] = system_prompt
 
                 if prev_interaction_id:
                     kwargs["previous_interaction_id"] = prev_interaction_id
@@ -274,18 +293,8 @@ class GeminiService:
                     kwargs["generation_config"] = gen_config
 
                 # Log the prompt snippet
-                last_turn = input_turns[-1] if input_turns else {}
-                last_content = last_turn.get("content", "")
-                if isinstance(last_content, list):
-                    snippet = next(
-                        (p.get("text", "") for p in last_content if isinstance(p, dict) and p.get("type") == "text"),
-                        "(multimodal)"
-                    )
-                elif isinstance(last_content, str):
-                    snippet = last_content
-                else:
-                    snippet = str(last_content)
-                snippet_trunc = snippet.replace("\n", " ")[:150]
+                last_content = input_parts[-1].get("text", "") if input_parts else ""
+                snippet_trunc = str(last_content).replace("\n", " ")[:150]
                 logger.info(f"[gemini/{GEMINI_MODEL}] Prompt Snippet: {snippet_trunc}{'...' if len(snippet) > 150 else ''}")
 
                 interaction = await client.aio.interactions.create(**kwargs)
