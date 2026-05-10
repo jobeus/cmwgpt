@@ -302,20 +302,32 @@ class GeminiService:
                 if interaction is None:
                     raise GeminiServiceError("Interactions API returned None")
 
+                # Convert to dict to robustly handle API structure variations (steps vs outputs)
+                try:
+                    interaction_dict = interaction.model_dump()
+                except AttributeError:
+                    try:
+                        interaction_dict = interaction.dict()
+                    except AttributeError:
+                        interaction_dict = vars(interaction)
+
                 # Extract outputs
                 text_parts = []
                 image_files = []
 
-                for output in interaction.outputs:
-                    output_type = getattr(output, 'type', None)
-                    if output_type == "text":
-                        text_parts.append(output.text)
-                    elif output_type == "image":
-                        # Image output: has data (base64) and mime_type
+                def process_output_item(item):
+                    if not isinstance(item, dict):
+                        # Fallback for unexpected objects
+                        item = vars(item) if hasattr(item, "__dict__") else {}
+                        
+                    output_type = item.get("type", "")
+                    if output_type == "text" or ("text" in item and item["text"]):
+                        text_parts.append(item.get("text", ""))
+                    elif output_type == "image" and "data" in item:
                         try:
-                            img_data = base64.b64decode(output.data)
+                            img_data = base64.b64decode(item["data"])
                             ext = "png"
-                            mime = getattr(output, 'mime_type', 'image/png')
+                            mime = item.get("mime_type", "image/png")
                             if "jpeg" in mime or "jpg" in mime:
                                 ext = "jpg"
                             elif "webp" in mime:
@@ -331,16 +343,24 @@ class GeminiService:
                         except Exception as e:
                             logger.error(f"Failed to process image output: {e}")
                     elif output_type == "thought":
-                        # Just log thinking summaries, don't include in response
-                        summary = getattr(output, 'summary', None)
+                        summary = item.get("summary", "")
                         if summary:
                             logger.info(f"[gemini] Thinking: {summary[:200]}")
-                    # Skip other types (google_search_result, etc.)
+
+                if "steps" in interaction_dict and interaction_dict["steps"]:
+                    # Gemini 3.1 Interactions API docs suggest content is nested in steps
+                    last_step = interaction_dict["steps"][-1]
+                    for item in last_step.get("content", []):
+                        process_output_item(item)
+                elif "outputs" in interaction_dict and interaction_dict["outputs"]:
+                    # Fallback for alternative or legacy schema
+                    for item in interaction_dict["outputs"]:
+                        process_output_item(item)
 
                 response_text = "\n".join(text_parts) if text_parts else ""
 
                 if not response_text and not image_files:
-                    logger.error(f"⚠️ Gemini response had no text or images. Raw: {interaction}")
+                    logger.error(f"⚠️ Gemini response had no text or images. Raw keys: {list(interaction_dict.keys())}")
                     raise ValueError("Gemini returned an empty response.")
 
                 # Clean the response text
