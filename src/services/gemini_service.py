@@ -295,7 +295,7 @@ class GeminiService:
                 # Log the prompt snippet
                 last_content = input_parts[-1].get("text", "") if input_parts else ""
                 snippet_trunc = str(last_content).replace("\n", " ")[:150]
-                logger.info(f"[gemini/{GEMINI_MODEL}] Prompt Snippet: {snippet_trunc}{'...' if len(snippet) > 150 else ''}")
+                logger.info(f"[gemini/{GEMINI_MODEL}] Prompt Snippet: {snippet_trunc}{'...' if len(str(last_content)) > 150 else ''}")
 
                 interaction = await client.aio.interactions.create(**kwargs)
 
