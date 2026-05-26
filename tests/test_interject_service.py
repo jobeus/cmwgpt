@@ -530,6 +530,54 @@ class TestInterjectService(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
+    def test_do_interject_with_audio_attachment(self):
+        async def run_test():
+            self.service._state_service.get_system_prompt.return_value = "channel prompt"
+            self.service._state_service.get_model.return_value = "chosen-model"
+            self.service._message_service.send_channel_reply = AsyncMock()
+
+            channel = MagicMock()
+            channel.id = 123
+            channel.name = "general"
+
+            audio_attach = MagicMock()
+            audio_attach.content_type = "audio/ogg"
+            audio_attach.filename = "voice_interject.ogg"
+            audio_attach.duration = 5.0
+            audio_attach.is_voice_message = MagicMock(return_value=True)
+
+            msg = MagicMock()
+            msg.author.id = 123
+            msg.content = "Check this voice note"
+            msg.id = 1
+            msg.reference = None
+            msg.embeds = []
+            msg.attachments = [audio_attach]
+            msg.created_at.astimezone.return_value.strftime.return_value = "2024-01-01 00:00:00"
+
+            async def history(limit):
+                yield msg
+
+            channel.history = history
+            self.mock_bot.user = SimpleNamespace(id=99999)
+
+            self.service._openai_service.get_chat_completion = AsyncMock(return_value=("reply", 0.0))
+            self.service._mention_legend_provider = AsyncMock(return_value=("legend text", 0.0))
+
+            with patch("src.services.interject_service.attachment_to_base64_data_url", AsyncMock(return_value="data:audio/ogg;base64,AUDIO_DATA")):
+                await self.service._do_interject(channel, 99999)
+
+            self.service._message_service.send_channel_reply.assert_awaited_once_with(channel, "reply")
+            
+            call = self.service._openai_service.get_chat_completion.await_args
+            messages = call.kwargs["messages"]
+            self.assertEqual(len(messages), 1)
+            self.assertEqual(messages[0]["content"][1]["type"], "audio_url")
+            self.assertEqual(messages[0]["content"][1]["audio_url"]["url"], "data:audio/ogg;base64,AUDIO_DATA")
+            self.assertIn("[Sent an audio message/voice clip (5.0s): voice_interject.ogg]", messages[0]["content"][0]["text"])
+
+        self.loop.run_until_complete(run_test())
+
 
 if __name__ == "__main__":
     unittest.main()

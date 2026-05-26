@@ -184,6 +184,35 @@ class GeminiService:
                                     "uri": image_url,
                                     "mime_type": "image/jpeg",
                                 })
+                        elif part.get("type") == "audio_url":
+                            audio_url = part.get("audio_url", {}).get("url", "")
+                            if audio_url.startswith("data:"):
+                                try:
+                                    header, b64data = audio_url.split(",", 1)
+                                    mime_type = header.split(":")[1].split(";")[0]
+                                    mime_type = mime_type.split(";")[0].strip().lower()
+                                    
+                                    supported_audio_types = {
+                                        "audio/wav", "audio/mp3", "audio/aiff", "audio/aac",
+                                        "audio/ogg", "audio/flac", "audio/mpeg", "audio/m4a",
+                                        "audio/l16", "audio/opus", "audio/alaw", "audio/mulaw"
+                                    }
+                                    if mime_type not in supported_audio_types:
+                                        mime_type = "audio/ogg"
+                                        
+                                    parts.append({
+                                        "type": "audio",
+                                        "data": b64data,
+                                        "mime_type": mime_type,
+                                    })
+                                except (ValueError, IndexError):
+                                    pass
+                            else:
+                                parts.append({
+                                    "type": "audio",
+                                    "uri": audio_url,
+                                    "mime_type": "audio/ogg",
+                                })
                     elif isinstance(part, str):
                         add_text_part(part)
             else:

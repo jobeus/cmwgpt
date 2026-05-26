@@ -261,6 +261,51 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(handler._history_cache[channel.id]["timestamp"], 1005)
         self.assertIn("newer", cached_context[-1]["content"][0]["text"])
 
+    async def test_prepare_context_with_audio_attachments(self):
+        handler, _, _, _, _ = self.make_handler(
+            attachment_converter=AsyncMock(return_value="data:audio/ogg;base64,AUDIO")
+        )
+        created_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        channel = MagicMock()
+        channel.id = 890
+        channel.name = "audio-channel"
+        bot_user = SimpleNamespace(id=999)
+        
+        audio_attachment = MagicMock()
+        audio_attachment.content_type = "audio/ogg"
+        audio_attachment.filename = "voice.ogg"
+        audio_attachment.duration = 4.5
+        audio_attachment.is_voice_message = MagicMock(return_value=True)
+
+        mention_msg = SimpleNamespace(
+            author=SimpleNamespace(id=123),
+            id=12,
+            content="here is a voice message",
+            channel=channel,
+            reference=None,
+            attachments=[audio_attachment],
+            embeds=[],
+            created_at=created_at,
+        )
+
+        async def history(limit=None, after=None):
+            yield mention_msg
+
+        channel.history = history
+
+        context, _ = await handler._prepare_mention_context(mention_msg, bot_user)
+
+        self.assertEqual(len(context), 1)
+        self.assertEqual(context[0]["role"], "user")
+        
+        # Checking that the content has the audio_url payload
+        payload = context[0]["content"]
+        self.assertEqual(payload[1]["type"], "audio_url")
+        self.assertEqual(payload[1]["audio_url"]["url"], "data:audio/ogg;base64,AUDIO")
+        
+        # Checking that the text payload has the placeholder text for the audio message
+        self.assertIn("[Sent an audio message/voice clip (4.5s): voice.ogg]", payload[0]["text"])
+
     async def test_prepare_context_marks_truly_empty_messages_and_swallow_embed_preview_failures(self):
         handler, _, _, _, _ = self.make_handler(
             url_converter=AsyncMock(side_effect=RuntimeError("preview failed")),

@@ -73,19 +73,45 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
 
     try:
         # Download the attachment
-        image_bytes = await attachment.read()
+        file_bytes = await attachment.read()
 
-        # Compress image to save token limit space on APIs
-        image_bytes = compress_image(image_bytes)
+        # Check if it is an audio file or voice message
+        is_audio = False
+        content_type = attachment.content_type
+        
+        from unittest.mock import Mock
+        is_voice_attr = getattr(attachment, "is_voice_message", None)
+        is_voice = False
+        if is_voice_attr:
+            if callable(is_voice_attr):
+                res = is_voice_attr()
+                if not isinstance(res, Mock):
+                    is_voice = bool(res)
+            elif not isinstance(is_voice_attr, Mock):
+                is_voice = bool(is_voice_attr)
 
-        # Encode to base64
-        base64_data = base64.b64encode(image_bytes).decode('utf-8')
+        if isinstance(content_type, str):
+            cleaned_content_type = content_type.split(";")[0].strip().lower()
+            if cleaned_content_type.startswith("audio/"):
+                is_audio = True
+        elif is_voice:
+            is_audio = True
+            cleaned_content_type = "audio/ogg"
 
-        # Content type is now JPEG due to compression
-        content_type = "image/jpeg"
-
-        # Create data URL
-        data_url = f"data:{content_type};base64,{base64_data}"
+        if is_audio:
+            # For audio, do not compress, keep original bytes
+            base64_data = base64.b64encode(file_bytes).decode('utf-8')
+            # Fallback/default content type for audio if not specified
+            if not content_type or not cleaned_content_type.startswith("audio/"):
+                cleaned_content_type = "audio/ogg"
+            data_url = f"data:{cleaned_content_type};base64,{base64_data}"
+        else:
+            # Compress image to save token limit space on APIs
+            compressed_bytes = compress_image(file_bytes)
+            # Encode to base64
+            base64_data = base64.b64encode(compressed_bytes).decode('utf-8')
+            # Content type is now JPEG due to compression
+            data_url = f"data:image/jpeg;base64,{base64_data}"
 
         logger.debug(
             f"Converted attachment {attachment.filename} to base64 data URL ({len(base64_data)} chars)")

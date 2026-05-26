@@ -161,6 +161,16 @@ class OpenAIService:
                         # If parsing fails, keep original content
                         pass
 
+                if isinstance(parsed_content, list):
+                    filtered_content = []
+                    for part in parsed_content:
+                        if isinstance(part, dict):
+                            if part.get("type") in ("text", "image_url"):
+                                filtered_content.append(part)
+                        else:
+                            filtered_content.append(part)
+                    parsed_content = filtered_content
+
                 api_input.append({
                     "role": msg.get("role"),
                     "content": parsed_content

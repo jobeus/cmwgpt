@@ -439,11 +439,31 @@ class MentionHandler:
                 try:
                     # We only convert attachments for user messages
                     if role == "user":
-                        if attach.content_type and attach.content_type.startswith('image/'):
+                        is_image = attach.content_type and attach.content_type.startswith('image/')
+                        
+                        is_voice_attr = getattr(attach, "is_voice_message", None)
+                        is_voice = False
+                        if is_voice_attr:
+                            if callable(is_voice_attr):
+                                is_voice = is_voice_attr()
+                            else:
+                                is_voice = bool(is_voice_attr)
+                                
+                        is_audio = (attach.content_type and attach.content_type.startswith('audio/')) or is_voice
+
+                        if is_image:
                             file_data_url = await self._attachment_converter(attach)
                             file_payloads.append(
                                 {"type": "image_url", "image_url": {"url": file_data_url}}
                             )
+                        elif is_audio:
+                            file_data_url = await self._attachment_converter(attach)
+                            file_payloads.append(
+                                {"type": "audio_url", "audio_url": {"url": file_data_url}}
+                            )
+                            # Add a text note about the audio file so the bot knows it exists and is placed there.
+                            duration_str = f" ({attach.duration}s)" if getattr(attach, "duration", None) else ""
+                            text_payload[0]["text"] += f"\n[Sent an audio message/voice clip{duration_str}: {attach.filename}]"
                         else:
                             text_payload[0]["text"] += f"\n[Attached file: {attach.filename}]"
                 except Exception as e:

@@ -100,6 +100,39 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(0, full_cache)
         self.assertIn(999, full_cache)
 
+    async def test_attachment_to_base64_data_url_with_audio_attachment(self):
+        attachment = MagicMock()
+        attachment.id = 1001
+        attachment.filename = "voice.ogg"
+        attachment.content_type = "audio/ogg; codecs=opus"
+        attachment.read = AsyncMock(return_value=b"raw-audio-bytes")
+
+        with patch("src.utils.discord_helper._attachment_base64_cache", {}), patch(
+            "src.utils.discord_helper.compress_image"
+        ) as mock_compress:
+            result = await discord_helper.attachment_to_base64_data_url(attachment)
+
+        self.assertTrue(result.startswith("data:audio/ogg;base64,"))
+        self.assertEqual(base64.b64decode(result.split(",", 1)[1]), b"raw-audio-bytes")
+        mock_compress.assert_not_called()
+
+    async def test_attachment_to_base64_data_url_with_voice_message(self):
+        attachment = MagicMock()
+        attachment.id = 1002
+        attachment.filename = "voice"
+        attachment.content_type = None
+        attachment.is_voice_message = MagicMock(return_value=True)
+        attachment.read = AsyncMock(return_value=b"voice-bytes")
+
+        with patch("src.utils.discord_helper._attachment_base64_cache", {}), patch(
+            "src.utils.discord_helper.compress_image"
+        ) as mock_compress:
+            result = await discord_helper.attachment_to_base64_data_url(attachment)
+
+        self.assertTrue(result.startswith("data:audio/ogg;base64,"))
+        self.assertEqual(base64.b64decode(result.split(",", 1)[1]), b"voice-bytes")
+        mock_compress.assert_not_called()
+
     async def test_url_to_base64_data_url_caches_success_but_not_timeout_failures(self):
         fake_client = MagicMock()
         fake_client.get = AsyncMock(return_value=SimpleNamespace(

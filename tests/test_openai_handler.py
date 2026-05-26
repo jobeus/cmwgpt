@@ -128,6 +128,39 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "cleaned")
         mock_clean.assert_called_once_with("<@12345> Hello", bot_id=12345)
 
+    async def test_get_chat_completion_filters_audio_blocks(self):
+        """Test that get_chat_completion filters out audio_url blocks from messages."""
+        mock_response = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = "Filtered response"
+        mock_response.choices = [mock_choice]
+        self.mock_client.chat.completions.create.return_value = mock_response
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Listen to this image:"},
+                    {"type": "image_url", "image_url": {"url": "http://example.com/image.jpg"}},
+                    {"type": "audio_url", "audio_url": {"url": "data:audio/ogg;base64,AAAA"}},
+                ],
+            }
+        ]
+
+        result, _ = await openai_service.get_chat_completion("gpt-test", messages)
+
+        self.assertEqual(result, "Filtered response")
+        
+        # Verify that only text and image_url parts were kept, and audio_url was removed
+        expected_content = [
+            {"type": "text", "text": "Listen to this image:"},
+            {"type": "image_url", "image_url": {"url": "http://example.com/image.jpg"}}
+        ]
+        
+        self.mock_client.chat.completions.create.assert_called_once()
+        call_kwargs = self.mock_client.chat.completions.create.call_args.kwargs
+        self.assertEqual(call_kwargs["messages"][0]["content"], expected_content)
+
 
 def make_response(text=None, *, error=None, cost=0.0, http_response=None):
     response = SimpleNamespace(

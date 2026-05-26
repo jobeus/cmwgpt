@@ -132,6 +132,50 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(image_parts), 1)
         self.assertEqual(image_parts[0]["data"], "AAAA")
 
+    def test_build_input_audio_messages(self):
+        service = self.make_service()
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Listen to this:"},
+                    {"type": "audio_url", "audio_url": {"url": "data:audio/ogg;base64,AAAA"}},
+                ],
+            }
+        ]
+        result = service._build_input(messages, has_prev_interaction=False)
+
+        # Only one message, so no history transcript
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["type"], "text")
+        self.assertEqual(result[0]["text"], "User: Listen to this:")
+        self.assertEqual(result[1]["type"], "audio")
+        self.assertEqual(result[1]["data"], "AAAA")
+        self.assertEqual(result[1]["mime_type"], "audio/ogg")
+
+    def test_build_input_remote_audio_url_and_unsupported_mime(self):
+        service = self.make_service()
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Listen"},
+                    {"type": "audio_url", "audio_url": {"url": "https://example.com/audio.mp3"}},
+                    {"type": "audio_url", "audio_url": {"url": "data:audio/unknown;base64,BBBB"}},
+                ],
+            }
+        ]
+        result = service._build_input(messages, has_prev_interaction=False)
+        self.assertEqual(len(result), 3)
+        self.assertEqual(result[1]["type"], "audio")
+        self.assertEqual(result[1]["uri"], "https://example.com/audio.mp3")
+        self.assertEqual(result[1]["mime_type"], "audio/ogg")
+        
+        self.assertEqual(result[2]["type"], "audio")
+        self.assertEqual(result[2]["data"], "BBBB")
+        # Should fallback to audio/ogg for unsupported type
+        self.assertEqual(result[2]["mime_type"], "audio/ogg")
+
     # ── Cost estimation ──
 
     def test_cost_estimation_basic(self):
