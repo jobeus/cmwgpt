@@ -267,7 +267,7 @@ class MentionHandler:
         channel_id = message.channel.id
         cache_entry = self._history_cache.get(channel_id)
 
-        limit_lines = 40 if model == "hybrid" else self._include_num_chatlines
+        limit_lines = self._include_num_chatlines
 
         if cache_entry and (current_time - cache_entry["timestamp"]) <= 600:
             oldest_message = cache_entry["oldest_message"]
