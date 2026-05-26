@@ -2,7 +2,7 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from src.services.gemini_service import (
     GeminiService,
@@ -187,11 +187,9 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
             total_cached_tokens=0,
         )
         cost = service._estimate_cost(usage)
-        expected = (
-            1000 * PRICE_INPUT_PER_M / 1_000_000
-            + (500 + 200) * PRICE_OUTPUT_PER_M / 1_000_000
-            + 0
-        )
+        input_cost = 1000 * PRICE_INPUT_PER_M / 1_000_000
+        output_cost = (500 + 200) * PRICE_OUTPUT_PER_M / 1_000_000
+        expected = input_cost + output_cost
         self.assertAlmostEqual(cost, expected)
 
     def test_cost_estimation_with_cached(self):
@@ -203,11 +201,10 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
             total_cached_tokens=5000,
         )
         cost = service._estimate_cost(usage)
-        expected = (
-            500 * PRICE_INPUT_PER_M / 1_000_000
-            + 100 * PRICE_OUTPUT_PER_M / 1_000_000
-            + 5000 * PRICE_CACHED_PER_M / 1_000_000
-        )
+        input_cost = 500 * PRICE_INPUT_PER_M / 1_000_000
+        output_cost = 100 * PRICE_OUTPUT_PER_M / 1_000_000
+        cached_cost = 5000 * PRICE_CACHED_PER_M / 1_000_000
+        expected = input_cost + output_cost + cached_cost
         self.assertAlmostEqual(cost, expected)
 
     def test_cost_estimation_none_usage(self):

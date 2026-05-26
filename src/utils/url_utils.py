@@ -3,7 +3,7 @@ import logging
 import httpx
 from typing import List, Optional
 from urllib.parse import urlparse
-from src.config import MAX_CACHE_SIZE, TRANSCRIPT_PROXY
+from src.config import TRANSCRIPT_PROXY
 from src.db.logger import build_artifact, log_pipeline_step
 from src.utils.http_client import create_async_client
 
@@ -33,9 +33,8 @@ EXCLUDED_DOMAINS = {
     'xcancel.com', 'www.xcancel.com',
     'cdn.discordapp.com', 'media.discordapp.net',
     'images-ext-1.discordapp.net', 'images-ext-2.discordapp.net',
-    'instagram.com','www.instagram.com',
-    'threads.com','www.threads.com',
-    'threads.net','www.threads.net',
+    'threads.com', 'www.threads.com',
+    'threads.net', 'www.threads.net',
 }
 
 EXCLUDED_MEDIA_EXTENSIONS = {

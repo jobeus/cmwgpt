@@ -180,7 +180,6 @@ class RunpodService:
                     img_response = await client.get(image_url)
                     img_response.raise_for_status()
 
-
                     return img_response.content, cost
                 elif status == "FAILED":
                     error_msg = data.get("error", "Unknown error")

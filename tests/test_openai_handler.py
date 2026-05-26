@@ -337,8 +337,10 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
         self.client.chat.completions.create.return_value = response
         self.service.set_bot_id_loader(lambda: (_ for _ in ()).throw(RuntimeError("no bot")))
 
-        with patch("src.services.openai_service.clean_openai_response", return_value="cleaned") as mock_clean, \
-            patch("src.services.openai_service.logger.warning") as mock_warning:
+        with (
+            patch("src.services.openai_service.clean_openai_response", return_value="cleaned") as mock_clean,
+            patch("src.services.openai_service.logger.warning") as mock_warning,
+        ):
             result, _ = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
 
         self.assertEqual(result, "cleaned")

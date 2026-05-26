@@ -468,9 +468,9 @@ class InterjectService:
                     logger.info("Hybrid phase 2 (Interject): Passing summary to Haiku...")
                     haiku_messages = [
                         {
-                            "role": "user", 
+                            "role": "user",
                             "content": [{
-                                "type": "text", 
+                                "type": "text",
                                 "text": f"Here is the context and gathered search results for the current conversation. Please use this information to write an interjection to the channel. Remember your personality and instructions from the system prompt. CRITICAL: You ARE the bot in this conversation. If the summary refers to the bot or <@{bot_id}>, it is referring to YOU. Do not refer to yourself in the third person.\n\nContext & Search Results:\n{summary_text}"
                             }]
                         }

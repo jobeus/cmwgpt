@@ -4,8 +4,6 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from src.utils.http_client import (
-    LoggingTransport,
-    LoggingSyncTransport,
     create_async_client,
     create_sync_client,
     flush_pending_logs,

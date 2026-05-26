@@ -6,6 +6,7 @@ import io
 import httpx
 import wave
 from PIL import Image
+from typing import Optional
 from src.config import GROQ_API_KEY
 
 logger = logging.getLogger(__name__)
@@ -251,7 +252,6 @@ async def transcribe_audio_attachment(attachment: discord.Attachment) -> Optiona
     Transcribe a Discord audio attachment using Groq Whisper API.
     Results are cached in memory to avoid repetitive API calls.
     """
-    from typing import Optional
     if attachment.id in _audio_transcript_cache:
         logger.debug(f"Cache hit for audio transcription: {attachment.filename}")
         return _audio_transcript_cache[attachment.id]

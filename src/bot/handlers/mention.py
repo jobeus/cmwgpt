@@ -121,9 +121,9 @@ class MentionHandler:
                         logger.info("Hybrid phase 2: Passing summary to Haiku...")
                         haiku_messages = [
                             {
-                                "role": "user", 
+                                "role": "user",
                                 "content": [{
-                                    "type": "text", 
+                                    "type": "text",
                                     "text": f"Here is the context and gathered search results for the current conversation. Please use this information to write the final response to the channel. Remember your personality from the system prompt. CRITICAL: You ARE the bot in this conversation. If the summary refers to the bot or <@{bot_user.id}>, it is referring to YOU. Do not refer to yourself in the third person.\n\nContext & Search Results:\n{summary_text}"
                                 }]
                             }
@@ -279,7 +279,7 @@ class MentionHandler:
 
             if len(history_msgs) >= 40:
                 # The gap is too large (40+ messages since last bot interaction).
-                # To save cost and avoid giant context windows, we abandon the old 
+                # To save cost and avoid giant context windows, we abandon the old
                 # interaction and start a fresh context from the most recent messages.
                 logger.info(f"Massive message gap detected in #{message.channel.name}. Resetting context.")
                 history_msgs = []

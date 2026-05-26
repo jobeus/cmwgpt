@@ -29,7 +29,7 @@ warnings.filterwarnings("ignore", message="Async interactions client cannot use 
 # Gemini 3.5 Flash pricing (paid tier, per 1M tokens)
 PRICE_INPUT_PER_M = 1.50   # text / image / video
 PRICE_OUTPUT_PER_M = 9.00  # output including thinking tokens
-PRICE_CACHED_PER_M = 0.15 # cached tokens
+PRICE_CACHED_PER_M = 0.15  # cached tokens
 
 GEMINI_MODEL = "gemini-3.5-flash"
 
@@ -413,7 +413,6 @@ class GeminiService:
                 # Log snippet
                 text_snippet = response_text.strip().replace("\n", " ")[:150] if response_text else "(empty)"
                 logger.info(f"[gemini/{GEMINI_MODEL}] response snippet: {text_snippet}{'...' if len(response_text or '') > 150 else ''}")
-
 
                 # Cache the interaction ID for future turns
                 interaction_id = getattr(interaction, 'id', None)

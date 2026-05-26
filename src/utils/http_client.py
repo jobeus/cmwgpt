@@ -10,13 +10,12 @@ Google GenAI SDKs so their underlying HTTP traffic is captured too.
 import base64
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 import httpx
 
 from src.db.logger import log_api_request
-from src.config import IS_TESTING
 
 logger = logging.getLogger(__name__)
 

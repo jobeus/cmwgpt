@@ -6,7 +6,7 @@ import tempfile
 import subprocess
 import asyncio
 import httpx
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple
 from src.config import RAPIDAPI_KEY, GROQ_API_KEY
 from src.utils.cache_utils import PersistentCache
 from src.db.logger import build_artifact, log_pipeline_step
@@ -219,12 +219,12 @@ async def get_instagram_context(url: str) -> Optional[Tuple[str, Optional[str]]]
                 if mp4_path and os.path.exists(mp4_path):
                     try:
                         os.remove(mp4_path)
-                    except OSError as exc:
+                    except OSError:
                         pass
                 if mp3_path and os.path.exists(mp3_path):
                     try:
                         os.remove(mp3_path)
-                    except OSError as exc:
+                    except OSError:
                         pass
 
             if video_transcript:
