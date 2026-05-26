@@ -358,6 +358,7 @@ class InterjectService:
                     bot_id=bot_id,
                     discord_user_id=context_messages[-1].author.id if context_messages else None,
                     thinking_level=get_thinking_level("google-high"),
+                    disable_cache=True,
                 )
 
                 if summary_content:

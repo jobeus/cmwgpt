@@ -257,7 +257,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(system_prompt.startswith("channel prompt\n\nErrata about how to chat in this channel:\nIn the channel you are"))
         self.assertEqual(context[-1]["content"][1]["type"], "image_url")
         self.assertEqual(history_calls[0], (10, None))
-        self.assertEqual(history_calls[1], (None, older_msg))
+        self.assertEqual(history_calls[1], (40, older_msg))
         self.assertEqual(handler._history_cache[channel.id]["timestamp"], 1005)
         self.assertIn("newer", cached_context[-1]["content"][0]["text"])
 

@@ -76,7 +76,7 @@ class MentionHandler:
                 # Mark channel as active
                 self._state_service.mark_channel_active(message.channel.id)
 
-                recent_messages, system_prompt = await self._prepare_mention_context(message, bot_user)
+                recent_messages, system_prompt = await self._prepare_mention_context(message, bot_user, model=model)
                 logger.info(
                     f"Context prepared for mention by {message.author}, sending to {'Gemini' if is_gemini_model(model) else 'OpenRouter'}...")
                 channel_id = message.channel.id
@@ -108,6 +108,7 @@ class MentionHandler:
                         channel_id=channel_id,
                         discord_user_id=message.author.id,
                         thinking_level=get_thinking_level("google-high"),
+                        disable_cache=True,
                     )
 
                     if summary_content:
@@ -242,7 +243,7 @@ class MentionHandler:
         )
 
     async def _prepare_mention_context(
-        self, message: discord.Message, bot_user: discord.User
+        self, message: discord.Message, bot_user: discord.User, model: str = None
     ) -> tuple[List[Dict[str, Any]], str]:
         """
         Prepares the message list and system prompt for OpenAI context in case of a mention.
@@ -250,6 +251,7 @@ class MentionHandler:
         Args:
             message: The Discord message containing the mention
             bot_user: The bot user object
+            model: The model to use (helps determine history size)
 
         Returns:
             Tuple of (message list for OpenAI API, system prompt string)
@@ -264,6 +266,8 @@ class MentionHandler:
         current_time = time.time()
         channel_id = message.channel.id
         cache_entry = self._history_cache.get(channel_id)
+
+        limit_lines = 40 if model == "hybrid" else self._include_num_chatlines
 
         if cache_entry and (current_time - cache_entry["timestamp"]) <= 600:
             oldest_message = cache_entry["oldest_message"]
@@ -282,7 +286,7 @@ class MentionHandler:
                 if self._gemini_service:
                     self._gemini_service.clear_channel_cache(channel_id)
                     
-                async for msg in message.channel.history(limit=self._include_num_chatlines):
+                async for msg in message.channel.history(limit=limit_lines):
                     history_msgs.append(msg)
                 history_msgs.reverse()
                 
@@ -299,7 +303,7 @@ class MentionHandler:
             if self._gemini_service:
                 self._gemini_service.clear_channel_cache(channel_id)
 
-            async for msg in message.channel.history(limit=self._include_num_chatlines):
+            async for msg in message.channel.history(limit=limit_lines):
                 history_msgs.append(msg)
             history_msgs.reverse()
 

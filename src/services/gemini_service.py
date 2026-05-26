@@ -26,12 +26,12 @@ logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore", message="Interactions usage is experimental")
 warnings.filterwarnings("ignore", message="Async interactions client cannot use aiohttp")
 
-# Gemini 3.1 Flash Lite pricing (paid tier, per 1M tokens)
-PRICE_INPUT_PER_M = 0.25   # text / image / video
-PRICE_OUTPUT_PER_M = 1.50  # output including thinking tokens
-PRICE_CACHED_PER_M = 0.025 # cached tokens
+# Gemini 3.5 Flash pricing (paid tier, per 1M tokens)
+PRICE_INPUT_PER_M = 1.50   # text / image / video
+PRICE_OUTPUT_PER_M = 9.00  # output including thinking tokens
+PRICE_CACHED_PER_M = 0.15 # cached tokens
 
-GEMINI_MODEL = "gemini-3.1-flash-lite"
+GEMINI_MODEL = "gemini-3.5-flash"
 
 # How long before a channel's cached interaction ID expires (seconds)
 INTERACTION_CACHE_TTL = 600  # 10 minutes
@@ -136,73 +136,69 @@ class GeminiService:
                 messages_to_transcript = messages[last_bot_idx + 1:-1]
             else:
                 messages_to_transcript = messages[:-1]
-        elif len(messages) > 1:
-            # Include ALL past messages EXCEPT the current message
-            messages_to_transcript = messages[:-1]
+        else:
+            if len(messages) > 1:
+                # Include ALL past messages EXCEPT the current message
+                messages_to_transcript = messages[:-1]
 
-        transcript = ""
-        if messages_to_transcript:
-            transcript = "The following messages occurred since your last response:\n\n"
-            for msg in messages_to_transcript:
-                role = "User" if msg.get("role") == "user" else "Assistant"
-                # simplify content to string for transcript
-                content_str = ""
-                content = msg.get("content", "")
-                if isinstance(content, list):
-                    for part in content:
-                        if isinstance(part, dict) and part.get("type") == "text":
-                            content_str += part.get("text", "") + "\n"
-                        elif isinstance(part, str):
-                            content_str += part + "\n"
-                        else:
-                            content_str += "[Media attachment]\n"
-                else:
-                    content_str = str(content)
-                transcript += f"{role}: {content_str.strip()}\n\n"
-            transcript += "--- End missed context ---\n\n"
-
-        # Build parts for current message
         parts = []
-        content = current_msg.get("content", "")
-        if isinstance(content, list):
-            for i, part in enumerate(content):
-                if isinstance(part, dict):
-                    if part.get("type") == "text":
-                        text_val = part.get("text", "")
-                        if i == 0 and transcript:
-                            text_val = transcript + text_val
-                            transcript = "" # only prepend once
-                        parts.append({"type": "text", "text": text_val})
-                    elif part.get("type") == "image_url":
-                        image_url = part.get("image_url", {}).get("url", "")
-                        if image_url.startswith("data:"):
-                            try:
-                                header, b64data = image_url.split(",", 1)
-                                mime_type = header.split(":")[1].split(";")[0]
+
+        # Helper to process a message dict into parts
+        def append_msg_parts(msg: Dict[str, Any], is_history: bool):
+            role = "User" if msg.get("role") == "user" else "Assistant"
+            content = msg.get("content", "")
+            
+            first_text = True
+            
+            def add_text_part(text_val: str):
+                nonlocal first_text
+                if not text_val:
+                    return
+                if first_text:
+                    # Prepend role prefix
+                    text_val = f"{role}: {text_val}"
+                    first_text = False
+                parts.append({"type": "text", "text": text_val})
+
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict):
+                        if part.get("type") == "text":
+                            add_text_part(part.get("text", ""))
+                        elif part.get("type") == "image_url":
+                            image_url = part.get("image_url", {}).get("url", "")
+                            if image_url.startswith("data:"):
+                                try:
+                                    header, b64data = image_url.split(",", 1)
+                                    mime_type = header.split(":")[1].split(";")[0]
+                                    parts.append({
+                                        "type": "image",
+                                        "data": b64data,
+                                        "mime_type": mime_type,
+                                    })
+                                except (ValueError, IndexError):
+                                    pass
+                            else:
                                 parts.append({
                                     "type": "image",
-                                    "data": b64data,
-                                    "mime_type": mime_type,
+                                    "uri": image_url,
+                                    "mime_type": "image/jpeg",
                                 })
-                            except (ValueError, IndexError):
-                                pass
-                        else:
-                            parts.append({
-                                "type": "image",
-                                "uri": image_url,
-                                "mime_type": "image/jpeg",
-                            })
-                elif isinstance(part, str):
-                    text_val = part
-                    if i == 0 and transcript:
-                        text_val = transcript + text_val
-                        transcript = ""
-                    parts.append({"type": "text", "text": text_val})
-        else:
-            text_val = str(content)
-            if transcript:
-                text_val = transcript + text_val
-            parts.append({"type": "text", "text": text_val})
+                    elif isinstance(part, str):
+                        add_text_part(part)
+            else:
+                add_text_part(str(content))
+
+        # Add history messages
+        if messages_to_transcript:
+            parts.append({"type": "text", "text": "The following messages occurred since your last response:\n\n"})
+            for msg in messages_to_transcript:
+                append_msg_parts(msg, is_history=True)
+                parts.append({"type": "text", "text": "\n\n"})
+            parts.append({"type": "text", "text": "--- End missed context ---\n\n"})
+
+        # Add the current message
+        append_msg_parts(current_msg, is_history=False)
             
         return parts
 
@@ -244,6 +240,7 @@ class GeminiService:
         discord_user_id: Optional[int] = None,
         bot_id: int = None,
         thinking_level: Optional[str] = None,
+        disable_cache: bool = False,
         # Accept and ignore extra kwargs for compatibility
         state_service: Any = None,
     ) -> tuple[Union[str, Dict[str, Any], None], float]:
@@ -259,7 +256,7 @@ class GeminiService:
         base_delay = 1.0
 
         # Check for a cached previous interaction ID for this channel
-        prev_interaction_id = self._get_previous_interaction_id(channel_id)
+        prev_interaction_id = None if disable_cache else self._get_previous_interaction_id(channel_id)
         if prev_interaction_id:
             logger.info(f"[gemini] Continuing conversation with previous_interaction_id={prev_interaction_id[:20]}...")
 
@@ -388,7 +385,7 @@ class GeminiService:
 
                 # Cache the interaction ID for future turns
                 interaction_id = getattr(interaction, 'id', None)
-                if interaction_id and channel_id:
+                if interaction_id and channel_id and not disable_cache:
                     self._update_interaction_cache(channel_id, interaction_id)
                     logger.info(f"[gemini] Cached interaction_id={interaction_id[:20]}... for channel {channel_id}")
 

@@ -36,31 +36,40 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
         service = GeminiService(api_key="test-key")
         return service
 
-    # ── Content conversion ──
+    # ── Content conversion (Interactions API _build_input) ──
 
-    def test_convert_simple_text_messages(self):
+    def test_build_input_simple_text_messages(self):
         service = self.make_service()
         messages = [
             {"role": "user", "content": "Hello!"},
             {"role": "assistant", "content": "Hi there!"},
             {"role": "user", "content": "How are you?"},
         ]
-        result = service._convert_messages_to_input(messages, "Be helpful.")
+        # No cached interaction -> has_prev_interaction = False
+        result = service._build_input(messages, has_prev_interaction=False)
 
-        # System prompt becomes first user+model pair
-        self.assertEqual(result[0]["role"], "user")
-        self.assertIn("Be helpful.", result[0]["content"])
-        self.assertEqual(result[1]["role"], "model")
+        # Expected: transcript of past messages, then the current message
+        self.assertEqual(result[0]["type"], "text")
+        self.assertIn("The following messages occurred since your last response:", result[0]["text"])
+        
+        # Checking that past messages are in the transcript/history parts
+        self.assertEqual(result[1]["type"], "text")
+        self.assertEqual(result[1]["text"], "User: Hello!")
+        
+        # spacer
+        self.assertEqual(result[2]["text"], "\n\n")
 
-        # Then the actual messages
-        self.assertEqual(result[2]["role"], "user")
-        self.assertEqual(result[2]["content"], "Hello!")
-        self.assertEqual(result[3]["role"], "model")  # assistant -> model
-        self.assertEqual(result[3]["content"], "Hi there!")
-        self.assertEqual(result[4]["role"], "user")
-        self.assertEqual(result[4]["content"], "How are you?")
+        # Assistant response
+        self.assertEqual(result[3]["text"], "Assistant: Hi there!")
+        
+        # End missed context
+        self.assertEqual(result[5]["text"], "--- End missed context ---\n\n")
+        
+        # Current message is User: How are you?
+        self.assertEqual(result[6]["type"], "text")
+        self.assertEqual(result[6]["text"], "User: How are you?")
 
-    def test_convert_multimodal_messages(self):
+    def test_build_input_multimodal_messages(self):
         service = self.make_service()
         messages = [
             {
@@ -71,18 +80,17 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
                 ],
             }
         ]
-        result = service._convert_messages_to_input(messages, "")
+        result = service._build_input(messages, has_prev_interaction=False)
 
-        # No system prompt pair when empty
-        user_turn = result[0]
-        self.assertEqual(user_turn["role"], "user")
-        self.assertEqual(len(user_turn["content"]), 2)
-        self.assertEqual(user_turn["content"][0]["type"], "text")
-        self.assertEqual(user_turn["content"][1]["type"], "image")
-        self.assertEqual(user_turn["content"][1]["data"], "AAAA")
-        self.assertEqual(user_turn["content"][1]["mime_type"], "image/png")
+        # Only one message, so no history transcript
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["type"], "text")
+        self.assertEqual(result[0]["text"], "User: What is this?")
+        self.assertEqual(result[1]["type"], "image")
+        self.assertEqual(result[1]["data"], "AAAA")
+        self.assertEqual(result[1]["mime_type"], "image/png")
 
-    def test_convert_remote_image_url(self):
+    def test_build_input_remote_image_url(self):
         service = self.make_service()
         messages = [
             {
@@ -93,32 +101,36 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
                 ],
             }
         ]
-        result = service._convert_messages_to_input(messages, "")
-        img_part = result[0]["content"][1]
-        self.assertEqual(img_part["type"], "image")
-        self.assertEqual(img_part["uri"], "https://example.com/img.jpg")
+        result = service._build_input(messages, has_prev_interaction=False)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[1]["type"], "image")
+        self.assertEqual(result[1]["uri"], "https://example.com/img.jpg")
 
-    def test_convert_skips_system_role_messages(self):
+    def test_build_input_history_multimodal(self):
         service = self.make_service()
         messages = [
-            {"role": "system", "content": "You are a bot"},
-            {"role": "user", "content": "Hello"},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Look at this:"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": "A nice image!",
+            },
+            {
+                "role": "user",
+                "content": "Indeed.",
+            }
         ]
-        result = service._convert_messages_to_input(messages, "System prompt")
-
-        # System role message is skipped, only system prompt pair + user msg
-        roles = [r["role"] for r in result]
-        self.assertEqual(roles, ["user", "model", "user"])
-
-    def test_convert_skips_empty_messages(self):
-        service = self.make_service()
-        messages = [
-            {"role": "user", "content": ""},
-            {"role": "user", "content": "Hello"},
-        ]
-        result = service._convert_messages_to_input(messages, "")
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["content"], "Hello")
+        result = service._build_input(messages, has_prev_interaction=False)
+        
+        # Verify that the image in history is preserved as a native image part!
+        image_parts = [p for p in result if p["type"] == "image"]
+        self.assertEqual(len(image_parts), 1)
+        self.assertEqual(image_parts[0]["data"], "AAAA")
 
     # ── Cost estimation ──
 
@@ -200,9 +212,40 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Hello from Gemini!", result)
         mock_create.assert_awaited_once()
         call_kwargs = mock_create.call_args.kwargs
-        self.assertEqual(call_kwargs["model"], "gemini-3.1-flash-lite-preview")
+        self.assertEqual(call_kwargs["model"], "gemini-3.5-flash")
         self.assertEqual(call_kwargs["store"], True)
         self.assertIn({"type": "google_search"}, call_kwargs["tools"])
+
+    async def test_get_chat_completion_with_disable_cache(self):
+        service = self.make_service()
+        # Seed cache
+        service._update_interaction_cache(123, "seeded-id")
+        
+        text_output = SimpleNamespace(type="text", text="Cache bypassed answer")
+        interaction = SimpleNamespace(
+            outputs=[text_output],
+            usage=SimpleNamespace(total_input_tokens=5, total_output_tokens=5, total_thought_tokens=0, total_cached_tokens=0),
+            id="new-interaction-id",
+        )
+        mock_create = AsyncMock(return_value=interaction)
+        mock_client = MagicMock()
+        mock_client.aio.interactions.create = mock_create
+        service._client = mock_client
+
+        await service.get_chat_completion(
+            model="google",
+            messages=[{"role": "user", "content": "Hi"}],
+            system_prompt="",
+            channel_id=123,
+            disable_cache=True,
+        )
+
+        call_kwargs = mock_create.call_args.kwargs
+        # previous_interaction_id should NOT be passed to interactions.create when disable_cache is True
+        self.assertNotIn("previous_interaction_id", call_kwargs)
+        
+        # Cache should NOT be updated to the new interaction id
+        self.assertEqual(service._get_previous_interaction_id(123), "seeded-id")
 
     async def test_get_chat_completion_with_thinking_level(self):
         service = self.make_service()
