@@ -268,3 +268,75 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         self.assertIn("You are <@999>!", result)
         self.assertIn("@Alice = <@1>", result)
         self.assertIn("@Bob = <@2>", result)
+
+    async def test_transcribe_audio_attachment_success(self):
+        attachment = MagicMock()
+        attachment.id = 5001
+        attachment.content_type = "audio/mp3"
+        attachment.filename = "test.mp3"
+        attachment.read = AsyncMock(return_value=b"some-mp3-bytes")
+
+        fake_resp = MagicMock()
+        fake_resp.text = "This is a test transcript"
+        fake_resp.raise_for_status = lambda: None
+        fake_client = MagicMock()
+        fake_client.post = AsyncMock(return_value=fake_resp)
+
+        with patch("src.utils.discord_helper.GROQ_API_KEY", "groq-key"), patch(
+            "httpx.AsyncClient", side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client)
+        ), patch("src.utils.discord_helper._audio_transcript_cache", {}) as cache:
+            result = await discord_helper.transcribe_audio_attachment(attachment)
+
+        self.assertEqual(result, "This is a test transcript")
+        self.assertEqual(cache[5001], "This is a test transcript")
+        fake_client.post.assert_called_once()
+        kwargs = fake_client.post.call_args.kwargs
+        self.assertEqual(kwargs["data"]["model"], "whisper-large-v3-turbo")
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer groq-key")
+        self.assertEqual(kwargs["files"]["file"][0], "test.mp3")
+        self.assertEqual(kwargs["files"]["file"][1], b"some-mp3-bytes")
+        self.assertEqual(kwargs["files"]["file"][2], "audio/mp3")
+
+    async def test_transcribe_audio_attachment_pcm_to_wav(self):
+        import wave
+        import io
+        attachment = MagicMock()
+        attachment.id = 5002
+        attachment.content_type = "audio/s16le"
+        attachment.filename = "voice.pcm"
+        raw_pcm = b"\x00\x01" * 48000
+        attachment.read = AsyncMock(return_value=raw_pcm)
+
+        fake_resp = MagicMock()
+        fake_resp.text = "Wav transcript"
+        fake_resp.raise_for_status = lambda: None
+        fake_client = MagicMock()
+        fake_client.post = AsyncMock(return_value=fake_resp)
+
+        with patch("src.utils.discord_helper.GROQ_API_KEY", "groq-key"), patch(
+            "httpx.AsyncClient", side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client)
+        ), patch("src.utils.discord_helper._audio_transcript_cache", {}):
+            result = await discord_helper.transcribe_audio_attachment(attachment)
+
+        self.assertEqual(result, "Wav transcript")
+        fake_client.post.assert_called_once()
+        kwargs = fake_client.post.call_args.kwargs
+        self.assertEqual(kwargs["files"]["file"][0], "voice.wav")
+        self.assertEqual(kwargs["files"]["file"][2], "audio/wav")
+        
+        # Verify the bytes sent are indeed a valid WAV file wrapping the PCM bytes
+        sent_bytes = kwargs["files"]["file"][1]
+        wav_io = io.BytesIO(sent_bytes)
+        with wave.open(wav_io, 'rb') as wav_file:
+            self.assertEqual(wav_file.getframerate(), 48000)
+            self.assertEqual(wav_file.getnchannels(), 2)
+            self.assertEqual(wav_file.readframes(48000), raw_pcm)
+
+    async def test_transcribe_audio_attachment_missing_api_key(self):
+        attachment = MagicMock()
+        attachment.id = 5003
+
+        with patch("src.utils.discord_helper.GROQ_API_KEY", ""):
+            result = await discord_helper.transcribe_audio_attachment(attachment)
+
+        self.assertIsNone(result)

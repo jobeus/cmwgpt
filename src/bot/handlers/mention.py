@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable, Dict, List
 
 import discord
 
-from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url
+from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url, transcribe_audio_attachment
 from src.services.openai_service import OpenAIServiceError
 from src.services.gemini_service import GeminiServiceError, is_gemini_model, get_thinking_level
 from src.utils.downloader_utils import fetch_all_url_content
@@ -457,13 +457,13 @@ class MentionHandler:
                                 {"type": "image_url", "image_url": {"url": file_data_url}}
                             )
                         elif is_audio:
-                            file_data_url = await self._attachment_converter(attach)
-                            file_payloads.append(
-                                {"type": "audio_url", "audio_url": {"url": file_data_url}}
-                            )
-                            # Add a text note about the audio file so the bot knows it exists and is placed there.
+                            # Send audio to Groq instead and get a transcript
+                            transcript = await transcribe_audio_attachment(attach)
                             duration_str = f" ({attach.duration}s)" if getattr(attach, "duration", None) else ""
-                            text_payload[0]["text"] += f"\n[Sent an audio message/voice clip{duration_str}: {attach.filename}]"
+                            if transcript:
+                                text_payload[0]["text"] += f"\n[Sent an audio message/voice clip{duration_str}: {attach.filename}\nTranscript: {transcript}]"
+                            else:
+                                text_payload[0]["text"] += f"\n[Sent an audio message/voice clip{duration_str}: {attach.filename}\n(Transcription failed or unavailable)]"
                         else:
                             text_payload[0]["text"] += f"\n[Attached file: {attach.filename}]"
                 except Exception as e:

@@ -1,3 +1,4 @@
+import os
 import base64
 import logging
 import discord
@@ -5,6 +6,7 @@ import io
 import httpx
 import wave
 from PIL import Image
+from src.config import GROQ_API_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +14,7 @@ logger = logging.getLogger(__name__)
 # Simple bounded caches for base64 conversions
 _url_base64_cache = {}
 _attachment_base64_cache = {}
+_audio_transcript_cache = {}
 MAX_CACHE_SIZE = 100
 
 
@@ -241,3 +244,103 @@ async def get_mention_legend(
         f"If you want to @mention someone yourself use <@discord_user_id> instead of @nickname for discord "
         f"to recoginize your intent."
     )
+
+
+async def transcribe_audio_attachment(attachment: discord.Attachment) -> Optional[str]:
+    """
+    Transcribe a Discord audio attachment using Groq Whisper API.
+    Results are cached in memory to avoid repetitive API calls.
+    """
+    from typing import Optional
+    if attachment.id in _audio_transcript_cache:
+        logger.debug(f"Cache hit for audio transcription: {attachment.filename}")
+        return _audio_transcript_cache[attachment.id]
+
+    if not GROQ_API_KEY:
+        logger.warning("GROQ_API_KEY is not set. Cannot transcribe audio.")
+        return None
+
+    try:
+        # Download the attachment bytes
+        file_bytes = await attachment.read()
+        
+        # Determine the content type and filename
+        content_type = attachment.content_type
+        filename = attachment.filename or "audio.ogg"
+        
+        is_voice_attr = getattr(attachment, "is_voice_message", None)
+        is_voice = False
+        if is_voice_attr:
+            if callable(is_voice_attr):
+                res = is_voice_attr()
+                is_voice = bool(res)
+            else:
+                is_voice = bool(is_voice_attr)
+
+        if isinstance(content_type, str):
+            cleaned_content_type = content_type.split(";")[0].strip().lower()
+        else:
+            cleaned_content_type = "audio/ogg" if is_voice else "audio/ogg"
+
+        # Transcode PCM (audio/s16le) to WAV
+        if cleaned_content_type == "audio/s16le":
+            file_bytes = pcm_to_wav(file_bytes)
+            cleaned_content_type = "audio/wav"
+            if not filename.endswith(".wav"):
+                filename = os.path.splitext(filename)[0] + ".wav"
+
+        # Ensure the filename has a supported extension for Groq Whisper
+        _, ext = os.path.splitext(filename)
+        supported_extensions = {'.flac', '.mp3', '.mp4', '.mpeg', '.mpga', '.m4a', '.ogg', '.wav', '.webm'}
+        if ext.lower() not in supported_extensions:
+            # Map MIME type to a supported extension
+            mime_to_ext = {
+                "audio/wav": ".wav",
+                "audio/x-wav": ".wav",
+                "audio/mp3": ".mp3",
+                "audio/mpeg": ".mp3",
+                "audio/ogg": ".ogg",
+                "audio/flac": ".flac",
+                "audio/aac": ".m4a",
+                "audio/m4a": ".m4a",
+                "audio/x-m4a": ".m4a",
+                "audio/mp4": ".mp4",
+                "audio/webm": ".webm",
+            }
+            mapped_ext = mime_to_ext.get(cleaned_content_type, ".ogg")
+            filename = os.path.splitext(filename)[0] + mapped_ext
+
+        # Use httpx.AsyncClient for non-blocking network I/O
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+            files = {'file': (filename, file_bytes, cleaned_content_type)}
+            data_payload = {
+                'model': 'whisper-large-v3-turbo',
+                'temperature': '0',
+                'response_format': 'text'
+            }
+            groq_headers = {'Authorization': f'Bearer {GROQ_API_KEY}'}
+            
+            groq_resp = await client.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers=groq_headers,
+                data=data_payload,
+                files=files
+            )
+            groq_resp.raise_for_status()
+            transcript_text = groq_resp.text.strip()
+            
+            if transcript_text:
+                logger.info(f"Successfully transcribed audio attachment {filename} using Groq.")
+                # Store in bounded cache
+                if len(_audio_transcript_cache) >= MAX_CACHE_SIZE:
+                    oldest_key = next(iter(_audio_transcript_cache))
+                    del _audio_transcript_cache[oldest_key]
+                _audio_transcript_cache[attachment.id] = transcript_text
+                return transcript_text
+            else:
+                logger.warning(f"Groq returned empty transcription for {filename}")
+                return None
+
+    except Exception as e:
+        logger.error(f"Error transcribing audio attachment {attachment.filename}: {e}")
+        return None

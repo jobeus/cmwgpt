@@ -21,7 +21,7 @@ from discord.ext import commands
 
 from src.config import get_system_prompt, DEFAULT_MODEL
 from src.services.gemini_service import is_gemini_model, get_thinking_level
-from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url
+from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url, transcribe_audio_attachment
 from src.utils.message_utils import format_discord_timestamp
 
 logger = logging.getLogger(__name__)
@@ -380,13 +380,13 @@ class InterjectService:
                                 {"type": "image_url", "image_url": {"url": file_data_url}}
                             )
                         elif is_audio:
-                            file_data_url = await attachment_to_base64_data_url(attach)
-                            file_payloads.append(
-                                {"type": "audio_url", "audio_url": {"url": file_data_url}}
-                            )
-                            # Add a text note about the audio file so the bot knows it exists and is placed there.
+                            # Send audio to Groq instead and get a transcript
+                            transcript = await transcribe_audio_attachment(attach)
                             duration_str = f" ({attach.duration}s)" if getattr(attach, "duration", None) else ""
-                            text_payload[0]["text"] += f"\n[Sent an audio message/voice clip{duration_str}: {attach.filename}]"
+                            if transcript:
+                                text_payload[0]["text"] += f"\n[Sent an audio message/voice clip{duration_str}: {attach.filename}\nTranscript: {transcript}]"
+                            else:
+                                text_payload[0]["text"] += f"\n[Sent an audio message/voice clip{duration_str}: {attach.filename}\n(Transcription failed or unavailable)]"
                         else:
                             text_payload[0]["text"] += f"\n[Attached file: {attach.filename}]"
                 except Exception as e:

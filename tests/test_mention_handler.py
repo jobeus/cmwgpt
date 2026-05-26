@@ -293,18 +293,19 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         channel.history = history
 
-        context, _ = await handler._prepare_mention_context(mention_msg, bot_user)
+        with patch("src.bot.handlers.mention.transcribe_audio_attachment", AsyncMock(return_value="Mocked Groq Transcript")):
+            context, _ = await handler._prepare_mention_context(mention_msg, bot_user)
 
         self.assertEqual(len(context), 1)
         self.assertEqual(context[0]["role"], "user")
         
-        # Checking that the content has the audio_url payload
+        # Checking that the content has only the text payload, no audio_url payload
         payload = context[0]["content"]
-        self.assertEqual(payload[1]["type"], "audio_url")
-        self.assertEqual(payload[1]["audio_url"]["url"], "data:audio/ogg;base64,AUDIO")
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["type"], "text")
         
-        # Checking that the text payload has the placeholder text for the audio message
-        self.assertIn("[Sent an audio message/voice clip (4.5s): voice.ogg]", payload[0]["text"])
+        # Checking that the text payload has the placeholder text for the audio message and the transcript
+        self.assertIn("[Sent an audio message/voice clip (4.5s): voice.ogg\nTranscript: Mocked Groq Transcript]", payload[0]["text"])
 
     async def test_prepare_context_marks_truly_empty_messages_and_swallow_embed_preview_failures(self):
         handler, _, _, _, _ = self.make_handler(

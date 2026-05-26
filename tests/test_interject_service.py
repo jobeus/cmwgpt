@@ -564,7 +564,7 @@ class TestInterjectService(unittest.TestCase):
             self.service._openai_service.get_chat_completion = AsyncMock(return_value=("reply", 0.0))
             self.service._mention_legend_provider = AsyncMock(return_value=("legend text", 0.0))
 
-            with patch("src.services.interject_service.attachment_to_base64_data_url", AsyncMock(return_value="data:audio/ogg;base64,AUDIO_DATA")):
+            with patch("src.services.interject_service.transcribe_audio_attachment", AsyncMock(return_value="Mocked Groq Transcript")):
                 await self.service._do_interject(channel, 99999)
 
             self.service._message_service.send_channel_reply.assert_awaited_once_with(channel, "reply")
@@ -572,9 +572,10 @@ class TestInterjectService(unittest.TestCase):
             call = self.service._openai_service.get_chat_completion.await_args
             messages = call.kwargs["messages"]
             self.assertEqual(len(messages), 1)
-            self.assertEqual(messages[0]["content"][1]["type"], "audio_url")
-            self.assertEqual(messages[0]["content"][1]["audio_url"]["url"], "data:audio/ogg;base64,AUDIO_DATA")
-            self.assertIn("[Sent an audio message/voice clip (5.0s): voice_interject.ogg]", messages[0]["content"][0]["text"])
+            payload = messages[0]["content"]
+            self.assertEqual(len(payload), 1)
+            self.assertEqual(payload[0]["type"], "text")
+            self.assertIn("[Sent an audio message/voice clip (5.0s): voice_interject.ogg\nTranscript: Mocked Groq Transcript]", payload[0]["text"])
 
         self.loop.run_until_complete(run_test())
 
