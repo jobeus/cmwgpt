@@ -133,6 +133,33 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(base64.b64decode(result.split(",", 1)[1]), b"voice-bytes")
         mock_compress.assert_not_called()
 
+    async def test_attachment_to_base64_data_url_with_s16le_attachment(self):
+        import wave
+        import io
+        attachment = MagicMock()
+        attachment.id = 1003
+        attachment.filename = "voice.pcm"
+        attachment.content_type = "audio/s16le; rate=48000"
+        raw_pcm = b"\x00\x01" * 96000  # 1 second of stereo 16-bit PCM at 48000Hz
+        attachment.read = AsyncMock(return_value=raw_pcm)
+
+        with patch("src.utils.discord_helper._attachment_base64_cache", {}), patch(
+            "src.utils.discord_helper.compress_image"
+        ) as mock_compress:
+            result = await discord_helper.attachment_to_base64_data_url(attachment)
+
+        self.assertTrue(result.startswith("data:audio/wav;base64,"))
+        wav_bytes = base64.b64decode(result.split(",", 1)[1])
+        mock_compress.assert_not_called()
+
+        # Verify wav header integrity
+        wav_io = io.BytesIO(wav_bytes)
+        with wave.open(wav_io, 'rb') as wav_file:
+            self.assertEqual(wav_file.getnchannels(), 2)
+            self.assertEqual(wav_file.getsampwidth(), 2)
+            self.assertEqual(wav_file.getframerate(), 48000)
+            self.assertEqual(wav_file.readframes(96000), raw_pcm)
+
     async def test_url_to_base64_data_url_caches_success_but_not_timeout_failures(self):
         fake_client = MagicMock()
         fake_client.get = AsyncMock(return_value=SimpleNamespace(

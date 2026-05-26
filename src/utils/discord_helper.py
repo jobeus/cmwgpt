@@ -3,6 +3,7 @@ import logging
 import discord
 import io
 import httpx
+import wave
 from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,26 @@ def compress_image(
         logger.warning(
             f"Image compression failed: {e}. Falling back to original bytes.")
         return image_bytes
+
+
+def pcm_to_wav(
+    pcm_bytes: bytes,
+    sample_rate: int = 48000,
+    channels: int = 2,
+    sampwidth: int = 2
+) -> bytes:
+    """Prepend a standard RIFF/WAV header to raw PCM bytes."""
+    wav_io = io.BytesIO()
+    try:
+        with wave.open(wav_io, 'wb') as wav_file:
+            wav_file.setnchannels(channels)
+            wav_file.setsampwidth(sampwidth)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(pcm_bytes)
+        return wav_io.getvalue()
+    except Exception as e:
+        logger.warning(f"PCM to WAV conversion failed: {e}. Returning original bytes.")
+        return pcm_bytes
 
 
 async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
@@ -99,7 +120,12 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
             cleaned_content_type = "audio/ogg"
 
         if is_audio:
-            # For audio, do not compress, keep original bytes
+            # Check if raw PCM (audio/s16le) needs to be converted to WAV
+            if cleaned_content_type == "audio/s16le":
+                file_bytes = pcm_to_wav(file_bytes)
+                cleaned_content_type = "audio/wav"
+
+            # For audio, do not compress, keep original bytes (or converted WAV bytes)
             base64_data = base64.b64encode(file_bytes).decode('utf-8')
             # Fallback/default content type for audio if not specified
             if not content_type or not cleaned_content_type.startswith("audio/"):

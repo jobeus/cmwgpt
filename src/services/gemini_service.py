@@ -194,8 +194,7 @@ class GeminiService:
                                     
                                     supported_audio_types = {
                                         "audio/wav", "audio/mp3", "audio/aiff", "audio/aac",
-                                        "audio/ogg", "audio/flac", "audio/mpeg", "audio/m4a",
-                                        "audio/l16", "audio/opus", "audio/alaw", "audio/mulaw"
+                                        "audio/ogg", "audio/flac"
                                     }
                                     if mime_type not in supported_audio_types:
                                         mime_type = "audio/ogg"
@@ -294,14 +293,18 @@ class GeminiService:
 
         for attempt in range(max_retries):
             try:
+                # Check if input has audio parts
+                has_audio = any(part.get("type") == "audio" for part in input_parts)
+                
+                tools = [{"type": "google_search"}, {"type": "url_context"}]
+                if not has_audio:
+                    tools.append({"type": "code_execution"})
+
                 # Build kwargs for interactions.create
                 kwargs = {
                     "model": GEMINI_MODEL,
                     "input": input_parts,
-                    "tools": [
-                        {"type": "google_search"},
-                        {"type": "code_execution"},
-                        {"type": "url_context"}],
+                    "tools": tools,
                     "store": True,
                 }
 
