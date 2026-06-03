@@ -48,26 +48,37 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
         # No cached interaction -> has_prev_interaction = False
         result = service._build_input(messages, has_prev_interaction=False)
 
-        # Expected: transcript of past messages, then the current message
+        # Expected: single consolidated text part containing full transcript in order,
+        # with NO missed context wrapper because has_prev_interaction=False.
+        self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["type"], "text")
-        self.assertIn("The following messages occurred since your last response:", result[0]["text"])
-        
-        # Checking that past messages are in the transcript/history parts
-        self.assertEqual(result[1]["type"], "text")
-        self.assertEqual(result[1]["text"], "User: Hello!")
-        
-        # spacer
-        self.assertEqual(result[2]["text"], "\n\n")
+        self.assertEqual(
+            result[0]["text"],
+            "User: Hello!\n\nAssistant: Hi there!\n\nUser: How are you?"
+        )
 
-        # Assistant response
-        self.assertEqual(result[3]["text"], "Assistant: Hi there!")
-        
-        # End missed context
-        self.assertEqual(result[5]["text"], "--- End missed context ---\n\n")
-        
-        # Current message is User: How are you?
-        self.assertEqual(result[6]["type"], "text")
-        self.assertEqual(result[6]["text"], "User: How are you?")
+    def test_build_input_simple_text_messages_with_prev_interaction(self):
+        service = self.make_service()
+        messages = [
+            {"role": "user", "content": "Hello!"},
+            {"role": "assistant", "content": "Hi there!"},
+            {"role": "user", "content": "How are you?"},
+            {"role": "user", "content": "Are you there?"},
+        ]
+        # Cached interaction exists -> has_prev_interaction = True
+        result = service._build_input(messages, has_prev_interaction=True)
+
+        # Expected: single consolidated text part containing the missed context wrapper
+        # around the messages sent since the last bot response.
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["type"], "text")
+        expected_text = (
+            "The following messages occurred since your last response:\n\n"
+            "User: How are you?\n\n"
+            "--- End missed context ---\n\n"
+            "User: Are you there?"
+        )
+        self.assertEqual(result[0]["text"], expected_text)
 
     def test_build_input_multimodal_messages(self):
         service = self.make_service()

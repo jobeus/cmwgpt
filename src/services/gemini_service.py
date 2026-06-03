@@ -143,6 +143,14 @@ class GeminiService:
 
         parts = []
 
+        def add_text(text_val: str):
+            if not text_val:
+                return
+            if parts and parts[-1].get("type") == "text":
+                parts[-1]["text"] += text_val
+            else:
+                parts.append({"type": "text", "text": text_val})
+
         # Helper to process a message dict into parts
         def append_msg_parts(msg: Dict[str, Any], is_history: bool):
             role = "User" if msg.get("role") == "user" else "Assistant"
@@ -158,7 +166,7 @@ class GeminiService:
                     # Prepend role prefix
                     text_val = f"{role}: {text_val}"
                     first_text = False
-                parts.append({"type": "text", "text": text_val})
+                add_text(text_val)
 
             if isinstance(content, list):
                 for part in content:
@@ -219,11 +227,15 @@ class GeminiService:
 
         # Add history messages
         if messages_to_transcript:
-            parts.append({"type": "text", "text": "The following messages occurred since your last response:\n\n"})
+            if has_prev_interaction:
+                add_text("The following messages occurred since your last response:\n\n")
+            
             for msg in messages_to_transcript:
                 append_msg_parts(msg, is_history=True)
-                parts.append({"type": "text", "text": "\n\n"})
-            parts.append({"type": "text", "text": "--- End missed context ---\n\n"})
+                add_text("\n\n")
+            
+            if has_prev_interaction:
+                add_text("--- End missed context ---\n\n")
 
         # Add the current message
         append_msg_parts(current_msg, is_history=False)
