@@ -70,10 +70,10 @@ class SystemCommands:
                     name="anthropic/claude-haiku-4.5 (search, web aware)",
                     value="anthropic/claude-haiku-4.5"),
                 Choice(
-                    name="google (gemini-3.5-flash, search)",
+                    name="google (gemini-3.1-flash-lite, search)",
                     value="google"),
                 Choice(
-                    name="google-high (gemini-3.5-flash, search, thinking)",
+                    name="google-high (gemini-3.1-flash-lite, search, thinking)",
                     value="google-high"),
                 Choice(
                     name="hybrid (google-high + haiku)",

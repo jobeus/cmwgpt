@@ -31,7 +31,7 @@ PRICE_INPUT_PER_M = 1.50   # text / image / video
 PRICE_OUTPUT_PER_M = 9.00  # output including thinking tokens
 PRICE_CACHED_PER_M = 0.15  # cached tokens
 
-GEMINI_MODEL = "gemini-3.5-flash"
+GEMINI_MODEL = "gemini-3.1-flash-lite"
 
 # How long before a channel's cached interaction ID expires (seconds)
 INTERACTION_CACHE_TTL = 600  # 10 minutes
