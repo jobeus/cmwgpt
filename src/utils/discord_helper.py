@@ -188,8 +188,13 @@ async def url_to_base64_data_url(url: str) -> str:
     try:
         # Follow redirects in case embeds resolve through URL shorteners or
         # edge network bounces
+        # Add User-Agent headers to avoid 403 Forbidden from strict servers like Wikimedia
+        headers = {
+            "User-Agent": "cmwgpt-bot/1.0 (jobeus@gmail.com)",
+            "Api-User-Agent": "cmwgpt-bot/1.0 (jobeus@gmail.com)"
+        }
         async with create_async_client(timeout=httpx.Timeout(5.0), follow_redirects=True, service_name="discord_cdn") as client:
-            response = await client.get(url)
+            response = await client.get(url, headers=headers)
             response.raise_for_status()
             image_bytes = response.content
 

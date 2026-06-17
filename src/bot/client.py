@@ -15,6 +15,7 @@ from src.bot.commands.image import ImageCommands
 from src.bot.commands.system import SystemCommands
 from src.bot.commands.interject import InterjectCommands
 from src.bot.commands.death import DeathCommands
+from src.bot.commands.wikicount import WikiCountCommands
 
 from src.utils.logger import setup_logger
 
@@ -280,6 +281,13 @@ class DiscordBotClient:
             death_channel_id=self.config.death_channel_id,
         )
         death_commands.setup_commands()
+
+        wikicount_commands = WikiCountCommands(
+            self.bot,
+            death_service_instance=self.services.death_service,
+            state_service_instance=self.services.state_service,
+        )
+        wikicount_commands.setup_commands()
 
     async def _handle_message(self, message: discord.Message) -> None:
         """

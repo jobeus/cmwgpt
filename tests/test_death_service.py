@@ -174,7 +174,7 @@ class TestDeathService(unittest.TestCase):
                 __aexit__=AsyncMock(return_value=False),
             ))
 
-            result = await self.service._get_avg_monthly_views(
+            result = await self.service.get_avg_monthly_views(
                 "Famous_Person", mock_session
             )
             self.assertEqual(result, 1_500_000)
@@ -197,7 +197,7 @@ class TestDeathService(unittest.TestCase):
                 __aexit__=AsyncMock(return_value=False),
             ))
 
-            result = await self.service._get_avg_monthly_views(
+            result = await self.service.get_avg_monthly_views(
                 "Obscure_Person", mock_session
             )
             self.assertEqual(result, 500)
@@ -216,7 +216,7 @@ class TestDeathService(unittest.TestCase):
                 __aexit__=AsyncMock(return_value=False),
             ))
 
-            result = await self.service._get_avg_monthly_views(
+            result = await self.service.get_avg_monthly_views(
                 "Missing_Person", mock_session
             )
             self.assertEqual(result, 0)
@@ -391,7 +391,7 @@ class TestDeathService(unittest.TestCase):
             with patch.object(self.service, "_get_session", AsyncMock(return_value=session)), patch.object(
                 self.service, "_save_state"
             ) as mock_save, patch.object(
-                self.service, "_get_avg_monthly_views", AsyncMock(side_effect=fake_views)
+                self.service, "get_avg_monthly_views", AsyncMock(side_effect=fake_views)
             ) as mock_views, patch.object(
                 self.service, "_announce", AsyncMock()
             ) as mock_announce, patch(
@@ -422,14 +422,14 @@ class TestDeathService(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    def test_get_avg_monthly_views_handles_empty_items_429_and_other_errors(self):
+    def testget_avg_monthly_views_handles_empty_items_429_and_other_errors(self):
         async def run_test():
             empty_resp = AsyncMock()
             empty_resp.status = 200
             empty_resp.json = AsyncMock(return_value={"items": []})
             session = MagicMock()
             session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=empty_resp), __aexit__=AsyncMock(return_value=False)))
-            self.assertEqual(await self.service._get_avg_monthly_views("Missing", session), 0)
+            self.assertEqual(await self.service.get_avg_monthly_views("Missing", session), 0)
 
             rate_resp = AsyncMock()
             rate_resp.status = 429
@@ -443,12 +443,12 @@ class TestDeathService(unittest.TestCase):
                 AsyncMock(__aenter__=AsyncMock(return_value=rate_resp), __aexit__=AsyncMock(return_value=False)),
             ])
             with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
-                self.assertIsNone(await self.service._get_avg_monthly_views("Rate Limited", session))
+                self.assertIsNone(await self.service.get_avg_monthly_views("Rate Limited", session))
             self.assertEqual(mock_sleep.await_count, 3)
 
             session = MagicMock()
             session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=other_resp), __aexit__=AsyncMock(return_value=False)))
-            self.assertIsNone(await self.service._get_avg_monthly_views("Oops", session))
+            self.assertIsNone(await self.service.get_avg_monthly_views("Oops", session))
 
         self.loop.run_until_complete(run_test())
 

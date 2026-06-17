@@ -232,7 +232,7 @@ class DeathService:
         for display_name, article_title in new_names:
             try:
                 min_views = self._get_setting("min_views", MIN_AVG_MONTHLY_VIEWS)
-                avg_views = await self._get_avg_monthly_views(article_title, session)
+                avg_views = await self.get_avg_monthly_views(article_title, session)
 
                 if avg_views is None:
                     continue
@@ -251,7 +251,7 @@ class DeathService:
 
     # -- pageviews ----------------------------------------------------------
 
-    async def _get_avg_monthly_views(
+    async def get_avg_monthly_views(
         self, article_title: str, session: aiohttp.ClientSession
     ) -> Optional[int]:
         """
