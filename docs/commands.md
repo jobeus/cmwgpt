@@ -30,6 +30,7 @@ The bot's main chat experience is **mention-based**:
 | `/death set` | Configures deathwatch behavior | persisted service state |
 | `/death view` | Shows deathwatch settings | reads persisted state |
 | `/death reset` | Restores default deathwatch settings | persisted reset |
+| `/wikicount` | Looks up a Wikipedia article's average monthly pageviews | runtime action |
 | `/restart` | Triggers restart flow and `git pull` | runtime action |
 
 ## Model and prompt commands
@@ -40,11 +41,20 @@ Sets the active text model for the current channel.
 
 Current choices exposed in code:
 
-| Model |
-| --- |
-| `anthropic/claude-haiku-4.5` |
-| `google/gemini-2.5-flash` |
-| `openai/gpt-5-mini` |
+| Model | Notes |
+| --- | --- |
+| `google/gemini-2.5-flash` | via OpenRouter |
+| `bytedance-seed/seed-2.0-mini` | via OpenRouter |
+| `bytedance-seed/seed-1.6-flash` | via OpenRouter |
+| `qwen/qwen3.5-flash-02-23` | via OpenRouter |
+| `anthropic/claude-haiku-4.5` | search / web aware (via OpenRouter) |
+| `google` | native Gemini (`gemini-3.1-flash-lite`, search) |
+| `google-high` | native Gemini (`gemini-3.1-flash-lite`, search, thinking) |
+| `hybrid` | two-phase: `google-high` gathers context, then `claude-haiku-4.5` writes the reply |
+
+`google`/`google-high`/`hybrid` route through `GeminiService` (and, for `hybrid`,
+also `OpenAIService`); the rest route through `OpenAIService` → OpenRouter. The
+routing itself lives in `src/services/completion_dispatch.py`.
 
 ### `/systemprompt ...`
 
@@ -67,16 +77,13 @@ These commands use `RunpodService` and channel-level state for model selection.
 | `/edit` | Edit an uploaded image using a prompt |
 | `/editmodel` | Set the model used by `/edit` |
 
-Current image model keys exposed by the bot include:
+Current image model keys exposed by the bot (the non-`seedream` keys appear only
+when Runpod models are enabled):
 
-| Model key |
-| --- |
-| `seedream` |
-| `qwen-image` |
-| `pruna` |
-| `wan-2.6` |
-| `flux-kontext` |
-| `z-image-edit` |
+| Command | Model keys |
+| --- | --- |
+| `/draw`, `/drawmodel` | `seedream`, `z-image`, `wan-2.6`, `pruna`, `qwen`, `flux` |
+| `/edit`, `/editmodel` | `seedream`, `qwen`, `pruna` |
 
 ## Interject commands
 
@@ -88,13 +95,14 @@ Parameters currently exposed in code:
 
 | Parameter | Meaning |
 | --- | --- |
-| `chance_percent` | Probability of interjection when conditions are met |
-| `cooldown_minutes` | Minimum time between interjections |
-| `min_messages` | Minimum message activity before interjection can happen |
-| `activity_window_minutes` | Lookback window for channel activity |
-| `context_lines` | How much recent context to include |
-| `max_daily` | Daily cap on interjections |
-| `exclude_embeds` | Whether embed-only context should be ignored |
+| `chance` | Percentage chance (0-100) to interject when conditions are met |
+| `cooldown` | Per-channel cooldown in minutes after an interjection or failed roll |
+| `min_messages` | Minimum qualifying messages in the activity window to trigger |
+| `min_authors` | Minimum number of distinct non-bot authors in the qualifying streak |
+| `window_mins` | Only messages within this many minutes from now count |
+| `context_lines` | How many recent messages to include as AI context |
+| `daily_max` | Daily cap on interjections per channel |
+| `exclude_embeds` | Whether messages with embeds/attachments break the streak |
 
 ### Other interject subcommands
 
@@ -114,9 +122,9 @@ Current parameters:
 
 | Parameter | Meaning |
 | --- | --- |
-| `interval_seconds` | How often to run checks |
-| `min_avg_monthly_views` | Minimum average pageviews threshold |
-| `pageview_months` | Number of months considered |
+| `poll_interval` | Polling interval in seconds (default 15) |
+| `min_views` | Minimum average monthly views to announce (default 180000) |
+| `pageview_months` | How many months to average pageview data (default 12) |
 
 ### Other death subcommands
 
@@ -124,6 +132,17 @@ Current parameters:
 | --- | --- |
 | `view` | Show current settings |
 | `reset` | Restore defaults |
+
+## Wikicount command
+
+### `/wikicount`
+
+Looks up a Wikipedia article's average monthly pageviews — the same heuristic the
+deathwatch feature uses — for ad-hoc queries.
+
+| Parameter | Meaning |
+| --- | --- |
+| `target` | Wikipedia URL or exact article title (e.g. `Daveigh Chase` or `Las Vegas`) |
 
 ## Persistence model
 
@@ -137,3 +156,4 @@ Most command-driven settings are persisted through `StateService`, which means m
 | `src/bot/commands/image.py` | `/draw`, `/drawmodel`, `/edit`, `/editmodel` |
 | `src/bot/commands/interject.py` | `/interject ...` |
 | `src/bot/commands/death.py` | `/death ...` |
+| `src/bot/commands/wikicount.py` | `/wikicount` |

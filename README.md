@@ -68,7 +68,7 @@ Default dev ports:
 
 | Group | Commands |
 | --- | --- |
-| General | `/help`, `/model`, `/restart` |
+| General | `/help`, `/model`, `/restart`, `/wikicount` |
 | Prompting | `/systemprompt set`, `/systemprompt view`, `/systemprompt reset` |
 | Images | `/draw`, `/drawmodel`, `/edit`, `/editmodel` |
 | Interjections | `/interject set`, `/interject view`, `/interject reset`, `/interject count` |
@@ -83,7 +83,8 @@ Chat itself remains mention-based.
 | Variable | Required | Why |
 | --- | --- | --- |
 | `DISCORD_BOT_TOKEN` | Yes | Connects the bot to Discord |
-| `OPENROUTER_API_KEY` | Yes | Powers text-model completions |
+| `OPENROUTER_API_KEY` | Yes | Powers text-model completions via OpenRouter |
+| `GEMINI_API_KEY` | If using `google`/`google-high`/`hybrid` models | Powers native Gemini completions |
 | `RUNPOD_IO_API_KEY` | If using image commands | Powers draw/edit requests |
 
 ### Downloader/provider essentials
@@ -108,7 +109,7 @@ For the full reference, see `docs/configuration.md`.
 
 ## Architecture in one paragraph
 
-`main.py` boots `src/startup.py`, which wires services like `StateService`, `QueueService`, `OpenAIService`, `RunpodService`, `InterjectService`, `DeathService`, and `MentionHandler` into `DiscordBotClient`. Mention replies are assembled by `src/bot/handlers/mention.py`, enriched through `src/utils/downloader_utils.py`, sent to OpenRouter for text output, and logged into MariaDB. The log-viewer backend and frontend then query and stream those logs for inspection.
+`main.py` boots `src/startup.py`, which wires services like `StateService`, `QueueService`, `OpenAIService`, `GeminiService`, `RunpodService`, `InterjectService`, `DeathService`, and `MentionHandler` into `DiscordBotClient`. Mention replies are assembled by `src/bot/handlers/mention.py` (context built via `src/utils/chat_context.py`), enriched through `src/utils/downloader_utils.py`, then routed by `src/services/completion_dispatch.py` to OpenRouter, native Gemini, or the two-phase `hybrid` pipeline for text output, and logged into MariaDB. The log-viewer backend and frontend then query and stream those logs for inspection.
 
 For diagrams and a deeper walkthrough, see `docs/architecture.md`.
 

@@ -25,7 +25,9 @@ These are loaded by `src/config.py`.
 | Variable | Default | Required | Notes |
 | --- | --- | --- | --- |
 | `DISCORD_BOT_TOKEN` | `test-token-for-ci` | Yes in real use | Discord authentication |
-| `OPENROUTER_API_KEY` | `test-key-for-ci` | Yes in real use | Text-model requests |
+| `OPENROUTER_API_KEY` | `test-key-for-ci` | Yes in real use | Text-model requests via OpenRouter |
+| `GEMINI_API_KEY` | empty | For `google`/`google-high`/`hybrid` models | Native Gemini (`GeminiService`) requests |
+| `GEMINI_TIMEOUT_SECONDS` | `120` | No | Client-side request timeout for Gemini calls |
 | `RUNPOD_IO_API_KEY` | empty | For image commands | Used by draw/edit flows |
 | `DEFAULT_MODEL` | `anthropic/claude-haiku-4.5` | No | Fallback text model |
 | `DEFAULT_DRAW_MODEL` | `seedream` | No | Default draw model key |
@@ -105,6 +107,7 @@ Fill at least:
 
 Add these as needed:
 
+- `GEMINI_API_KEY` for the `google`/`google-high`/`hybrid` text models
 - `RUNPOD_IO_API_KEY` for image commands
 - `GROQ_API_KEY` for transcription-heavy sources
 - `RAPIDAPI_KEY` for Twitter/X enrichment

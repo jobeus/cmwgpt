@@ -42,7 +42,9 @@ flowchart LR
         Commands[Slash command modules]:::service
         Queue[QueueService]:::service
         State[StateService]:::service
+        Dispatch[completion_dispatch<br/>model routing]:::service
         OpenAI[OpenAIService<br/>OpenRouter text]:::service
+        Gemini[GeminiService<br/>native Gemini]:::service
         Runpod[RunpodService<br/>image draw/edit]:::service
         Downloader[Downloader pipeline]:::service
         MsgSvc[MessageService]:::service
@@ -53,7 +55,9 @@ flowchart LR
     Client --> Mention
     Client --> Commands
     Mention --> Queue
-    Queue --> OpenAI
+    Mention --> Dispatch
+    Dispatch --> OpenAI
+    Dispatch --> Gemini
     Mention --> Downloader
     Mention --> State
     Mention --> MsgSvc
@@ -64,6 +68,7 @@ flowchart LR
 
     DB[(MariaDB<br/>request + pipeline logs)]:::data
     OpenAI --> DB
+    Gemini --> DB
     Downloader --> DB
     Runpod --> DB
     Client --> DB
@@ -99,6 +104,7 @@ flowchart TB
     Factory --> State[StateService]:::svc
     Factory --> Queue[QueueService]:::svc
     Factory --> OpenAI[OpenAIService]:::svc
+    Factory --> Gemini[GeminiService]:::svc
     Factory --> Paste[PasteService]:::svc
     Factory --> Message[MessageService]:::svc
     Factory --> Runpod[RunpodService]:::svc
@@ -115,6 +121,8 @@ flowchart TB
     Queue --> Mention
     OpenAI --> Interject
     OpenAI --> Mention
+    Gemini --> Interject
+    Gemini --> Mention
     Message --> Interject
     Message --> Mention
 
@@ -139,7 +147,9 @@ sequenceDiagram
     participant M as MentionHandler
     participant S as StateService
     participant D as downloader_utils
+    participant DP as completion_dispatch
     participant O as OpenAIService
+    participant G as GeminiService
     participant MS as MessageService
     participant DB as MariaDB logger
 
@@ -148,15 +158,23 @@ sequenceDiagram
     C->>Q: queue_mention(message, bot_user, model)
     Q->>M: handle_mention(...)
     M->>S: mark_channel_active(channel)
-    M->>M: load history + reply context + embeds + attachments
+    M->>M: build_chat_context (history, replies, embeds, attachments)
     M->>S: get_system_prompt(channel)
     M->>D: fetch_all_url_content(message text)
     D->>D: discover YouTube / TikTok / Twitter / Facebook / articles
     D->>DB: log pipeline steps and API calls
     D-->>M: aggregated enrichment block
-    M->>O: get_chat_completion(messages, system_prompt, model)
-    O->>DB: log request / response metadata
-    O-->>M: reply content
+    M->>DP: dispatch_completion(messages, model, system_prompt)
+    alt model is google / google-high / hybrid
+        DP->>G: get_chat_completion(...)
+        G->>DB: log request / response metadata
+        G-->>DP: reply content
+    else other models
+        DP->>O: get_chat_completion(...)
+        O->>DB: log request / response metadata
+        O-->>DP: reply content
+    end
+    DP-->>M: reply content
     M->>MS: send_channel_reply(...)
     MS-->>U: Discord reply
 ```
@@ -164,7 +182,8 @@ sequenceDiagram
 ### What matters about this flow
 
 - Mentions are **queued**, not processed in parallel ad hoc.
-- Prompt context is more than just the latest message: it includes recent history, reply metadata, embeds, and attachments.
+- Prompt context is more than just the latest message: it includes recent history, reply metadata, embeds, and attachments. The multimodal context array is built by `src/utils/chat_context.py` (`build_chat_context`), shared with the interject service.
+- Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `hybrid` runs a two-phase Gemini-then-OpenRouter pipeline, and everything else goes to `OpenAIService`.
 - URL enrichment happens **before** the LLM call and can materially change the prompt content.
 - Logging is first-class: downloader and model activity both emit records consumed later by the log viewer.
 
@@ -206,10 +225,11 @@ flowchart LR
 | Source | Helper | Notes |
 | --- | --- | --- |
 | YouTube | `src/utils/youtube_utils.py` | Transcript extraction with optional proxy assistance |
-| TikTok | `src/utils/tiktok_utils.py` | Media download -> audio extraction -> Groq transcription |
+| TikTok | `src/utils/tiktok_utils.py` | Thin wrapper over `src/utils/media_transcribe.py` (yt-dlp download -> Groq transcription) |
 | Twitter/X | `src/utils/twitter_utils.py` | Tweet/context lookup, with optional video transcription path |
-| Facebook | `src/utils/facebook_utils.py` | Media download -> audio extraction -> Groq transcription |
+| Facebook | `src/utils/facebook_utils.py` | Thin wrapper over `src/utils/media_transcribe.py` (yt-dlp download -> Groq transcription) |
 | Generic articles | `src/utils/url_utils.py` | `httpx` fetch plus content extraction/fallbacks |
+| Shared media pipeline | `src/utils/media_transcribe.py` | yt-dlp audio download + proxy fallback + Groq Whisper transcription, used by TikTok/Facebook |
 
 ## Diagram: docker/runtime layout
 
@@ -241,7 +261,10 @@ flowchart LR
 | `src/bot/client.py` | Discord client orchestration | See event handlers, command setup, service startup/shutdown |
 | `src/bot/handlers/mention.py` | Main conversational path | Debug context assembly or mention behavior |
 | `src/bot/commands/` | Slash commands | Inspect user-facing command behavior |
+| `src/utils/chat_context.py` | Multimodal context builder | Change how history/embeds/attachments become the model input (shared by mention + interject) |
+| `src/services/completion_dispatch.py` | Model routing | Understand hybrid/Gemini/OpenRouter selection (shared by mention + interject) |
 | `src/services/openai_service.py` | Text-model integration | Understand OpenRouter calls |
+| `src/services/gemini_service.py` | Native Gemini integration | Understand `google`/`google-high`/`hybrid` calls and the Gemini timeout |
 | `src/services/runpod_service.py` | Image integration | Understand draw/edit requests |
 | `src/services/state_service.py` | Per-channel persistence | See where model/system-prompt/service settings live |
 | `src/services/queue_service.py` | FIFO work queue | Understand serialized mention processing |
@@ -262,9 +285,9 @@ flowchart LR
 
 1. A user mentions the bot.
 2. `DiscordBotClient` chooses the active model for the channel and queues the work.
-3. `MentionHandler` gathers recent message history and reply context.
+3. `MentionHandler` gathers recent message history and reply context (via `build_chat_context`).
 4. The handler enriches user text with downloader output for supported URLs.
-5. `OpenAIService` sends the assembled context to OpenRouter.
+5. `dispatch_completion` routes the assembled context to `OpenAIService` (OpenRouter), `GeminiService` (native Gemini), or the two-phase `hybrid` pipeline, based on the channel's model.
 6. `MessageService` sends the final reply back to Discord.
 7. Request and pipeline details are written to MariaDB.
 
