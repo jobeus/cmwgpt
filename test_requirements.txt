@@ -5,7 +5,7 @@
 # unittest is built-in, but we might want additional test utilities
 
 # Mocking and testing utilities
-pytest>=9.0.2
+pytest>=9.1.1
 pytest-asyncio>=1.4.0
 pytest-mock>=3.15.1
 pytest-cov>=7.1.0
@@ -26,5 +26,5 @@ mypy>=2.1.0
 # All the main dependencies (for testing against real implementations)
 discord.py>=2.7.1
 python-dotenv>=1.2.2
-openai>=2.40.0
+openai>=2.43.0
 requests>=2.34.2
