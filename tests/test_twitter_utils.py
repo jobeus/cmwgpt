@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 from src.utils import twitter_utils
+from tests.config_helpers import cfg
 
 
 class FakeAsyncClientContext:
@@ -97,7 +98,7 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await twitter_utils.get_tweet_context("https://x.com/bad"))
 
     async def test_get_tweet_context_requires_api_key(self):
-        with patch("src.utils.twitter_utils.RAPIDAPI_KEY", ""):
+        with patch("src.config._cached_config", cfg(rapidapi_key="")):
             self.assertIsNone(await twitter_utils.get_tweet_context("https://x.com/a/status/1"))
 
     async def test_get_tweet_context_fetches_context_and_replies(self):
@@ -124,8 +125,8 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         fake_client.get = AsyncMock(return_value=fake_response)
 
         with patch("src.utils.twitter_utils._twitter_cache", fake_cache), patch(
-            "src.utils.twitter_utils.RAPIDAPI_KEY", "rapid-key"
-        ), patch("src.utils.twitter_utils.GROQ_API_KEY", ""), patch(
+            "src.config._cached_config", cfg(rapidapi_key="rapid-key", groq_api_key="")
+        ), patch(
             "src.utils.twitter_utils.create_async_client",
             side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client),
         ), patch("src.utils.twitter_utils.extract_media", return_value=[]):
@@ -148,7 +149,7 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         fake_client.get = AsyncMock(return_value=fake_response)
 
         with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
-            "src.utils.twitter_utils.RAPIDAPI_KEY", "rapid-key"
+            "src.config._cached_config", cfg(rapidapi_key="rapid-key")
         ), patch("src.utils.twitter_utils.create_async_client", side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client)):
             result = await twitter_utils.get_tweet_context("https://x.com/a/status/123")
 
@@ -205,8 +206,8 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         ]
 
         with patch("src.utils.twitter_utils._twitter_cache", fake_cache), patch(
-            "src.utils.twitter_utils.RAPIDAPI_KEY", "rapid-key"
-        ), patch("src.utils.twitter_utils.GROQ_API_KEY", "groq-key"), patch(
+            "src.config._cached_config", cfg(rapidapi_key="rapid-key", groq_api_key="groq-key")
+        ), patch(
             "src.utils.twitter_utils.create_async_client", side_effect=contexts
         ), patch("src.utils.twitter_utils.extract_media", return_value=[{"type": "video", "url": "https://cdn.example/video.mp4"}]), patch(
             "src.utils.twitter_utils.asyncio.to_thread", new=AsyncMock(return_value=None)

@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 from discord.app_commands import Choice
 
-from src.config import get_system_prompt, DEFAULT_MODEL
+from src.config import get_system_prompt, get_config
 from src.utils.discord_helper import get_mention_legend
 from src.utils.async_utils import safe_run
 
@@ -28,7 +28,7 @@ class SystemCommands:
         state_service_instance,
         auto_update_service=None,
         system_prompt_loader=get_system_prompt,
-        default_model: str = DEFAULT_MODEL,
+        default_model: Optional[str] = None,
         mention_legend_provider=get_mention_legend,
     ):
         self.bot = bot
@@ -36,7 +36,7 @@ class SystemCommands:
         self._state_service = state_service_instance
         self._auto_update_service = auto_update_service
         self._system_prompt_loader = system_prompt_loader
-        self._default_model = default_model
+        self._default_model = get_config().default_model if default_model is None else default_model
         self._mention_legend_provider = mention_legend_provider
 
     def setup_commands(self) -> None:

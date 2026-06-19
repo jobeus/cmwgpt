@@ -2,6 +2,7 @@
 
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+from tests.config_helpers import cfg
 
 from src.db import connection
 
@@ -25,14 +26,14 @@ class TestDbConnection(unittest.IsolatedAsyncioTestCase):
         connection._pool = None
 
     async def test_get_db_pool_raises_during_testing_mode(self):
-        with patch("src.db.connection.IS_TESTING", True):
+        with patch("src.config._cached_config", cfg(is_testing=True)):
             with self.assertRaises(RuntimeError):
                 await connection.get_db_pool()
 
     async def test_get_db_pool_creates_pool_once_and_reuses_it(self):
         fake_pool = MagicMock()
 
-        with patch("src.db.connection.IS_TESTING", False), patch(
+        with patch("src.config._cached_config", cfg(is_testing=False)), patch(
             "src.db.connection.aiomysql.create_pool", new=AsyncMock(return_value=fake_pool)
         ) as mock_create_pool:
             first = await connection.get_db_pool()

@@ -3,7 +3,7 @@ import logging
 import httpx
 from typing import List, Optional
 from urllib.parse import urlparse
-from src.config import TRANSCRIPT_PROXY
+from src.config import get_config
 from src.db.logger import build_artifact, log_pipeline_step
 from src.utils.http_client import create_async_client
 
@@ -108,7 +108,7 @@ async def get_article_text(url: str) -> Optional[str]:
     try:
         logger.info(f"Fetching article for URL: {url}")
         
-        proxy = TRANSCRIPT_PROXY if TRANSCRIPT_PROXY else None
+        proxy = get_config().transcript_proxy or None
             
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',

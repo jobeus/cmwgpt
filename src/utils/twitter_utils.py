@@ -7,7 +7,7 @@ import subprocess  # nosec B404
 import asyncio
 import httpx
 from typing import List, Optional
-from src.config import RAPIDAPI_KEY, GROQ_API_KEY
+from src.config import get_config
 from src.utils.cache_utils import PersistentCache
 from src.db.logger import build_artifact, log_pipeline_step
 from src.utils.http_client import create_async_client
@@ -80,17 +80,18 @@ async def get_tweet_context(tweet_url: str) -> Optional[Tuple[str, List[str]]]:
         logger.debug(f"Cache hit for Twitter fetch: {tweet_url}")
         return cached_result
 
-    if not RAPIDAPI_KEY:
+    cfg = get_config()
+    if not cfg.rapidapi_key:
         logger.error("RAPIDAPI_KEY is not set. Cannot fetch Twitter content.")
         return None
 
     try:
         # Extract the trailing ID, ignoring any query parameters
         tweet_id = tweet_url.rstrip('/').split('/')[-1].split('?')[0]
-        
+
         headers = {
             "x-rapidapi-host": "x-com2.p.rapidapi.com",
-            "x-rapidapi-key": RAPIDAPI_KEY
+            "x-rapidapi-key": cfg.rapidapi_key
         }
         
         async with create_async_client(timeout=httpx.Timeout(15.0)) as client:
@@ -131,7 +132,7 @@ async def get_tweet_context(tweet_url: str) -> Optional[Tuple[str, List[str]]]:
                 break
                 
         video_transcript = None
-        if video_url and GROQ_API_KEY:
+        if video_url and cfg.groq_api_key:
             mp4_path = None
             mp3_path = None
             try:
@@ -208,7 +209,7 @@ async def get_tweet_context(tweet_url: str) -> Optional[Tuple[str, List[str]]]:
                             'temperature': '0',
                             'response_format': 'text'
                         }
-                        groq_headers = {'Authorization': f'Bearer {GROQ_API_KEY}'}
+                        groq_headers = {'Authorization': f'Bearer {cfg.groq_api_key}'}
                         
                         groq_resp = await client.post(
                             "https://api.groq.com/openai/v1/audio/transcriptions",

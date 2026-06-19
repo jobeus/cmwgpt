@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import discord
 
-from src.config import IS_TESTING
+from src.config import get_config
 from src.utils.http_client import create_async_client
 from src.utils.message_utils import clean_openai_response
 
@@ -96,7 +96,7 @@ class GeminiService:
     def _get_client(self):
         """Lazy-init the google-genai client."""
         if self._client is None:
-            if IS_TESTING:
+            if get_config().is_testing:
                 class MockClient:
                     class _aio:
                         class interactions:

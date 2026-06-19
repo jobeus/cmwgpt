@@ -10,7 +10,7 @@ import hashlib
 from typing import Optional, Any, Dict, Union
 
 from src.db.connection import execute_query
-from src.config import IS_TESTING
+from src.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ async def log_api_request(
     Asynchronously log an API request to the central database without blocking main execution.
     Fails safely instead of crashing bots on DB down.
     """
-    if IS_TESTING:
+    if get_config().is_testing:
         logger.debug(f"[TESTING] Skipped logging API request to {service_name}")
         return
 

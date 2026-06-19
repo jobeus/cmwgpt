@@ -14,7 +14,7 @@ from typing import Optional
 import httpx
 import yt_dlp
 
-from src.config import TRANSCRIPT_PROXY, GROQ_API_KEY
+from src.config import get_config
 from src.db.logger import build_artifact
 from src.utils.http_client import create_sync_client
 
@@ -82,7 +82,8 @@ def download_and_transcribe_video(url: str, cache, *, label: str, file_prefix: s
                 "from_cache": True,
             }
 
-    if not GROQ_API_KEY:
+    cfg = get_config()
+    if not cfg.groq_api_key:
         logger.error(f"GROQ_API_KEY is not set. Cannot transcribe {label} videos.")
         return None
 
@@ -96,11 +97,11 @@ def download_and_transcribe_video(url: str, cache, *, label: str, file_prefix: s
         audio_file, info = _download_audio(url, ydl_opts)
     except Exception as e:
         logger.warning(f"Direct download failed for {url}: {e}. Falling back to proxy.")
-        if not TRANSCRIPT_PROXY:
+        if not cfg.transcript_proxy:
             logger.warning(f"Download failed and no proxy configured for {url}. URL may not be a video.")
             return None
         download_strategy = "proxy"
-        ydl_opts["proxy"] = TRANSCRIPT_PROXY
+        ydl_opts["proxy"] = cfg.transcript_proxy
         try:
             audio_file, info = _download_audio(url, ydl_opts)
         except Exception as e2:
@@ -124,7 +125,7 @@ def download_and_transcribe_video(url: str, cache, *, label: str, file_prefix: s
                 "temperature": "0",
                 "response_format": "text",
             }
-            groq_headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+            groq_headers = {"Authorization": f"Bearer {cfg.groq_api_key}"}
 
             groq_resp = sync_client.post(
                 GROQ_TRANSCRIBE_URL,

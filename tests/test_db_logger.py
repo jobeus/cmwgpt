@@ -2,6 +2,7 @@
 
 import unittest
 from unittest.mock import AsyncMock, patch
+from tests.config_helpers import cfg
 
 from src.db import logger as db_logger
 
@@ -34,13 +35,13 @@ class TestDbLogger(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, '{"error": "unserializable content", "raw": "oops"}')
 
     async def test_log_api_request_skips_work_in_testing_mode(self):
-        with patch("src.db.logger.IS_TESTING", True), patch("src.db.logger.asyncio.create_task") as mock_task:
+        with patch("src.config._cached_config", cfg(is_testing=True)), patch("src.db.logger.asyncio.create_task") as mock_task:
             await db_logger.log_api_request("svc", "GET", "https://example.com")
 
         mock_task.assert_not_called()
 
     async def test_log_api_request_schedules_execute_query_with_serialized_args(self):
-        with patch("src.db.logger.IS_TESTING", False), patch(
+        with patch("src.config._cached_config", cfg(is_testing=False)), patch(
             "src.db.logger.execute_query", new=AsyncMock()
         ) as mock_execute_query, patch(
             "src.db.logger.asyncio.create_task", side_effect=lambda coro: coro.close()

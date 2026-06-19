@@ -5,7 +5,7 @@ Runpod Service - Handles image generation via Runpod API
 import httpx
 import logging
 from typing import Optional
-from src.config import RUNPOD_IO_API_KEY
+from src.config import get_config
 from src.utils.http_client import create_async_client
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ class RunpodServiceError(Exception):
 
 class RunpodService:
     def __init__(self):
-        self.api_key = RUNPOD_IO_API_KEY
+        self.api_key = get_config().runpod_io_api_key
         self.models = {
             "z-image": {
                 "url": "https://api.runpod.ai/v2/z-image-turbo/runsync",

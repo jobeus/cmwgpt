@@ -7,7 +7,7 @@ import subprocess
 import asyncio
 import httpx
 from typing import List, Optional, Tuple
-from src.config import RAPIDAPI_KEY, GROQ_API_KEY
+from src.config import get_config
 from src.utils.cache_utils import PersistentCache
 from src.db.logger import build_artifact, log_pipeline_step
 from src.utils.http_client import create_async_client
@@ -65,14 +65,15 @@ async def get_instagram_context(url: str) -> Optional[Tuple[str, Optional[str]]]
         logger.debug(f"Cache hit for Instagram fetch: {url}")
         return cached_result
 
-    if not RAPIDAPI_KEY:
+    cfg = get_config()
+    if not cfg.rapidapi_key:
         logger.error("RAPIDAPI_KEY is not set. Cannot fetch Instagram content.")
         return None
 
     try:
         headers = {
             "x-rapidapi-host": "instagram-downloader-download-instagram-videos-stories1.p.rapidapi.com",
-            "x-rapidapi-key": RAPIDAPI_KEY
+            "x-rapidapi-key": cfg.rapidapi_key
         }
         
         async with create_async_client(timeout=httpx.Timeout(15.0), service_name="rapidapi/instagram") as client:
@@ -113,7 +114,7 @@ async def get_instagram_context(url: str) -> Optional[Tuple[str, Optional[str]]]
             except Exception as e:
                 logger.warning(f"Failed to fetch image data url for {url}: {e}")
 
-        elif media_type == "video" and download_url and GROQ_API_KEY:
+        elif media_type == "video" and download_url and cfg.groq_api_key:
             # It's a video, let's transcribe it
             mp4_path = None
             mp3_path = None
@@ -183,7 +184,7 @@ async def get_instagram_context(url: str) -> Optional[Tuple[str, Optional[str]]]
                             'temperature': '0',
                             'response_format': 'text'
                         }
-                        groq_headers = {'Authorization': f'Bearer {GROQ_API_KEY}'}
+                        groq_headers = {'Authorization': f'Bearer {cfg.groq_api_key}'}
                         
                         groq_resp = await client.post(
                             "https://api.groq.com/openai/v1/audio/transcriptions",

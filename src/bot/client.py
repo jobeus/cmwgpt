@@ -10,7 +10,7 @@ from typing import Any, Optional
 import discord
 from discord.ext import commands
 
-from src.config import AppConfig, DEFAULT_MODEL, get_system_prompt, load_config
+from src.config import AppConfig, get_system_prompt, load_config
 from src.bot.commands.image import ImageCommands
 from src.bot.commands.system import SystemCommands
 from src.bot.commands.interject import InterjectCommands
@@ -319,7 +319,7 @@ class DiscordBotClient:
         # Handle bot mentions
         if self.bot.user and self.bot.user in message.mentions and self.config.reply_to_mentions:
             model = self.services.state_service.get_model(
-                message.channel.id) or self.config.default_model or DEFAULT_MODEL
+                message.channel.id) or self.config.default_model
 
             # Queue the mention for FIFO processing
             queued = await self.mention_handler.queue_mention(message, self.bot.user, model)

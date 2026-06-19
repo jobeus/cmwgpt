@@ -18,7 +18,7 @@ from typing import Any, Awaitable, Callable, Optional
 import discord
 from discord.ext import commands
 
-from src.config import get_system_prompt, DEFAULT_MODEL
+from src.config import get_system_prompt, get_config
 from src.services.completion_dispatch import dispatch_completion, HybridConfig
 from src.utils.chat_context import build_chat_context
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url, transcribe_audio_attachment
@@ -68,7 +68,7 @@ class InterjectService:
         openai_service,
         message_service,
         system_prompt_loader: Callable[[], str] = get_system_prompt,
-        default_model: str = DEFAULT_MODEL,
+        default_model: Optional[str] = None,
         state_file: str = STATE_FILE,
         mention_legend_provider: Callable[[discord.TextChannel, discord.User], Awaitable[str]] = get_mention_legend,
         gemini_service=None,
@@ -78,7 +78,7 @@ class InterjectService:
         self._gemini_service = gemini_service
         self._message_service = message_service
         self._system_prompt_loader = system_prompt_loader
-        self._default_model = default_model
+        self._default_model = get_config().default_model if default_model is None else default_model
         self._state_file = state_file
         self._mention_legend_provider = mention_legend_provider
         self._bot: Optional[commands.Bot] = None

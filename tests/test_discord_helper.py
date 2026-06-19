@@ -5,6 +5,7 @@ import io
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+from tests.config_helpers import cfg
 
 import httpx
 from PIL import Image
@@ -282,7 +283,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         fake_client = MagicMock()
         fake_client.post = AsyncMock(return_value=fake_resp)
 
-        with patch("src.utils.discord_helper.GROQ_API_KEY", "groq-key"), patch(
+        with patch("src.config._cached_config", cfg(groq_api_key="groq-key")), patch(
             "httpx.AsyncClient", side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client)
         ), patch("src.utils.discord_helper._audio_transcript_cache", {}) as cache:
             result = await discord_helper.transcribe_audio_attachment(attachment)
@@ -313,7 +314,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         fake_client = MagicMock()
         fake_client.post = AsyncMock(return_value=fake_resp)
 
-        with patch("src.utils.discord_helper.GROQ_API_KEY", "groq-key"), patch(
+        with patch("src.config._cached_config", cfg(groq_api_key="groq-key")), patch(
             "httpx.AsyncClient", side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client)
         ), patch("src.utils.discord_helper._audio_transcript_cache", {}):
             result = await discord_helper.transcribe_audio_attachment(attachment)
@@ -336,7 +337,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         attachment = MagicMock()
         attachment.id = 5003
 
-        with patch("src.utils.discord_helper.GROQ_API_KEY", ""):
+        with patch("src.config._cached_config", cfg(groq_api_key="")):
             result = await discord_helper.transcribe_audio_attachment(attachment)
 
         self.assertIsNone(result)

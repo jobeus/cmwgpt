@@ -133,32 +133,22 @@ def get_system_prompt(prompt_path: str = "system_prompt.txt") -> str:
     return load_system_prompt(prompt_path)
 
 
-# Backward-compatibility path for modules that still import config constants at
-# module import time. This must continue loading `.env` so existing non-Docker
-# production startup keeps working until all callers move to injected config.
-LEGACY_CONFIG = load_config()
+# Process-wide config, loaded lazily on first use. Consumers that have no DI seam
+# (free functions in src/utils and src/db) call get_config() at call time instead
+# of importing module-level constants, so importing src.config has no side effects
+# and AppConfig remains the single source of truth.
+_cached_config: Optional[AppConfig] = None
 
-OPENROUTER_API_KEY = LEGACY_CONFIG.openrouter_api_key
-GEMINI_API_KEY = LEGACY_CONFIG.gemini_api_key
-RUNPOD_IO_API_KEY = LEGACY_CONFIG.runpod_io_api_key
-GROQ_API_KEY = LEGACY_CONFIG.groq_api_key
-RAPIDAPI_KEY = LEGACY_CONFIG.rapidapi_key
-DISCORD_BOT_TOKEN = LEGACY_CONFIG.discord_bot_token
-DISCORD_GUILD_ID = LEGACY_CONFIG.discord_guild_id
-DEATH_CHANNEL_ID = LEGACY_CONFIG.death_channel_id
-TRANSCRIPT_PROXY = LEGACY_CONFIG.transcript_proxy
-DB_HOST = LEGACY_CONFIG.db_host
-DB_PORT = LEGACY_CONFIG.db_port
-DB_USER = LEGACY_CONFIG.db_user
-DB_PASSWORD = LEGACY_CONFIG.db_password
-DB_NAME = LEGACY_CONFIG.db_name
-DEFAULT_MODEL = LEGACY_CONFIG.default_model
-DEFAULT_DRAW_MODEL = LEGACY_CONFIG.default_draw_model
-DEFAULT_EDIT_MODEL = LEGACY_CONFIG.default_edit_model
-INCLUDE_USERNAMES = LEGACY_CONFIG.include_usernames
-REPLY_TO_MENTIONS = LEGACY_CONFIG.reply_to_mentions
-KEEP_UP_TO_DATE_WITH_GIT = LEGACY_CONFIG.keep_up_to_date_with_git
-QUIET_UPDATES = LEGACY_CONFIG.quiet_updates
-INCLUDE_NUM_CHATLINES = LEGACY_CONFIG.include_num_chatlines
-MAX_CACHE_SIZE = LEGACY_CONFIG.max_cache_size
-IS_TESTING = LEGACY_CONFIG.is_testing
+
+def get_config() -> AppConfig:
+    """Return the process-wide :class:`AppConfig`, loading it once on first use."""
+    global _cached_config
+    if _cached_config is None:
+        _cached_config = load_config()
+    return _cached_config
+
+
+def reset_config_cache() -> None:
+    """Clear the cached config (primarily for tests)."""
+    global _cached_config
+    _cached_config = None

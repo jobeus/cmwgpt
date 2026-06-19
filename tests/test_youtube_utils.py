@@ -3,6 +3,7 @@
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from tests.config_helpers import cfg
 
 from src.utils import youtube_utils
 
@@ -31,7 +32,7 @@ class TestYoutubeUtils(unittest.IsolatedAsyncioTestCase):
             return fn()
 
         with patch("src.utils.youtube_utils._transcript_cache", legacy_cache), patch(
-            "src.utils.youtube_utils.TRANSCRIPT_PROXY", ""
+            "src.config._cached_config", cfg(transcript_proxy="")
         ), patch("src.utils.youtube_utils.YouTubeTranscriptApi", return_value=FakeYoutubeApi()), patch(
             "src.utils.youtube_utils.asyncio.to_thread", new=AsyncMock(side_effect=fake_to_thread)
         ), patch("src.utils.youtube_utils.log_pipeline_step", new=AsyncMock()):
@@ -47,7 +48,7 @@ class TestYoutubeUtils(unittest.IsolatedAsyncioTestCase):
             return fn()
 
         with patch("src.utils.youtube_utils._transcript_cache", fake_cache), patch(
-            "src.utils.youtube_utils.TRANSCRIPT_PROXY", ""
+            "src.config._cached_config", cfg(transcript_proxy="")
         ), patch("src.utils.youtube_utils.YouTubeTranscriptApi", return_value=FakeYoutubeApi()), patch(
             "src.utils.youtube_utils.asyncio.to_thread", new=AsyncMock(side_effect=fake_to_thread)
         ), patch("src.utils.youtube_utils.log_pipeline_step", new=AsyncMock()) as mock_log:

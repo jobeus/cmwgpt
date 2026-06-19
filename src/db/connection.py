@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 import aiomysql
 
-from src.config import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, IS_TESTING
+from src.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -19,22 +19,23 @@ async def get_db_pool() -> aiomysql.Pool:
     """
     global _pool
 
-    if IS_TESTING:
+    cfg = get_config()
+    if cfg.is_testing:
         # Avoid creating real pools during tests unless explicitly needed
         raise RuntimeError("Real database pool requested during IS_TESTING=True")
 
     if _pool is None:
-        if not DB_PASSWORD:
+        if not cfg.db_password:
             logger.warning("DB_PASSWORD is not set. Database logging may fail.")
 
         try:
-            logger.info(f"Initializing MariaDB pool to {DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+            logger.info(f"Initializing MariaDB pool to {cfg.db_user}@{cfg.db_host}:{cfg.db_port}/{cfg.db_name}")
             _pool = await aiomysql.create_pool(
-                host=DB_HOST,
-                port=DB_PORT,
-                user=DB_USER,
-                password=DB_PASSWORD,
-                db=DB_NAME,
+                host=cfg.db_host,
+                port=cfg.db_port,
+                user=cfg.db_user,
+                password=cfg.db_password,
+                db=cfg.db_name,
                 autocommit=True,
                 charset='utf8mb4',
                 minsize=1,

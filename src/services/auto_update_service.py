@@ -10,7 +10,7 @@ import logging
 import threading
 from typing import Optional, Callable, Awaitable
 
-from src.config import KEEP_UP_TO_DATE_WITH_GIT
+from src.config import get_config
 from src.utils.git_utils import (
     check_for_new_commits as default_check_for_new_commits,
     fetch_updates as default_fetch_updates,
@@ -37,7 +37,7 @@ class AutoUpdateService:
     ):
         """Initialize the auto-update service."""
         self.check_interval = check_interval
-        self._enabled = KEEP_UP_TO_DATE_WITH_GIT if enabled is None else enabled
+        self._enabled = get_config().keep_up_to_date_with_git if enabled is None else enabled
         self._queue_service = queue_service
         self._is_git_repository = is_git_repository_fn
         self._get_current_commit_hash = get_current_commit_hash_fn

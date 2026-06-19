@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import MagicMock, mock_open, patch
 
 from src.utils import facebook_utils
+from tests.config_helpers import cfg
 
 
 class FakeYoutubeDL:
@@ -60,7 +61,7 @@ class TestFacebookUtils(unittest.TestCase):
         fake_client.post.return_value = fake_response
 
         with patch("src.utils.facebook_utils._facebook_cache", legacy_cache), patch(
-            "src.utils.media_transcribe.GROQ_API_KEY", "groq-key"
+            "src.config._cached_config", cfg(groq_api_key="groq-key")
         ), patch("src.utils.media_transcribe.yt_dlp.YoutubeDL", side_effect=lambda opts: FakeYoutubeDL(opts)), patch(
             "src.utils.media_transcribe.os.path.exists", return_value=True
         ), patch("builtins.open", mock_open(read_data=b"audio-bytes")), patch(
@@ -72,7 +73,7 @@ class TestFacebookUtils(unittest.TestCase):
         self.assertEqual(legacy_cache["u2"], "transcribed text")
 
     def test_get_facebook_transcript_requires_api_key(self):
-        with patch("src.utils.media_transcribe.GROQ_API_KEY", ""):
+        with patch("src.config._cached_config", cfg(groq_api_key="")):
             self.assertIsNone(facebook_utils.get_facebook_transcript("https://fb.watch/abc"))
 
     def test_get_facebook_transcript_downloads_and_transcribes(self):
@@ -84,7 +85,7 @@ class TestFacebookUtils(unittest.TestCase):
         fake_client.post.return_value = fake_response
 
         with patch("src.utils.facebook_utils._facebook_cache", fake_cache), patch(
-            "src.utils.media_transcribe.GROQ_API_KEY", "groq-key"
+            "src.config._cached_config", cfg(groq_api_key="groq-key")
         ), patch("src.utils.media_transcribe.yt_dlp.YoutubeDL", side_effect=lambda opts: FakeYoutubeDL(opts)), patch(
             "src.utils.media_transcribe.os.path.exists", return_value=True
         ), patch("builtins.open", mock_open(read_data=b"audio-bytes")), patch(
@@ -99,9 +100,8 @@ class TestFacebookUtils(unittest.TestCase):
         mock_remove.assert_called_once()
 
     def test_get_facebook_transcript_returns_none_when_download_fails_without_proxy(self):
-        with patch("src.utils.media_transcribe.GROQ_API_KEY", "groq-key"), patch(
-            "src.utils.media_transcribe.TRANSCRIPT_PROXY", ""
-        ), patch("src.utils.media_transcribe.yt_dlp.YoutubeDL", side_effect=lambda opts: FakeYoutubeDL(opts, should_fail=True)):
+        with patch("src.config._cached_config", cfg(groq_api_key="groq-key", transcript_proxy="")), patch(
+            "src.utils.media_transcribe.yt_dlp.YoutubeDL", side_effect=lambda opts: FakeYoutubeDL(opts, should_fail=True)):
             self.assertIsNone(facebook_utils.get_facebook_transcript("https://facebook.com/a/videos/1"))
 
     def test_get_facebook_transcript_retries_with_proxy_and_handles_empty_transcript(self):
@@ -119,8 +119,8 @@ class TestFacebookUtils(unittest.TestCase):
         fake_client.post.return_value = empty_response
 
         with patch("src.utils.facebook_utils._facebook_cache", {}), patch(
-            "src.utils.media_transcribe.GROQ_API_KEY", "groq-key"
-        ), patch("src.utils.media_transcribe.TRANSCRIPT_PROXY", "http://proxy"), patch(
+            "src.config._cached_config", cfg(groq_api_key="groq-key", transcript_proxy="http://proxy")
+        ), patch(
             "src.utils.media_transcribe.yt_dlp.YoutubeDL", side_effect=fake_ydl
         ), patch("src.utils.media_transcribe.os.path.exists", return_value=True), patch(
             "builtins.open", mock_open(read_data=b"audio-bytes")

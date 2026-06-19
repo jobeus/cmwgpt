@@ -3,7 +3,7 @@ import logging
 import asyncio
 from typing import List, Optional
 from youtube_transcript_api import YouTubeTranscriptApi
-from src.config import TRANSCRIPT_PROXY
+from src.config import get_config
 from src.utils.cache_utils import PersistentCache
 from src.db.logger import build_artifact, log_pipeline_step
 
@@ -58,10 +58,12 @@ async def get_transcript(video_id: str) -> Optional[str]:
             return cached_result
 
     try:
+        transcript_proxy = get_config().transcript_proxy
+
         def _fetch():
-            if TRANSCRIPT_PROXY:
+            if transcript_proxy:
                 from youtube_transcript_api.proxies import GenericProxyConfig
-                proxy_config = GenericProxyConfig(https_url=TRANSCRIPT_PROXY)
+                proxy_config = GenericProxyConfig(https_url=transcript_proxy)
                 api = YouTubeTranscriptApi(proxy_config=proxy_config)
             else:
                 api = YouTubeTranscriptApi()
@@ -77,7 +79,7 @@ async def get_transcript(video_id: str) -> Optional[str]:
 from youtube_transcript_api.formatters import TextFormatter
 
 video_id = "{video_id}"
-proxy = "{TRANSCRIPT_PROXY}" if "{TRANSCRIPT_PROXY}" else None
+proxy = "{transcript_proxy}" if "{transcript_proxy}" else None
 
 if proxy:
     from youtube_transcript_api.proxies import GenericProxyConfig
@@ -104,7 +106,7 @@ print(TextFormatter().format_transcript(transcript.fetch()))
             input_summary=f"Fetched transcript for YouTube video `{video_id}`",
             input_data={
                 "video_id": video_id,
-                "proxy": TRANSCRIPT_PROXY or None,
+                "proxy": transcript_proxy or None,
                 "library": "youtube_transcript_api",
             },
             output_summary="Produced transcript text from YouTube transcript snippets",

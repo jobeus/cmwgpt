@@ -5,6 +5,7 @@ import sys
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+from tests.config_helpers import cfg
 
 from src.services.openai_service import OpenAIService, OpenAIServiceError, openai_service
 
@@ -211,13 +212,13 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
     def test_get_client_uses_testing_stub_and_real_client_factory(self):
         service = OpenAIService()
 
-        with patch("src.services.openai_service.IS_TESTING", True):
+        with patch("src.config._cached_config", cfg(is_testing=True)):
             client = service.get_client()
             self.assertTrue(callable(client.anything))
 
         service = OpenAIService()
         fake_client = MagicMock()
-        with patch("src.services.openai_service.IS_TESTING", False), patch(
+        with patch("src.config._cached_config", cfg(is_testing=False)), patch(
             "src.services.openai_service.AsyncOpenAI", return_value=fake_client
         ) as mock_factory:
             client = service.get_client()
@@ -261,7 +262,7 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
         client.default_headers = {"X-Test": "1", "X-Skip": omit_value}
         client.api_key = None
 
-        with patch("src.services.openai_service.OPENROUTER_API_KEY", "config-key"), patch(
+        with patch("src.config._cached_config", cfg(openrouter_api_key="config-key")), patch(
             "builtins.open", mock_open()
         ) as mock_file, patch("src.services.openai_service.json.dump"), patch("os.chmod"), patch(
             "src.services.openai_service.tempfile.gettempdir", return_value="/tmp"

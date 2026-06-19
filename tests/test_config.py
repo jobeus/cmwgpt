@@ -1,6 +1,5 @@
 """Unit tests for explicit config loading."""
 
-import importlib
 import unittest
 from unittest.mock import mock_open, patch
 
@@ -57,15 +56,19 @@ class TestConfig(unittest.TestCase):
 
         self.assertEqual(result, "/tmp/.env")
 
-    def test_legacy_config_constants_still_load_resolved_env_file_on_import(self):
-        with patch("dotenv.find_dotenv", return_value="/tmp/.env.production") as mock_find_dotenv, patch(
-            "dotenv.load_dotenv"
-        ) as mock_load_dotenv:
-            importlib.reload(config_module)
-            mock_find_dotenv.assert_called_once_with(".env.production", usecwd=True)
-            mock_load_dotenv.assert_called_once_with("/tmp/.env.production")
+    def test_get_config_loads_once_and_caches(self):
+        config_module.reset_config_cache()
+        try:
+            with patch.object(
+                config_module, "load_config", wraps=config_module.load_config
+            ) as mock_load:
+                first = config_module.get_config()
+                second = config_module.get_config()
 
-        importlib.reload(config_module)
+            self.assertIs(first, second)
+            mock_load.assert_called_once()
+        finally:
+            config_module.reset_config_cache()
 
     def test_load_system_prompt_replaces_timestamp(self):
         with patch(

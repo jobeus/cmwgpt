@@ -13,7 +13,7 @@ from typing import Callable, Optional
 import discord
 from discord.ext import commands
 
-from src.config import QUIET_UPDATES
+from src.config import get_config
 from src.utils.pasters import upload_to_pasters
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ class AnnouncementService:
         *,
         state_service,
         paste_service=None,
-        quiet_updates: bool = QUIET_UPDATES,
+        quiet_updates: Optional[bool] = None,
         current_git_sha_loader: Optional[Callable[[], Optional[str]]] = None,
         changelog_loader: Optional[Callable[[str, str], Optional[str]]] = None,
     ):
@@ -35,7 +35,7 @@ class AnnouncementService:
         self._bot: Optional[commands.Bot] = None
         self._state_service = state_service
         self._paste_service = paste_service
-        self._quiet_updates = quiet_updates
+        self._quiet_updates = get_config().quiet_updates if quiet_updates is None else quiet_updates
         self._current_git_sha_loader = current_git_sha_loader or self._get_current_git_sha
         self._changelog_loader = changelog_loader or self._get_complete_changelog
 

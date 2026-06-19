@@ -7,7 +7,7 @@ import httpx
 import wave
 from PIL import Image
 from typing import Optional
-from src.config import GROQ_API_KEY
+from src.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +261,8 @@ async def transcribe_audio_attachment(attachment: discord.Attachment) -> Optiona
         logger.debug(f"Cache hit for audio transcription: {attachment.filename}")
         return _audio_transcript_cache[attachment.id]
 
-    if not GROQ_API_KEY:
+    groq_api_key = get_config().groq_api_key
+    if not groq_api_key:
         logger.warning("GROQ_API_KEY is not set. Cannot transcribe audio.")
         return None
 
@@ -323,7 +324,7 @@ async def transcribe_audio_attachment(attachment: discord.Attachment) -> Optiona
                 'temperature': '0',
                 'response_format': 'text'
             }
-            groq_headers = {'Authorization': f'Bearer {GROQ_API_KEY}'}
+            groq_headers = {'Authorization': f'Bearer {groq_api_key}'}
             
             groq_resp = await client.post(
                 "https://api.groq.com/openai/v1/audio/transcriptions",

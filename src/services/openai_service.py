@@ -20,7 +20,7 @@ from openai import (
 )
 
 
-from src.config import OPENROUTER_API_KEY, IS_TESTING
+from src.config import get_config
 from src.utils.message_utils import clean_openai_response
 from src.utils.http_client import create_async_client
 
@@ -50,7 +50,7 @@ class OpenAIService:
     def get_client(self) -> AsyncOpenAI:
         """Get OpenAI client with lazy initialization."""
         if self._client is None:
-            if IS_TESTING:
+            if get_config().is_testing:
                 # In testing environment, create a mock-friendly client
                 # Don't try to create a real client in testing
                 class MockClient:
@@ -61,7 +61,7 @@ class OpenAIService:
             else:
                 self._client = AsyncOpenAI(
                     base_url="https://openrouter.ai/api/v1",
-                    api_key=OPENROUTER_API_KEY,
+                    api_key=get_config().openrouter_api_key,
                     default_headers={
                         "HTTP-Referer": "https://github.com/jobeus/cmwgpt",
                         "X-Title": "CMWGPT Discord Bot"
@@ -91,8 +91,8 @@ class OpenAIService:
             # Ensure Auth is present
             if hasattr(client, 'api_key') and client.api_key:
                 headers_dict['Authorization'] = f"Bearer {client.api_key}"
-            elif OPENROUTER_API_KEY:
-                headers_dict['Authorization'] = f"Bearer {OPENROUTER_API_KEY}"
+            elif get_config().openrouter_api_key:
+                headers_dict['Authorization'] = f"Bearer {get_config().openrouter_api_key}"
 
             for k, v in headers_dict.items():
                 if 'Omit' in str(type(v)):
