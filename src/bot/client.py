@@ -309,6 +309,8 @@ class DiscordBotClient:
         xcancel_links = []
         for match in matches:
             path = match.group(1)
+            # Drop query string / tracking args (e.g. ?get_args=xxx)
+            path = path.split('?')[0]
             # Remove trailing punctuation that might have been captured
             path = re.sub(r'[.,!?\'"]+$', '', path)
             xcancel_links.append(f"( <https://xcancel.com/{path}> )")

@@ -86,8 +86,13 @@ async def get_tweet_context(tweet_url: str) -> Optional[Tuple[str, List[str]]]:
         return None
 
     try:
-        # Extract the trailing ID, ignoring any query parameters
-        tweet_id = tweet_url.rstrip('/').split('/')[-1].split('?')[0]
+        # Extract the numeric tweet ID following /status/, ignoring any
+        # trailing path segments (e.g. /photo/1) or query parameters.
+        id_match = re.search(r'/status/(\d+)', tweet_url)
+        if id_match:
+            tweet_id = id_match.group(1)
+        else:
+            tweet_id = tweet_url.rstrip('/').split('/')[-1].split('?')[0]
 
         headers = {
             "x-rapidapi-host": "x-com2.p.rapidapi.com",
