@@ -10,7 +10,8 @@ import discord
 
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url, transcribe_audio_attachment
 from src.services.openai_service import OpenAIServiceError
-from src.services.gemini_service import GeminiServiceError, is_gemini_model, get_thinking_level
+from src.services.gemini_service import GeminiServiceError, is_gemini_model
+from src.services.completion_dispatch import dispatch_completion, HybridConfig
 from src.utils.chat_context import build_chat_context
 from src.utils.downloader_utils import fetch_all_url_content
 from src.config import load_system_prompt
@@ -77,10 +78,11 @@ class MentionHandler:
                     f"Context prepared for mention by {message.author}, sending to {'Gemini' if is_gemini_model(model) else 'OpenRouter'}...")
                 channel_id = message.channel.id
 
-                reply_content = None
-                cost = 0.0
-                if model == "hybrid" and self._gemini_service:
-                    # Phase 1: Google-High to summarize and search
+                # Identity threaded into every model call for this mention.
+                identity = {"channel_id": channel_id, "discord_user_id": message.author.id}
+
+                hybrid_cfg = None
+                if model == "hybrid":
                     hybrid_summary_prompt = (
                         f"\n\nYou are a chat CONTEXT GATHERER only, you are not participating in the chat:\n"
                         f"Do not reply directly to the user. Instead, review the entire chat buffer provided. "
@@ -95,64 +97,21 @@ class MentionHandler:
                         f"search results you found to do with the conversation + mention, and who asked what (YOU ARE *NOT* REPLYING IN THE CHANNEL -- you are SUMMARIZING THE CONVERSATION TO ANOTHER AI AGENT). "
                         f"Another AI model will use this briefing to write the final response."
                     )
-                    
-                    logger.info("Hybrid phase 1: Sending to Google-High for summary...")
-                    summary_content, gemini_cost = await self._gemini_service.get_chat_completion(
-                        model="google-high",
-                        messages=recent_messages,
-                        system_prompt=hybrid_summary_prompt,
-                        channel_id=channel_id,
-                        discord_user_id=message.author.id,
-                        thinking_level=get_thinking_level("google-high"),
-                        disable_cache=True,
+                    hybrid_cfg = HybridConfig(
+                        summary_prompt=hybrid_summary_prompt,
+                        phase2_system_prompt=load_system_prompt(prompt_path="system_prompt_hybrid.txt"),
+                        build_phase2_text=lambda s: f"Here is the context and gathered search results for the current conversation. Please use this information to write the final response to the channel. Remember your personality from the system prompt. CRITICAL: You ARE the bot in this conversation. If the summary refers to the bot or <@{bot_user.id}>, it is referring to YOU. Do not refer to yourself in the third person.\n\nContext & Search Results:\n{s}",
                     )
 
-                    if summary_content:
-                        if isinstance(summary_content, dict) and "text" in summary_content:
-                            summary_text = summary_content["text"]
-                        else:
-                            summary_text = str(summary_content)
-
-                        # Phase 2: Haiku to write response
-                        logger.info("Hybrid phase 2: Passing summary to Haiku...")
-                        haiku_messages = [
-                            {
-                                "role": "user",
-                                "content": [{
-                                    "type": "text",
-                                    "text": f"Here is the context and gathered search results for the current conversation. Please use this information to write the final response to the channel. Remember your personality from the system prompt. CRITICAL: You ARE the bot in this conversation. If the summary refers to the bot or <@{bot_user.id}>, it is referring to YOU. Do not refer to yourself in the third person.\n\nContext & Search Results:\n{summary_text}"
-                                }]
-                            }
-                        ]
-
-                        reply_content, haiku_cost = await self._openai_service.get_chat_completion(
-                            model="anthropic/claude-haiku-4.5",
-                            messages=haiku_messages,
-                            system_prompt=load_system_prompt(prompt_path="system_prompt_hybrid.txt"),
-                            channel_id=channel_id,
-                            discord_user_id=message.author.id,
-                            search=False,
-                        )
-
-                        cost = gemini_cost + haiku_cost
-
-                elif is_gemini_model(model) and self._gemini_service:
-                    reply_content, cost = await self._gemini_service.get_chat_completion(
-                        model=model,
-                        messages=recent_messages,
-                        system_prompt=system_prompt,
-                        channel_id=channel_id,
-                        discord_user_id=message.author.id,
-                        thinking_level=get_thinking_level(model),
-                    )
-                else:
-                    reply_content, cost = await self._openai_service.get_chat_completion(
-                        model=model,
-                        messages=recent_messages,
-                        system_prompt=system_prompt,
-                        channel_id=channel_id,
-                        discord_user_id=message.author.id,
-                    )
+                reply_content, cost = await dispatch_completion(
+                    model=model,
+                    messages=recent_messages,
+                    system_prompt=system_prompt,
+                    openai_service=self._openai_service,
+                    gemini_service=self._gemini_service,
+                    identity=identity,
+                    hybrid=hybrid_cfg,
+                )
 
                 if reply_content is None:
                     logger.error(f"❌ Received None from get_chat_completion for model {model}.")

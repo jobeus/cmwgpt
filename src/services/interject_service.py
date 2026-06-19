@@ -19,7 +19,7 @@ import discord
 from discord.ext import commands
 
 from src.config import get_system_prompt, DEFAULT_MODEL
-from src.services.gemini_service import is_gemini_model, get_thinking_level
+from src.services.completion_dispatch import dispatch_completion, HybridConfig
 from src.utils.chat_context import build_chat_context
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url, transcribe_audio_attachment
 
@@ -291,82 +291,48 @@ class InterjectService:
         # Get the model for this channel
         model = self._state_service.get_model(channel.id) or self._default_model
 
+        # Identity threaded into every model call for this interjection. Unlike a
+        # mention, channel_id is included so Gemini gets per-channel interaction
+        # caching (multi-turn continuity) here too.
+        identity = {
+            "channel_id": channel.id,
+            "bot_id": bot_id,
+            "discord_user_id": context_messages[-1].author.id if context_messages else None,
+        }
+
+        hybrid_cfg = None
+        if model == "hybrid":
+            hybrid_summary_prompt = (
+                f"\n\nYou are a chat CONTEXT GATHERER only, you are not participating in the chat:\n"
+                f"Do not reply directly to the user. Instead, review the entire chat buffer provided. "
+                f"You must summarize all the available information, perform any web searches needed to enrich the context, "
+                f"and extract the main points or questions.\n"
+                f"CRITICAL: Be sure to include the <@Discord_User_IDs> of the participants in your summary so the final responder knows exactly who said what, and clearly point out what the current topic is.\n"
+                f"CRITICAL: When referring to the bot in your summary, speak directly to the final responder as 'YOU' (e.g. 'User <@ID> asked YOU a question'). Do NOT refer to the bot in the third person (like '<@{bot_id}>' or 'the bot') so the final responder doesn't get confused.\n\n"
+                f"CRITICAL: DO NOT MAKE THINGS UP, IF YOU CAN'T SEE CONTENT OR A VIDEO OR DON'T KNOW SOMETHING, SAY SO. No hallucinating allowed!!!\n\n"
+                f"CRITICAL: You are to act as a casual viewer to the conversation. Note if there is a place for another bot to interject to add to the current conversation from an outside perspective, but if you have nothing that would add or change the current conversation happening between others just return an empty response.\n\n"
+                f"CRITICAL: Include relevant times and dates!\n\n"
+                f"Provide a *detailed*, unfiltered, comprehensive briefing of information from the channel conversation, any relevant urls or summaries (summarized by you), "
+                f"search results you found to do with the conversation, and who said what (YOU ARE *NOT* REPLYING IN THE CHANNEL -- you are SUMMARIZING THE CONVERSATION TO ANOTHER AI AGENT). "
+                f"Another AI model will use this briefing to write the final response."
+            )
+            hybrid_cfg = HybridConfig(
+                summary_prompt=hybrid_summary_prompt,
+                phase2_system_prompt=system_prompt,
+                build_phase2_text=lambda s: f"Here is the context and gathered search results for the current conversation. Please use this information to write an interjection to the channel. Remember your personality and instructions from the system prompt. CRITICAL: You ARE the bot in this conversation. If the summary refers to the bot or <@{bot_id}>, it is referring to YOU. Do not refer to yourself in the third person.\n\nContext & Search Results:\n{s}",
+            )
+
         try:
-            if model == "hybrid" and self._gemini_service:
-                hybrid_summary_prompt = (
-                    f"\n\nYou are a chat CONTEXT GATHERER only, you are not participating in the chat:\n"
-                    f"Do not reply directly to the user. Instead, review the entire chat buffer provided. "
-                    f"You must summarize all the available information, perform any web searches needed to enrich the context, "
-                    f"and extract the main points or questions.\n"
-                    f"CRITICAL: Be sure to include the <@Discord_User_IDs> of the participants in your summary so the final responder knows exactly who said what, and clearly point out what the current topic is.\n"
-                    f"CRITICAL: When referring to the bot in your summary, speak directly to the final responder as 'YOU' (e.g. 'User <@ID> asked YOU a question'). Do NOT refer to the bot in the third person (like '<@{bot_id}>' or 'the bot') so the final responder doesn't get confused.\n\n"
-                    f"CRITICAL: DO NOT MAKE THINGS UP, IF YOU CAN'T SEE CONTENT OR A VIDEO OR DON'T KNOW SOMETHING, SAY SO. No hallucinating allowed!!!\n\n"
-                    f"CRITICAL: You are to act as a casual viewer to the conversation. Note if there is a place for another bot to interject to add to the current conversation from an outside perspective, but if you have nothing that would add or change the current conversation happening between others just return an empty response.\n\n"
-                    f"CRITICAL: Include relevant times and dates!\n\n"
-                    f"Provide a *detailed*, unfiltered, comprehensive briefing of information from the channel conversation, any relevant urls or summaries (summarized by you), "
-                    f"search results you found to do with the conversation, and who said what (YOU ARE *NOT* REPLYING IN THE CHANNEL -- you are SUMMARIZING THE CONVERSATION TO ANOTHER AI AGENT). "
-                    f"Another AI model will use this briefing to write the final response."
-                )
-                
-                logger.info("Hybrid phase 1 (Interject): Sending to Google-High for summary...")
-                summary_content, gemini_cost = await self._gemini_service.get_chat_completion(
-                    model="google-high",
-                    messages=chat_context,
-                    system_prompt=hybrid_summary_prompt,
-                    bot_id=bot_id,
-                    discord_user_id=context_messages[-1].author.id if context_messages else None,
-                    thinking_level=get_thinking_level("google-high"),
-                    disable_cache=True,
-                )
-
-                if summary_content:
-                    if isinstance(summary_content, dict) and "text" in summary_content:
-                        summary_text = summary_content["text"]
-                    else:
-                        summary_text = str(summary_content)
-
-                    # Phase 2: Haiku to write response
-                    logger.info("Hybrid phase 2 (Interject): Passing summary to Haiku...")
-                    haiku_messages = [
-                        {
-                            "role": "user",
-                            "content": [{
-                                "type": "text",
-                                "text": f"Here is the context and gathered search results for the current conversation. Please use this information to write an interjection to the channel. Remember your personality and instructions from the system prompt. CRITICAL: You ARE the bot in this conversation. If the summary refers to the bot or <@{bot_id}>, it is referring to YOU. Do not refer to yourself in the third person.\n\nContext & Search Results:\n{summary_text}"
-                            }]
-                        }
-                    ]
-
-                    reply_content, haiku_cost = await self._openai_service.get_chat_completion(
-                        model="anthropic/claude-haiku-4.5",
-                        messages=haiku_messages,
-                        system_prompt=system_prompt,
-                        bot_id=bot_id,
-                        discord_user_id=context_messages[-1].author.id if context_messages else None,
-                        search=False,
-                    )
-                    cost = gemini_cost + haiku_cost
-                else:
-                    reply_content = None
-                    cost = 0.0
-                    
-            elif is_gemini_model(model) and self._gemini_service:
-                reply_content, cost = await self._gemini_service.get_chat_completion(
-                    model=model,
-                    messages=chat_context,
-                    system_prompt=system_prompt,
-                    bot_id=bot_id,
-                    discord_user_id=context_messages[-1].author.id if context_messages else None,
-                    thinking_level=get_thinking_level(model),
-                )
-            else:
-                reply_content, cost = await self._openai_service.get_chat_completion(
-                    model=model,
-                    messages=chat_context,
-                    system_prompt=system_prompt,
-                    bot_id=bot_id,
-                    discord_user_id=context_messages[-1].author.id if context_messages else None,
-                )
+            reply_content, cost = await dispatch_completion(
+                model=model,
+                messages=chat_context,
+                system_prompt=system_prompt,
+                openai_service=self._openai_service,
+                gemini_service=self._gemini_service,
+                identity=identity,
+                hybrid=hybrid_cfg,
+                label="Interject",
+            )
 
             if reply_content is None:
                 logger.warning("Interject got None from AI, skipping")
