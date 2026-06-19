@@ -36,6 +36,15 @@ GEMINI_MODEL = "gemini-3.1-flash-lite"
 # How long before a channel's cached interaction ID expires (seconds)
 INTERACTION_CACHE_TTL = 600  # 10 minutes
 
+# Client-side request timeout (seconds). The google-genai SDK relies on the
+# injected httpx client's timeout, which otherwise defaults to httpx's 5s — far
+# too short for thinking models and the hybrid "google-high" web-search path.
+# Override with GEMINI_TIMEOUT_SECONDS.
+try:
+    REQUEST_TIMEOUT_SECONDS = float(os.environ.get("GEMINI_TIMEOUT_SECONDS", "120"))
+except ValueError:
+    REQUEST_TIMEOUT_SECONDS = 120.0
+
 
 class GeminiServiceError(Exception):
     """Custom exception for Gemini service errors."""
@@ -104,6 +113,7 @@ class GeminiService:
                     http_options=genai_types.HttpOptions(
                         httpxAsyncClient=create_async_client(
                             service_name="gemini",
+                            timeout=REQUEST_TIMEOUT_SECONDS,
                         ),
                     ),
                 )
