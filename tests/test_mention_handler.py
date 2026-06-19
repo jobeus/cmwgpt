@@ -339,7 +339,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         channel.history = history
 
-        with patch("src.bot.handlers.mention.logger.warning") as mock_warning:
+        with patch("src.utils.chat_context.logger.warning") as mock_warning:
             context, _ = await handler._prepare_mention_context(empty_msg, bot_user)
 
         self.assertIn("[Embeds:", context[0]["content"][0]["text"])
