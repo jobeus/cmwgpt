@@ -46,14 +46,29 @@ def _build_ydl_opts(file_prefix: str) -> dict:
 
 def _download_audio(url: str, ydl_opts: dict) -> tuple[Optional[str], Optional[dict]]:
     """Run yt-dlp and return (audio_file_path, info). Raises on failure."""
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        audio_file = ydl.prepare_filename(info)
-        # With the FFmpeg post-processor the real file is .mp3 even though
-        # prepare_filename may report the source container extension.
-        if not audio_file.endswith(".mp3"):
-            audio_file = os.path.splitext(audio_file)[0] + ".mp3"
-    return audio_file, info
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            audio_file = ydl.prepare_filename(info)
+            if not audio_file.endswith(".mp3"):
+                audio_file = os.path.splitext(audio_file)[0] + ".mp3"
+        return audio_file, info
+    except yt_dlp.utils.PostProcessingError as e:
+        # If ffprobe fails to find an audio codec, the format selected genuinely has no audio.
+        # This often happens on TikTok where H265 streams are misreported as having AAC.
+        # We retry explicitly forcing a fallback format.
+        if "unable to obtain file audio codec" in str(e):
+            logger.warning(f"Audio extraction failed for format. Retrying with strict h264 fallback for {url}")
+            fallback_opts = dict(ydl_opts)
+            # Force standard video formats which reliably contain audio streams
+            fallback_opts["format"] = "best[vcodec^=avc]/best[ext=mp4]/best"
+            with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                audio_file = ydl.prepare_filename(info)
+                if not audio_file.endswith(".mp3"):
+                    audio_file = os.path.splitext(audio_file)[0] + ".mp3"
+            return audio_file, info
+        raise
 
 
 def download_and_transcribe_video(url: str, cache, *, label: str, file_prefix: str) -> Optional[dict]:
