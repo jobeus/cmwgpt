@@ -32,7 +32,7 @@ def _delete_cache_entry(cache, key: str) -> None:
 
 def _build_ydl_opts(file_prefix: str) -> dict:
     return {
-        "format": "bestaudio/best",
+        "format": "bwa/bestaudio/best[vcodec=h264]/best",
         "outtmpl": os.path.join(tempfile.gettempdir(), f"{file_prefix}_%(id)s.%(ext)s"),
         "quiet": True,
         "no_warnings": True,
