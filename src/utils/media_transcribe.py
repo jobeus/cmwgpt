@@ -53,7 +53,8 @@ def _download_audio(url: str, ydl_opts: dict) -> tuple[Optional[str], Optional[d
             if not audio_file.endswith(".mp3"):
                 audio_file = os.path.splitext(audio_file)[0] + ".mp3"
         return audio_file, info
-    except yt_dlp.utils.PostProcessingError as e:
+    except Exception as e:
+        # yt-dlp wraps all post-processing exceptions in a DownloadError.
         # If ffprobe fails to find an audio codec, the format selected genuinely has no audio.
         # This often happens on TikTok where H265 streams are misreported as having AAC.
         # We retry explicitly forcing a fallback format.
