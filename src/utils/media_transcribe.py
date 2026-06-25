@@ -62,7 +62,7 @@ def _download_audio(url: str, ydl_opts: dict) -> tuple[Optional[str], Optional[d
             logger.warning(f"Audio extraction failed for format. Retrying with strict h264 fallback for {url}")
             fallback_opts = dict(ydl_opts)
             # Force standard video formats which reliably contain audio streams
-            fallback_opts["format"] = "best[vcodec^=avc]/best[ext=mp4]/best"
+            fallback_opts["format"] = "best[vcodec=h264]"
             with yt_dlp.YoutubeDL(fallback_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 audio_file = ydl.prepare_filename(info)

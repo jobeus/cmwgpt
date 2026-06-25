@@ -16,3 +16,4 @@ groq>=1.4.0
 google-genai>=2.9.0
 aiomysql>=0.3.2
 cryptography>=49.0.0
+curl_cffi>=0.7.1
