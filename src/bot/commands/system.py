@@ -67,8 +67,8 @@ class SystemCommands:
                     name="qwen/qwen3.5-flash-02-23",
                     value="qwen/qwen3.5-flash-02-23"),
                 Choice(
-                    name="anthropic/claude-haiku-4.5 (search, web aware)",
-                    value="anthropic/claude-haiku-4.5"),
+                    name="anthropic/claude-sonnet-5 (search, web aware)",
+                    value="anthropic/claude-sonnet-5"),
                 Choice(
                     name="google (gemini-3.1-flash-lite, search)",
                     value="google"),
@@ -76,7 +76,7 @@ class SystemCommands:
                     name="google-high (gemini-3.1-flash-lite, search, thinking)",
                     value="google-high"),
                 Choice(
-                    name="hybrid (google-high + haiku)",
+                    name="hybrid (google-high + sonnet)",
                     value="hybrid"),
             ])
         async def model_command(
@@ -339,7 +339,7 @@ class SystemCommands:
             "`/drawmodel [model]` - View or set the default image generation model\n"
             "`/editmodel [model]` - View or set the default image editing model\n\n"
             "**System & Settings:**\n"
-            "`/model [model]` - View or set the AI language model (e.g., anthropic/claude-haiku-4.5)\n"
+            "`/model [model]` - View or set the AI language model (e.g., anthropic/claude-sonnet-5)\n"
             "`/systemprompt set [prompt]` - Set a custom AI personality for this channel\n"
             "`/systemprompt view` - View the current custom personality\n"
             "`/systemprompt reset` - Return to the default personality\n\n"

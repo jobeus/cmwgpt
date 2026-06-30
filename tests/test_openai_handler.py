@@ -38,7 +38,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         mock_response.choices = [mock_choice]
         self.mock_client.chat.completions.create.return_value = mock_response
 
-        model = "anthropic/claude-haiku-4.5"
+        model = "anthropic/claude-sonnet-5"
         messages = [{"role": "user", "content": "Hello"}]
         system_prompt = "You are a helpful assistant."
 

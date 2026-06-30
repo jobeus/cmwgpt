@@ -29,7 +29,7 @@ These are loaded by `src/config.py`.
 | `GEMINI_API_KEY` | empty | For `google`/`google-high`/`hybrid` models | Native Gemini (`GeminiService`) requests |
 | `GEMINI_TIMEOUT_SECONDS` | `120` | No | Client-side request timeout for Gemini calls |
 | `RUNPOD_IO_API_KEY` | empty | For image commands | Used by draw/edit flows |
-| `DEFAULT_MODEL` | `anthropic/claude-haiku-4.5` | No | Fallback text model |
+| `DEFAULT_MODEL` | `anthropic/claude-sonnet-5` | No | Fallback text model |
 | `DEFAULT_DRAW_MODEL` | `seedream` | No | Default draw model key |
 | `DEFAULT_EDIT_MODEL` | `seedream` | No | Default edit model key |
 | `INCLUDE_USERNAMES` | `true` | No | Include usernames in prompt context |

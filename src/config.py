@@ -96,7 +96,7 @@ def load_config(
         db_user=source.get("DB_USER", "cmwgpt_user"),
         db_password=source.get("DB_PASSWORD", ""),
         db_name=source.get("DB_NAME", "cmwgpt"),
-        default_model=source.get("DEFAULT_MODEL", "anthropic/claude-haiku-4.5"),
+        default_model=source.get("DEFAULT_MODEL", "anthropic/claude-sonnet-5"),
         default_draw_model=source.get("DEFAULT_DRAW_MODEL", "seedream"),
         default_edit_model=source.get("DEFAULT_EDIT_MODEL", "seedream"),
         include_usernames=_read_bool(source.get("INCLUDE_USERNAMES"), True),

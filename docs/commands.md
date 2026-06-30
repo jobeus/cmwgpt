@@ -47,10 +47,10 @@ Current choices exposed in code:
 | `bytedance-seed/seed-2.0-mini` | via OpenRouter |
 | `bytedance-seed/seed-1.6-flash` | via OpenRouter |
 | `qwen/qwen3.5-flash-02-23` | via OpenRouter |
-| `anthropic/claude-haiku-4.5` | search / web aware (via OpenRouter) |
+| `anthropic/claude-sonnet-5` | search / web aware (via OpenRouter) |
 | `google` | native Gemini (`gemini-3.1-flash-lite`, search) |
 | `google-high` | native Gemini (`gemini-3.1-flash-lite`, search, thinking) |
-| `hybrid` | two-phase: `google-high` gathers context, then `claude-haiku-4.5` writes the reply |
+| `hybrid` | two-phase: `google-high` gathers context, then `claude-sonnet-5` writes the reply |
 
 `google`/`google-high`/`hybrid` route through `GeminiService` (and, for `hybrid`,
 also `OpenAIService`); the rest route through `OpenAIService` → OpenRouter. The

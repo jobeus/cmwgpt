@@ -4,7 +4,7 @@ The mention handler and the interject service both turn a prepared message
 array into a reply by routing across the same three paths:
 
 * ``hybrid``      — phase 1 ``google-high`` (Gemini) summarises + web-searches,
-                    phase 2 Haiku (OpenRouter) writes the final reply;
+                    phase 2 Sonnet (OpenRouter) writes the final reply;
 * a Gemini model  — single Gemini call;
 * anything else   — single OpenRouter call.
 
@@ -80,20 +80,20 @@ async def dispatch_completion(
             else:
                 summary_text = str(summary_content)
 
-            # Phase 2: Haiku to write the reply from the briefing
-            logger.info(f"Hybrid phase 2{tag}: Passing summary to Haiku...")
+            # Phase 2: Sonnet to write the reply from the briefing
+            logger.info(f"Hybrid phase 2{tag}: Passing summary to Sonnet...")
             phase2_messages = [{
                 "role": "user",
                 "content": [{"type": "text", "text": hybrid.build_phase2_text(summary_text)}],
             }]
-            reply_content, haiku_cost = await openai_service.get_chat_completion(
-                model="anthropic/claude-haiku-4.5",
+            reply_content, sonnet_cost = await openai_service.get_chat_completion(
+                model="anthropic/claude-sonnet-5",
                 messages=phase2_messages,
                 system_prompt=hybrid.phase2_system_prompt,
                 search=False,
                 **identity,
             )
-            cost = gemini_cost + haiku_cost
+            cost = gemini_cost + sonnet_cost
 
     elif is_gemini_model(model) and gemini_service:
         reply_content, cost = await gemini_service.get_chat_completion(
