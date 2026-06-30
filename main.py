@@ -39,13 +39,6 @@ def setup_signal_handlers(bot_client):
                 except Exception as e:
                     logger.error(f"Error stopping auto-update service: {e}")
 
-                # Stop interject service (synchronous)
-                try:
-                    bot_client.services.interject_service.stop()
-                    logger.info("Interject service stopped")
-                except Exception as e:
-                    logger.error(f"Error stopping interject service: {e}")
-
                 # Stop death service (synchronous)
                 try:
                     bot_client.services.death_service.stop()

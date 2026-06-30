@@ -23,10 +23,6 @@ The bot's main chat experience is **mention-based**:
 | `/drawmodel` | Sets the draw model | persisted per channel |
 | `/edit` | Edits an uploaded image | uses current edit model |
 | `/editmodel` | Sets the edit model | persisted per channel |
-| `/interject set` | Configures bot interjection behavior | persisted per channel/service state |
-| `/interject view` | Shows interjection settings | reads persisted state |
-| `/interject reset` | Restores default interjection settings | persisted reset |
-| `/interject count` | Shows current interjection counters/status | runtime/service state |
 | `/death set` | Configures deathwatch behavior | persisted service state |
 | `/death view` | Shows deathwatch settings | reads persisted state |
 | `/death reset` | Restores default deathwatch settings | persisted reset |
@@ -85,32 +81,6 @@ when Runpod models are enabled):
 | `/draw`, `/drawmodel` | `seedream`, `z-image`, `wan-2.6`, `pruna`, `qwen`, `flux` |
 | `/edit`, `/editmodel` | `seedream`, `qwen`, `pruna` |
 
-## Interject commands
-
-The interject feature lets the bot occasionally speak without being directly mentioned when a channel is active enough.
-
-### `/interject set`
-
-Parameters currently exposed in code:
-
-| Parameter | Meaning |
-| --- | --- |
-| `chance` | Percentage chance (0-100) to interject when conditions are met |
-| `cooldown` | Per-channel cooldown in minutes after an interjection or failed roll |
-| `min_messages` | Minimum qualifying messages in the activity window to trigger |
-| `min_authors` | Minimum number of distinct non-bot authors in the qualifying streak |
-| `window_mins` | Only messages within this many minutes from now count |
-| `context_lines` | How many recent messages to include as AI context |
-| `daily_max` | Daily cap on interjections per channel |
-| `exclude_embeds` | Whether messages with embeds/attachments break the streak |
-
-### Other interject subcommands
-
-| Subcommand | Meaning |
-| --- | --- |
-| `view` | Show current settings |
-| `reset` | Restore defaults |
-| `count` | Show runtime counters/status |
 
 ## Death commands
 
@@ -154,6 +124,5 @@ Most command-driven settings are persisted through `StateService`, which means m
 | --- | --- |
 | `src/bot/commands/system.py` | `/help`, `/model`, `/systemprompt`, `/restart` |
 | `src/bot/commands/image.py` | `/draw`, `/drawmodel`, `/edit`, `/editmodel` |
-| `src/bot/commands/interject.py` | `/interject ...` |
 | `src/bot/commands/death.py` | `/death ...` |
 | `src/bot/commands/wikicount.py` | `/wikicount` |

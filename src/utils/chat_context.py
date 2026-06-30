@@ -1,6 +1,6 @@
 """Shared multimodal chat-context builder for Discord message history.
 
-Both the mention handler and the interject service turn a list of
+The mention handler turns a list of
 ``discord.Message`` objects into the native multimodal ``messages`` array
 expected by the chat-completion services (text prefixed with timestamp/ID/sender,
 reply resolution, embed text, image attachments, audio transcription, embed
@@ -44,8 +44,7 @@ async def build_chat_context(
         transcriber: Async audio attachment -> transcript text (or ``None``).
         url_content_fetcher: Optional async ``text -> (extra_text, image_parts)``.
             When provided, user messages are enriched with fetched URL content
-            (the mention path); when ``None`` the enrichment is skipped (the
-            interject path).
+            (the mention path); when ``None`` the enrichment is skipped.
     """
     chat_context: List[Dict[str, Any]] = []
 

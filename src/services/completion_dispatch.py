@@ -1,6 +1,6 @@
 """Shared model-routing for chat completions.
 
-The mention handler and the interject service both turn a prepared message
+The mention handler turns a prepared message
 array into a reply by routing across the same three paths:
 
 * ``hybrid``      — phase 1 ``google-high`` (Gemini) summarises + web-searches,

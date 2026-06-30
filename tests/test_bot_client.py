@@ -47,7 +47,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
             restart_handler=MagicMock(),
             auto_update_service=MagicMock(),
             announcement_service=MagicMock(),
-            interject_service=MagicMock(),
             death_service=MagicMock(),
         )
         client.services.queue_service.start = AsyncMock()
@@ -57,9 +56,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         client.services.auto_update_service.get_status = MagicMock(
             return_value={"enabled": False, "check_interval": 60}
         )
-        client.services.interject_service.start = MagicMock()
-        client.services.interject_service.stop = MagicMock()
-        client.services.interject_service.on_new_message = AsyncMock()
         client.services.death_service.start = MagicMock()
         client.services.death_service.stop = MagicMock()
         client.services.announcement_service.announce_update = AsyncMock()
@@ -84,7 +80,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
             await client._handle_message(message)
 
         client.mention_handler.queue_mention.assert_not_awaited()
-        client.services.interject_service.on_new_message.assert_not_awaited()
         client.bot.process_commands.assert_not_awaited()
 
     async def test_handle_message_ignores_non_text_channels(self):
@@ -99,7 +94,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
             await client._handle_message(message)
 
         client.mention_handler.queue_mention.assert_not_awaited()
-        client.services.interject_service.on_new_message.assert_not_awaited()
         client.bot.process_commands.assert_not_awaited()
 
     async def test_handle_message_queues_mention_with_channel_model(self):
@@ -118,7 +112,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         client.mention_handler.queue_mention.assert_awaited_once_with(
             message, bot_user, "channel-model"
         )
-        client.services.interject_service.on_new_message.assert_awaited_once_with(message)
         client.bot.process_commands.assert_awaited_once_with(message)
 
     async def test_handle_message_uses_default_model_fallback(self):
@@ -148,7 +141,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
             await client._handle_message(message)
 
         client.mention_handler.queue_mention.assert_not_awaited()
-        client.services.interject_service.on_new_message.assert_awaited_once_with(message)
         client.bot.process_commands.assert_awaited_once_with(message)
 
     async def test_send_update_announcement_skips_without_active_channels(self):
@@ -197,7 +189,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         client.bot.tree.sync.assert_awaited_once_with(guild=guild_arg)
         client.services.queue_service.start.assert_awaited_once_with()
         client.services.auto_update_service.start.assert_called_once_with()
-        client.services.interject_service.start.assert_called_once_with()
         client.services.death_service.start.assert_called_once_with()
         client._send_update_announcement_if_needed.assert_awaited_once_with()
 
@@ -237,7 +228,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
             restart_handler=MagicMock(),
             auto_update_service=MagicMock(),
             announcement_service=MagicMock(),
-            interject_service=MagicMock(),
             death_service=MagicMock(),
             message_service=MagicMock(),
             paste_service=MagicMock(),
@@ -251,8 +241,8 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         ), patch.object(DiscordBotClient, "_get_current_git_sha", return_value="abc123"), patch(
             "src.bot.client.ImageCommands"
         ) as mock_image, patch("src.bot.client.SystemCommands") as mock_system, patch(
-            "src.bot.client.InterjectCommands"
-        ) as mock_interject, patch("src.bot.client.DeathCommands") as mock_death:
+            "src.bot.client.DeathCommands"
+        ) as mock_death:
             client = DiscordBotClient(config=config, services=services)
 
         self.assertIs(client.bot, fake_bot)
@@ -265,11 +255,9 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
             services.restart_handler.perform_restart
         )
         services.announcement_service.set_bot.assert_called_once_with(fake_bot)
-        services.interject_service.set_bot.assert_called_once_with(fake_bot)
         services.death_service.set_bot.assert_called_once_with(fake_bot)
         mock_image.return_value.setup_commands.assert_called_once_with()
         mock_system.return_value.setup_commands.assert_called_once_with()
-        mock_interject.return_value.setup_commands.assert_called_once_with()
         mock_death.return_value.setup_commands.assert_called_once_with()
 
     async def test_check_for_restart_info_reads_manual_restart_from_state_files(self):
@@ -305,7 +293,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         client.services = SimpleNamespace(
             restart_handler=MagicMock(),
             auto_update_service=MagicMock(),
-            interject_service=MagicMock(),
             death_service=MagicMock(),
             queue_service=MagicMock(),
         )
@@ -319,7 +306,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
                 client.run()
 
         client.services.auto_update_service.stop.assert_called_once_with()
-        client.services.interject_service.stop.assert_called_once_with()
         client.services.death_service.stop.assert_called_once_with()
         client.services.queue_service.stop.assert_called_once_with()
         mock_create_task.assert_called_once()
@@ -332,7 +318,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         client.services = SimpleNamespace(
             restart_handler=MagicMock(),
             auto_update_service=MagicMock(),
-            interject_service=MagicMock(),
             death_service=MagicMock(),
             queue_service=MagicMock(),
         )

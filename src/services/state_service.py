@@ -55,8 +55,7 @@ class StateService:
                 'draw_model': None,
                 'edit_model': None,
                 'system_prompt': None,
-                'response_id': None,
-                'interject_settings': None
+                'response_id': None
             }
 
     def get_conversation(
@@ -96,8 +95,7 @@ class StateService:
                             channel_data['draw_model'],
                             channel_data['edit_model'],
                             channel_data['system_prompt'],
-                            channel_data['response_id'],
-                            channel_data.get('interject_settings')]):
+                            channel_data['response_id']]):
                     # Remove the entire channel entry if no other data exists
                     del self._channel_data[channel_id]
                 else:
@@ -227,28 +225,7 @@ class StateService:
             return {k: v['system_prompt'] for k,
                     v in self._channel_data.items() if v['system_prompt']}
 
-    # Interject settings management
-    def get_interject_settings(self, channel_id: int) -> Optional[Dict[str, Any]]:
-        """Get the interject settings for a channel."""
-        with self._channel_data_lock:
-            return self._channel_data.get(channel_id, {}).get('interject_settings')
 
-    def set_interject_settings(self, channel_id: int, settings: Dict[str, Any]) -> None:
-        """Set the interject settings for a channel."""
-        with self._channel_data_lock:
-            self._ensure_channel_data(channel_id)
-            self._channel_data[channel_id]['interject_settings'] = settings.copy()
-            logger.debug(f"Set interject settings for channel {channel_id}")
-        self._save_settings()
-
-    def clear_interject_settings(self, channel_id: int) -> None:
-        """Clear the interject settings for a channel."""
-        with self._channel_data_lock:
-            if channel_id in self._channel_data:
-                self._channel_data[channel_id]['interject_settings'] = None
-                logger.debug(f"Cleared interject settings for channel {channel_id}")
-        self._save_settings()
-                
     # Death settings management (global)
     def get_death_settings(self) -> Optional[Dict[str, Any]]:
         """Get the global death settings."""
@@ -284,9 +261,7 @@ class StateService:
                     'model': None,
                     'draw_model': None,
                     'edit_model': None,
-                    'system_prompt': None,
-                    'response_id': None,
-                    'interject_settings': None
+                    'response_id': None
                 }
             return self._channel_data[channel_id].copy()
 
@@ -309,9 +284,8 @@ class StateService:
                     'edit_model',
                     'system_prompt',
                     'response_id',
-                    'interject_settings',
                 ]:
-                    if field in ['conversation', 'interject_settings'] and isinstance(value, (list, dict)):
+                    if field in ['conversation'] and isinstance(value, (list, dict)):
                         self._channel_data[channel_id][field] = value.copy() if value is not None else None
                     else:
                         self._channel_data[channel_id][field] = value
@@ -608,7 +582,7 @@ class StateService:
                     "draw_models": {str(k): v['draw_model'] for k, v in self._channel_data.items() if v.get('draw_model')},
                     "edit_models": {str(k): v['edit_model'] for k, v in self._channel_data.items() if v.get('edit_model')},
                     "system_prompts": {str(k): v['system_prompt'] for k, v in self._channel_data.items() if v.get('system_prompt')},
-                    "interject_settings": {str(k): v['interject_settings'] for k, v in self._channel_data.items() if v.get('interject_settings')},
+
                     "death_settings": self._death_settings,
                 }
             
@@ -651,11 +625,7 @@ class StateService:
                     self._ensure_channel_data(int(k))
                     self._channel_data[int(k)]['system_prompt'] = v
                     
-                # Load interject_settings
-                for k, v in settings_data.get("interject_settings", {}).items():
-                    self._ensure_channel_data(int(k))
-                    self._channel_data[int(k)]['interject_settings'] = v
-                    
+
                 # Load death_settings
                 self._death_settings = settings_data.get("death_settings")
                 

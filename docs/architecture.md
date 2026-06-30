@@ -111,26 +111,26 @@ flowchart TB
     Factory --> Restart[RestartHandler]:::aux
     Factory --> AutoUpdate[AutoUpdateService]:::aux
     Factory --> Announce[AnnouncementService]:::aux
-    Factory --> Interject[InterjectService]:::aux
+
     Factory --> Death[DeathService]:::aux
     Factory --> Mention[MentionHandler]:::svc
 
-    State --> Interject
+
     State --> Death
     State --> Mention
     Queue --> Mention
-    OpenAI --> Interject
+
     OpenAI --> Mention
-    Gemini --> Interject
+
     Gemini --> Mention
-    Message --> Interject
+
     Message --> Mention
 
     Startup --> Client[DiscordBotClient]:::core
     Client --> Mention
     Client --> AutoUpdate
     Client --> Announce
-    Client --> Interject
+
     Client --> Death
 ```
 
@@ -182,7 +182,7 @@ sequenceDiagram
 ### What matters about this flow
 
 - Mentions are **queued**, not processed in parallel ad hoc.
-- Prompt context is more than just the latest message: it includes recent history, reply metadata, embeds, and attachments. The multimodal context array is built by `src/utils/chat_context.py` (`build_chat_context`), shared with the interject service.
+- Prompt context is more than just the latest message: it includes recent history, reply metadata, embeds, and attachments. The multimodal context array is built by `src/utils/chat_context.py` (`build_chat_context`).
 - Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `hybrid` runs a two-phase Gemini-then-OpenRouter pipeline, and everything else goes to `OpenAIService`.
 - URL enrichment happens **before** the LLM call and can materially change the prompt content.
 - Logging is first-class: downloader and model activity both emit records consumed later by the log viewer.
@@ -261,8 +261,8 @@ flowchart LR
 | `src/bot/client.py` | Discord client orchestration | See event handlers, command setup, service startup/shutdown |
 | `src/bot/handlers/mention.py` | Main conversational path | Debug context assembly or mention behavior |
 | `src/bot/commands/` | Slash commands | Inspect user-facing command behavior |
-| `src/utils/chat_context.py` | Multimodal context builder | Change how history/embeds/attachments become the model input (shared by mention + interject) |
-| `src/services/completion_dispatch.py` | Model routing | Understand hybrid/Gemini/OpenRouter selection (shared by mention + interject) |
+| `src/utils/chat_context.py` | Multimodal context builder | Change how history/embeds/attachments become the model input |
+| `src/services/completion_dispatch.py` | Model routing | Understand hybrid/Gemini/OpenRouter selection |
 | `src/services/openai_service.py` | Text-model integration | Understand OpenRouter calls |
 | `src/services/gemini_service.py` | Native Gemini integration | Understand `google`/`google-high`/`hybrid` calls and the Gemini timeout |
 | `src/services/runpod_service.py` | Image integration | Understand draw/edit requests |

@@ -8,7 +8,6 @@ from src.config import AppConfig, get_system_prompt, load_config
 from src.services.announcement_service import AnnouncementService
 from src.services.auto_update_service import AutoUpdateService
 from src.services.death_service import DeathService
-from src.services.interject_service import InterjectService
 from src.services.message_service import MessageService
 from src.services.openai_service import OpenAIService
 from src.services.gemini_service import GeminiService
@@ -32,7 +31,6 @@ class AppServices:
     restart_handler: RestartHandler
     auto_update_service: AutoUpdateService
     announcement_service: AnnouncementService
-    interject_service: InterjectService
     death_service: DeathService
     mention_handler: MentionHandler
 
@@ -57,14 +55,6 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         state_service=state_service,
         paste_service=paste_service,
         quiet_updates=app_config.quiet_updates,
-    )
-    interject_service = InterjectService(
-        state_service=state_service,
-        openai_service=openai_service,
-        gemini_service=gemini_service,
-        message_service=message_service,
-        system_prompt_loader=lambda: get_system_prompt(app_config.system_prompt_path),
-        default_model=app_config.default_model,
     )
     death_service = DeathService(
         state_service=state_service,
@@ -91,7 +81,6 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         restart_handler=restart_handler,
         auto_update_service=auto_update_service,
         announcement_service=announcement_service,
-        interject_service=interject_service,
         death_service=death_service,
         mention_handler=mention_handler,
     )

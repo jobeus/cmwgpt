@@ -101,7 +101,6 @@ Examples:
 
 ```bash
 .venv/bin/python -m pytest tests/test_state_service.py
-.venv/bin/python -m pytest tests/test_interject_service.py
 ```
 
 ### Working on the frontend

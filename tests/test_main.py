@@ -32,14 +32,12 @@ def make_bot_client():
     services = SimpleNamespace(
         restart_handler=MagicMock(),
         auto_update_service=MagicMock(),
-        interject_service=MagicMock(),
         death_service=MagicMock(),
         queue_service=MagicMock(),
         openai_service=MagicMock(),
     )
     services.restart_handler.perform_graceful_shutdown = AsyncMock()
     services.auto_update_service.stop = MagicMock()
-    services.interject_service.stop = MagicMock()
     services.death_service.stop = MagicMock()
     services.queue_service.stop = AsyncMock()
     services.openai_service.close = AsyncMock()
@@ -75,7 +73,6 @@ class TestMainSignalHandlers(unittest.TestCase):
 
         bot_client.services.restart_handler.perform_graceful_shutdown.assert_awaited_once_with()
         bot_client.services.auto_update_service.stop.assert_called_once_with()
-        bot_client.services.interject_service.stop.assert_called_once_with()
         bot_client.services.death_service.stop.assert_called_once_with()
         bot_client.services.queue_service.stop.assert_awaited_once_with()
         bot_client.services.openai_service.close.assert_awaited_once_with()
@@ -109,7 +106,6 @@ class TestMainSignalHandlers(unittest.TestCase):
         with patch("main.asyncio.get_event_loop", return_value=FakeStoppedLoop()):
             handlers[signal.SIGTERM](signal.SIGTERM, None)
 
-        bot_client.services.interject_service.stop.assert_called_once_with()
         bot_client.services.death_service.stop.assert_called_once_with()
         bot_client.services.queue_service.stop.assert_awaited_once_with()
         bot_client.services.openai_service.close.assert_awaited_once_with()
@@ -117,7 +113,6 @@ class TestMainSignalHandlers(unittest.TestCase):
 
     def test_shutdown_logs_and_continues_when_remaining_services_raise(self):
         bot_client = make_bot_client()
-        bot_client.services.interject_service.stop.side_effect = RuntimeError("interject boom")
         bot_client.services.death_service.stop.side_effect = RuntimeError("death boom")
         bot_client.services.queue_service.stop.side_effect = RuntimeError("queue boom")
         bot_client.services.openai_service.close.side_effect = RuntimeError("openai boom")
@@ -130,7 +125,6 @@ class TestMainSignalHandlers(unittest.TestCase):
         with patch("main.asyncio.get_event_loop", return_value=FakeStoppedLoop()), patch("builtins.print") as mock_print:
             handlers[signal.SIGTERM](signal.SIGTERM, None)
 
-        bot_client.services.interject_service.stop.assert_called_once_with()
         bot_client.services.death_service.stop.assert_called_once_with()
         bot_client.services.queue_service.stop.assert_awaited_once_with()
         bot_client.services.openai_service.close.assert_awaited_once_with()

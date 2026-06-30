@@ -13,7 +13,6 @@ from discord.ext import commands
 from src.config import AppConfig, get_system_prompt, load_config
 from src.bot.commands.image import ImageCommands
 from src.bot.commands.system import SystemCommands
-from src.bot.commands.interject import InterjectCommands
 from src.bot.commands.death import DeathCommands
 from src.bot.commands.wikicount import WikiCountCommands
 
@@ -52,8 +51,6 @@ class DiscordBotClient:
         # Set up announcement service
         self.services.announcement_service.set_bot(self.bot)
 
-        # Set up interject service
-        self.services.interject_service.set_bot(self.bot)
 
         # Set up death service
         self.services.death_service.set_bot(self.bot)
@@ -215,8 +212,6 @@ class DiscordBotClient:
             # Start the auto-update service
             self.services.auto_update_service.start()
 
-            # Start the interject service
-            self.services.interject_service.start()
 
             # Start the death service
             self.services.death_service.start()
@@ -268,12 +263,6 @@ class DiscordBotClient:
         )
         system_commands.setup_commands()
 
-        interject_commands = InterjectCommands(
-            self.bot,
-            state_service_instance=self.services.state_service,
-            interject_service=self.services.interject_service,
-        )
-        interject_commands.setup_commands()
 
         death_commands = DeathCommands(
             self.bot,
@@ -334,8 +323,6 @@ class DiscordBotClient:
                 # await mention_handler.handle_mention(message, self.bot.user,
                 # model)
 
-        # Check for interjection opportunity (event-driven, no polling)
-        await self.services.interject_service.on_new_message(message)
 
         # Ensure other commands are still processed
         await self.bot.process_commands(message)
@@ -367,7 +354,6 @@ class DiscordBotClient:
                         f"Error shutting down auto-update service: {e}")
 
                 try:
-                    self.services.interject_service.stop()
                     self.services.death_service.stop()
                     logger.info("Background services stopped")
                 except Exception as e:

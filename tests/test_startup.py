@@ -35,7 +35,6 @@ class TestStartupIntegration(unittest.TestCase):
         self.assertIs(services.message_service._paste_service, services.paste_service)
         self.assertIs(services.auto_update_service._queue_service, services.queue_service)
         self.assertIs(services.announcement_service._state_service, services.state_service)
-        self.assertIs(services.interject_service._message_service, services.message_service)
         self.assertIs(services.death_service._state_service, services.state_service)
         self.assertIs(services.mention_handler._queue_service, services.queue_service)
         self.assertEqual(services.death_service._death_channel_id, "999")

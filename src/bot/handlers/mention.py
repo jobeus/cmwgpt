@@ -90,8 +90,8 @@ class MentionHandler:
                         f"and extract the main points or questions.\n"
                         f"CRITICAL: Be sure to include the <@Discord_User_IDs> of the participants in your summary so the final responder knows exactly who said what, and clearly point out who is asking what question or mentioning the bot at the very end of the chat log.\n"
                         f"CRITICAL: When referring to the bot in your summary, speak directly to the final responder as 'YOU' (e.g. 'User <@ID> asked YOU a question'). Do NOT refer to the bot in the third person (like '<@{bot_user.id}>' or 'the bot') so the final responder doesn't get confused.\n\n"
+                        f"CRITICAL: Explain what YOU, i.e. '<@{bot_id}>' has already responded to so we don't get 3 replies in a row about the same answer. You can mention you've responded to X Y Z before for context but don't imply we need another answer to the same thing!"
                         f"CRITICAL: DO NOT MAKE THINGS UP, IF YOU CAN'T SEE CONTENT OR A VIDEO OR DON'T KNOW SOMETHING, SAY SO. No hallucinating allowed!!!\n\n"
-                        f"CRITICAL: If no one is mentioning you (No <@{bot_user.id}> in the preceding few lines, you're to act as a casual viewer to the conversation. Interject if you have something to add to the current conversation, but feel free to stay silent and return an empty response if you have nothing that would add or change the current conversation happening between others)\n\n"
                         f"CRITICAL: Include relevant times and dates!\n\n"
                         f"Provide a *detailed*, unfiltered, comprehensive briefing of information from the channel conversation, any relevant urls or summaries (summarized by you), "
                         f"search results you found to do with the conversation + mention, and who asked what (YOU ARE *NOT* REPLYING IN THE CHANNEL -- you are SUMMARIZING THE CONVERSATION TO ANOTHER AI AGENT). "
@@ -100,7 +100,7 @@ class MentionHandler:
                     hybrid_cfg = HybridConfig(
                         summary_prompt=hybrid_summary_prompt,
                         phase2_system_prompt=load_system_prompt(prompt_path="system_prompt_hybrid.txt"),
-                        build_phase2_text=lambda s: f"Here is the context and gathered search results for the current conversation. Please use this information to write the final response to the channel. Remember your personality from the system prompt. CRITICAL: You ARE the bot in this conversation. If the summary refers to the bot or <@{bot_user.id}>, it is referring to YOU. Do not refer to yourself in the third person.\n\nContext & Search Results:\n{s}",
+                        build_phase2_text=lambda s: f"Here is the context and gathered search results for the current conversation. Please use this information to write the final response to the channel. Remember your personality from the system prompt. CRITICAL: You ARE the bot in this conversation. If the summary refers to YOU, the bot, or <@{bot_user.id}>, it is referring to YOU. Do not refer to yourself in the third person.\n\nContext & Search Results from Chat Summarization Agent:\n{s}",
                     )
 
                 reply_content, cost = await dispatch_completion(

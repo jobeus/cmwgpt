@@ -353,26 +353,22 @@ class TestStateService(unittest.TestCase):
             if os.path.exists(temp_file):
                 os.remove(temp_file)
 
-    def test_draw_edit_interject_death_active_and_git_sha_management(self):
+    def test_draw_edit_death_active_and_git_sha_management(self):
         self.state_service.set_draw_model(1, "draw-model")
         self.state_service.set_edit_model(1, "edit-model")
-        self.state_service.set_interject_settings(1, {"chance": 10})
         self.state_service.set_death_settings({"interval": 30})
         self.state_service.mark_channel_active(1)
         self.state_service.set_last_git_sha("abc123")
 
         self.assertEqual(self.state_service.get_draw_model(1), "draw-model")
         self.assertEqual(self.state_service.get_edit_model(1), "edit-model")
-        self.assertEqual(self.state_service.get_interject_settings(1), {"chance": 10})
         self.assertEqual(self.state_service.get_death_settings(), {"interval": 30})
         self.assertEqual(self.state_service.get_active_channels(), {1})
         self.assertEqual(self.state_service.get_last_git_sha(), "abc123")
 
-        self.state_service.clear_interject_settings(1)
         self.state_service.clear_death_settings()
         self.state_service.clear_active_channels()
 
-        self.assertIsNone(self.state_service.get_interject_settings(1))
         self.assertIsNone(self.state_service.get_death_settings())
         self.assertEqual(self.state_service.get_active_channels(), set())
 
@@ -385,7 +381,6 @@ class TestStateService(unittest.TestCase):
             edit_model="qwen",
             system_prompt="be helpful",
             response_id="resp-1",
-            interject_settings={"chance": 25},
             ignored_field="nope",
         )
 
@@ -394,7 +389,6 @@ class TestStateService(unittest.TestCase):
         self.assertEqual(context["draw_model"], "seedream")
         self.assertEqual(context["edit_model"], "qwen")
         self.assertEqual(context["response_id"], "resp-1")
-        self.assertEqual(context["interject_settings"], {"chance": 25})
 
         missing = self.state_service.get_channel_context(999)
         self.assertIsNone(missing["conversation"])
@@ -422,7 +416,6 @@ class TestStateService(unittest.TestCase):
         self.state_service.set_edit_model(1, "qwen")
         self.state_service.set_system_prompt(1, "be helpful")
         self.state_service.set_response_id(1, "resp-1")
-        self.state_service.set_interject_settings(1, {"chance": 10})
         self.state_service.set_death_settings({"interval": 30})
         self.state_service.mark_channel_active(1)
         self.state_service.set_last_git_sha("abc123")
