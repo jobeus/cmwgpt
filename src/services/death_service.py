@@ -172,7 +172,8 @@ class DeathService:
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
-                headers={"Api-User-Agent": USER_AGENT, "User-Agent": USER_AGENT}
+                headers={"Api-User-Agent": USER_AGENT, "User-Agent": USER_AGENT},
+                timeout=aiohttp.ClientTimeout(total=30, sock_connect=10),
             )
         return self._session
 
@@ -184,6 +185,8 @@ class DeathService:
                     await self._poll_once()
                 except asyncio.CancelledError:
                     raise
+                except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                    logger.warning(f"Network error during death-page poll: {exc}")
                 except Exception:
                     logger.exception("Error during death-page poll")
 
