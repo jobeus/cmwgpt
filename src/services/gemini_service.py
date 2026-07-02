@@ -280,6 +280,33 @@ class GeminiService:
             logger.warning(f"Failed to estimate Gemini cost: {e}")
             return 0.0
 
+    def _estimate_image_cost(self, usage_metadata: Any, model: str) -> float:
+        """Estimate cost from GenerateContent API usage metadata for image models."""
+        if not usage_metadata:
+            return 0.0
+
+        try:
+            input_tokens = getattr(usage_metadata, 'prompt_token_count', 0) or 0
+            output_tokens = getattr(usage_metadata, 'candidates_token_count', 0) or 0
+
+            # Default rates for gemini-3.1-flash-image
+            price_input = 0.25
+            price_output = 30.0
+
+            if model == "gemini-3-pro-image":
+                price_input = 2.00
+                price_output = 120.0
+
+            input_cost = input_tokens * price_input / 1_000_000
+            output_cost = output_tokens * price_output / 1_000_000
+
+            cost = input_cost + output_cost
+            logger.info(f"[gemini/image] Usage: {input_tokens} input, {output_tokens} output. Estimated cost: ${cost:.4f}")
+            return cost
+        except Exception as e:
+            logger.warning(f"Failed to estimate Gemini image cost: {e}")
+            return 0.0
+
     async def get_chat_completion(
         self,
         *,
@@ -527,7 +554,7 @@ class GeminiService:
             
         for part in response.candidates[0].content.parts:
             if part.inline_data and part.inline_data.data:
-                cost = self._estimate_cost(getattr(response, 'usage', None))
+                cost = self._estimate_image_cost(getattr(response, 'usage_metadata', None), model)
                 return part.inline_data.data, cost
                 
         raise GeminiServiceError("No inline_data image returned from Gemini.")
