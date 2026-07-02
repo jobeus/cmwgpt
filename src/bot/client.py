@@ -247,6 +247,7 @@ class DiscordBotClient:
             state_service=self.services.state_service,
             message_service=self.services.message_service,
             runpod_service=self.services.runpod_service,
+            gemini_service=self.services.gemini_service,
             default_draw_model=self.config.default_draw_model,
             default_edit_model=self.config.default_edit_model,
             enable_runpod_models=bool(self.config.runpod_io_api_key),

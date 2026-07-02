@@ -482,6 +482,70 @@ class GeminiService:
         """Clean up resources."""
         self._client = None
 
+    async def generate_image(
+        self,
+        prompt: str,
+        model: str,
+        images_b64: Optional[List[str]] = None,
+        discord_user_id: Optional[int] = None,
+        discord_channel_id: Optional[int] = None
+    ) -> tuple[bytes, Optional[float]]:
+        """
+        Generate an image using Gemini Models.
+        """
+        client = self._get_client()
+        
+        from google.genai import types
+        
+        parts = []
+        if images_b64:
+            for b64 in images_b64:
+                parts.append(
+                    types.Part.from_bytes(
+                        data=base64.b64decode(b64),
+                        mime_type="image/jpeg"
+                    )
+                )
+        
+        # Add the text prompt
+        parts.append(types.Part.from_text(text=prompt))
+        
+        # Gemini-3 image models expect aspect ratio in image_config
+        config = types.GenerateContentConfig(
+            image_config=types.ImageConfig(aspect_ratio="16:9")
+        )
+        
+        logger.info(f"[gemini/image] Generating image with model {model}, Prompt: {prompt[:50]}")
+        response = await client.aio.models.generate_content(
+            model=model,
+            contents=parts,
+            config=config
+        )
+        
+        if not response.candidates or not response.candidates[0].content.parts:
+            raise GeminiServiceError("No image returned from Gemini.")
+            
+        for part in response.candidates[0].content.parts:
+            if part.inline_data and part.inline_data.data:
+                cost = self._estimate_cost(getattr(response, 'usage', None))
+                return part.inline_data.data, cost
+                
+        raise GeminiServiceError("No inline_data image returned from Gemini.")
+
+    async def edit_image(
+        self,
+        prompt: str,
+        model: str,
+        images_b64: List[str],
+        discord_user_id: Optional[int] = None,
+        discord_channel_id: Optional[int] = None
+    ) -> tuple[bytes, Optional[float]]:
+        """
+        Edit an image using Gemini Models.
+        """
+        # For Gemini models, editing is just multimodal image + text generation.
+        return await self.generate_image(prompt, model, images_b64, discord_user_id, discord_channel_id)
+
 
 # Helper to check if a model string should route to Gemini
 GEMINI_MODEL_ALIASES = {"google", "google-high"}

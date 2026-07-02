@@ -14,6 +14,7 @@ from discord.app_commands import Choice
 from discord.ext import commands
 from src.services.openai_service import OpenAIServiceError
 from src.services.runpod_service import RunpodServiceError
+from src.services.gemini_service import GeminiServiceError
 from src.utils.async_utils import safe_run
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ class ImageCommands:
         state_service,
         message_service,
         runpod_service,
+        gemini_service,
         default_draw_model: str,
         default_edit_model: str,
         enable_runpod_models: bool,
@@ -37,6 +39,7 @@ class ImageCommands:
         self._state_service = state_service
         self._message_service = message_service
         self._runpod_service = runpod_service
+        self._gemini_service = gemini_service
         self._default_draw_model = default_draw_model
         self._default_edit_model = default_edit_model
         self._enable_runpod_models = enable_runpod_models
@@ -52,6 +55,8 @@ class ImageCommands:
         """Create the /draw command."""
 
         model_choices = [
+            Choice(name="banana-pro", value="gemini-3-pro-image"),
+            Choice(name="banana-2", value="gemini-3.1-flash-image"),
             Choice(name="seedream", value="seedream"),
         ]
 
@@ -76,6 +81,10 @@ class ImageCommands:
         async def draw(
             interaction: discord.Interaction,
             prompt: str,
+            image1: Optional[discord.Attachment] = None,
+            image2: Optional[discord.Attachment] = None,
+            image3: Optional[discord.Attachment] = None,
+            image4: Optional[discord.Attachment] = None,
             model: Optional[str] = None,
         ):
             # Immediately defer the interaction to avoid Discord's 3-second
@@ -84,7 +93,7 @@ class ImageCommands:
 
             # Fire-and-forget: image commands run async, not queued
             asyncio.create_task(
-                safe_run(interaction, self._handle_draw_command, interaction, prompt, model)
+                safe_run(interaction, self._handle_draw_command, interaction, prompt, image1, image2, image3, image4, model)
             )
 
         return draw
@@ -93,6 +102,10 @@ class ImageCommands:
         self,
         interaction: discord.Interaction,
         prompt: str,
+        image1: Optional[discord.Attachment] = None,
+        image2: Optional[discord.Attachment] = None,
+        image3: Optional[discord.Attachment] = None,
+        image4: Optional[discord.Attachment] = None,
         model: Optional[str] = None,
     ) -> None:
         """
@@ -119,7 +132,21 @@ class ImageCommands:
             try:
                 cost = None
                 # Generate the image
-                if self._runpod_service.has_model(active_model):
+                if active_model in ["gemini-3-pro-image", "gemini-3.1-flash-image"]:
+                    images_b64 = []
+                    for img in [image1, image2, image3, image4]:
+                        if img:
+                            img_bytes = await img.read()
+                            images_b64.append(base64.b64encode(img_bytes).decode('utf-8'))
+                            
+                    img_bytes, cost = await self._gemini_service.generate_image(
+                        prompt=prompt,
+                        model=active_model,
+                        images_b64=images_b64,
+                        discord_user_id=interaction.user.id,
+                        discord_channel_id=channel_id
+                    )
+                elif self._runpod_service.has_model(active_model):
                     img_bytes, cost = await self._runpod_service.generate_image(
                         prompt=prompt,
                         model=active_model,
@@ -206,6 +233,8 @@ class ImageCommands:
         """Create the /drawmodel command."""
 
         model_choices = [
+            Choice(name="banana-pro", value="gemini-3-pro-image"),
+            Choice(name="banana-2", value="gemini-3.1-flash-image"),
             Choice(name="seedream", value="seedream"),
         ]
 
@@ -256,6 +285,8 @@ class ImageCommands:
         """Create the /edit command."""
 
         edit_model_choices = [
+            Choice(name="banana-pro", value="gemini-3-pro-image"),
+            Choice(name="banana-2", value="gemini-3.1-flash-image"),
             Choice(name="seedream", value="seedream"),
         ]
 
@@ -322,7 +353,20 @@ class ImageCommands:
                     f"[/edit] Channel {channel_id}: editing image {edit_image.filename}")
 
                 cost = None
-                if self._runpod_service.has_edit_model(active_model):
+                if active_model in ["gemini-3-pro-image", "gemini-3.1-flash-image"]:
+                    # Gather base64 images (just edit_image for edit command as per instructions)
+                    images_b64 = []
+                    img_bytes = await edit_image.read()
+                    images_b64.append(base64.b64encode(img_bytes).decode('utf-8'))
+                        
+                    img_bytes, cost = await self._gemini_service.edit_image(
+                        prompt=prompt,
+                        model=active_model,
+                        images_b64=images_b64,
+                        discord_user_id=interaction.user.id,
+                        discord_channel_id=channel_id
+                    )
+                elif self._runpod_service.has_edit_model(active_model):
                     # Gather base64 images
                     images_b64 = []
                     for img in [edit_image, image2, image3, image4]:
@@ -404,6 +448,8 @@ class ImageCommands:
         """Create the /editmodel command."""
 
         edit_model_choices = [
+            Choice(name="banana-pro", value="gemini-3-pro-image"),
+            Choice(name="banana-2", value="gemini-3.1-flash-image"),
             Choice(name="seedream", value="seedream"),
         ]
 

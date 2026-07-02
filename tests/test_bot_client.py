@@ -232,6 +232,7 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
             message_service=MagicMock(),
             paste_service=MagicMock(),
             runpod_service=MagicMock(),
+            gemini_service=MagicMock(),
         )
         services.state_service.load_state_from_temp_files.return_value = False
         services.state_service.get_last_git_sha.return_value = None

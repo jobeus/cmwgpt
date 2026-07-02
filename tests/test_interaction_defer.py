@@ -40,6 +40,7 @@ class TestInteractionDefer(unittest.TestCase):
             state_service=MagicMock(),
             message_service=MagicMock(),
             runpod_service=MagicMock(),
+            gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=False,

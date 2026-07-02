@@ -22,7 +22,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=MagicMock(),
             message_service=MagicMock(),
-            runpod_service=MagicMock(),
+            runpod_service=MagicMock(), gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=False,
@@ -36,7 +36,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=MagicMock(),
             message_service=MagicMock(),
-            runpod_service=MagicMock(),
+            runpod_service=MagicMock(), gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -46,8 +46,8 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             for choice in with_runpod_commands._create_editmodel_command().parameters[0].choices
         ]
 
-        self.assertEqual(no_runpod_choices, ["seedream"])
-        self.assertEqual(with_runpod_choices, ["seedream", "qwen", "pruna"])
+        self.assertEqual(no_runpod_choices, ["gemini-3-pro-image", "gemini-3.1-flash-image", "seedream"])
+        self.assertEqual(with_runpod_choices, ["gemini-3-pro-image", "gemini-3.1-flash-image", "seedream", "qwen", "pruna"])
 
     async def test_handle_draw_command_uses_injected_services(self):
         state_service = MagicMock()
@@ -70,7 +70,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=message_service,
-            runpod_service=runpod_service,
+            runpod_service=runpod_service, gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -101,7 +101,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=MagicMock(),
-            runpod_service=MagicMock(),
+            runpod_service=MagicMock(), gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -140,7 +140,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=message_service,
-            runpod_service=runpod_service,
+            runpod_service=runpod_service, gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -179,7 +179,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=MagicMock(),
-            runpod_service=runpod_service,
+            runpod_service=runpod_service, gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -201,7 +201,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=MagicMock(),
-            runpod_service=MagicMock(),
+            runpod_service=MagicMock(), gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -224,7 +224,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=MagicMock(),
-            runpod_service=MagicMock(),
+            runpod_service=MagicMock(), gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -248,7 +248,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=MagicMock(),
-            runpod_service=MagicMock(),
+            runpod_service=MagicMock(), gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="default-edit",
             enable_runpod_models=True,
@@ -278,7 +278,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=message_service,
-            runpod_service=runpod_service,
+            runpod_service=runpod_service, gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -307,7 +307,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=message_service,
-            runpod_service=runpod_service,
+            runpod_service=runpod_service, gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -333,7 +333,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=message_service,
-            runpod_service=runpod_service,
+            runpod_service=runpod_service, gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -362,7 +362,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=message_service,
-            runpod_service=runpod_service,
+            runpod_service=runpod_service, gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -388,7 +388,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=message_service,
-            runpod_service=runpod_service,
+            runpod_service=runpod_service, gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -420,7 +420,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=message_service,
-            runpod_service=runpod_service,
+            runpod_service=runpod_service, gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -453,7 +453,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=message_service,
-            runpod_service=runpod_service,
+            runpod_service=runpod_service, gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -485,7 +485,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=message_service,
-            runpod_service=runpod_service,
+            runpod_service=runpod_service, gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -518,7 +518,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=state_service,
             message_service=message_service,
-            runpod_service=runpod_service,
+            runpod_service=runpod_service, gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -534,7 +534,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             bot,
             state_service=MagicMock(),
             message_service=MagicMock(),
-            runpod_service=MagicMock(),
+            runpod_service=MagicMock(), gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -551,7 +551,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=MagicMock(),
             message_service=MagicMock(),
-            runpod_service=MagicMock(),
+            runpod_service=MagicMock(), gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -561,10 +561,10 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
         with patch("src.bot.commands.image.safe_run", new=AsyncMock()) as mock_safe_run, patch(
             "src.bot.commands.image.asyncio.create_task", side_effect=lambda coro: coro.close()
         ) as mock_create_task:
-            await draw.callback(interaction, "a prompt", None)
+            await draw.callback(interaction, "a prompt", None, None, None, None, None)
 
         interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
-        mock_safe_run.assert_called_once_with(interaction, commands._handle_draw_command, interaction, "a prompt", None)
+        mock_safe_run.assert_called_once_with(interaction, commands._handle_draw_command, interaction, "a prompt", None, None, None, None, None)
         mock_create_task.assert_called_once()
 
     async def test_drawmodel_command_wrapper_defers_and_schedules_safe_run(self):
@@ -574,7 +574,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=MagicMock(),
             message_service=MagicMock(),
-            runpod_service=MagicMock(),
+            runpod_service=MagicMock(), gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -598,7 +598,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=MagicMock(),
             message_service=MagicMock(),
-            runpod_service=MagicMock(),
+            runpod_service=MagicMock(), gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
@@ -631,7 +631,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             MagicMock(),
             state_service=MagicMock(),
             message_service=MagicMock(),
-            runpod_service=MagicMock(),
+            runpod_service=MagicMock(), gemini_service=MagicMock(),
             default_draw_model="seedream",
             default_edit_model="seedream",
             enable_runpod_models=True,
