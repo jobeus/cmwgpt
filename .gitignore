@@ -340,27 +340,29 @@ local_settings.py
 dev_config.py
 test_config.py
 
-# Ignore any file with 'secret' in the name
-*secret*
-*SECRET*
-
-# Ignore any file with 'private' in the name
-*private*
-*PRIVATE*
-
-# Ignore any file with 'key' in the name (except requirements files)
-*key*
-*KEY*
-!requirements*.txt
-!*key*.md
-
-# Ignore any file with 'token' in the name
-*token*
-*TOKEN*
-
-# Ignore any file with 'password' in the name
-*password*
-*PASSWORD*
+# Secret / credential files (narrow patterns so legitimate source
+# modules like token_utils.py or key_service.py are never ignored)
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.der
+*.keystore
+*.jks
+secrets.*
+[Ss]ecrets.json
+[Ss]ecrets.yaml
+[Ss]ecrets.yml
+credentials.json
+service-account*.json
+*_rsa
+*_ed25519
+id_rsa*
+id_ed25519*
+token.txt
+api_key.txt
+password.txt
 
 # Don't commit my own prompt
 system_prompt.txt
