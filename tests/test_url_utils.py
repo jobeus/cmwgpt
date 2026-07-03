@@ -137,7 +137,7 @@ class TestUrlUtils(unittest.IsolatedAsyncioTestCase):
             side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client),
         ), patch("src.utils.url_utils.trafilatura.extract", return_value="reddit text"), patch(
             "src.utils.url_utils.log_pipeline_step", new=AsyncMock()
-        ):
+        ), patch("src.utils.url_utils.assert_public_url", new=AsyncMock()):
             result = await url_utils.get_article_text(original_url)
 
         self.assertEqual(result, "reddit text")
@@ -146,3 +146,16 @@ class TestUrlUtils(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fetched_url, "https://old.reddit.com/r/test/comments/1/reddit.com_in_title/")
         # The cache is keyed on the original URL so future lookups hit.
         self.assertEqual(fake_cache[original_url], "reddit text")
+
+    async def test_get_article_text_blocks_non_public_urls(self):
+        fake_client = MagicMock()
+        fake_client.get = AsyncMock(return_value=FakeResponse(text="<html>internal</html>"))
+
+        with patch("src.utils.url_utils._article_cache", {}), patch(
+            "src.utils.url_utils.httpx.AsyncClient",
+            side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client),
+        ):
+            result = await url_utils.get_article_text("http://127.0.0.1:8080/admin")
+
+        self.assertIsNone(result)
+        fake_client.get.assert_not_awaited()

@@ -6,6 +6,7 @@ from urllib.parse import urlparse, urlunparse
 from src.config import get_config
 from src.db.logger import build_artifact, log_pipeline_step
 from src.utils.http_client import create_async_client
+from src.utils.ssrf_guard import assert_public_url
 
 import trafilatura
 from newspaper import Article, Config
@@ -180,6 +181,10 @@ async def get_article_text(url: str) -> Optional[str]:
         if 'reddit.com' in parsed.netloc.lower() and parsed.netloc.lower() != 'old.reddit.com':
             parsed = parsed._replace(netloc='old.reddit.com')
             fetch_url = urlunparse(parsed)
+
+        # Refuse to fetch URLs that resolve to loopback/private/link-local
+        # addresses (SSRF guard for user-supplied links).
+        await assert_public_url(fetch_url)
 
         async with create_async_client(proxy=proxy, timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
             response = await client.get(fetch_url, headers=headers)

@@ -243,6 +243,22 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("https://example.com/generic.png", generic_failure_cache)
 
+    async def test_url_to_base64_data_url_blocks_non_public_urls(self):
+        fake_client = MagicMock()
+        fake_client.get = AsyncMock(return_value=SimpleNamespace(
+            content=b"image-bytes",
+            raise_for_status=lambda: None,
+        ))
+
+        with patch("src.utils.discord_helper._url_base64_cache", {}) as guard_cache, patch(
+            "httpx.AsyncClient", side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client)
+        ):
+            with self.assertRaises(ValueError):
+                await discord_helper.url_to_base64_data_url("http://192.168.1.5/internal.png")
+
+        self.assertNotIn("http://192.168.1.5/internal.png", guard_cache)
+        fake_client.get.assert_not_awaited()
+
     async def test_url_to_base64_data_url_discards_legacy_failure_sentinel(self):
         fake_client = MagicMock()
         fake_client.get = AsyncMock(return_value=SimpleNamespace(

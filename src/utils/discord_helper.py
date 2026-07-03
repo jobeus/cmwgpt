@@ -184,8 +184,13 @@ async def url_to_base64_data_url(url: str) -> str:
             return cached_result
 
     from src.utils.http_client import create_async_client
+    from src.utils.ssrf_guard import assert_public_url
 
     try:
+        # Refuse to fetch URLs that resolve to loopback/private/link-local
+        # addresses (SSRF guard for user-supplied links).
+        await assert_public_url(url)
+
         # Follow redirects in case embeds resolve through URL shorteners or
         # edge network bounces
         # Add User-Agent headers to avoid 403 Forbidden from strict servers like Wikimedia
