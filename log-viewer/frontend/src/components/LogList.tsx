@@ -11,6 +11,9 @@ import { getPipelineSnippet, getPipelineTitle, isPipelinePayload } from '../util
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || '/';
 
+// Cap the in-memory list so a long-running tab doesn't grow without bound.
+const MAX_LOG_ROWS = 300;
+
 interface LogEntry {
     id: number;
     timestamp: string;
@@ -22,6 +25,12 @@ interface LogEntry {
     request_body_snippet: string | null;
     response_body_snippet: string | null;
     curl_command: string | null;
+}
+
+interface ParsedLogEntry extends LogEntry {
+    displayTitle: string;
+    requestSnippet: string;
+    responseSnippet: string;
 }
 
 const extractLastMessageSnippet = (bodyStr: string | null, serviceName: string, type: 'request' | 'response'): string => {
@@ -137,18 +146,43 @@ const extractLastMessageSnippet = (bodyStr: string | null, serviceName: string, 
     }
 };
 
+// Parse body JSON once when a log is received instead of on every render.
+const parseLogEntry = (log: LogEntry): ParsedLogEntry => {
+    let displayTitle = log.service_name;
+    try {
+        displayTitle = getPipelineTitle(
+            log.request_body_snippet ? JSON.parse(log.request_body_snippet) : null,
+            log.response_body_snippet ? JSON.parse(log.response_body_snippet) : null,
+            log.service_name,
+        );
+    } catch {
+        // Fall back to the service name for unparseable bodies.
+    }
+
+    return {
+        ...log,
+        displayTitle,
+        requestSnippet: extractLastMessageSnippet(log.request_body_snippet, log.service_name, 'request'),
+        responseSnippet: extractLastMessageSnippet(log.response_body_snippet, log.service_name, 'response'),
+    };
+};
+
 export default function LogList() {
-    const [logs, setLogs] = useState<LogEntry[]>([]);
+    const [logs, setLogs] = useState<ParsedLogEntry[]>([]);
     const [total, setTotal] = useState(0);
     const [copiedId, setCopiedId] = useState<number | null>(null);
     const { token } = useAuth();
     const navigate = useNavigate();
     const socketRef = useRef<Socket | null>(null);
+    // Track ids we've already shown so socket/fetch overlap can't create duplicate rows.
+    const seenLogIdsRef = useRef<Set<number>>(new Set());
 
     const fetchLogs = useCallback(async () => {
         try {
             const res = await axios.get(`${API_BASE_URL}/logs?limit=50`);
-            setLogs(res.data.logs);
+            const parsedLogs: ParsedLogEntry[] = res.data.logs.map(parseLogEntry);
+            seenLogIdsRef.current = new Set(parsedLogs.map((log) => log.id));
+            setLogs(parsedLogs);
             setTotal(res.data.total);
         } catch (err) {
             console.error('Failed to fetch logs', err);
@@ -164,7 +198,10 @@ export default function LogList() {
 
         socket.on('connect', () => console.log('WebSocket Connected'));
         socket.on('new-log', (newLog: LogEntry) => {
-            setLogs((prev) => [newLog, ...prev]);
+            if (seenLogIdsRef.current.has(newLog.id)) return;
+            seenLogIdsRef.current.add(newLog.id);
+            const parsedLog = parseLogEntry(newLog);
+            setLogs((prev) => [parsedLog, ...prev].slice(0, MAX_LOG_ROWS));
             setTotal((t) => t + 1);
         });
 
@@ -188,18 +225,6 @@ export default function LogList() {
         if (status >= 400 && status < 500) return 'text-amber-400 bg-amber-400/10 border-amber-400/20';
         if (status >= 500) return 'text-red-400 bg-red-400/10 border-red-400/20';
         return 'text-gray-400 bg-gray-400/10 border-gray-400/20';
-    };
-
-    const getDisplayTitle = (log: LogEntry) => {
-        try {
-            return getPipelineTitle(
-                log.request_body_snippet ? JSON.parse(log.request_body_snippet) : null,
-                log.response_body_snippet ? JSON.parse(log.response_body_snippet) : null,
-                log.service_name,
-            );
-        } catch {
-            return log.service_name;
-        }
     };
 
     return (
@@ -226,8 +251,8 @@ export default function LogList() {
                                 <div className="flex items-center space-x-2 text-gray-300">
                                     <Server className="w-4 h-4 text-blue-400" />
                                     <div>
-                                        <div className="font-semibold text-white">{getDisplayTitle(log)}</div>
-                                        {getDisplayTitle(log) !== log.service_name && <div className="text-[11px] text-gray-500 font-mono">{log.service_name}</div>}
+                                        <div className="font-semibold text-white">{log.displayTitle}</div>
+                                        {log.displayTitle !== log.service_name && <div className="text-[11px] text-gray-500 font-mono">{log.service_name}</div>}
                                     </div>
                                     <span className="text-gray-500 text-sm font-mono px-2 py-0.5 bg-gray-950 rounded border border-gray-800">{log.method}</span>
                                 </div>
@@ -266,7 +291,7 @@ export default function LogList() {
                                     Request
                                 </div>
                                 <div className="text-gray-300 font-mono text-xs truncate opacity-80">
-                                    {extractLastMessageSnippet(log.request_body_snippet, log.service_name, 'request') || <span className="text-gray-600 italic">No body</span>}
+                                    {log.requestSnippet || <span className="text-gray-600 italic">No body</span>}
                                 </div>
                             </div>
                             <div className="bg-gray-950 rounded-lg p-3 border border-gray-800/60 overflow-hidden">
@@ -275,7 +300,7 @@ export default function LogList() {
                                     Response
                                 </div>
                                 <div className="text-gray-300 font-mono text-xs truncate opacity-80">
-                                    {extractLastMessageSnippet(log.response_body_snippet, log.service_name, 'response') || <span className="text-gray-600 italic">No body</span>}
+                                    {log.responseSnippet || <span className="text-gray-600 italic">No body</span>}
                                 </div>
                             </div>
                         </div>
