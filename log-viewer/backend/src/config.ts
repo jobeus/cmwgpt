@@ -37,4 +37,16 @@ if (!configuredJwtSecret) {
 }
 
 export const JWT_SECRET = configuredJwtSecret || 'fallback-secret-for-dev-only-change-in-prod';
-export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN?.trim() || (isProduction ? '12h' : '7d');
+
+// Accepts a plain number of seconds or a vercel/ms-style duration (e.g. "12h", "7 days"),
+// matching what jsonwebtoken's expiresIn option understands. Fail fast at startup instead
+// of throwing inside the login callback.
+const JWT_EXPIRES_IN_PATTERN = /^\d+(\.\d+)?\s*(milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|years?|yrs?|y)?$/i;
+
+const configuredJwtExpiresIn = process.env.JWT_EXPIRES_IN?.trim();
+
+if (configuredJwtExpiresIn && !JWT_EXPIRES_IN_PATTERN.test(configuredJwtExpiresIn)) {
+    throw new Error(`Invalid JWT_EXPIRES_IN value "${configuredJwtExpiresIn}": use seconds (e.g. "3600") or a duration like "12h" or "7d"`);
+}
+
+export const JWT_EXPIRES_IN = configuredJwtExpiresIn || (isProduction ? '12h' : '7d');
