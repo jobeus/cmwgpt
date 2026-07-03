@@ -2,8 +2,8 @@
 Logger setup with colors, file output, and better clarity.
 """
 import copy
-import datetime
 import logging
+import logging.handlers
 import re
 import sys
 from pathlib import Path
@@ -72,11 +72,22 @@ def setup_logger():
     console_handler.setFormatter(ColoredEmojiFormatter('%(asctime)s - %(levelname)s - [%(name)s] - %(message)s', '%H:%M:%S'))
     root.addHandler(console_handler)
 
-    # File handler
+    # File handler. Rotates at midnight so a long-running process doesn't keep
+    # writing weeks of logs into its launch-date file. The active file is
+    # logs/bot.log; the namer renames rotated files to the historical
+    # logs/YYYY-MM-DD.log pattern.
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
-    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    file_handler = logging.FileHandler(f"logs/{today_str}.log", encoding="utf-8")
+    file_handler = logging.handlers.TimedRotatingFileHandler(
+        log_dir / "bot.log", when="midnight", backupCount=60, encoding="utf-8"
+    )
+    file_handler.suffix = "%Y-%m-%d.log"
+
+    def _dated_log_namer(default_name: str) -> str:
+        # default_name looks like "logs/bot.log.2026-07-03.log"
+        return str(log_dir / Path(default_name).name.replace("bot.log.", "", 1))
+
+    file_handler.namer = _dated_log_namer
     file_handler.setLevel(logging.DEBUG)  # Keep full history in file
     file_handler.setFormatter(file_format)
     root.addHandler(file_handler)
