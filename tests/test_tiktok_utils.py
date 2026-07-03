@@ -52,6 +52,27 @@ class TestTikTokUtils(unittest.TestCase):
 
         self.assertEqual(urls, ["https://vt.tiktok.com/abc123/", "https://www.tiktok.com/@user/video/123"])
 
+    def test_extract_tiktok_urls_matches_vm_short_links(self):
+        text = "check this https://vm.tiktok.com/ZMabc123/ out"
+
+        urls = tiktok_utils.extract_tiktok_urls(text)
+
+        self.assertEqual(urls, ["https://vm.tiktok.com/ZMabc123/"])
+
+    def test_extract_tiktok_urls_matches_t_share_links(self):
+        text = "https://www.tiktok.com/t/ZTabc123/ and https://tiktok.com/t/ZTdef456"
+
+        urls = tiktok_utils.extract_tiktok_urls(text)
+
+        self.assertEqual(urls, ["https://www.tiktok.com/t/ZTabc123/", "https://tiktok.com/t/ZTdef456"])
+
+    def test_extract_tiktok_urls_matches_video_links_without_www(self):
+        text = "https://tiktok.com/@some.user_1/video/7300000000000000000"
+
+        urls = tiktok_utils.extract_tiktok_urls(text)
+
+        self.assertEqual(urls, ["https://tiktok.com/@some.user_1/video/7300000000000000000"])
+
     def test_get_tiktok_transcript_returns_cached_values_and_retries_legacy_failure_sentinels(self):
         legacy_cache = {"u1": "cached", "u2": None}
         fake_response = MagicMock()

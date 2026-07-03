@@ -14,13 +14,20 @@ _tiktok_cache = PersistentCache('tiktok_transcripts')
 def extract_tiktok_urls(text: str) -> List[str]:
     """
     Extract TikTok video URLs from a block of text.
-    Handles vt.tiktok.com and www.tiktok.com links.
+    Handles vt.tiktok.com / vm.tiktok.com short links, tiktok.com/t/ share
+    links, and full (www.)tiktok.com/@user/video/ID links.
     """
     if not text:
         return []
 
     # Regex to match TikTok video URLs
-    pattern = r'(https?://(?:vt\.tiktok\.com/[a-zA-Z0-9]+/?|www\.tiktok\.com/@[a-zA-Z0-9_.]+/video/\d+/?))'
+    pattern = (
+        r'(https?://(?:'
+        r'(?:vt|vm)\.tiktok\.com/[a-zA-Z0-9]+/?'
+        r'|(?:www\.)?tiktok\.com/t/[a-zA-Z0-9]+/?'
+        r'|(?:www\.)?tiktok\.com/@[a-zA-Z0-9_.]+/video/\d+/?'
+        r'))'
+    )
 
     matches = re.finditer(pattern, text)
     urls = []
