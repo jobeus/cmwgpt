@@ -37,6 +37,7 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         )
         client.mention_handler = MagicMock()
         client.mention_handler.queue_mention = AsyncMock(return_value=True)
+        client._ready_once_completed = False
         client.services = SimpleNamespace(
             state_service=MagicMock(),
             queue_service=MagicMock(),
@@ -187,6 +188,22 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         guild_arg = client.bot.tree.copy_global_to.call_args.kwargs["guild"]
         self.assertEqual(guild_arg.id, 777)
         client.bot.tree.sync.assert_awaited_once_with(guild=guild_arg)
+        client.services.queue_service.start.assert_awaited_once_with()
+        client.services.auto_update_service.start.assert_called_once_with()
+        client.services.death_service.start.assert_called_once_with()
+        client._send_update_announcement_if_needed.assert_awaited_once_with()
+
+    async def test_on_ready_skips_one_time_setup_on_gateway_reconnect(self):
+        client, _ = self.make_client(guild_id="")
+        client._send_update_announcement_if_needed = AsyncMock()
+        events = {}
+        client.bot.event = lambda fn: events.setdefault(fn.__name__, fn) or fn
+
+        client._setup_events()
+        await events["on_ready"]()
+        await events["on_ready"]()
+
+        client.bot.tree.sync.assert_awaited_once_with()
         client.services.queue_service.start.assert_awaited_once_with()
         client.services.auto_update_service.start.assert_called_once_with()
         client.services.death_service.start.assert_called_once_with()

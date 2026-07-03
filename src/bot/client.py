@@ -31,6 +31,11 @@ class DiscordBotClient:
         self.services = services
         self.mention_handler = mention_handler or services.mention_handler
 
+        # on_ready fires again on every gateway reconnect; this flag ensures
+        # once-only work (command sync, service starts, announcements) only
+        # runs on the first ready event.
+        self._ready_once_completed = False
+
         # Configure Discord bot with intents
         intents = discord.Intents.default()
         intents.message_content = True
@@ -195,6 +200,15 @@ class DiscordBotClient:
 
         @self.bot.event
         async def on_ready():
+            # on_ready re-fires on every gateway reconnect — skip the
+            # once-only setup (command sync is a rate-limited API call, and
+            # services must not be started twice).
+            if self._ready_once_completed:
+                logger.info(
+                    "on_ready fired again (gateway reconnect), skipping one-time setup")
+                return
+            self._ready_once_completed = True
+
             # Sync commands - guild-specific if configured (instant),
             # otherwise global (can take up to 1 hour)
             if self.config.discord_guild_id:
