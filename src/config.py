@@ -1,3 +1,4 @@
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -6,7 +7,12 @@ from typing import Mapping, Optional
 from dotenv import find_dotenv, load_dotenv
 from zoneinfo import ZoneInfo
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
+
+# Paths we've already warned about so a missing prompt file only logs once.
+_missing_prompt_files_warned: set = set()
 
 
 def _read_bool(value: Optional[str], default: bool) -> bool:
@@ -121,7 +127,11 @@ def load_system_prompt(prompt_path: str = "system_prompt.txt") -> str:
                 ).strftime("%Y-%m-%d %H:%M:%S %Z").strip()
                 return content.replace("[[CURRENT_DATE_AND_TIME]]", current_datetime)
     except FileNotFoundError:
-        pass
+        if prompt_path not in _missing_prompt_files_warned:
+            _missing_prompt_files_warned.add(prompt_path)
+            logger.warning(
+                f"System prompt file '{prompt_path}' not found; "
+                f"falling back to default system prompt.")
     except (OSError, UnicodeDecodeError, PermissionError) as e:
         print(f"Warning: Error loading {prompt_path}: {e}")
 

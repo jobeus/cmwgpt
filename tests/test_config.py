@@ -86,6 +86,24 @@ class TestConfig(unittest.TestCase):
 
         self.assertEqual(result, DEFAULT_SYSTEM_PROMPT)
 
+    def test_load_system_prompt_warns_once_per_missing_file(self):
+        import src.config as config_module
+
+        config_module._missing_prompt_files_warned.discard("missing_prompt.txt")
+        try:
+            with patch("builtins.open", side_effect=FileNotFoundError), patch.object(
+                config_module.logger, "warning"
+            ) as mock_warning:
+                first = load_system_prompt("missing_prompt.txt")
+                second = load_system_prompt("missing_prompt.txt")
+
+            self.assertEqual(first, DEFAULT_SYSTEM_PROMPT)
+            self.assertEqual(second, DEFAULT_SYSTEM_PROMPT)
+            mock_warning.assert_called_once()
+            self.assertIn("missing_prompt.txt", mock_warning.call_args.args[0])
+        finally:
+            config_module._missing_prompt_files_warned.discard("missing_prompt.txt")
+
 
 if __name__ == "__main__":
     unittest.main()
