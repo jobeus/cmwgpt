@@ -1,18 +1,39 @@
 import express from 'express';
+import http from 'http';
+import https from 'https';
+import net from 'net';
 import { pool } from './db';
 import { authMiddleware } from './auth';
 import axios from 'axios';
-import { MAX_PROXY_REDIRECTS, validateProxyUrl } from './proxySecurity';
+import { MAX_PROXY_REDIRECTS, validateProxyUrl, type ValidatedProxyTarget } from './proxySecurity';
 
 const router = express.Router();
 
-const fetchProxiedMedia = async (targetUrl: string, redirectCount = 0): Promise<any> => {
+// Pin outbound connections to the address vetted during validation so a DNS
+// rebinding attacker can't pass validation and then resolve elsewhere.
+const createPinnedLookup = (target: ValidatedProxyTarget): net.LookupFunction =>
+    ((hostname: string, options: any, callback: any) => {
+        if (typeof options === 'function') {
+            callback = options;
+            options = {};
+        }
+        if (options?.all) {
+            callback(null, [{ address: target.address, family: target.family }]);
+        } else {
+            callback(null, target.address, target.family);
+        }
+    }) as net.LookupFunction;
+
+const fetchProxiedMedia = async (target: ValidatedProxyTarget, redirectCount = 0): Promise<any> => {
+    const lookup = createPinnedLookup(target);
     const response = await axios({
         method: 'GET',
-        url: targetUrl,
+        url: target.url,
         responseType: 'stream',
         timeout: 15000,
         maxRedirects: 0,
+        httpAgent: new http.Agent({ lookup }),
+        httpsAgent: new https.Agent({ lookup }),
         validateStatus: (status) => status >= 200 && status < 400,
         headers: {
             'Referer': 'https://x.com/',
@@ -31,14 +52,14 @@ const fetchProxiedMedia = async (targetUrl: string, redirectCount = 0): Promise<
             throw new Error('Redirect missing location header');
         }
 
-        const redirectedUrl = new URL(redirectLocation, targetUrl).toString();
-        const validatedRedirectUrl = await validateProxyUrl(redirectedUrl);
-        if (!validatedRedirectUrl) {
+        const redirectedUrl = new URL(redirectLocation, target.url).toString();
+        const validatedRedirectTarget = await validateProxyUrl(redirectedUrl);
+        if (!validatedRedirectTarget) {
             throw new Error('Blocked proxy redirect target');
         }
 
         response.data.destroy();
-        return fetchProxiedMedia(validatedRedirectUrl, redirectCount + 1);
+        return fetchProxiedMedia(validatedRedirectTarget, redirectCount + 1);
     }
 
     return response;
@@ -107,13 +128,13 @@ router.get('/proxy-media', authMiddleware, async (req, res) => {
         return res.status(400).json({ error: 'Missing media URL' });
     }
 
-    const validatedMediaUrl = await validateProxyUrl(mediaUrl);
-    if (!validatedMediaUrl) {
+    const validatedTarget = await validateProxyUrl(mediaUrl);
+    if (!validatedTarget) {
         return res.status(400).json({ error: 'Invalid or disallowed media URL' });
     }
 
     try {
-        const response = await fetchProxiedMedia(validatedMediaUrl);
+        const response = await fetchProxiedMedia(validatedTarget);
 
         // Forward content-type and length headers
         res.setHeader('Content-Type', response.headers['content-type'] || 'application/octet-stream');

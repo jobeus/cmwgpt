@@ -50,15 +50,34 @@ describe('proxySecurity helpers', () => {
         await expect(validateProxyUrl('https://example.com/private.png')).resolves.toBeNull();
     });
 
-    it('allows public URLs when DNS resolves to public IPs', async () => {
+    it('allows public URLs and pins the resolved address', async () => {
         mockedLookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as never);
 
-        await expect(validateProxyUrl('https://example.com/media.png')).resolves.toBe('https://example.com/media.png');
+        await expect(validateProxyUrl('https://example.com/media.png')).resolves.toEqual({
+            url: 'https://example.com/media.png',
+            address: '93.184.216.34',
+            family: 4
+        });
     });
 
-    it('allows URLs when DNS lookup temporarily fails', async () => {
+    it('pins literal IP hostnames without a DNS lookup', async () => {
+        await expect(validateProxyUrl('https://93.184.216.34/media.png')).resolves.toEqual({
+            url: 'https://93.184.216.34/media.png',
+            address: '93.184.216.34',
+            family: 4
+        });
+        expect(mockedLookup).not.toHaveBeenCalled();
+    });
+
+    it('rejects URLs when DNS lookup fails', async () => {
         mockedLookup.mockRejectedValue(new Error('temporary dns failure'));
 
-        await expect(validateProxyUrl('https://example.com/media.png')).resolves.toBe('https://example.com/media.png');
+        await expect(validateProxyUrl('https://example.com/media.png')).resolves.toBeNull();
+    });
+
+    it('rejects URLs when DNS returns no addresses', async () => {
+        mockedLookup.mockResolvedValue([] as never);
+
+        await expect(validateProxyUrl('https://example.com/media.png')).resolves.toBeNull();
     });
 });

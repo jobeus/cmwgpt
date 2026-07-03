@@ -53,7 +53,13 @@ export const isPrivateAddress = (address: string) => {
     return true;
 };
 
-export const validateProxyUrl = async (rawUrl: string) => {
+export interface ValidatedProxyTarget {
+    url: string;
+    address: string;
+    family: number;
+}
+
+export const validateProxyUrl = async (rawUrl: string): Promise<ValidatedProxyTarget | null> => {
     try {
         const parsedUrl = new URL(rawUrl);
         if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
@@ -67,20 +73,29 @@ export const validateProxyUrl = async (rawUrl: string) => {
             return null;
         }
 
-        if (net.isIP(parsedUrl.hostname)) {
-            return isPrivateAddress(parsedUrl.hostname) ? null : parsedUrl.toString();
+        const literalIpVersion = net.isIP(parsedUrl.hostname);
+        if (literalIpVersion) {
+            return isPrivateAddress(parsedUrl.hostname)
+                ? null
+                : { url: parsedUrl.toString(), address: parsedUrl.hostname, family: literalIpVersion };
         }
 
+        let resolvedAddresses;
         try {
-            const resolvedAddresses = await dns.lookup(parsedUrl.hostname, { all: true, verbatim: true });
-            if (resolvedAddresses.some(({ address }) => isPrivateAddress(address))) {
-                return null;
-            }
+            resolvedAddresses = await dns.lookup(parsedUrl.hostname, { all: true, verbatim: true });
         } catch {
-            // Let the outbound request fail normally if DNS is temporarily unavailable.
+            // Fail closed: if we cannot resolve the hostname we cannot vet it.
+            return null;
         }
 
-        return parsedUrl.toString();
+        if (resolvedAddresses.length === 0
+            || resolvedAddresses.some(({ address }) => isPrivateAddress(address))) {
+            return null;
+        }
+
+        // Pin the first vetted address so the caller connects to exactly what was validated.
+        const [pinned] = resolvedAddresses;
+        return { url: parsedUrl.toString(), address: pinned.address, family: pinned.family };
     } catch {
         return null;
     }
