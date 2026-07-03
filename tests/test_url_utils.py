@@ -125,3 +125,24 @@ class TestUrlUtils(unittest.IsolatedAsyncioTestCase):
             result = await url_utils.get_article_text("https://example.com/fail")
 
         self.assertIsNone(result)
+
+    async def test_get_article_text_fetches_old_reddit_but_caches_original_url(self):
+        original_url = "https://www.reddit.com/r/test/comments/1/reddit.com_in_title/"
+        fake_cache = {}
+        fake_client = MagicMock()
+        fake_client.get = AsyncMock(return_value=FakeResponse(text="<html>reddit</html>"))
+
+        with patch("src.utils.url_utils._article_cache", fake_cache), patch(
+            "src.utils.url_utils.httpx.AsyncClient",
+            side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client),
+        ), patch("src.utils.url_utils.trafilatura.extract", return_value="reddit text"), patch(
+            "src.utils.url_utils.log_pipeline_step", new=AsyncMock()
+        ):
+            result = await url_utils.get_article_text(original_url)
+
+        self.assertEqual(result, "reddit text")
+        # Only the host is swapped to old.reddit.com; the path stays intact.
+        fetched_url = fake_client.get.await_args[0][0]
+        self.assertEqual(fetched_url, "https://old.reddit.com/r/test/comments/1/reddit.com_in_title/")
+        # The cache is keyed on the original URL so future lookups hit.
+        self.assertEqual(fake_cache[original_url], "reddit text")

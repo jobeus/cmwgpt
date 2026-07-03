@@ -2,7 +2,7 @@ import re
 import logging
 import httpx
 from typing import List, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 from src.config import get_config
 from src.db.logger import build_artifact, log_pipeline_step
 from src.utils.http_client import create_async_client
@@ -126,8 +126,13 @@ async def get_article_text(url: str) -> Optional[str]:
             'Cache-Control': 'max-age=0'
         }
 
+        # The URL may get rewritten below (v.redd.it resolution, old.reddit swap).
+        # Fetch via fetch_url but always cache under the original url so future
+        # lookups (which use the original) actually hit.
+        fetch_url = url
+
         # Handle v.redd.it redirects manually first to avoid hitting Reddit's bot block on www.reddit.com
-        parsed = urlparse(url)
+        parsed = urlparse(fetch_url)
         
         # Fast-path for Wikipedia using official API instead of scraping (avoids 403s on proxies/datacenters)
         if parsed.netloc.endswith('wikipedia.org') and parsed.path.startswith('/wiki/'):
@@ -162,19 +167,22 @@ async def get_article_text(url: str) -> Optional[str]:
         if parsed.netloc.lower() == 'v.redd.it':
             async with httpx.AsyncClient(proxy=proxy, timeout=10.0, follow_redirects=False) as preflight:
                 try:
-                    pre_resp = await preflight.get(url, headers=headers)
+                    pre_resp = await preflight.get(fetch_url, headers=headers)
                     if pre_resp.status_code in (301, 302, 303, 307, 308) and "Location" in pre_resp.headers:
-                        url = pre_resp.headers["Location"]
-                        parsed = urlparse(url)  # update parsed for next step
+                        fetch_url = pre_resp.headers["Location"]
+                        parsed = urlparse(fetch_url)  # update parsed for next step
                 except Exception as e:
-                    logger.debug(f"Failed to resolve v.redd.it redirect for {url}: {e}")
+                    logger.debug(f"Failed to resolve v.redd.it redirect for {fetch_url}: {e}")
 
-        # Swap reddit to old.reddit to bypass blocks and login walls
+        # Swap reddit to old.reddit to bypass blocks and login walls.
+        # Rebuild via urlunparse so only the host is swapped, never a path/query
+        # substring that happens to contain the netloc text.
         if 'reddit.com' in parsed.netloc.lower() and parsed.netloc.lower() != 'old.reddit.com':
-            url = url.replace(parsed.netloc, 'old.reddit.com')
-        
+            parsed = parsed._replace(netloc='old.reddit.com')
+            fetch_url = urlunparse(parsed)
+
         async with create_async_client(proxy=proxy, timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
-            response = await client.get(url, headers=headers)
+            response = await client.get(fetch_url, headers=headers)
             response.raise_for_status()
             html = response.text
             actual_request_headers = dict(response.request.headers)
@@ -183,18 +191,19 @@ async def get_article_text(url: str) -> Optional[str]:
         
         await log_pipeline_step(
             service_name="downloader/article/fetch",
-            endpoint_url=url,
+            endpoint_url=fetch_url,
             title="Article URL → HTML",
             step="article_fetch",
             input_summary="Fetched article HTML from URL",
             input_data={
-                "url": url,
+                "url": fetch_url,
+                "original_url": url,
                 "proxy": proxy,
                 "headers": headers,
             },
             output_summary="Received raw article HTML",
             output_data={
-                "url": url,
+                "url": fetch_url,
                 "html": html,
                 "status_code": actual_response_status,
             },
@@ -224,7 +233,7 @@ async def get_article_text(url: str) -> Optional[str]:
             config.request_timeout = 15
             if proxy:
                 config.proxies = {'http': proxy, 'https': proxy}
-            article = Article(url, config=config)
+            article = Article(fetch_url, config=config)
             article.set_html(html)
             article.parse()
             text = article.text
