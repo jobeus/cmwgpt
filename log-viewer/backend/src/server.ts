@@ -29,9 +29,28 @@ app.use('/api', logsRouter);
 // Socket.io Middlewares
 io.use(socketAuthMiddleware);
 
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
 io.on('connection', (socket) => {
     console.log(`Socket connected: ${socket.id}`);
+
+    // Enforce JWT expiry beyond the handshake: disconnect when the token's exp passes.
+    let expiryTimer: NodeJS.Timeout | undefined;
+    const exp = (socket as any).user?.exp;
+    if (typeof exp === 'number') {
+        const msUntilExpiry = exp * 1000 - Date.now();
+        if (msUntilExpiry <= 0) {
+            socket.disconnect(true);
+            return;
+        }
+        expiryTimer = setTimeout(() => {
+            console.log(`Socket token expired, disconnecting: ${socket.id}`);
+            socket.disconnect(true);
+        }, Math.min(msUntilExpiry, MAX_TIMEOUT_MS));
+    }
+
     socket.on('disconnect', () => {
+        if (expiryTimer) clearTimeout(expiryTimer);
         console.log(`Socket disconnected: ${socket.id}`);
     });
 });
