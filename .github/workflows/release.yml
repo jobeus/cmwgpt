@@ -18,7 +18,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Python 3.13
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: 3.13
 
@@ -56,6 +56,8 @@ jobs:
   create-release:
     needs: test-before-release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     
     steps:
@@ -92,33 +94,31 @@ jobs:
         echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
     - name: Create Release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.changelog.outputs.VERSION }}
-        release_name: Release ${{ steps.changelog.outputs.VERSION }}
+        name: Release ${{ steps.changelog.outputs.VERSION }}
         body: |
           ## Changes
           ${{ steps.changelog.outputs.CHANGELOG }}
-          
+
           ## Installation
           ```bash
           git clone https://github.com/${{ github.repository }}.git
-          cd chatter
+          cd cmwgpt
           make dev-setup
           ```
-          
+
           ## What's New
           - Enhanced Discord bot with AI capabilities
-          - Comprehensive test suite with 48+ tests
+          - Comprehensive test suite
           - Pre-commit hooks for code quality
           - Automatic linting and formatting
-          
+
           ## Requirements
           - Python 3.9+
           - Discord Bot Token
-          - OpenAI API Key
+          - OpenRouter API Key
         draft: false
         prerelease: false
 
