@@ -7,10 +7,5 @@ export const pool = mariadb.createPool({
     password: process.env.DB_PASSWORD || '',
     database: process.env.DB_NAME || 'cmwgpt',
     connectionLimit: 5,
-    multipleStatements: true,
     bigIntAsNumber: true, // important for bigints like user ids if they fit JS Number, though strings are safer. We will handle safely.
 });
-
-export const getConnection = async () => {
-    return await pool.getConnection();
-};
