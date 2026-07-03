@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 PIPELINE_STEP_FORMAT = "pipeline_step.v1"
 
+# Strong references to in-flight fire-and-forget log tasks so the event loop
+# can't garbage-collect them mid-flight (asyncio only keeps weak references).
+_pending_log_tasks: set = set()
+
 
 def _serialize_json(data: Any) -> Optional[str]:
     """Helper to safely serialize dictionaries/lists to JSON strings."""
@@ -133,7 +137,9 @@ async def log_api_request(
 
     try:
         # Wrap in a fire-and-forget task so the slow DB inserts don't block the hot path of the bot
-        asyncio.create_task(execute_query(query, args))
+        task = asyncio.create_task(execute_query(query, args))
+        _pending_log_tasks.add(task)
+        task.add_done_callback(_pending_log_tasks.discard)
     except Exception as e:
         logger.error(f"Failed to spawn DB log task for {service_name}: {e}")
 

@@ -73,8 +73,8 @@ async def execute_query(query: str, args: tuple = None) -> Any:
     Returns:
         The last row ID (if applicable)
     """
-    pool = await get_db_pool()
     try:
+        pool = await get_db_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(query, args or ())
