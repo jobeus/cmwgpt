@@ -29,14 +29,16 @@ def _delete_cache_entry(cache, key: str) -> None:
 
 def extract_twitter_urls(text: str) -> List[str]:
     """
-    Extract x.com and twitter.com and xcancel.com URLs from text.
+    Extract x.com and twitter.com and xcancel.com tweet URLs from text.
+    Only URLs containing /status/<id> are returned, so profile links and other
+    non-tweet pages (e.g. x.com/home) are ignored.
     Normalizes all variants to x.com so the same tweet isn't fetched twice.
     """
     if not text:
         return []
 
-    # Regex targeting twitter/x URLs
-    pattern = r'https?://(?:www\.)?(?:twitter\.com|x\.com|xcancel\.com)/[^\s<>"]+'
+    # Regex targeting twitter/x tweet URLs (must contain /status/<numeric id>)
+    pattern = r'https?://(?:www\.)?(?:twitter\.com|x\.com|xcancel\.com)/[^\s<>"]+/status/\d+[^\s<>"]*'
 
     matches = re.finditer(pattern, text)
     urls = []
@@ -97,10 +99,10 @@ async def get_tweet_context(tweet_url: str) -> Optional[Tuple[str, List[str]]]:
         # Extract the numeric tweet ID following /status/, ignoring any
         # trailing path segments (e.g. /photo/1) or query parameters.
         id_match = re.search(r'/status/(\d+)', tweet_url)
-        if id_match:
-            tweet_id = id_match.group(1)
-        else:
-            tweet_id = tweet_url.rstrip('/').split('/')[-1].split('?')[0]
+        if not id_match:
+            logger.warning(f"No /status/<id> tweet ID found in URL, skipping: {tweet_url}")
+            return None
+        tweet_id = id_match.group(1)
 
         headers = {
             "x-rapidapi-host": "x-com2.p.rapidapi.com",

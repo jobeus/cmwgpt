@@ -48,6 +48,16 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(urls, ["https://x.com/a/status/1"])
 
+    def test_extract_twitter_urls_ignores_profiles_and_non_status_pages(self):
+        text = (
+            "https://x.com/elonmusk https://x.com/home https://twitter.com/some_user "
+            "and a real tweet https://twitter.com/foo/status/42?s=20"
+        )
+
+        urls = twitter_utils.extract_twitter_urls(text)
+
+        self.assertEqual(urls, ["https://x.com/foo/status/42?s=20"])
+
     def test_extract_media_returns_lowest_bitrate_mp4(self):
         data = {
             "data": {
@@ -108,6 +118,15 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
     async def test_get_tweet_context_requires_api_key(self):
         with patch("src.config._cached_config", cfg(rapidapi_key="")):
             self.assertIsNone(await twitter_utils.get_tweet_context("https://x.com/a/status/1"))
+
+    async def test_get_tweet_context_rejects_urls_without_status_id(self):
+        with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
+            "src.config._cached_config", cfg(rapidapi_key="rapid-key")
+        ), patch("src.utils.twitter_utils.create_async_client") as mock_create_client:
+            result = await twitter_utils.get_tweet_context("https://x.com/elonmusk")
+
+        self.assertIsNone(result)
+        mock_create_client.assert_not_called()
 
     async def test_get_tweet_context_fetches_context_and_replies(self):
         fake_cache = {}
