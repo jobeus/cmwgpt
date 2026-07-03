@@ -132,6 +132,12 @@ class QueueService:
         if channel_id not in self._channel_queues:
             self._channel_queues[channel_id] = asyncio.Queue(
                 maxsize=self._max_queue_size)
+
+        worker = self._channel_workers.get(channel_id)
+        if worker is None or worker.done():
+            if worker is not None and worker.done():
+                logger.warning(
+                    f"Worker for channel {channel_id} died, respawning")
             self._channel_workers[channel_id] = asyncio.create_task(
                 self._process_channel_messages(channel_id))
             logger.debug(
@@ -317,7 +323,9 @@ class QueueService:
                 logger.info(
                     f"Queue service received SystemExit signal (code {e.code}). Exiting process immediately.")
                 os._exit(e.code)
-            except (RuntimeError, OSError, ValueError) as e:
+            except Exception as e:
+                # Catch *everything* else (discord.HTTPException, KeyError, ...)
+                # so an unexpected error can never kill the channel worker.
                 logger.error(
                     f"Error in channel {channel_id} processing loop: {e}",
                     exc_info=True)
@@ -363,7 +371,9 @@ class QueueService:
 
             logger.debug(f"Processed message in {processing_time:.2f}s")
 
-        except (RuntimeError, OSError, ValueError, TypeError) as e:
+        except Exception as e:
+            # Catch *everything* (discord.HTTPException, KeyError, ...) so a
+            # misbehaving handler can never propagate up and kill the worker.
             self._stats["messages_failed"] += 1
             if queued_msg.message_type == MessageType.MENTION:
                 user_info = f"{queued_msg.discord_message.author}"

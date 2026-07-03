@@ -575,6 +575,88 @@ class TestQueueService(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
+    def test_unexpected_exception_does_not_kill_worker(self):
+        """An exception type outside the old catch-list must not kill the channel worker."""
+
+        async def run_test():
+            await self.queue_service.start()
+            await asyncio.sleep(0.01)
+
+            processed_messages = []
+
+            async def unexpected_failure_handler(message, bot_user, model):
+                raise KeyError("totally unexpected")
+
+            async def tracking_handler(message, bot_user, model):
+                processed_messages.append(message.content)
+
+            mock_bot_user = MagicMock()
+
+            failing_msg = self._make_mock_message(
+                content="Boom", channel_id=100)
+            self.assertTrue(await self.queue_service.queue_mention(
+                failing_msg, mock_bot_user, "model", unexpected_failure_handler))
+
+            follow_up_msg = self._make_mock_message(
+                content="Still alive", channel_id=100)
+            self.assertTrue(await self.queue_service.queue_mention(
+                follow_up_msg, mock_bot_user, "model", tracking_handler))
+
+            await asyncio.sleep(0.1)
+
+            # The worker survived the unexpected exception and processed the
+            # follow-up message.
+            worker = self.queue_service._channel_workers[100]
+            self.assertFalse(worker.done())
+            self.assertEqual(processed_messages, ["Still alive"])
+            self.assertGreaterEqual(
+                self.queue_service.get_stats()["messages_failed"], 1)
+
+            await self.queue_service.stop()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_dead_worker_is_respawned(self):
+        """A dead worker task must be respawned on the next queued message."""
+
+        async def run_test():
+            await self.queue_service.start()
+            await asyncio.sleep(0.01)
+
+            processed_messages = []
+
+            async def tracking_handler(message, bot_user, model):
+                processed_messages.append(message.content)
+
+            mock_bot_user = MagicMock()
+
+            first_msg = self._make_mock_message(content="First", channel_id=100)
+            self.assertTrue(await self.queue_service.queue_mention(
+                first_msg, mock_bot_user, "model", tracking_handler))
+            await asyncio.sleep(0.05)
+
+            # Kill the worker task to simulate an unrecoverable crash
+            old_worker = self.queue_service._channel_workers[100]
+            old_worker.cancel()
+            await asyncio.gather(old_worker, return_exceptions=True)
+            self.assertTrue(old_worker.done())
+
+            # Queueing another message should respawn a fresh worker
+            second_msg = self._make_mock_message(
+                content="Second", channel_id=100)
+            self.assertTrue(await self.queue_service.queue_mention(
+                second_msg, mock_bot_user, "model", tracking_handler))
+            await asyncio.sleep(0.05)
+
+            new_worker = self.queue_service._channel_workers[100]
+            self.assertIsNot(new_worker, old_worker)
+            self.assertFalse(new_worker.done())
+            self.assertEqual(processed_messages, ["First", "Second"])
+
+            await self.queue_service.stop()
+
+        self.loop.run_until_complete(run_test())
+
     def test_handle_queued_message_restart_and_unknown_failure_branch(self):
         async def run_test():
             from src.services.queue_service import MessageType, QueuedMessage
