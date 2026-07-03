@@ -79,18 +79,25 @@ const pollNewLogs = async () => {
         const newLogs = await pool.query(query, [lastCheckedId]);
 
         if (newLogs.length > 0) {
+            // Advance the cursor before emitting so a slow emit can't cause re-reads.
+            newLogs.forEach((log: any) => {
+                lastCheckedId = Math.max(lastCheckedId, Number(log.id));
+            });
             newLogs.forEach((log: any) => {
                 io.emit('new-log', log);
-                lastCheckedId = Math.max(lastCheckedId, log.id);
             });
         }
     } catch (err) {
         console.error('Error polling for new logs:', err);
+    } finally {
+        // Self-schedule so slow queries can't overlap the next poll.
+        setTimeout(pollNewLogs, POLL_INTERVAL_MS);
     }
 };
 
 // Poll every 1.5 seconds
-setInterval(pollNewLogs, 1500);
+const POLL_INTERVAL_MS = 1500;
+setTimeout(pollNewLogs, POLL_INTERVAL_MS);
 
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.LOG_VIEWER_HOST || '127.0.0.1';
