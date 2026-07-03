@@ -170,6 +170,7 @@ const parseLogEntry = (log: LogEntry): ParsedLogEntry => {
 export default function LogList() {
     const [logs, setLogs] = useState<ParsedLogEntry[]>([]);
     const [total, setTotal] = useState(0);
+    const [error, setError] = useState<string | null>(null);
     const [copiedId, setCopiedId] = useState<number | null>(null);
     const { token } = useAuth();
     const navigate = useNavigate();
@@ -184,8 +185,10 @@ export default function LogList() {
             seenLogIdsRef.current = new Set(parsedLogs.map((log) => log.id));
             setLogs(parsedLogs);
             setTotal(res.data.total);
+            setError(null);
         } catch (err) {
             console.error('Failed to fetch logs', err);
+            setError('Failed to load logs. Check your connection and try again.');
         }
     }, []);
 
@@ -235,6 +238,21 @@ export default function LogList() {
                     Showing {logs.length} of {total}
                 </span>
             </div>
+
+            {error && (
+                <div className="flex items-center justify-between bg-red-950/40 border border-red-800/50 rounded-xl p-4">
+                    <div className="flex items-center space-x-3 text-red-300">
+                        <AlertCircle className="w-5 h-5 shrink-0" />
+                        <span className="text-sm">{error}</span>
+                    </div>
+                    <button
+                        onClick={fetchLogs}
+                        className="px-3 py-1.5 text-xs font-medium text-red-200 bg-red-900/50 hover:bg-red-800/60 rounded-lg border border-red-700/50 transition-colors"
+                    >
+                        Retry
+                    </button>
+                </div>
+            )}
 
             <div className="flex flex-col space-y-3">
                 {logs.map((log) => (
@@ -312,7 +330,7 @@ export default function LogList() {
                         )}
                     </div>
                 ))}
-                {logs.length === 0 && (
+                {logs.length === 0 && !error && (
                     <div className="text-center py-20 text-gray-500 border border-dashed border-gray-700 rounded-xl">
                         <AlertCircle className="w-8 h-8 mx-auto mb-3 text-gray-600" />
                         <p>No requests found in the database.</p>

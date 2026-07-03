@@ -65,6 +65,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.removeItem('username');
     };
 
+    // Log out on 401 responses (expired/invalid token) so the router redirects to /login.
+    // Skip the login endpoint itself: a 401 there just means bad credentials.
+    useEffect(() => {
+        const interceptorId = axios.interceptors.response.use(
+            (response) => response,
+            (error) => {
+                const status = error.response?.status;
+                const requestUrl: string = error.config?.url || '';
+                if (status === 401 && !requestUrl.endsWith('/login')) {
+                    logout();
+                }
+                return Promise.reject(error);
+            }
+        );
+
+        return () => axios.interceptors.response.eject(interceptorId);
+    }, []);
+
     return (
         <AuthContext.Provider value={{ token, username, login, logout }}>
             {children}
