@@ -369,3 +369,6 @@ system_prompt.txt
 system_prompt_hybrid.txt
 
 log-viewer/frontend/src/user_map.json
+
+# Local pip outdated-packages report
+outdated.txt
