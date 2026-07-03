@@ -125,8 +125,9 @@ class AnnouncementService:
                 "QUIET_UPDATES is enabled, skipping update announcement")
             return
 
-        # Get current git SHA
-        current_sha = self._current_git_sha_loader()
+        # Get current git SHA (run the synchronous git call in a thread so we
+        # don't block the event loop / Discord heartbeats)
+        current_sha = await asyncio.to_thread(self._current_git_sha_loader)
         if not current_sha:
             logger.warning(
                 "Could not determine git SHA, skipping update announcement")
@@ -148,10 +149,12 @@ class AnnouncementService:
             logger.info("No active channels to announce to")
             return
 
-        # Get complete changelog if we have a previous SHA
+        # Get complete changelog if we have a previous SHA (synchronous git
+        # call, so run it in a thread to keep the event loop responsive)
         changelog = None
         if previous_sha:
-            changelog = self._changelog_loader(previous_sha, current_sha)
+            changelog = await asyncio.to_thread(
+                self._changelog_loader, previous_sha, current_sha)
 
         # Skip announcement if there is no changelog containing #announce
         if not changelog:

@@ -68,9 +68,10 @@ class RestartHandler:
             else:
                 print("⚠️  Failed to save state, continuing anyway")
 
-            # Step 2: Perform git pull
+            # Step 2: Perform git pull (synchronous, so run it in a thread to
+            # avoid blocking the event loop / Discord heartbeats)
             print("📥 Updating code...")
-            if self._git_pull():
+            if await asyncio.to_thread(self._git_pull):
                 print("✅ Code updated")
             else:
                 print("⚠️  Git pull failed, continuing anyway")
