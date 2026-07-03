@@ -129,14 +129,31 @@ class DeathService:
         logger.info("DeathService started")
 
     def stop(self) -> None:
-        """Stop the polling task and persist state."""
-        if not self._running:
+        """Stop the polling task, close the HTTP session, and persist state."""
+        if self._running:
+            self._running = False
+            if self._task and not self._task.done():
+                self._task.cancel()
+            self._save_state()
+            logger.info("DeathService stopped")
+        # Close the session even if the poll loop never ran (e.g. when
+        # DEATH_CHANNEL_ID is unset but /wikicount created a session).
+        self._close_session()
+
+    def _close_session(self) -> None:
+        """Close the shared HTTP session if one was created."""
+        session = self._session
+        if session is None or session.closed:
             return
-        self._running = False
-        if self._task and not self._task.done():
-            self._task.cancel()
-        self._save_state()
-        logger.info("DeathService stopped")
+        self._session = None
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None and loop.is_running():
+            loop.create_task(session.close())
+        else:
+            asyncio.run(session.close())
 
     # -- state persistence --------------------------------------------------
 
@@ -176,6 +193,15 @@ class DeathService:
                 timeout=aiohttp.ClientTimeout(total=30, sock_connect=10),
             )
         return self._session
+
+    async def get_session(self) -> aiohttp.ClientSession:
+        """Public accessor: get or create the shared HTTP session.
+
+        Used by callers outside this service (e.g. /wikicount) so they don't
+        have to reach into private state. The session is closed by ``stop()``
+        even if the poll loop never ran.
+        """
+        return await self._get_session()
 
     async def _poll_loop(self) -> None:
         """Fetch the deaths page every POLL_INTERVAL_SECONDS."""

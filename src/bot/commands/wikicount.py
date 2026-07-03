@@ -61,8 +61,8 @@ class WikiCountCommands:
             settings = self._state_service.get_death_settings() or {}
             months = settings.get("pageview_months", PAGEVIEW_MONTHS)
             
-            # Obtain session via the death service
-            session = await self._death_service._get_session()
+            # Obtain the shared session via the death service's public accessor
+            session = await self._death_service.get_session()
             
             avg_views = await self._death_service.get_avg_monthly_views(article_title, session)
             

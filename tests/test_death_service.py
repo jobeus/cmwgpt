@@ -333,6 +333,41 @@ class TestDeathService(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
+    def test_public_get_session_returns_shared_session(self):
+        async def run_test():
+            session_public = await self.service.get_session()
+            session_private = await self.service._get_session()
+            self.assertIs(session_public, session_private)
+            await session_public.close()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_stop_closes_session_even_when_never_started(self):
+        """Sessions created outside the poll loop (e.g. /wikicount) are closed by stop()."""
+        async def run_test():
+            session = await self.service.get_session()
+            self.assertFalse(session.closed)
+
+            # Service was never started (like when DEATH_CHANNEL_ID is unset)
+            self.assertFalse(self.service._running)
+            self.service.stop()
+            self.assertIsNone(self.service._session)
+
+            # Let the scheduled close task run
+            await asyncio.sleep(0.01)
+            self.assertTrue(session.closed)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_stop_closes_session_without_running_loop(self):
+        fake_session = SimpleNamespace(closed=False, close=AsyncMock())
+        self.service._session = fake_session
+
+        self.service.stop()
+
+        fake_session.close.assert_awaited_once_with()
+        self.assertIsNone(self.service._session)
+
     def test_start_already_running_and_stop_when_not_running(self):
         def fake_create_task(coro):
             coro.close()
