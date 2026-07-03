@@ -18,6 +18,10 @@ from src.config import load_system_prompt
 
 logger = logging.getLogger(__name__)
 
+# Maximum number of channels to keep in the per-channel history cache before
+# evicting the least-recently-used entry.
+HISTORY_CACHE_MAX_CHANNELS = 200
+
 
 class MentionHandler:
     """Handles bot mentions and context preparation."""
@@ -48,9 +52,22 @@ class MentionHandler:
         self._attachment_converter = attachment_converter
         self._url_converter = url_converter
         self._url_content_fetcher = url_content_fetcher
-        # Cache for history fetching optimization
+        # Cache for history fetching optimization (bounded, LRU-ish eviction)
         # channel_id -> {"timestamp": float, "oldest_message": discord.Message}
         self._history_cache = {}
+
+    def _store_history_cache(self, channel_id: int, timestamp: float, oldest_message: discord.Message) -> None:
+        """Store a history cache entry, evicting the stalest channel if full."""
+        if channel_id not in self._history_cache and len(self._history_cache) >= HISTORY_CACHE_MAX_CHANNELS:
+            stalest_channel = min(
+                self._history_cache,
+                key=lambda cid: self._history_cache[cid]["timestamp"],
+            )
+            del self._history_cache[stalest_channel]
+        self._history_cache[channel_id] = {
+            "timestamp": timestamp,
+            "oldest_message": oldest_message,
+        }
 
     async def handle_mention(
             self,
@@ -244,12 +261,9 @@ class MentionHandler:
                 async for msg in message.channel.history(limit=limit_lines):
                     history_msgs.append(msg)
                 history_msgs.reverse()
-                
+
                 if history_msgs:
-                    self._history_cache[channel_id] = {
-                        "timestamp": current_time,
-                        "oldest_message": history_msgs[0]
-                    }
+                    self._store_history_cache(channel_id, current_time, history_msgs[0])
             else:
                 # Update timestamp for this channel
                 self._history_cache[channel_id]["timestamp"] = current_time
@@ -263,10 +277,7 @@ class MentionHandler:
             history_msgs.reverse()
 
             if history_msgs:
-                self._history_cache[channel_id] = {
-                    "timestamp": current_time,
-                    "oldest_message": history_msgs[0]
-                }
+                self._store_history_cache(channel_id, current_time, history_msgs[0])
 
         # Get user legend for the channel
         legend_section = await self._mention_legend_provider(message.channel, bot_user)

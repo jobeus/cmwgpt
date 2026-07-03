@@ -201,7 +201,6 @@ class OpenAIService:
 
                 snippet_trunc = last_msg_snippet[:150] + ("..." if len(last_msg_snippet) > 150 else "")
                 logger.info(f"[{actual_model}] Prompt Snippet: {snippet_trunc}")
-                logger.info(f"api headers: {client.default_headers}")
 
                 kwargs = {
                     "model": actual_model,
