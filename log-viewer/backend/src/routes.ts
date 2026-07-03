@@ -56,8 +56,8 @@ router.get('/logs', authMiddleware, async (req, res) => {
         const query = `
             SELECT id, timestamp, service_name, method, endpoint_url, 
                    response_status, cost, discord_user_id, discord_channel_id,
-                   request_body as request_body_snippet, 
-                   response_body as response_body_snippet,
+                   LEFT(request_body, 1000) as request_body_snippet,
+                   LEFT(response_body, 1000) as response_body_snippet,
                    curl_command
             FROM api_request_logs
             ORDER BY timestamp DESC
