@@ -20,6 +20,13 @@ logger = logging.getLogger(__name__)
 _twitter_cache = PersistentCache('twitter_transcripts')
 
 
+def _delete_cache_entry(cache, key: str) -> None:
+    if hasattr(cache, 'delete'):
+        cache.delete(key)
+    elif key in cache:
+        del cache[key]
+
+
 def extract_twitter_urls(text: str) -> List[str]:
     """
     Extract x.com and twitter.com and xcancel.com URLs from text.
@@ -75,10 +82,11 @@ async def get_tweet_context(tweet_url: str) -> Optional[Tuple[str, List[str]]]:
     if tweet_url in _twitter_cache:
         cached_result = _twitter_cache[tweet_url]
         if cached_result is None:
-            logger.debug(f"Cache hit for Twitter fetch failure: {tweet_url}")
-            return None
-        logger.debug(f"Cache hit for Twitter fetch: {tweet_url}")
-        return cached_result
+            logger.debug(f"Discarding legacy Twitter fetch failure sentinel for: {tweet_url}")
+            _delete_cache_entry(_twitter_cache, tweet_url)
+        else:
+            logger.debug(f"Cache hit for Twitter fetch: {tweet_url}")
+            return cached_result
 
     cfg = get_config()
     if not cfg.rapidapi_key:

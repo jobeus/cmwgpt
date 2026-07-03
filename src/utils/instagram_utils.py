@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 _instagram_cache = PersistentCache('instagram_transcripts')
 
 
+def _delete_cache_entry(cache, key: str) -> None:
+    if hasattr(cache, 'delete'):
+        cache.delete(key)
+    elif key in cache:
+        del cache[key]
+
+
 def extract_instagram_urls(text: str) -> List[str]:
     """
     Extract instagram.com and threads.com URLs from text.
@@ -60,10 +67,11 @@ async def get_instagram_context(url: str) -> Optional[Tuple[str, Optional[str]]]
     if url in _instagram_cache:
         cached_result = _instagram_cache[url]
         if cached_result is None:
-            logger.debug(f"Cache hit for Instagram fetch failure: {url}")
-            return None
-        logger.debug(f"Cache hit for Instagram fetch: {url}")
-        return cached_result
+            logger.debug(f"Discarding legacy Instagram fetch failure sentinel for: {url}")
+            _delete_cache_entry(_instagram_cache, url)
+        else:
+            logger.debug(f"Cache hit for Instagram fetch: {url}")
+            return cached_result
 
     cfg = get_config()
     if not cfg.rapidapi_key:

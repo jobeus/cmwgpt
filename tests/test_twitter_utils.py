@@ -92,10 +92,18 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(media[0]["url"], "low")
         self.assertEqual(twitter_utils.extract_media({}), [])
 
-    async def test_get_tweet_context_returns_cached_values(self):
-        with patch("src.utils.twitter_utils._twitter_cache", {"https://x.com/ok": "cached", "https://x.com/bad": None}):
+    async def test_get_tweet_context_returns_cached_values_and_retries_legacy_failure_sentinels(self):
+        legacy_cache = {"https://x.com/ok": "cached", "https://x.com/bad": None}
+
+        with patch("src.utils.twitter_utils._twitter_cache", legacy_cache), patch(
+            "src.config._cached_config", cfg(rapidapi_key="")
+        ):
             self.assertEqual(await twitter_utils.get_tweet_context("https://x.com/ok"), "cached")
+            # The None failure sentinel is discarded so the fetch is retried
+            # (here it fails again because no API key is configured).
             self.assertIsNone(await twitter_utils.get_tweet_context("https://x.com/bad"))
+
+        self.assertNotIn("https://x.com/bad", legacy_cache)
 
     async def test_get_tweet_context_requires_api_key(self):
         with patch("src.config._cached_config", cfg(rapidapi_key="")):
