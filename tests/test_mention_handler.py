@@ -249,7 +249,9 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         channel.history = first_history
 
-        with patch("src.bot.handlers.mention.time.time", side_effect=[1000, 1005]):
+        # Patch the mention module's reference to the time module (not
+        # time.time globally, which logging handlers may also call).
+        with patch("src.bot.handlers.mention.time", MagicMock(time=MagicMock(side_effect=[1000, 1005]))):
             context, system_prompt = await handler._prepare_mention_context(mention_msg, bot_user)
             channel.history = second_history
             cached_context, _ = await handler._prepare_mention_context(mention_msg, bot_user)
