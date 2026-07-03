@@ -1,9 +1,18 @@
 import express, { Request, Response, NextFunction } from 'express';
+import rateLimit from 'express-rate-limit';
 import jwt, { type SignOptions } from 'jsonwebtoken';
 import pam from 'authenticate-pam';
 import { JWT_EXPIRES_IN, JWT_SECRET } from './config';
 
 const router = express.Router();
+
+const loginRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many login attempts, please try again later' }
+});
 
 const buildToken = (username: string) => jwt.sign(
     { username },
@@ -56,7 +65,7 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction) 
     }
 };
 
-router.post('/login', (req: Request, res: Response) => {
+router.post('/login', loginRateLimiter, (req: Request, res: Response) => {
     const { username, password } = req.body;
 
     if (!username || !password) {
