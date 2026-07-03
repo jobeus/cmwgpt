@@ -21,6 +21,10 @@ const io = new Server(server, {
 
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    next();
+});
 
 // Routes
 app.use('/api', authRouter);

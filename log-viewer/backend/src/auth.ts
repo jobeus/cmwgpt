@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import express, { Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
 import jwt, { type SignOptions } from 'jsonwebtoken';
@@ -26,6 +27,19 @@ export const isDevelopmentAuthEnabled = (env: NodeJS.ProcessEnv = process.env) =
 export const hasDevelopmentAuthCredentials = (env: NodeJS.ProcessEnv = process.env) =>
     Boolean(env.LOG_VIEWER_DEV_USERNAME?.trim() && env.LOG_VIEWER_DEV_PASSWORD);
 
+const timingSafeStringEqual = (actual: string, expected: string) => {
+    const actualBuffer = Buffer.from(actual);
+    const expectedBuffer = Buffer.from(expected);
+
+    if (actualBuffer.length !== expectedBuffer.length) {
+        // Still perform a comparison so the length mismatch is not observable via timing.
+        crypto.timingSafeEqual(expectedBuffer, expectedBuffer);
+        return false;
+    }
+
+    return crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+};
+
 export const matchesDevelopmentCredentials = (
     username: string,
     password: string,
@@ -39,7 +53,7 @@ export const matchesDevelopmentCredentials = (
         && expectedUsername
         && expectedPassword
         && username === expectedUsername
-        && password === expectedPassword
+        && timingSafeStringEqual(password, expectedPassword)
     );
 };
 

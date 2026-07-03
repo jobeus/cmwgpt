@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
-import { io, Socket } from 'socket.io-client';
+import { io } from 'socket.io-client';
 import { format } from 'date-fns';
 import { useAuth } from '../AuthContext';
 import { Terminal, ChevronRight, Server, Check, AlertCircle } from 'lucide-react';
@@ -174,7 +174,6 @@ export default function LogList() {
     const [copiedId, setCopiedId] = useState<number | null>(null);
     const { token } = useAuth();
     const navigate = useNavigate();
-    const socketRef = useRef<Socket | null>(null);
     // Track ids we've already shown so socket/fetch overlap can't create duplicate rows.
     const seenLogIdsRef = useRef<Set<number>>(new Set());
 
@@ -207,8 +206,6 @@ export default function LogList() {
             setLogs((prev) => [parsedLog, ...prev].slice(0, MAX_LOG_ROWS));
             setTotal((t) => t + 1);
         });
-
-        socketRef.current = socket;
 
         return () => {
             socket.disconnect();
