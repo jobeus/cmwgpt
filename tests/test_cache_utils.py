@@ -2,6 +2,7 @@
 
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -38,6 +39,28 @@ class TestPersistentCache(unittest.TestCase):
         self.assertNotIn("one", cache)
         self.assertEqual(cache["two"], "2")
         self.assertEqual(cache["three"], "3")
+
+    def test_concurrent_writes_keep_cache_file_valid(self):
+        with tempfile.TemporaryDirectory() as tmpdir, patch("src.utils.cache_utils.CACHE_DIR", tmpdir):
+            cache = PersistentCache("threads", max_size=500)
+
+            def writer(prefix):
+                for i in range(25):
+                    cache[f"{prefix}-{i}"] = i
+
+            threads = [threading.Thread(target=writer, args=(n,)) for n in range(4)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            # The persisted file must be valid JSON containing every write.
+            reloaded = PersistentCache("threads", max_size=500)
+            leftover_tmp = [p for p in Path(tmpdir).iterdir() if p.suffix == ".tmp"]
+
+        self.assertEqual(len(cache), 100)
+        self.assertEqual(len(reloaded), 100)
+        self.assertEqual(leftover_tmp, [])
 
     def test_delete_removes_key_and_persists(self):
         with tempfile.TemporaryDirectory() as tmpdir, patch("src.utils.cache_utils.CACHE_DIR", tmpdir):
