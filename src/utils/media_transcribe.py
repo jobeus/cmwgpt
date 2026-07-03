@@ -8,6 +8,7 @@ result dict. This module is the single source of truth for that flow.
 
 import os
 import logging
+import shutil
 import tempfile
 from typing import Optional
 
@@ -30,10 +31,10 @@ def _delete_cache_entry(cache, key: str) -> None:
         del cache[key]
 
 
-def _build_ydl_opts(file_prefix: str) -> dict:
+def _build_ydl_opts(file_prefix: str, temp_dir: str) -> dict:
     return {
         "format": "bestaudio/best[vcodec=h264]/best",
-        "outtmpl": os.path.join(tempfile.gettempdir(), f"{file_prefix}_%(id)s_%(format_id)s.%(ext)s"),
+        "outtmpl": os.path.join(temp_dir, f"{file_prefix}_%(id)s_%(format_id)s.%(ext)s"),
         "overwrites": True,
         "quiet": True,
         "no_warnings": True,
@@ -106,30 +107,33 @@ def download_and_transcribe_video(url: str, cache, *, label: str, file_prefix: s
 
     logger.info(f"Fetching {label} transcript for URL: {url}")
 
-    ydl_opts = _build_ydl_opts(file_prefix)
-    audio_file = None
-    info = None
-    download_strategy = "direct"
+    # Use a private per-call temp directory so concurrent requests for the same
+    # video never clobber each other's files (yt-dlp overwrites shared paths).
+    temp_dir = tempfile.mkdtemp(prefix=f"{file_prefix}_")
     try:
-        audio_file, info = _download_audio(url, ydl_opts)
-    except Exception as e:
-        logger.warning(f"Direct download failed for {url}: {e}. Falling back to proxy.")
-        if not cfg.transcript_proxy:
-            logger.warning(f"Download failed and no proxy configured for {url}. URL may not be a video.")
-            return None
-        download_strategy = "proxy"
-        ydl_opts["proxy"] = cfg.transcript_proxy
+        ydl_opts = _build_ydl_opts(file_prefix, temp_dir)
+        audio_file = None
+        info = None
+        download_strategy = "direct"
         try:
             audio_file, info = _download_audio(url, ydl_opts)
-        except Exception as e2:
-            logger.warning(f"Proxy download also failed for {url}: {e2}. URL may not be a video.")
+        except Exception as e:
+            logger.warning(f"Direct download failed for {url}: {e}. Falling back to proxy.")
+            if not cfg.transcript_proxy:
+                logger.warning(f"Download failed and no proxy configured for {url}. URL may not be a video.")
+                return None
+            download_strategy = "proxy"
+            ydl_opts["proxy"] = cfg.transcript_proxy
+            try:
+                audio_file, info = _download_audio(url, ydl_opts)
+            except Exception as e2:
+                logger.warning(f"Proxy download also failed for {url}: {e2}. URL may not be a video.")
+                return None
+
+        if not audio_file or not os.path.exists(audio_file):
+            logger.error(f"Failed to find downloaded audio for {label} URL: {url}")
             return None
 
-    if not audio_file or not os.path.exists(audio_file):
-        logger.error(f"Failed to find downloaded audio for {label} URL: {url}")
-        return None
-
-    try:
         logger.info(f"Transcribing {audio_file} using Groq via httpx...")
         with open(audio_file, "rb") as file:
             audio_bytes = file.read()
@@ -188,9 +192,8 @@ def download_and_transcribe_video(url: str, cache, *, label: str, file_prefix: s
         logger.error(f"Unexpected error processing {label} video {url}: {e}")
         return None
     finally:
-        if audio_file and os.path.exists(audio_file):
-            try:
-                os.remove(audio_file)
-                logger.debug(f"Removed temporary audio file: {audio_file}")
-            except OSError as e:
-                logger.warning(f"Failed to remove temporary file {audio_file}: {e}")
+        try:
+            shutil.rmtree(temp_dir)
+            logger.debug(f"Removed temporary directory: {temp_dir}")
+        except OSError as e:
+            logger.warning(f"Failed to remove temporary directory {temp_dir}: {e}")

@@ -66,7 +66,9 @@ class TestTikTokUtils(unittest.TestCase):
             "src.utils.media_transcribe.os.path.exists", return_value=True
         ), patch("builtins.open", mock_open(read_data=b"audio-bytes")), patch(
             "src.utils.media_transcribe.create_sync_client", return_value=FakeHttpxClientContext(fake_client)
-        ), patch("src.utils.media_transcribe.os.remove"):
+        ), patch(
+            "src.utils.media_transcribe.tempfile.mkdtemp", return_value="/tmp/fake_tiktok_dir"
+        ), patch("src.utils.media_transcribe.shutil.rmtree"):
             self.assertEqual(tiktok_utils.get_tiktok_transcript("u1")["transcript_text"], "cached")
             self.assertEqual(tiktok_utils.get_tiktok_transcript("u2")["transcript_text"], "transcribed text")
 
@@ -90,14 +92,16 @@ class TestTikTokUtils(unittest.TestCase):
             "src.utils.media_transcribe.os.path.exists", return_value=True
         ), patch("builtins.open", mock_open(read_data=b"audio-bytes")), patch(
             "src.utils.media_transcribe.create_sync_client", return_value=FakeHttpxClientContext(fake_client)
-        ), patch("src.utils.media_transcribe.os.remove") as mock_remove:
+        ), patch(
+            "src.utils.media_transcribe.tempfile.mkdtemp", return_value="/tmp/fake_tiktok_dir"
+        ), patch("src.utils.media_transcribe.shutil.rmtree") as mock_rmtree:
             result = tiktok_utils.get_tiktok_transcript("https://vt.tiktok.com/abc123/")
 
         self.assertEqual(result["transcript_text"], "transcribed text")
         self.assertIs(result["groq_response"], fake_response)
         self.assertEqual(result["audio_artifact"]["media_type"], "audio/mpeg")
         self.assertEqual(fake_cache["https://vt.tiktok.com/abc123/"], "transcribed text")
-        mock_remove.assert_called_once()
+        mock_rmtree.assert_called_once_with("/tmp/fake_tiktok_dir")
 
     def test_get_tiktok_transcript_returns_none_when_download_fails_without_proxy(self):
         with patch("src.config._cached_config", cfg(groq_api_key="groq-key", transcript_proxy="")), patch(
