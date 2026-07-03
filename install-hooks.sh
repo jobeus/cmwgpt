@@ -59,41 +59,16 @@ install_dependencies() {
     fi
 }
 
-# Install the pre-commit hook
-install_pre_commit_hook() {
-    local git_hooks_dir=".git/hooks"
-    local source_hook=".githooks/pre-commit"
-    local target_hook="$git_hooks_dir/pre-commit"
-    
-    # Create hooks directory if it doesn't exist
-    mkdir -p "$git_hooks_dir"
-    
-    # Check if hook already exists
-    if [ -f "$target_hook" ]; then
-        print_warning "Pre-commit hook already exists"
-        read -p "Do you want to overwrite it? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_status "Skipping pre-commit hook installation"
-            return 0
-        fi
-    fi
-    
-    # Copy the hook
-    cp "$source_hook" "$target_hook"
-    chmod +x "$target_hook"
-    
-    print_success "Pre-commit hook installed"
-}
-
 # Configure git to use the hooks
 configure_git() {
     print_status "Configuring git settings..."
-    
-    # Set up git to use our hooks directory (optional, for future hooks)
+
+    # Point git at the project's hooks directory; all hooks in .githooks
+    # (including pre-commit) are picked up from there directly.
     git config core.hooksPath .githooks
-    
-    print_success "Git configured to use project hooks"
+    chmod +x .githooks/* 2>/dev/null || true
+
+    print_success "Git configured to use project hooks (.githooks)"
 }
 
 # Main installation function
@@ -105,10 +80,7 @@ main() {
     
     # Install dependencies
     install_dependencies
-    
-    # Install the pre-commit hook
-    install_pre_commit_hook
-    
+
     # Configure git
     configure_git
     
