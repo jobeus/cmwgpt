@@ -134,6 +134,7 @@ async def get_instagram_context(url: str) -> Optional[Tuple[str, Optional[str]]]
                                 f.write(chunk)
                 
                 logger.info("Converting to mp3 with ffmpeg...")
+                # timeout guards against a hung ffmpeg pinning the worker thread forever.
                 await asyncio.to_thread(
                     subprocess.run,
                     [
@@ -141,7 +142,8 @@ async def get_instagram_context(url: str) -> Optional[Tuple[str, Optional[str]]]
                         "-vn", "-ar", "44100", "-ac", "2", "-b:a", "64k",
                         mp3_path
                     ],
-                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=300
                 )
                 
                 if os.path.exists(mp3_path):

@@ -155,7 +155,8 @@ async def get_tweet_context(tweet_url: str) -> Optional[Tuple[str, List[str]]]:
                                 f.write(chunk)
                 
                 logger.info("Converting to mp3 with ffmpeg...")
-                # Run ffmpeg in a thread pool to avoid blocking the event loop
+                # Run ffmpeg in a thread pool to avoid blocking the event loop.
+                # timeout guards against a hung ffmpeg pinning the worker thread forever.
                 await asyncio.to_thread(
                     subprocess.run,
                     [
@@ -163,7 +164,8 @@ async def get_tweet_context(tweet_url: str) -> Optional[Tuple[str, List[str]]]:
                         "-vn", "-ar", "44100", "-ac", "2", "-b:a", "64k",
                         mp3_path
                     ],
-                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=300
                 )
                 
                 if os.path.exists(mp3_path):
