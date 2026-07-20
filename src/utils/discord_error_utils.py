@@ -69,6 +69,35 @@ async def safe_defer(interaction, *, ephemeral: bool = False, thinking: bool = T
         return False
 
 
+async def safe_followup_send(interaction, content, *, ephemeral: bool = False, **kwargs) -> bool:
+    """Send an interaction followup, surviving a deleted invocation message.
+
+    If the user deleted the "X used /command" message (or the token expired),
+    followup.send raises NotFound. For public replies we fall back to a plain
+    channel message so the result still gets delivered; ephemeral replies have
+    no such fallback (posting them publicly would leak them), so they are just
+    dropped with a small log line. Returns True if something was delivered.
+    """
+    try:
+        await interaction.followup.send(content=content, ephemeral=ephemeral, **kwargs)
+        return True
+    except discord.NotFound as e:
+        logger.warning(
+            f"Interaction followup target is gone ({concise_error(e)}) — the invocation "
+            "message was likely deleted or the token expired."
+        )
+        channel = getattr(interaction, "channel", None)
+        if ephemeral or channel is None:
+            return False
+        try:
+            await channel.send(content, **kwargs)
+            logger.info("Delivered the reply as a plain channel message instead.")
+            return True
+        except Exception as send_error:
+            logger.warning(f"Channel fallback also failed: {concise_error(send_error)}")
+            return False
+
+
 @asynccontextmanager
 async def best_effort_typing(channel):
     """

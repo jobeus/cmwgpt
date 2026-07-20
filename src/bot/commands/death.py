@@ -11,7 +11,7 @@ from discord import app_commands
 
 from src.services.death_service import POLL_INTERVAL_SECONDS, MIN_AVG_MONTHLY_VIEWS, PAGEVIEW_MONTHS
 from src.utils.async_utils import safe_run
-from src.utils.discord_error_utils import safe_defer
+from src.utils.discord_error_utils import safe_defer, safe_followup_send
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +67,12 @@ class DeathCommands:
     async def _handle_limerick(self, interaction: discord.Interaction, person: str) -> None:
         """Handle the /limerick command."""
         if self._death_service is None:
-            await interaction.followup.send("The limerick service is not available.")
+            await safe_followup_send(interaction, "The limerick service is not available.")
             return
 
         ok, message = await self._death_service.write_limerick(person)
         logger.info(f"[/limerick] {interaction.user} requested '{person}' -> ok={ok}")
-        await interaction.followup.send(message if ok else f"❌ {message}")
+        await safe_followup_send(interaction, message if ok else f"❌ {message}")
 
     async def _handle_forcedeath(self, interaction: discord.Interaction, url: str) -> None:
         """Handle the /forcedeath command."""

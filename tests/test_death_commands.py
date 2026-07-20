@@ -159,7 +159,7 @@ class TestDeathCommands(unittest.IsolatedAsyncioTestCase):
 
         death_service.write_limerick.assert_awaited_once_with("Kevin Keegan")
         interaction.followup.send.assert_awaited_once_with(
-            "There once was a keeper named Kev..."
+            content="There once was a keeper named Kev...", ephemeral=False
         )
 
     async def test_handle_limerick_reports_failure(self):
@@ -172,7 +172,7 @@ class TestDeathCommands(unittest.IsolatedAsyncioTestCase):
 
         await commands._handle_limerick(interaction, "")
 
-        sent = interaction.followup.send.await_args.args[0]
+        sent = interaction.followup.send.await_args.kwargs["content"]
         self.assertTrue(sent.startswith("❌"))
 
     async def test_handle_limerick_without_service(self):
@@ -182,7 +182,7 @@ class TestDeathCommands(unittest.IsolatedAsyncioTestCase):
         await commands._handle_limerick(interaction, "Kevin Keegan")
 
         interaction.followup.send.assert_awaited_once_with(
-            "The limerick service is not available."
+            content="The limerick service is not available.", ephemeral=False
         )
 
     async def test_limerick_command_defers_publicly_for_any_user(self):

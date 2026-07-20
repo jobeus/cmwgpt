@@ -11,6 +11,7 @@ from src.utils.discord_error_utils import (
     concise_error,
     is_discord_server_error,
     safe_defer,
+    safe_followup_send,
 )
 
 
@@ -111,6 +112,59 @@ class TestSafeDefer(unittest.IsolatedAsyncioTestCase):
         result = await safe_defer(interaction)
 
         self.assertTrue(result)
+
+
+class TestSafeFollowupSend(unittest.IsolatedAsyncioTestCase):
+    def make_interaction(self):
+        interaction = MagicMock()
+        interaction.followup = AsyncMock()
+        interaction.channel = MagicMock()
+        interaction.channel.send = AsyncMock()
+        return interaction
+
+    async def test_sends_followup_normally(self):
+        interaction = self.make_interaction()
+
+        result = await safe_followup_send(interaction, "hello")
+
+        self.assertTrue(result)
+        interaction.followup.send.assert_awaited_once_with(content="hello", ephemeral=False)
+        interaction.channel.send.assert_not_awaited()
+
+    async def test_falls_back_to_channel_when_invocation_message_deleted(self):
+        interaction = self.make_interaction()
+        interaction.followup.send.side_effect = make_http_exception(
+            404, "Unknown Message", discord.NotFound
+        )
+
+        result = await safe_followup_send(interaction, "the limerick")
+
+        self.assertTrue(result)
+        interaction.channel.send.assert_awaited_once_with("the limerick")
+
+    async def test_ephemeral_content_is_not_leaked_to_channel(self):
+        interaction = self.make_interaction()
+        interaction.followup.send.side_effect = make_http_exception(
+            404, "Unknown interaction", discord.NotFound
+        )
+
+        result = await safe_followup_send(interaction, "secret", ephemeral=True)
+
+        self.assertFalse(result)
+        interaction.channel.send.assert_not_awaited()
+
+    async def test_returns_false_when_fallback_also_fails(self):
+        interaction = self.make_interaction()
+        interaction.followup.send.side_effect = make_http_exception(
+            404, "Unknown Message", discord.NotFound
+        )
+        interaction.channel.send.side_effect = make_http_exception(
+            500, CLOUDFLARE_HTML, discord.DiscordServerError
+        )
+
+        result = await safe_followup_send(interaction, "the limerick")
+
+        self.assertFalse(result)
 
 
 class TestBestEffortTyping(unittest.IsolatedAsyncioTestCase):

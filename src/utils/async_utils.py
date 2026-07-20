@@ -7,6 +7,8 @@ import traceback
 
 import discord
 
+from src.utils.discord_error_utils import concise_error
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +28,14 @@ async def safe_run(interaction: discord.Interaction,
     """
     try:
         await handler(*args, **kwargs)
+    except discord.NotFound as e:
+        # The interaction's response message was deleted (or the token
+        # expired) mid-command. Nothing to respond to — one small log line,
+        # no traceback dump.
+        logger.warning(
+            f"Interaction vanished mid-command ({concise_error(e)}) — the invocation "
+            "message was likely deleted. Skipping the reply; the bot is still running."
+        )
     except Exception:
         error_dump = traceback.format_exc()
         logger.error(
@@ -39,4 +49,4 @@ async def safe_run(interaction: discord.Interaction,
             )
         except Exception as discord_error:
             logger.error(
-                f"Failed to send error message to Discord: {discord_error}")
+                f"Failed to send error message to Discord: {concise_error(discord_error)}")
