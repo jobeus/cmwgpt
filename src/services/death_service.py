@@ -459,7 +459,7 @@ class DeathService:
     async def _summarize_person(
         self, display_name: str, wiki_link: str
     ) -> Optional[str]:
-        """Ask the chat model what the deceased was best known for.
+        """Ask the chat model for a limerick about the deceased.
 
         Uses the same model the mention handler uses. Best-effort: any failure
         (or an unconfigured model/service) just returns None and the plain RIP
@@ -469,9 +469,8 @@ class DeathService:
             return None
 
         prompt = (
-            f"{display_name} died today ({wiki_link}) — what are they best known for? "
-            f"Answer in one or two short sentences for a chat death announcement, "
-            f"no preamble."
+            f"Write a funny limerick about {display_name} ({wiki_link}). "
+            f"Respond with only the limerick."
         )
         try:
             summary, _cost = await self._openai_service.get_chat_completion(
