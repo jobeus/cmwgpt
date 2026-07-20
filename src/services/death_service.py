@@ -469,9 +469,9 @@ class DeathService:
             return None
 
         prompt = (
-            f"Write a funny limerick about what {display_name} ({wiki_link}) is known for. "
-            f"Multiple verses are allowed to cover all the things they're known for. "
-            f"Respond with only the limerick."
+            f"Write a funny, adult-appropriate limerick about what {display_name} ({wiki_link}) is known for. "
+            f"Any number of verses are allowed to cover all the things they're known for. "
+            f"Respond with only the title and limerick."
         )
         try:
             summary, _cost = await self._openai_service.get_chat_completion(
