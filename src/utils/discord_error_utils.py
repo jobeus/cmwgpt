@@ -1,0 +1,63 @@
+"""
+Helpers for surviving Discord API failures gracefully.
+
+When Discord's API has server trouble it returns Cloudflare-fronted HTML
+error pages, which discord.py embeds verbatim in the exception message.
+These helpers keep such failures from aborting work that could still
+succeed, and keep the raw HTML/JavaScript out of the logs.
+"""
+
+import logging
+from contextlib import asynccontextmanager
+
+import discord
+
+logger = logging.getLogger(__name__)
+
+MAX_ERROR_MESSAGE_LENGTH = 200
+
+
+def concise_error(error: BaseException, max_length: int = MAX_ERROR_MESSAGE_LENGTH) -> str:
+    """Format an exception for logging without dumping HTML error pages."""
+    text = " ".join(str(error).split())
+    html_start = text.lower().find("<html")
+    if html_start == -1:
+        html_start = text.lower().find("<!doctype")
+    if html_start != -1:
+        text = f"{text[:html_start].strip()} [HTML error page omitted]".strip()
+    if len(text) > max_length:
+        text = text[:max_length] + "…"
+    return f"{type(error).__name__}: {text}" if text else type(error).__name__
+
+
+def is_discord_server_error(error: BaseException) -> bool:
+    """True if the error is a 5xx from Discord's API (their outage, not our bug)."""
+    return isinstance(error, discord.HTTPException) and (error.status or 0) >= 500
+
+
+@asynccontextmanager
+async def best_effort_typing(channel):
+    """
+    Show the typing indicator, but never let its failure abort the work.
+
+    The typing endpoint is purely cosmetic; if Discord 500s on it (discord.py
+    already retried several times internally by then), log one concise
+    warning and run the wrapped block anyway.
+    """
+    typing_ctx = channel.typing()
+    try:
+        await typing_ctx.__aenter__()
+    except Exception as e:
+        logger.warning(
+            f"Couldn't start typing indicator ({concise_error(e)}); continuing without it."
+        )
+        yield
+        return
+
+    try:
+        yield
+    finally:
+        try:
+            await typing_ctx.__aexit__(None, None, None)
+        except Exception as e:
+            logger.debug(f"Failed to stop typing indicator: {concise_error(e)}")

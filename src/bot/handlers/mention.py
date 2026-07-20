@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable, Dict, List
 import discord
 
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url, transcribe_audio_attachment
+from src.utils.discord_error_utils import best_effort_typing, concise_error
 from src.services.openai_service import OpenAIServiceError
 from src.services.gemini_service import GeminiServiceError, is_gemini_model
 from src.services.completion_dispatch import dispatch_completion, HybridConfig
@@ -85,7 +86,7 @@ class MentionHandler:
             bot_user: The bot user object
             model: The model to use for the response
         """
-        async with message.channel.typing():
+        async with best_effort_typing(message.channel):
             try:
                 # Mark channel as active
                 self._state_service.mark_channel_active(message.channel.id)
@@ -172,6 +173,24 @@ class MentionHandler:
                         )
                     except Exception:
                         logger.error("Failed to send fallback error message")
+
+            except discord.DiscordServerError as e:
+                # Discord's own API is erroring (Cloudflare HTML page). Log it
+                # concisely instead of dumping the page, and reassure that the
+                # bot itself is fine.
+                logger.error(
+                    f"🌩️ Discord API server error while handling mention: {concise_error(e)}. "
+                    "This is a Discord-side outage; the bot is still running and will handle new messages normally."
+                )
+                try:
+                    await self._message_service.send_channel_reply(
+                        message.channel,
+                        "Discord's API had a hiccup while I was working on that — please mention me again in a moment."
+                    )
+                except Exception as discord_error:
+                    logger.warning(
+                        f"⚠️ Couldn't notify the channel about the Discord outage either: {concise_error(discord_error)}"
+                    )
 
             except Exception:
                 logger.exception("🚨 Unexpected error in mention handler")

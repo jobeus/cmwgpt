@@ -16,6 +16,7 @@ from src.services.openai_service import OpenAIServiceError
 from src.services.runpod_service import RunpodServiceError
 from src.services.gemini_service import GeminiServiceError
 from src.utils.async_utils import safe_run
+from src.utils.discord_error_utils import best_effort_typing
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +129,7 @@ class ImageCommands:
             f"[/draw] Channel {channel_id} Prompt: {prompt} Model: {active_model}")
 
         # Interaction already deferred in slash command handler
-        async with interaction.channel.typing():
+        async with best_effort_typing(interaction.channel):
             try:
                 cost = None
                 # Generate the image
@@ -347,7 +348,7 @@ class ImageCommands:
         logger.info(
             f"[/edit] Channel {channel_id} Prompt: {prompt} Model: {active_model} Edit? True")
 
-        async with interaction.channel.typing():
+        async with best_effort_typing(interaction.channel):
             try:
                 logger.info(
                     f"[/edit] Channel {channel_id}: editing image {edit_image.filename}")

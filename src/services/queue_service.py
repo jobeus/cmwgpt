@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from enum import Enum
 import discord
 
+from src.utils.discord_error_utils import concise_error, is_discord_server_error
+
 logger = logging.getLogger(__name__)
 
 
@@ -326,9 +328,15 @@ class QueueService:
             except Exception as e:
                 # Catch *everything* else (discord.HTTPException, KeyError, ...)
                 # so an unexpected error can never kill the channel worker.
-                logger.error(
-                    f"Error in channel {channel_id} processing loop: {e}",
-                    exc_info=True)
+                if is_discord_server_error(e):
+                    logger.error(
+                        f"Discord API server error in channel {channel_id} processing loop: {concise_error(e)}. "
+                        "This is a Discord-side outage; the worker is still running and will keep processing new messages."
+                    )
+                else:
+                    logger.error(
+                        f"Error in channel {channel_id} processing loop: {e}",
+                        exc_info=True)
                 self._stats["messages_failed"] += 1
 
         logger.debug(f"Channel {channel_id} processing loop ended")
@@ -384,10 +392,17 @@ class QueueService:
             else:
                 user_info = "unknown"
 
-            logger.error(
-                f"Error processing {queued_msg.message_type.value} from {user_info}: {e}",
-                exc_info=True,
-            )
+            if is_discord_server_error(e):
+                logger.error(
+                    f"Discord API server error while processing {queued_msg.message_type.value} from {user_info}: "
+                    f"{concise_error(e)}. This is a Discord-side outage; the bot is still running and will "
+                    "handle new messages normally."
+                )
+            else:
+                logger.error(
+                    f"Error processing {queued_msg.message_type.value} from {user_info}: {e}",
+                    exc_info=True,
+                )
 
     def get_queue_size(self) -> int:
         """Get total queue size across all channels."""

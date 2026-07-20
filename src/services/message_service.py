@@ -9,6 +9,7 @@ from typing import List, Optional, Protocol, Union
 import discord
 from discord import HTTPException, Forbidden, NotFound
 
+from src.utils.discord_error_utils import concise_error
 from src.utils.message_utils import format_attachment_message, format_prompt_message
 
 logger = logging.getLogger(__name__)
@@ -94,8 +95,18 @@ class MessageService:
                         continue
                     logger.error("Max retries exceeded for rate limit")
                     raise
+                elif e.status >= 500:
+                    logger.warning(
+                        f"Discord server error on attempt {attempt + 1}: {concise_error(e)}")
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2**attempt)
+                        logger.info(f"Retrying in {delay} seconds...")
+                        await asyncio.sleep(delay)
+                        continue
+                    logger.error("Max retries exceeded for Discord server error")
+                    raise
                 else:
-                    logger.error(f"Discord HTTP error: {e}")
+                    logger.error(f"Discord HTTP error: {concise_error(e)}")
                     raise
 
             except Forbidden as e:
@@ -186,9 +197,19 @@ class MessageService:
                         continue
                     logger.error("Max retries exceeded for rate limit")
                     raise
+                elif e.status >= 500:
+                    logger.warning(
+                        f"Discord server error on interaction followup attempt {attempt + 1}: {concise_error(e)}")
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2**attempt)
+                        logger.info(f"Retrying in {delay} seconds...")
+                        await asyncio.sleep(delay)
+                        continue
+                    logger.error("Max retries exceeded for Discord server error")
+                    raise
                 else:
                     logger.error(
-                        f"Discord HTTP error on interaction followup: {e}")
+                        f"Discord HTTP error on interaction followup: {concise_error(e)}")
                     raise
 
             except Forbidden as e:
@@ -279,9 +300,20 @@ class MessageService:
                         continue
                     logger.error("Max retries exceeded for rate limit")
                     raise
+                elif e.status >= 500:
+                    logger.warning(
+                        f"Discord server error during interaction followup with files on attempt {attempt + 1}: "
+                        f"{concise_error(e)}")
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2**attempt)
+                        logger.info(f"Retrying in {delay} seconds...")
+                        await asyncio.sleep(delay)
+                        continue
+                    logger.error("Max retries exceeded for Discord server error")
+                    raise
                 else:
                     logger.error(
-                        f"HTTP error during interaction followup with files: {e}")
+                        f"HTTP error during interaction followup with files: {concise_error(e)}")
                     raise
 
             except (Forbidden, NotFound) as e:
@@ -358,9 +390,20 @@ class MessageService:
                         continue
                     logger.error("Max retries exceeded for rate limit")
                     raise
+                elif e.status >= 500:
+                    logger.warning(
+                        f"Discord server error during channel reply with files on attempt {attempt + 1}: "
+                        f"{concise_error(e)}")
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2**attempt)
+                        logger.info(f"Retrying in {delay} seconds...")
+                        await asyncio.sleep(delay)
+                        continue
+                    logger.error("Max retries exceeded for Discord server error")
+                    raise
                 else:
                     logger.error(
-                        f"HTTP error during channel reply with files: {e}")
+                        f"HTTP error during channel reply with files: {concise_error(e)}")
                     raise
 
             except (Forbidden, NotFound) as e:
