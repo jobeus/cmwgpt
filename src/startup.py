@@ -59,6 +59,8 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     death_service = DeathService(
         state_service=state_service,
         death_channel_id=app_config.death_channel_id,
+        openai_service=openai_service,
+        model=app_config.default_model,
     )
     mention_handler = MentionHandler(
         state_service=state_service,

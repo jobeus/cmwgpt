@@ -451,11 +451,129 @@ class TestDeathService(unittest.TestCase):
 
                 await self.service._poll_once()
 
-            mock_save.assert_called_once()
+            # One save for the known-names baseline update, one for the
+            # announced-set after "New One" was announced.
+            self.assertEqual(mock_save.call_count, 2)
             self.assertEqual(mock_views.await_count, 4)
             mock_announce.assert_awaited_once_with("New One", "New_One", 200000)
+            self.assertIn("New_One", self.service._announced_titles)
 
         self.loop.run_until_complete(run_test())
+
+    def test_already_announced_name_not_reannounced(self):
+        """A name that reappears after being announced is never announced again."""
+        async def run_test():
+            self.service._first_poll = False
+            self.service._known_names = set()
+            self.service._announced_titles = {"Famous_One"}
+
+            session = MagicMock()
+            ok_resp = AsyncMock()
+            ok_resp.status = 200
+            ok_resp.text = AsyncMock(return_value=SAMPLE_HTML)
+            session.get = MagicMock(return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=ok_resp),
+                __aexit__=AsyncMock(return_value=False),
+            ))
+
+            with patch.object(self.service, "_get_session", AsyncMock(return_value=session)), \
+                patch.object(self.service, "_save_state"), \
+                patch.object(self.service, "get_avg_monthly_views", AsyncMock(return_value=5_000_000)) as mock_views, \
+                patch.object(self.service, "_announce", AsyncMock()) as mock_announce, \
+                patch(
+                    "src.services.death_service.parse_deaths_html",
+                    return_value=[("Famous One", "Famous_One")],
+                ):
+                await self.service._poll_once()
+
+            # Already announced → we never even fetch views or announce again.
+            mock_views.assert_not_awaited()
+            mock_announce.assert_not_awaited()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_announce_appends_model_summary(self):
+        """The announcement includes the model's 'known for' summary when available."""
+        async def run_test():
+            mock_openai = MagicMock()
+            mock_openai.get_chat_completion = AsyncMock(
+                return_value=("Legendary footballer and manager.", 0.0)
+            )
+            self.service._openai_service = mock_openai
+            self.service._model = "anthropic/claude-sonnet-5"
+
+            mock_channel = AsyncMock()
+            self.mock_bot.get_channel.return_value = mock_channel
+
+            await self.service._announce("Kevin Keegan", "Kevin_Keegan", 2_000_000)
+
+            # Two separate sends: the RIP line with the URL as-is, then the
+            # AI summary as a follow-up.
+            self.assertEqual(mock_channel.send.call_count, 2)
+            first = mock_channel.send.call_args_list[0][0][0]
+            second = mock_channel.send.call_args_list[1][0][0]
+            self.assertEqual(
+                first, "RIP Kevin Keegan - https://en.wikipedia.org/wiki/Kevin_Keegan"
+            )
+            self.assertEqual(second, "Legendary footballer and manager.")
+
+            # The model was prompted with the name and wiki link.
+            prompt = mock_openai.get_chat_completion.call_args.kwargs["messages"][0]["content"]
+            self.assertIn("Kevin Keegan", prompt)
+            self.assertIn("https://en.wikipedia.org/wiki/Kevin_Keegan", prompt)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_announce_survives_summary_failure(self):
+        """A failing summary call still sends the plain RIP message."""
+        async def run_test():
+            mock_openai = MagicMock()
+            mock_openai.get_chat_completion = AsyncMock(side_effect=RuntimeError("boom"))
+            self.service._openai_service = mock_openai
+            self.service._model = "anthropic/claude-sonnet-5"
+
+            mock_channel = AsyncMock()
+            self.mock_bot.get_channel.return_value = mock_channel
+
+            await self.service._announce("Kevin Keegan", "Kevin_Keegan", 2_000_000)
+
+            sent = mock_channel.send.call_args[0][0]
+            self.assertEqual(sent, "RIP Kevin Keegan - https://en.wikipedia.org/wiki/Kevin_Keegan")
+
+        self.loop.run_until_complete(run_test())
+
+    def test_legacy_list_state_seeds_announced(self):
+        """Old list-format state files migrate: known names seed the announced-set."""
+        import json as _json
+        with open("/tmp/_test_death_names.json", "w", encoding="utf-8") as f:
+            _json.dump([["John Doe", "John_Doe"], ["Jane Smith", "Jane_Smith"]], f)
+
+        from src.services.death_service import DeathService
+        service = DeathService(
+            state_service=self.state_service,
+            state_file="/tmp/_test_death_names.json",
+            death_channel_id="12345",
+        )
+        self.assertEqual(
+            service._known_names,
+            {("John Doe", "John_Doe"), ("Jane Smith", "Jane_Smith")},
+        )
+        self.assertEqual(service._announced_titles, {"John_Doe", "Jane_Smith"})
+
+    def test_announced_titles_round_trip(self):
+        """Announced titles persist and reload alongside known names."""
+        self.service._known_names = {("John Doe", "John_Doe")}
+        self.service._announced_titles = {"John_Doe"}
+        self.service._save_state()
+
+        from src.services.death_service import DeathService
+        reloaded = DeathService(
+            state_service=self.state_service,
+            state_file="/tmp/_test_death_names.json",
+            death_channel_id="12345",
+        )
+        self.assertEqual(reloaded._announced_titles, {"John_Doe"})
+        self.assertEqual(reloaded._known_names, {("John Doe", "John_Doe")})
 
     def testget_avg_monthly_views_handles_empty_items_429_and_other_errors(self):
         async def run_test():

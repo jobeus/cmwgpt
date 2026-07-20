@@ -5,9 +5,11 @@ Polls the Wikipedia "Deaths in <YEAR>" page every 15 seconds, detects newly-adde
 names, checks their average monthly pageviews, and announces notable deaths
 (≥ MIN_AVG_MONTHLY_VIEWS) to a configured Discord channel.
 
-State (the set of known names) is persisted to a temp file on shutdown and
-reloaded on startup so deaths that occur while the bot is offline are still
-detected.
+State (the set of known names, plus the set of names that have already been
+announced) is persisted to a temp file on shutdown and reloaded on startup so
+deaths that occur while the bot is offline are still detected. Once a name has
+been announced it is never announced again, even if it drops off the deaths
+page and later reappears.
 """
 
 import asyncio
@@ -85,14 +87,22 @@ class DeathService:
         state_service,
         death_channel_id: str,
         state_file: str = STATE_FILE,
+        openai_service=None,
+        model: Optional[str] = None,
     ):
         self._state_service = state_service
         self._death_channel_id = death_channel_id
         self._state_file = state_file
+        self._openai_service = openai_service
+        self._model = model
         self._bot: Optional[commands.Bot] = None
         self._task: Optional[asyncio.Task] = None
         self._running = False
         self._known_names: Set[Tuple[str, str]] = set()
+        # Article titles that have already been announced. Persisted so a name
+        # is never announced twice, even across restarts or if it disappears
+        # from the deaths page and later reappears.
+        self._announced_titles: Set[str] = set()
         self._session: Optional[aiohttp.ClientSession] = None
         self._first_poll = True
 
@@ -158,28 +168,43 @@ class DeathService:
     # -- state persistence --------------------------------------------------
 
     def _save_state(self) -> None:
-        """Persist current known names to disk."""
+        """Persist current known names and announced titles to disk."""
         if not self._state_file:
             return
         try:
             os.makedirs(os.path.dirname(self._state_file) or ".", exist_ok=True)
-            data = [list(t) for t in self._known_names]
+            data = {
+                "known": [list(t) for t in self._known_names],
+                "announced": sorted(self._announced_titles),
+            }
             with open(self._state_file, "w", encoding="utf-8") as f:
                 json.dump(data, f)
-            logger.debug(f"Saved {len(data)} known death names to {self._state_file}")
+            logger.debug(
+                f"Saved {len(self._known_names)} known / {len(self._announced_titles)} "
+                f"announced death names to {self._state_file}"
+            )
         except (OSError, ValueError) as exc:
             logger.error(f"Failed to save death state: {exc}")
 
     def _load_state(self) -> None:
-        """Load known names from a previous session, if available."""
+        """Load known names and announced titles from a previous session, if available."""
         if not self._state_file or not os.path.exists(self._state_file):
             return
         try:
             with open(self._state_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self._known_names = {tuple(item) for item in data}
+            if isinstance(data, dict):
+                self._known_names = {tuple(item) for item in data.get("known", [])}
+                self._announced_titles = set(data.get("announced", []))
+            else:
+                # Legacy format: a bare list of [name, title] pairs with no
+                # announced-set. Treat every previously-known name as already
+                # announced so we don't re-post historic deaths on upgrade.
+                self._known_names = {tuple(item) for item in data}
+                self._announced_titles = {t[1] for t in self._known_names if len(t) > 1}
             logger.info(
-                f"Loaded {len(self._known_names)} known death names from {self._state_file}"
+                f"Loaded {len(self._known_names)} known / {len(self._announced_titles)} "
+                f"announced death names from {self._state_file}"
             )
         except (OSError, json.JSONDecodeError, ValueError) as exc:
             logger.error(f"Failed to load death state: {exc}")
@@ -258,8 +283,17 @@ class DeathService:
 
         logger.info(f"Detected {len(new_names)} new name(s) on deaths page")
 
+        announced_any = False
         for display_name, article_title in new_names:
             try:
+                # Never announce the same person twice, even if they dropped off
+                # the deaths page and reappeared.
+                if article_title in self._announced_titles:
+                    logger.debug(
+                        f"Already announced {display_name} ({article_title}) — skipping"
+                    )
+                    continue
+
                 min_views = self._get_setting("min_views", MIN_AVG_MONTHLY_VIEWS)
                 avg_views = await self.get_avg_monthly_views(article_title, session)
 
@@ -271,12 +305,18 @@ class DeathService:
                         f"Met threshold: {display_name} ({avg_views:,} avg monthly views) -> ANNOUNCING"
                     )
                     await self._announce(display_name, article_title, avg_views)
+                    self._announced_titles.add(article_title)
+                    announced_any = True
                 else:
                     logger.info(
                         f"Skipped: {display_name} ({avg_views:,} avg monthly views, below {min_views:,} threshold)"
                     )
             except Exception:
                 logger.exception(f"Error checking views for {display_name}")
+
+        # Persist the updated announced-set so restarts don't re-post.
+        if announced_any:
+            self._save_state()
 
     # -- pageviews ----------------------------------------------------------
 
@@ -370,9 +410,51 @@ class DeathService:
             f"https://en.wikipedia.org/wiki/{article_title.replace(' ', '_')}"
         )
         message = f"RIP {display_name} - {wiki_link}"
+
         logger.info(f"Announcing death: {message} ({avg_views:,} avg monthly views)")
 
+        # Post the RIP line with the Wikipedia URL as-is first, so Discord can
+        # unfurl the link embed, then follow up with the AI summary as a
+        # separate message.
         try:
             await channel.send(message)
         except discord.HTTPException as exc:
             logger.error(f"Failed to send death announcement: {exc}")
+            return
+
+        summary = await self._summarize_person(display_name, wiki_link)
+        if not summary:
+            return
+
+        try:
+            await channel.send(summary)
+        except discord.HTTPException as exc:
+            logger.error(f"Failed to send death summary follow-up: {exc}")
+
+    async def _summarize_person(
+        self, display_name: str, wiki_link: str
+    ) -> Optional[str]:
+        """Ask the chat model what the deceased was best known for.
+
+        Uses the same model the mention handler uses. Best-effort: any failure
+        (or an unconfigured model/service) just returns None and the plain RIP
+        message is sent.
+        """
+        if not self._openai_service or not self._model:
+            return None
+
+        prompt = (
+            f"{display_name} died today ({wiki_link}) — what are they best known for? "
+            f"Answer in one or two short sentences for a chat death announcement, "
+            f"no preamble."
+        )
+        try:
+            summary, _cost = await self._openai_service.get_chat_completion(
+                model=self._model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            summary = (summary or "").strip()
+            return summary or None
+        except Exception:
+            logger.exception(f"Failed to summarize {display_name} for death announcement")
+            return None
