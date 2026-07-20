@@ -469,7 +469,7 @@ class DeathService:
             return None
 
         prompt = (
-            f"Write a funny limerick about {display_name} ({wiki_link}). "
+            f"Write a funny limerick about why {display_name} ({wiki_link}) is known. "
             f"Respond with only the limerick."
         )
         try:
