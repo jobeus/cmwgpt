@@ -283,6 +283,7 @@ class DiscordBotClient:
             self.bot,
             state_service_instance=self.services.state_service,
             death_channel_id=self.config.death_channel_id,
+            death_service_instance=self.services.death_service,
         )
         death_commands.setup_commands()
 

@@ -19,7 +19,7 @@ import os
 import re
 from datetime import datetime, timezone
 from typing import Optional, Set, Tuple, Any
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 import aiohttp
 import discord
@@ -72,6 +72,31 @@ def parse_deaths_html(html: str) -> list[Tuple[str, str]]:
                 results.append((name, title))
 
     return results
+
+
+def parse_article_title(target: str) -> str:
+    """Extract a Wikipedia article title from a URL or bare title.
+
+    Accepts a full ``https://en.wikipedia.org/wiki/...`` URL or a plain title
+    like ``Kevin Keegan``. Returns the underscore-joined article title, or an
+    empty string if nothing usable could be parsed.
+    """
+    if not target:
+        return ""
+    target = target.strip()
+
+    if "wikipedia.org/wiki/" in target:
+        parsed = urlparse(target)
+        path_parts = parsed.path.split("/wiki/")
+        if len(path_parts) > 1:
+            return unquote(path_parts[1]).replace(" ", "_")
+        return ""
+
+    title = target.replace(" ", "_")
+    # Wikipedia capitalises the first letter of article titles.
+    if title:
+        title = title[0].upper() + title[1:]
+    return title
 
 
 # ---------------------------------------------------------------------------
@@ -458,3 +483,32 @@ class DeathService:
         except Exception:
             logger.exception(f"Failed to summarize {display_name} for death announcement")
             return None
+
+    async def force_announce(self, target: str) -> Tuple[bool, str]:
+        """Force a death announcement for a Wikipedia URL/title (for testing).
+
+        Bypasses the newness diff and the pageview threshold, and does NOT
+        touch the announced-set, so it can be run repeatedly and never
+        interferes with the real dedup state. Returns ``(ok, message)``.
+        """
+        if not self._death_channel_id:
+            return False, "DEATH_CHANNEL_ID is not configured — no channel to announce to."
+
+        article_title = parse_article_title(target)
+        if not article_title:
+            return False, "Could not determine a Wikipedia article title from that input."
+
+        display_name = article_title.replace("_", " ")
+
+        # Fetch real pageviews purely for a realistic log line; the threshold is
+        # intentionally not enforced here.
+        avg_views = 0
+        try:
+            session = await self._get_session()
+            avg_views = await self.get_avg_monthly_views(article_title, session) or 0
+        except Exception:
+            logger.exception(f"force_announce: failed to fetch pageviews for {article_title}")
+
+        logger.info(f"[force_announce] Announcing {display_name} ({avg_views:,} avg monthly views)")
+        await self._announce(display_name, article_title, avg_views)
+        return True, f"Forced death announcement for **{display_name}** in the death channel."

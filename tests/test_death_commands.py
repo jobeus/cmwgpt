@@ -20,13 +20,14 @@ def make_interaction(channel_id=123, channel_name="deaths"):
 
 
 class TestDeathCommands(unittest.IsolatedAsyncioTestCase):
-    def make_commands(self, *, current_settings=None, death_channel_id="123"):
+    def make_commands(self, *, current_settings=None, death_channel_id="123", death_service=None):
         state_service = MagicMock()
         state_service.get_death_settings.return_value = current_settings
         commands = DeathCommands(
             MagicMock(),
             state_service_instance=state_service,
             death_channel_id=death_channel_id,
+            death_service_instance=death_service,
         )
         return commands, state_service
 
@@ -121,6 +122,51 @@ class TestDeathCommands(unittest.IsolatedAsyncioTestCase):
         commands.setup_commands()
 
         commands.bot.tree.add_command.assert_called_once()
+
+    async def test_handle_forcedeath_invokes_service(self):
+        death_service = MagicMock()
+        death_service.force_announce = AsyncMock(return_value=(True, "Forced death announcement for **Kevin Keegan**."))
+        commands, _ = self.make_commands(death_channel_id="123", death_service=death_service)
+        interaction = make_interaction(channel_id=123)
+
+        await commands._handle_forcedeath(interaction, "https://en.wikipedia.org/wiki/Kevin_Keegan")
+
+        death_service.force_announce.assert_awaited_once_with("https://en.wikipedia.org/wiki/Kevin_Keegan")
+        interaction.followup.send.assert_awaited_once_with(
+            "Forced death announcement for **Kevin Keegan**.", ephemeral=True
+        )
+
+    async def test_handle_forcedeath_reports_failure(self):
+        death_service = MagicMock()
+        death_service.force_announce = AsyncMock(return_value=(False, "Could not determine a Wikipedia article title from that input."))
+        commands, _ = self.make_commands(death_channel_id="123", death_service=death_service)
+        interaction = make_interaction(channel_id=123)
+
+        await commands._handle_forcedeath(interaction, "garbage")
+
+        sent = interaction.followup.send.await_args.args[0]
+        self.assertTrue(sent.startswith("❌"))
+
+    async def test_forcedeath_command_rejects_non_admin(self):
+        death_service = MagicMock()
+        death_service.force_announce = AsyncMock()
+        commands, _ = self.make_commands(death_channel_id="123", death_service=death_service)
+
+        registered = {}
+        commands.bot.tree.command = lambda **kwargs: (lambda fn: registered.setdefault(kwargs["name"], fn) or fn)
+
+        commands._create_forcedeath_command()
+        forcedeath = registered["forcedeath"]
+
+        interaction = make_interaction(channel_id=123)
+        interaction.user.guild_permissions.administrator = False
+
+        await forcedeath(interaction, "https://en.wikipedia.org/wiki/Kevin_Keegan")
+
+        interaction.response.send_message.assert_awaited_once_with(
+            "❌ You need administrator permissions to use this command.", ephemeral=True
+        )
+        death_service.force_announce.assert_not_awaited()
 
     async def test_death_wrappers_defer_and_schedule_safe_run(self):
         commands, _ = self.make_commands(death_channel_id="123")

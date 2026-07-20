@@ -18,14 +18,46 @@ logger = logging.getLogger(__name__)
 class DeathCommands:
     """Handles /death Discord commands."""
 
-    def __init__(self, bot: discord.ext.commands.Bot, *, state_service_instance, death_channel_id: str):
+    def __init__(self, bot: discord.ext.commands.Bot, *, state_service_instance, death_channel_id: str, death_service_instance=None):
         self.bot = bot
         self._state_service = state_service_instance
         self._death_channel_id = death_channel_id
+        self._death_service = death_service_instance
 
     def setup_commands(self) -> None:
         """Set up all death-related commands."""
         self.bot.tree.add_command(self._create_death_group())
+        self._create_forcedeath_command()
+
+    def _create_forcedeath_command(self) -> None:
+        """Create the /forcedeath command (server admins only)."""
+
+        @self.bot.tree.command(
+            name="forcedeath",
+            description="Force a death announcement for a Wikipedia URL (admin only, for testing)")
+        @app_commands.describe(url="Wikipedia URL or article title (e.g. 'Kevin Keegan')")
+        async def forcedeath(interaction: discord.Interaction, url: str):
+            if not getattr(interaction.user, "guild_permissions", None) or not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message(
+                    "❌ You need administrator permissions to use this command.", ephemeral=True
+                )
+                return
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            asyncio.create_task(
+                safe_run(interaction, self._handle_forcedeath, interaction, url)
+            )
+
+    async def _handle_forcedeath(self, interaction: discord.Interaction, url: str) -> None:
+        """Handle the /forcedeath command."""
+        if self._death_service is None:
+            await interaction.followup.send("Death service is not available.", ephemeral=True)
+            return
+
+        ok, message = await self._death_service.force_announce(url)
+        logger.info(f"[/forcedeath] {interaction.user} forced '{url}' -> ok={ok}")
+        await interaction.followup.send(
+            message if ok else f"❌ {message}", ephemeral=True
+        )
 
     def _create_death_group(self) -> app_commands.Group:
         """Create the /death command group."""

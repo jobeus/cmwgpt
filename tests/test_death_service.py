@@ -249,6 +249,62 @@ class TestDeathService(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
+    # ----- Force announce -----
+
+    def test_parse_article_title(self):
+        from src.services.death_service import parse_article_title
+        self.assertEqual(
+            parse_article_title("https://en.wikipedia.org/wiki/Kevin_Keegan"),
+            "Kevin_Keegan",
+        )
+        self.assertEqual(
+            parse_article_title("https://en.wikipedia.org/wiki/Ren%C3%A9_Dupont"),
+            "René_Dupont",
+        )
+        self.assertEqual(parse_article_title("kevin keegan"), "Kevin_keegan")
+        self.assertEqual(parse_article_title("  "), "")
+        self.assertEqual(parse_article_title(""), "")
+
+    def test_force_announce_calls_announce(self):
+        """force_announce bypasses the threshold and announces, without touching dedup state."""
+        async def run_test():
+            with patch.object(self.service, "_get_session", AsyncMock(return_value=MagicMock())), \
+                patch.object(self.service, "get_avg_monthly_views", AsyncMock(return_value=123)), \
+                patch.object(self.service, "_announce", AsyncMock()) as mock_announce:
+                ok, msg = await self.service.force_announce(
+                    "https://en.wikipedia.org/wiki/Kevin_Keegan"
+                )
+
+            self.assertTrue(ok)
+            mock_announce.assert_awaited_once_with("Kevin Keegan", "Kevin_Keegan", 123)
+            # Force testing must not pollute the real dedup set.
+            self.assertNotIn("Kevin_Keegan", self.service._announced_titles)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_force_announce_rejects_bad_input(self):
+        async def run_test():
+            with patch.object(self.service, "_announce", AsyncMock()) as mock_announce:
+                ok, msg = await self.service.force_announce("   ")
+            self.assertFalse(ok)
+            mock_announce.assert_not_awaited()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_force_announce_requires_channel(self):
+        async def run_test():
+            from src.services.death_service import DeathService
+            svc = DeathService(
+                state_service=self.state_service,
+                state_file="/tmp/_test_death_names.json",
+                death_channel_id="",
+            )
+            ok, msg = await svc.force_announce("https://en.wikipedia.org/wiki/Kevin_Keegan")
+            self.assertFalse(ok)
+            self.assertIn("DEATH_CHANNEL_ID", msg)
+
+        self.loop.run_until_complete(run_test())
+
     # ----- State persistence -----
 
     def test_save_and_load_state(self):
