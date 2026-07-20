@@ -12,6 +12,7 @@ from discord.app_commands import Choice
 
 from src.config import get_system_prompt, get_config
 from src.utils.discord_helper import get_mention_legend
+from src.utils.discord_error_utils import safe_defer
 from src.utils.async_utils import safe_run
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,8 @@ class SystemCommands:
                 model: Optional[str] = None):
             # Immediately defer the interaction to avoid Discord's 3-second
             # timeout
-            await interaction.response.defer(ephemeral=False, thinking=True)
+            if not await safe_defer(interaction, ephemeral=False, thinking=True):
+                return
 
             # Queue the command for FIFO processing
             queued = await self._queue_service.queue_command(interaction, self._handle_model_command, model)
@@ -114,7 +116,8 @@ class SystemCommands:
                 prompt_text: Optional[str] = None):
             # Immediately defer the interaction to avoid Discord's 3-second
             # timeout
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            if not await safe_defer(interaction, ephemeral=True, thinking=True):
+                return
 
             # Queue the command for FIFO processing
             queued = await self._queue_service.queue_command(interaction, self._handle_systemprompt_set, prompt_text)
@@ -133,7 +136,8 @@ class SystemCommands:
         async def systemprompt_reset(interaction: discord.Interaction):
             # Immediately defer the interaction to avoid Discord's 3-second
             # timeout
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            if not await safe_defer(interaction, ephemeral=True, thinking=True):
+                return
 
             # Queue the command for FIFO processing
             queued = await self._queue_service.queue_command(interaction, self._handle_systemprompt_reset)
@@ -150,7 +154,8 @@ class SystemCommands:
             name="view",
             description="View the composed base system prompt for this channel")
         async def systemprompt_view(interaction: discord.Interaction):
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            if not await safe_defer(interaction, ephemeral=True, thinking=True):
+                return
 
             # Fire-and-forget: read-only, no state mutation
             asyncio.create_task(
@@ -295,7 +300,8 @@ class SystemCommands:
 
             # Immediately defer the interaction to avoid Discord's 3-second
             # timeout
-            await interaction.response.defer(ephemeral=False, thinking=True)
+            if not await safe_defer(interaction, ephemeral=False, thinking=True):
+                return
 
             # Queue the command for FIFO processing
             queued = await self._queue_service.queue_command(interaction, self._handle_restart_command)
@@ -315,7 +321,8 @@ class SystemCommands:
         @app_commands.command(name="help",
                               description="Get help with bot commands privately")
         async def help_command(interaction: discord.Interaction):
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            if not await safe_defer(interaction, ephemeral=True, thinking=True):
+                return
 
             # Fire-and-forget: help is stateless, no need to queue
             asyncio.create_task(

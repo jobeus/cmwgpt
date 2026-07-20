@@ -35,6 +35,40 @@ def is_discord_server_error(error: BaseException) -> bool:
     return isinstance(error, discord.HTTPException) and (error.status or 0) >= 500
 
 
+async def safe_defer(interaction, *, ephemeral: bool = False, thinking: bool = True) -> bool:
+    """Acknowledge a slash-command interaction, tolerating an expired token.
+
+    Discord gives bots 3 seconds to acknowledge an interaction. If the event
+    loop was stalled past that (or Discord lagged delivering it), defer()
+    raises NotFound (10062 Unknown interaction) and there is no way to respond
+    to that invocation at all — retrying is pointless, the token is dead.
+
+    Returns True when the interaction is usable, False when it should be
+    abandoned (the failure has already been logged concisely).
+    """
+    try:
+        await interaction.response.defer(ephemeral=ephemeral, thinking=thinking)
+        return True
+    except discord.InteractionResponded:
+        # Someone already acknowledged it; the interaction is still usable.
+        return True
+    except discord.NotFound:
+        command_name = getattr(getattr(interaction, "command", None), "name", "?")
+        logger.warning(
+            f"Interaction for '/{command_name}' expired before it could be acknowledged "
+            "(bot took >3s to respond — event loop stall or Discord lag). Skipping this "
+            "invocation; the bot is still running and new commands will work."
+        )
+        return False
+    except discord.HTTPException as e:
+        command_name = getattr(getattr(interaction, "command", None), "name", "?")
+        logger.warning(
+            f"Failed to defer interaction for '/{command_name}': {concise_error(e)}. "
+            "Skipping this invocation; the bot is still running."
+        )
+        return False
+
+
 @asynccontextmanager
 async def best_effort_typing(channel):
     """

@@ -11,6 +11,7 @@ from discord import app_commands
 
 from src.services.death_service import POLL_INTERVAL_SECONDS, MIN_AVG_MONTHLY_VIEWS, PAGEVIEW_MONTHS
 from src.utils.async_utils import safe_run
+from src.utils.discord_error_utils import safe_defer
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,8 @@ class DeathCommands:
                     "❌ You need administrator permissions to use this command.", ephemeral=True
                 )
                 return
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            if not await safe_defer(interaction, ephemeral=True, thinking=True):
+                return
             asyncio.create_task(
                 safe_run(interaction, self._handle_forcedeath, interaction, url)
             )
@@ -56,7 +58,8 @@ class DeathCommands:
             description="Write a funny limerick about a person")
         @app_commands.describe(person="Person's name or Wikipedia URL (e.g. 'Kevin Keegan')")
         async def limerick(interaction: discord.Interaction, person: str):
-            await interaction.response.defer(thinking=True)
+            if not await safe_defer(interaction, thinking=True):
+                return
             asyncio.create_task(
                 safe_run(interaction, self._handle_limerick, interaction, person)
             )
@@ -100,7 +103,8 @@ class DeathCommands:
                 poll_interval: Optional[app_commands.Range[int, 5, 3600]] = None,
                 min_views: Optional[app_commands.Range[int, 1, 100000000]] = None,
                 pageview_months: Optional[app_commands.Range[int, 1, 60]] = None):
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            if not await safe_defer(interaction, ephemeral=True, thinking=True):
+                return
             asyncio.create_task(
                 safe_run(interaction, self._handle_death_set, interaction, poll_interval, min_views, pageview_months)
             )
@@ -109,7 +113,8 @@ class DeathCommands:
             name="reset",
             description="Reset the death service settings to defaults")
         async def death_reset(interaction: discord.Interaction):
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            if not await safe_defer(interaction, ephemeral=True, thinking=True):
+                return
             asyncio.create_task(
                 safe_run(interaction, self._handle_death_reset, interaction)
             )
@@ -118,7 +123,8 @@ class DeathCommands:
             name="view",
             description="View the current death service settings")
         async def death_view(interaction: discord.Interaction):
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            if not await safe_defer(interaction, ephemeral=True, thinking=True):
+                return
             asyncio.create_task(
                 safe_run(interaction, self._handle_death_view, interaction)
             )

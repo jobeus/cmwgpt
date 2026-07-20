@@ -16,7 +16,7 @@ from src.services.openai_service import OpenAIServiceError
 from src.services.runpod_service import RunpodServiceError
 from src.services.gemini_service import GeminiServiceError
 from src.utils.async_utils import safe_run
-from src.utils.discord_error_utils import best_effort_typing
+from src.utils.discord_error_utils import best_effort_typing, safe_defer
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,8 @@ class ImageCommands:
         ):
             # Immediately defer the interaction to avoid Discord's 3-second
             # timeout
-            await interaction.response.defer(ephemeral=False, thinking=True)
+            if not await safe_defer(interaction, ephemeral=False, thinking=True):
+                return
 
             # Fire-and-forget: image commands run async, not queued
             asyncio.create_task(
@@ -257,7 +258,8 @@ class ImageCommands:
         async def drawmodel_command(
                 interaction: discord.Interaction,
                 model: Optional[str] = None):
-            await interaction.response.defer(ephemeral=False, thinking=True)
+            if not await safe_defer(interaction, ephemeral=False, thinking=True):
+                return
 
             # Fire-and-forget: model config commands run async, not queued
             asyncio.create_task(
@@ -319,7 +321,8 @@ class ImageCommands:
             image4: Optional[discord.Attachment] = None,
             model: Optional[str] = None,
         ):
-            await interaction.response.defer(ephemeral=False, thinking=True)
+            if not await safe_defer(interaction, ephemeral=False, thinking=True):
+                return
 
             # Fire-and-forget: image commands run async, not queued
             asyncio.create_task(
@@ -469,7 +472,8 @@ class ImageCommands:
         async def editmodel_command(
                 interaction: discord.Interaction,
                 model: Optional[str] = None):
-            await interaction.response.defer(ephemeral=False, thinking=True)
+            if not await safe_defer(interaction, ephemeral=False, thinking=True):
+                return
 
             # Fire-and-forget: model config commands run async, not queued
             asyncio.create_task(

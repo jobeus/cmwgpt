@@ -204,7 +204,7 @@ class TestDeathCommands(unittest.IsolatedAsyncioTestCase):
         ):
             await limerick(interaction, "Kevin Keegan")
 
-        interaction.response.defer.assert_awaited_once_with(thinking=True)
+        interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
 
     async def test_forcedeath_command_rejects_non_admin(self):
         death_service = MagicMock()

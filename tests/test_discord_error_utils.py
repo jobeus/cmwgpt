@@ -10,6 +10,7 @@ from src.utils.discord_error_utils import (
     best_effort_typing,
     concise_error,
     is_discord_server_error,
+    safe_defer,
 )
 
 
@@ -66,6 +67,50 @@ class TestIsDiscordServerError(unittest.TestCase):
 
     def test_false_for_non_discord_errors(self):
         self.assertFalse(is_discord_server_error(ValueError("boom")))
+
+
+class TestSafeDefer(unittest.IsolatedAsyncioTestCase):
+    def make_interaction(self):
+        interaction = MagicMock()
+        interaction.response = AsyncMock()
+        interaction.command.name = "limerick"
+        return interaction
+
+    async def test_returns_true_on_success(self):
+        interaction = self.make_interaction()
+
+        result = await safe_defer(interaction, ephemeral=True, thinking=True)
+
+        self.assertTrue(result)
+        interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+
+    async def test_returns_false_when_interaction_expired(self):
+        interaction = self.make_interaction()
+        interaction.response.defer.side_effect = make_http_exception(
+            404, "Unknown interaction", discord.NotFound
+        )
+
+        result = await safe_defer(interaction)
+
+        self.assertFalse(result)
+
+    async def test_returns_false_on_other_http_errors(self):
+        interaction = self.make_interaction()
+        interaction.response.defer.side_effect = make_http_exception(
+            500, CLOUDFLARE_HTML, discord.DiscordServerError
+        )
+
+        result = await safe_defer(interaction)
+
+        self.assertFalse(result)
+
+    async def test_returns_true_when_already_responded(self):
+        interaction = self.make_interaction()
+        interaction.response.defer.side_effect = discord.InteractionResponded(interaction)
+
+        result = await safe_defer(interaction)
+
+        self.assertTrue(result)
 
 
 class TestBestEffortTyping(unittest.IsolatedAsyncioTestCase):

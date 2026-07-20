@@ -11,6 +11,7 @@ from discord import app_commands
 
 from src.services.death_service import PAGEVIEW_MONTHS
 from src.utils.async_utils import safe_run
+from src.utils.discord_error_utils import safe_defer
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,8 @@ class WikiCountCommands:
         @self.bot.tree.command(name="wikicount", description="Look up Wikipedia average monthly pageviews for an article")
         @app_commands.describe(target="Wikipedia URL or exact article title (e.g. 'Daveigh Chase' or 'Las Vegas')")
         async def wikicount(interaction: discord.Interaction, target: str):
-            await interaction.response.defer(ephemeral=False, thinking=True)
+            if not await safe_defer(interaction, ephemeral=False, thinking=True):
+                return
             asyncio.create_task(
                 safe_run(interaction, self._handle_wikicount, interaction, target)
             )
