@@ -469,7 +469,8 @@ class DeathService:
             return None
 
         prompt = (
-            f"Write a funny limerick about why {display_name} ({wiki_link}) is known. "
+            f"Write a funny limerick about what {display_name} ({wiki_link}) is known for. "
+            f"Multiple verses are allowed to cover all the things they're known for. "
             f"Respond with only the limerick."
         )
         try:
