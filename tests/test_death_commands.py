@@ -147,6 +147,65 @@ class TestDeathCommands(unittest.IsolatedAsyncioTestCase):
         sent = interaction.followup.send.await_args.args[0]
         self.assertTrue(sent.startswith("❌"))
 
+    async def test_handle_limerick_invokes_service(self):
+        death_service = MagicMock()
+        death_service.write_limerick = AsyncMock(
+            return_value=(True, "There once was a keeper named Kev...")
+        )
+        commands, _ = self.make_commands(death_channel_id="123", death_service=death_service)
+        interaction = make_interaction(channel_id=123)
+
+        await commands._handle_limerick(interaction, "Kevin Keegan")
+
+        death_service.write_limerick.assert_awaited_once_with("Kevin Keegan")
+        interaction.followup.send.assert_awaited_once_with(
+            "There once was a keeper named Kev..."
+        )
+
+    async def test_handle_limerick_reports_failure(self):
+        death_service = MagicMock()
+        death_service.write_limerick = AsyncMock(
+            return_value=(False, "Could not determine a person from that input.")
+        )
+        commands, _ = self.make_commands(death_channel_id="123", death_service=death_service)
+        interaction = make_interaction(channel_id=123)
+
+        await commands._handle_limerick(interaction, "")
+
+        sent = interaction.followup.send.await_args.args[0]
+        self.assertTrue(sent.startswith("❌"))
+
+    async def test_handle_limerick_without_service(self):
+        commands, _ = self.make_commands(death_channel_id="123", death_service=None)
+        interaction = make_interaction(channel_id=123)
+
+        await commands._handle_limerick(interaction, "Kevin Keegan")
+
+        interaction.followup.send.assert_awaited_once_with(
+            "The limerick service is not available."
+        )
+
+    async def test_limerick_command_defers_publicly_for_any_user(self):
+        death_service = MagicMock()
+        death_service.write_limerick = AsyncMock(return_value=(True, "verse"))
+        commands, _ = self.make_commands(death_channel_id="123", death_service=death_service)
+
+        registered = {}
+        commands.bot.tree.command = lambda **kwargs: (lambda fn: registered.setdefault(kwargs["name"], fn) or fn)
+
+        commands._create_limerick_command()
+        limerick = registered["limerick"]
+
+        interaction = make_interaction(channel_id=123)
+        interaction.user.guild_permissions.administrator = False
+
+        with patch("src.bot.commands.death.safe_run", new=AsyncMock()), patch(
+            "src.bot.commands.death.asyncio.create_task", side_effect=lambda coro: coro.close()
+        ):
+            await limerick(interaction, "Kevin Keegan")
+
+        interaction.response.defer.assert_awaited_once_with(thinking=True)
+
     async def test_forcedeath_command_rejects_non_admin(self):
         death_service = MagicMock()
         death_service.force_announce = AsyncMock()

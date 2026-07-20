@@ -484,6 +484,27 @@ class DeathService:
             logger.exception(f"Failed to summarize {display_name} for death announcement")
             return None
 
+    async def write_limerick(self, target: str) -> Tuple[bool, str]:
+        """Write a limerick about any person, with no announcement attached.
+
+        Accepts a name or Wikipedia URL. Returns ``(ok, message)`` where the
+        message is the limerick itself on success.
+        """
+        if not self._openai_service or not self._model:
+            return False, "No chat model is configured for limericks."
+
+        article_title = parse_article_title(target)
+        if not article_title:
+            return False, "Could not determine a person from that input."
+
+        display_name = article_title.replace("_", " ")
+        wiki_link = f"https://en.wikipedia.org/wiki/{article_title}"
+
+        limerick = await self._summarize_person(display_name, wiki_link)
+        if not limerick:
+            return False, f"The model failed to produce a limerick for **{display_name}**."
+        return True, limerick
+
     async def force_announce(self, target: str) -> Tuple[bool, str]:
         """Force a death announcement for a Wikipedia URL/title (for testing).
 

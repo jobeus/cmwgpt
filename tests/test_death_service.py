@@ -580,6 +580,59 @@ class TestDeathService(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
+    def test_write_limerick_returns_model_output(self):
+        """write_limerick prompts with the name and wiki link, returns the verse."""
+        async def run_test():
+            mock_openai = MagicMock()
+            mock_openai.get_chat_completion = AsyncMock(
+                return_value=("There once was a keeper named Kev...", 0.0)
+            )
+            self.service._openai_service = mock_openai
+            self.service._model = "anthropic/claude-sonnet-5"
+
+            ok, message = await self.service.write_limerick("Kevin Keegan")
+
+            self.assertTrue(ok)
+            self.assertEqual(message, "There once was a keeper named Kev...")
+            prompt = mock_openai.get_chat_completion.call_args.kwargs["messages"][0]["content"]
+            self.assertIn("Kevin Keegan", prompt)
+            self.assertIn("https://en.wikipedia.org/wiki/Kevin_Keegan", prompt)
+            self.assertIn("limerick", prompt.lower())
+
+        self.loop.run_until_complete(run_test())
+
+    def test_write_limerick_without_model_configured(self):
+        async def run_test():
+            ok, message = await self.service.write_limerick("Kevin Keegan")
+            self.assertFalse(ok)
+            self.assertIn("No chat model", message)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_write_limerick_rejects_empty_input(self):
+        async def run_test():
+            self.service._openai_service = MagicMock()
+            self.service._model = "anthropic/claude-sonnet-5"
+
+            ok, message = await self.service.write_limerick("   ")
+            self.assertFalse(ok)
+            self.assertIn("Could not determine a person", message)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_write_limerick_survives_model_failure(self):
+        async def run_test():
+            mock_openai = MagicMock()
+            mock_openai.get_chat_completion = AsyncMock(side_effect=RuntimeError("boom"))
+            self.service._openai_service = mock_openai
+            self.service._model = "anthropic/claude-sonnet-5"
+
+            ok, message = await self.service.write_limerick("Kevin Keegan")
+            self.assertFalse(ok)
+            self.assertIn("failed to produce a limerick", message)
+
+        self.loop.run_until_complete(run_test())
+
     def test_announce_survives_summary_failure(self):
         """A failing summary call still sends the plain RIP message."""
         async def run_test():

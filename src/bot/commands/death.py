@@ -28,6 +28,7 @@ class DeathCommands:
         """Set up all death-related commands."""
         self.bot.tree.add_command(self._create_death_group())
         self._create_forcedeath_command()
+        self._create_limerick_command()
 
     def _create_forcedeath_command(self) -> None:
         """Create the /forcedeath command (server admins only)."""
@@ -46,6 +47,29 @@ class DeathCommands:
             asyncio.create_task(
                 safe_run(interaction, self._handle_forcedeath, interaction, url)
             )
+
+    def _create_limerick_command(self) -> None:
+        """Create the /limerick command (open to everyone)."""
+
+        @self.bot.tree.command(
+            name="limerick",
+            description="Write a funny limerick about a person")
+        @app_commands.describe(person="Person's name or Wikipedia URL (e.g. 'Kevin Keegan')")
+        async def limerick(interaction: discord.Interaction, person: str):
+            await interaction.response.defer(thinking=True)
+            asyncio.create_task(
+                safe_run(interaction, self._handle_limerick, interaction, person)
+            )
+
+    async def _handle_limerick(self, interaction: discord.Interaction, person: str) -> None:
+        """Handle the /limerick command."""
+        if self._death_service is None:
+            await interaction.followup.send("The limerick service is not available.")
+            return
+
+        ok, message = await self._death_service.write_limerick(person)
+        logger.info(f"[/limerick] {interaction.user} requested '{person}' -> ok={ok}")
+        await interaction.followup.send(message if ok else f"❌ {message}")
 
     async def _handle_forcedeath(self, interaction: discord.Interaction, url: str) -> None:
         """Handle the /forcedeath command."""
