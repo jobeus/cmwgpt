@@ -12,11 +12,11 @@
   },
   "dependencies": {
     "authenticate-pam": "^1.0.5",
-    "axios": "^1.18.0",
+    "axios": "^1.19.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "express-rate-limit": "^8.5.2",
+    "express-rate-limit": "^8.6.2",
     "jsonwebtoken": "^9.0.3",
     "mariadb": "^3.5.3",
     "socket.io": "^4.8.3"
@@ -26,13 +26,13 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^26.0.0",
-    "eslint": "^10.5.0",
-    "globals": "^17.6.0",
+    "@types/node": "^26.2.0",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.61.1",
-    "vitest": "^4.1.9"
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.10"
   }
 }

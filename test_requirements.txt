@@ -5,10 +5,10 @@
 pytest>=9.1.1
 pytest-asyncio>=1.4.0
 pytest-cov>=7.1.0
-coverage>=7.15.0
+coverage>=7.15.4
 
 # Code quality and linting tools
 flake8>=7.3.0
 autopep8>=2.3.2
 black>=26.5.1
-mypy>=2.1.0
+mypy>=2.3.0
