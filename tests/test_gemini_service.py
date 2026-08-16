@@ -264,7 +264,7 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Hello from Gemini!", result)
         mock_create.assert_awaited_once()
         call_kwargs = mock_create.call_args.kwargs
-        self.assertEqual(call_kwargs["model"], "gemini-3.1-flash-lite")
+        self.assertEqual(call_kwargs["model"], "gemini-3.5-flash-lite")
         self.assertEqual(call_kwargs["store"], True)
         self.assertIn({"type": "google_search"}, call_kwargs["tools"])
 
