@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch, mock_open
 import asyncio
 import os
 import sys
+
+import aiohttp
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -220,6 +222,100 @@ class TestDeathService(unittest.TestCase):
                 "Missing_Person", mock_session
             )
             self.assertEqual(result, 0)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_pageview_api_504_is_retried_until_it_succeeds(self):
+        """A transient upstream timeout is retried, not reported as unknown."""
+        async def run_test():
+            timeout_resp = AsyncMock()
+            timeout_resp.status = 504
+            timeout_resp.text = AsyncMock(return_value=
+                '{"httpCode":504,"httpReason":"upstream request timeout"}'
+            )
+            ok_resp = AsyncMock()
+            ok_resp.status = 200
+            ok_resp.json = AsyncMock(return_value={"items": [{"views": 300}] * 3})
+
+            session = MagicMock()
+            session.get = MagicMock(side_effect=[
+                AsyncMock(__aenter__=AsyncMock(return_value=timeout_resp), __aexit__=AsyncMock(return_value=False)),
+                AsyncMock(__aenter__=AsyncMock(return_value=ok_resp), __aexit__=AsyncMock(return_value=False)),
+            ])
+
+            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()):
+                result = await self.service.get_avg_monthly_views("Dolly_Parton", session)
+
+            self.assertEqual(result, 300)
+            self.assertEqual(session.get.call_count, 2)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_pageview_network_error_is_retried(self):
+        """Connection failures are retried before giving up."""
+        async def run_test():
+            ok_resp = AsyncMock()
+            ok_resp.status = 200
+            ok_resp.json = AsyncMock(return_value={"items": [{"views": 90}]})
+
+            session = MagicMock()
+            session.get = MagicMock(side_effect=[
+                aiohttp.ClientError("connection reset"),
+                AsyncMock(__aenter__=AsyncMock(return_value=ok_resp), __aexit__=AsyncMock(return_value=False)),
+            ])
+
+            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()):
+                result = await self.service.get_avg_monthly_views("Flaky", session)
+
+            self.assertEqual(result, 90)
+
+            # Never-recovering network errors give up as unknown, not as zero.
+            session = MagicMock()
+            session.get = MagicMock(side_effect=asyncio.TimeoutError())
+            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()):
+                self.assertIsNone(await self.service.get_avg_monthly_views("Dead", session))
+            self.assertEqual(session.get.call_count, 3)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_unchecked_name_is_announced_on_a_later_poll(self):
+        """A name whose views could not be fetched is retried and then announced."""
+        async def run_test():
+            self.service._first_poll = False
+            self.service._known_names = set()
+
+            ok_resp = AsyncMock()
+            ok_resp.status = 200
+            ok_resp.text = AsyncMock(return_value=SAMPLE_HTML)
+            session = MagicMock()
+            session.get = MagicMock(return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=ok_resp),
+                __aexit__=AsyncMock(return_value=False),
+            ))
+
+            with patch.object(self.service, "_get_session", AsyncMock(return_value=session)), \
+                patch.object(self.service, "_save_state"), \
+                patch.object(self.service, "_announce", AsyncMock()) as mock_announce, \
+                patch.object(
+                    self.service,
+                    "get_avg_monthly_views",
+                    AsyncMock(side_effect=[None, 5_000_000]),
+                ), \
+                patch(
+                    "src.services.death_service.parse_deaths_html",
+                    return_value=[("Famous One", "Famous_One")],
+                ):
+                # First poll: the pageviews API is down.
+                await self.service._poll_once()
+                mock_announce.assert_not_awaited()
+                self.assertEqual(self.service._known_names, set())
+
+                # Second poll: same name is still "new", the API recovers.
+                await self.service._poll_once()
+                mock_announce.assert_awaited_once_with("Famous One", "Famous_One", 5_000_000)
+                self.assertEqual(
+                    self.service._known_names, {("Famous One", "Famous_One")}
+                )
 
         self.loop.run_until_complete(run_test())
 
@@ -507,12 +603,21 @@ class TestDeathService(unittest.TestCase):
 
                 await self.service._poll_once()
 
-            # One save for the known-names baseline update, one for the
-            # announced-set after "New One" was announced.
-            self.assertEqual(mock_save.call_count, 2)
+            # One save covering the known-names and announced-set updates.
+            self.assertEqual(mock_save.call_count, 1)
             self.assertEqual(mock_views.await_count, 4)
             mock_announce.assert_awaited_once_with("New One", "New_One", 200000)
             self.assertIn("New_One", self.service._announced_titles)
+            # "No Data" (views unavailable) and "Boom" (lookup raised) must not
+            # be recorded as seen, so the next poll retries them.
+            self.assertEqual(
+                self.service._known_names,
+                {
+                    ("John Doe", "John_Doe"),
+                    ("New One", "New_One"),
+                    ("Low Views", "Low_Views"),
+                },
+            )
 
         self.loop.run_until_complete(run_test())
 
@@ -695,9 +800,13 @@ class TestDeathService(unittest.TestCase):
 
             rate_resp = AsyncMock()
             rate_resp.status = 429
+            rate_resp.text = AsyncMock(return_value="rate limited")
             other_resp = AsyncMock()
             other_resp.status = 500
             other_resp.text = AsyncMock(return_value="oops")
+            bad_request_resp = AsyncMock()
+            bad_request_resp.status = 400
+            bad_request_resp.text = AsyncMock(return_value="bad title")
             session = MagicMock()
             session.get = MagicMock(side_effect=[
                 AsyncMock(__aenter__=AsyncMock(return_value=rate_resp), __aexit__=AsyncMock(return_value=False)),
@@ -706,11 +815,22 @@ class TestDeathService(unittest.TestCase):
             ])
             with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
                 self.assertIsNone(await self.service.get_avg_monthly_views("Rate Limited", session))
-            self.assertEqual(mock_sleep.await_count, 3)
+            # Backoff happens between attempts, not after the last one.
+            self.assertEqual(mock_sleep.await_count, 2)
+            self.assertEqual(session.get.call_count, 3)
 
+            # 5xx is transient too: retry the full budget, then give up as unknown.
             session = MagicMock()
             session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=other_resp), __aexit__=AsyncMock(return_value=False)))
-            self.assertIsNone(await self.service.get_avg_monthly_views("Oops", session))
+            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()):
+                self.assertIsNone(await self.service.get_avg_monthly_views("Oops", session))
+            self.assertEqual(session.get.call_count, 3)
+
+            # A non-transient 4xx is not worth retrying.
+            session = MagicMock()
+            session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=bad_request_resp), __aexit__=AsyncMock(return_value=False)))
+            self.assertIsNone(await self.service.get_avg_monthly_views("Bad", session))
+            self.assertEqual(session.get.call_count, 1)
 
         self.loop.run_until_complete(run_test())
 

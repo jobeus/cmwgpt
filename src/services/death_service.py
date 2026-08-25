@@ -9,7 +9,8 @@ State (the set of known names, plus the set of names that have already been
 announced) is persisted to a temp file on shutdown and reloaded on startup so
 deaths that occur while the bot is offline are still detected. Once a name has
 been announced it is never announced again, even if it drops off the deaths
-page and later reappears.
+page and later reappears. A name whose pageview lookup fails is never recorded
+as seen, so the next poll picks it up and tries again.
 """
 
 import asyncio
@@ -298,17 +299,19 @@ class DeathService:
             return
 
         new_names = current - self._known_names
-        self._known_names = current
 
         if not new_names:
+            self._known_names = current
             return
-
-        # Persist immediately so restarts don't lose track of new names
-        self._save_state()
 
         logger.info(f"Detected {len(new_names)} new name(s) on deaths page")
 
-        announced_any = False
+        # Names whose view count we could not determine this round. They are
+        # deliberately left out of the known-names set so the next poll sees
+        # them as new again and retries: a transient pageviews-API failure must
+        # never silently swallow a death.
+        unchecked: Set[Tuple[str, str]] = set()
+
         for display_name, article_title in new_names:
             try:
                 # Never announce the same person twice, even if they dropped off
@@ -323,6 +326,11 @@ class DeathService:
                 avg_views = await self.get_avg_monthly_views(article_title, session)
 
                 if avg_views is None:
+                    logger.warning(
+                        f"Could not determine view count for {display_name} "
+                        f"({article_title}) — not marking as seen, will retry next poll"
+                    )
+                    unchecked.add((display_name, article_title))
                     continue
 
                 if avg_views >= min_views:
@@ -331,17 +339,21 @@ class DeathService:
                     )
                     await self._announce(display_name, article_title, avg_views)
                     self._announced_titles.add(article_title)
-                    announced_any = True
                 else:
                     logger.info(
                         f"Skipped: {display_name} ({avg_views:,} avg monthly views, below {min_views:,} threshold)"
                     )
             except Exception:
-                logger.exception(f"Error checking views for {display_name}")
+                logger.exception(
+                    f"Error checking views for {display_name} — not marking as seen, "
+                    f"will retry next poll"
+                )
+                unchecked.add((display_name, article_title))
 
-        # Persist the updated announced-set so restarts don't re-post.
-        if announced_any:
-            self._save_state()
+        # Everything currently on the page is now known, except the names we
+        # could not check — those stay "new" so the next poll retries them.
+        self._known_names = current - unchecked
+        self._save_state()
 
     # -- pageviews ----------------------------------------------------------
 
@@ -387,31 +399,54 @@ class DeathService:
         base_delay = 1.0
 
         for attempt in range(max_retries):
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    items = data.get("items", [])
-                    if not items:
-                        return 0
-                    total = sum(item.get("views", 0) for item in items)
-                    return total // len(items)
+            last_attempt = attempt == max_retries - 1
+            try:
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        items = data.get("items", [])
+                        if not items:
+                            return 0
+                        total = sum(item.get("views", 0) for item in items)
+                        return total // len(items)
 
-                if resp.status == 404:
-                    return 0  # No data / page doesn't exist
+                    if resp.status == 404:
+                        return 0  # No data / page doesn't exist
 
-                if resp.status == 429:
-                    delay = base_delay * (2 ** attempt)
+                    # Rate limits and upstream 5xx (502/503/504) are transient:
+                    # back off and try again rather than giving up on the death.
+                    if resp.status == 429 or resp.status >= 500:
+                        text = await resp.text()
+                        if last_attempt:
+                            logger.warning(
+                                f"Pageviews API returned {resp.status} for {article_title}: {text}"
+                            )
+                            break
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(
+                            f"Pageviews API returned {resp.status} for {article_title}: {text} — "
+                            f"retrying in {delay}s (attempt {attempt + 1}/{max_retries})"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+
+                    text = await resp.text()
                     logger.warning(
-                        f"Rate limited (429) on {article_title}, retrying in {delay}s..."
+                        f"Pageviews API returned {resp.status} for {article_title}: {text}"
                     )
-                    await asyncio.sleep(delay)
-                    continue
-
-                text = await resp.text()
+                    return None
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                if last_attempt:
+                    logger.warning(
+                        f"Network error fetching pageviews for {article_title}: {exc}"
+                    )
+                    break
+                delay = base_delay * (2 ** attempt)
                 logger.warning(
-                    f"Pageviews API returned {resp.status} for {article_title}: {text}"
+                    f"Network error fetching pageviews for {article_title}: {exc} — "
+                    f"retrying in {delay}s (attempt {attempt + 1}/{max_retries})"
                 )
-                return None
+                await asyncio.sleep(delay)
 
         logger.error(f"Failed to fetch pageviews for {article_title} after {max_retries} attempts.")
         return None
