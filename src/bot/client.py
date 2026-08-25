@@ -306,23 +306,6 @@ class DiscordBotClient:
                 message.channel, discord.TextChannel):
             return
 
-        # Check for X/Twitter links to provide xcancel.com alternatives
-        import re
-        pattern = r'\b(?:https?://)?(?:www\.)?(?:x|twitter)\.com/([^\s>)]+)'
-        content = getattr(message, 'content', '')
-        matches = re.finditer(pattern, content, re.IGNORECASE)
-        xcancel_links = []
-        for match in matches:
-            path = match.group(1)
-            # Drop query string / tracking args (e.g. ?get_args=xxx)
-            path = path.split('?')[0]
-            # Remove trailing punctuation that might have been captured
-            path = re.sub(r'[.,!?\'"]+$', '', path)
-            xcancel_links.append(f"( <https://xcancel.com/{path}> )")
-            
-        if xcancel_links:
-            await message.channel.send("\n".join(xcancel_links))
-
         # Handle bot mentions
         if self.bot.user and self.bot.user in message.mentions and self.config.reply_to_mentions:
             model = self.services.state_service.get_model(
