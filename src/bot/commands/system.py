@@ -71,10 +71,10 @@ class SystemCommands:
                     name="anthropic/claude-sonnet-5 (search, web aware)",
                     value="anthropic/claude-sonnet-5"),
                 Choice(
-                    name="google (gemini-3.5-flash-lite, search)",
+                    name="google (gemini-3.7-flash, search)",
                     value="google"),
                 Choice(
-                    name="google-high (gemini-3.5-flash-lite, search, thinking)",
+                    name="google-high (gemini-3.7-flash, search, thinking)",
                     value="google-high"),
                 Choice(
                     name="hybrid (google-high + sonnet)",
