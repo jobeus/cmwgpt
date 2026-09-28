@@ -212,7 +212,7 @@ class OpenAIService:
                     }
                 }
 
-                if search and actual_model == "anthropic/claude-sonnet-5":
+                if search and actual_model == "anthropic/claude-sonnet-5.5":
                     kwargs["extra_body"]["plugins"] = [{
                         "id": "web",
                         "engine": "native"

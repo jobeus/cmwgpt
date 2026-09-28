@@ -87,7 +87,7 @@ async def dispatch_completion(
                 "content": [{"type": "text", "text": hybrid.build_phase2_text(summary_text)}],
             }]
             reply_content, sonnet_cost = await openai_service.get_chat_completion(
-                model="anthropic/claude-sonnet-5",
+                model="anthropic/claude-sonnet-5.5",
                 messages=phase2_messages,
                 system_prompt=hybrid.phase2_system_prompt,
                 search=False,

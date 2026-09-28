@@ -68,8 +68,8 @@ class SystemCommands:
                     name="qwen/qwen3.5-flash-02-23",
                     value="qwen/qwen3.5-flash-02-23"),
                 Choice(
-                    name="anthropic/claude-sonnet-5 (search, web aware)",
-                    value="anthropic/claude-sonnet-5"),
+                    name="anthropic/claude-sonnet-5.5 (search, web aware)",
+                    value="anthropic/claude-sonnet-5.5"),
                 Choice(
                     name="google (gemini-3.8-flash, search)",
                     value="google"),
@@ -346,7 +346,7 @@ class SystemCommands:
             "`/drawmodel [model]` - View or set the default image generation model\n"
             "`/editmodel [model]` - View or set the default image editing model\n\n"
             "**System & Settings:**\n"
-            "`/model [model]` - View or set the AI language model (e.g., anthropic/claude-sonnet-5)\n"
+            "`/model [model]` - View or set the AI language model (e.g., anthropic/claude-sonnet-5.5)\n"
             "`/systemprompt set [prompt]` - Set a custom AI personality for this channel\n"
             "`/systemprompt view` - View the current custom personality\n"
             "`/systemprompt reset` - Return to the default personality\n\n"

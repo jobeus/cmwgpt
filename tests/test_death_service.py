@@ -661,7 +661,7 @@ class TestDeathService(unittest.TestCase):
                 return_value=("Legendary footballer and manager.", 0.0)
             )
             self.service._openai_service = mock_openai
-            self.service._model = "anthropic/claude-sonnet-5"
+            self.service._model = "anthropic/claude-sonnet-5.5"
 
             mock_channel = AsyncMock()
             self.mock_bot.get_channel.return_value = mock_channel
@@ -693,7 +693,7 @@ class TestDeathService(unittest.TestCase):
                 return_value=("There once was a keeper named Kev...", 0.0)
             )
             self.service._openai_service = mock_openai
-            self.service._model = "anthropic/claude-sonnet-5"
+            self.service._model = "anthropic/claude-sonnet-5.5"
 
             ok, message = await self.service.write_limerick("Kevin Keegan")
 
@@ -717,7 +717,7 @@ class TestDeathService(unittest.TestCase):
     def test_write_limerick_rejects_empty_input(self):
         async def run_test():
             self.service._openai_service = MagicMock()
-            self.service._model = "anthropic/claude-sonnet-5"
+            self.service._model = "anthropic/claude-sonnet-5.5"
 
             ok, message = await self.service.write_limerick("   ")
             self.assertFalse(ok)
@@ -730,7 +730,7 @@ class TestDeathService(unittest.TestCase):
             mock_openai = MagicMock()
             mock_openai.get_chat_completion = AsyncMock(side_effect=RuntimeError("boom"))
             self.service._openai_service = mock_openai
-            self.service._model = "anthropic/claude-sonnet-5"
+            self.service._model = "anthropic/claude-sonnet-5.5"
 
             ok, message = await self.service.write_limerick("Kevin Keegan")
             self.assertFalse(ok)
@@ -744,7 +744,7 @@ class TestDeathService(unittest.TestCase):
             mock_openai = MagicMock()
             mock_openai.get_chat_completion = AsyncMock(side_effect=RuntimeError("boom"))
             self.service._openai_service = mock_openai
-            self.service._model = "anthropic/claude-sonnet-5"
+            self.service._model = "anthropic/claude-sonnet-5.5"
 
             mock_channel = AsyncMock()
             self.mock_bot.get_channel.return_value = mock_channel
