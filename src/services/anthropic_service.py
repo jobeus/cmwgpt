@@ -31,7 +31,8 @@ PRICE_CACHE_READ_PER_M = 0.20
 PRICE_WEB_SEARCH = 0.01
 
 MAX_TOKENS = 16000
-EFFORT = "medium"
+# Sonnet 5.5 recommends ``low`` for chat and search; it still thinks when a message needs it.
+EFFORT = "low"
 WEB_SEARCH_MAX_USES = 5
 # A web-search turn can come back as ``pause_turn``; resume it this many times.
 MAX_CONTINUATIONS = 3
@@ -207,6 +208,9 @@ class AnthropicService:
             # On a safety decline, let the API re-run on its recommended fallback model.
             "betas": ["server-side-fallback-2026-07-01"],
             "fallbacks": "default",
+            # Cache the prompt up to the last block; the next mention in the channel
+            # re-sends the same system prompt and older history, so it reads from cache.
+            "cache_control": {"type": "ephemeral"},
         }
         if system_prompt:
             kwargs["system"] = system_prompt

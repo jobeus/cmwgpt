@@ -128,7 +128,7 @@ class TestBotFunctions(unittest.TestCase):
 
             # The system prompt should contain the preamble about discord IDs
             self.assertIn(
-                "prefixed with its timestamp, message ID, and the sender's Discord ID",
+                "(timestamp, message ID, sender's Discord ID)",
                 system_prompt)
 
             # Verify history is in correct order (oldest first)

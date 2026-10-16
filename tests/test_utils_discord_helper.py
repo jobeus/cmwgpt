@@ -59,9 +59,8 @@ class TestDiscordHelper(unittest.TestCase):
                 "You are <@99999>!",
                 "@Alice = <@12345>",
                 "@Bob = <@67890>",
-                "Whenever you see a mention like <@discord_user_id>, map it back to the corresponding handle. "
-                "If you want to @mention someone yourself use <@discord_user_id> instead of @nickname for discord "
-                "to recoginize your intent.",
+                "A <@discord_user_id> in the chat refers to the person with that handle above. To @mention someone, "
+                "write <@discord_user_id>; a plain @nickname is just text and won't ping them.",
             ]
             expected = "\n".join(expected_lines)
 
@@ -90,9 +89,8 @@ class TestDiscordHelper(unittest.TestCase):
             expected_lines = [
                 "Here are all the users in this channel:",
                 "You are <@99999>!",
-                "Whenever you see a mention like <@discord_user_id>, map it back to the corresponding handle. "
-                "If you want to @mention someone yourself use <@discord_user_id> instead of @nickname for discord "
-                "to recoginize your intent.",
+                "A <@discord_user_id> in the chat refers to the person with that handle above. To @mention someone, "
+                "write <@discord_user_id>; a plain @nickname is just text and won't ping them.",
             ]
             expected = "\n".join(expected_lines)
 
@@ -173,7 +171,7 @@ class TestDiscordHelper(unittest.TestCase):
             # Verify structure
             self.assertIn("Here are all the users in this channel:", result)
             self.assertIn(
-                "Whenever you see a mention like <@discord_user_id>",
+                "A <@discord_user_id> in the chat refers to",
                 result)
 
         self.loop.run_until_complete(run_test())
@@ -241,8 +239,8 @@ class TestDiscordHelper(unittest.TestCase):
                 lines[0], "Here are all the users in this channel:")
             self.assertEqual(lines[1], "You are <@99999>!")
             self.assertEqual(lines[2], "@TestUser = <@12345>")
-            self.assertTrue(lines[3].startswith("Whenever you see a mention"))
-            self.assertTrue(lines[3].endswith("to recoginize your intent."))
+            self.assertTrue(lines[3].startswith("A <@discord_user_id> in the chat"))
+            self.assertTrue(lines[3].endswith("won't ping them."))
 
         self.loop.run_until_complete(run_test())
 

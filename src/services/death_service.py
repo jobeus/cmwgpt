@@ -504,9 +504,10 @@ class DeathService:
             return None
 
         prompt = (
-            f"Write a funny, adult-appropriate limerick about what {display_name} ({wiki_link}) is known for. "
-            f"Any number of verses are allowed to cover all the things they're known for. "
-            f"Respond with only the title and limerick."
+            f"Write a funny limerick about what {display_name} ({wiki_link}) is known for. It's for an "
+            f"adult Discord server, so edgy is fine, as long as the jokes are about their public life and work. "
+            f"Use as many verses as it takes to cover the main things they're known for. Your reply is "
+            f"posted as-is, so give only a title line and the limerick."
         )
         try:
             summary, _cost = await self._openai_service.get_chat_completion(

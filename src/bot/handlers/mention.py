@@ -121,7 +121,12 @@ class MentionHandler:
                     hybrid_cfg = HybridConfig(
                         summary_prompt=hybrid_summary_prompt,
                         phase2_system_prompt=load_system_prompt(prompt_path="system_prompt_hybrid.txt"),
-                        build_phase2_text=lambda s: f"Here is the context and gathered search results for the current conversation. Please use this information to write the final response to the channel. Remember your personality from the system prompt. CRITICAL: You ARE the bot in this conversation. If the summary refers to YOU, the bot, or <@{bot_user.id}>, it is referring to YOU. Do not refer to yourself in the third person.\n\nContext & Search Results from Chat Summarization Agent:\n{s}",
+                        build_phase2_text=lambda s: (
+                            f"You are <@{bot_user.id}>; wherever the briefing says YOU or uses that ID, it means you. "
+                            f"Write your reply to the message that mentioned you, speaking as yourself rather than "
+                            f"about yourself in the third person.\n\n"
+                            f"<briefing>\n{s}\n</briefing>"
+                        ),
                     )
 
                 reply_content, cost = await dispatch_completion(
@@ -314,16 +319,23 @@ class MentionHandler:
             current_channel_system_prompt = self._system_prompt_loader()
 
         current_channel_system_prompt += (
-            f"\n\nErrata about how to chat in this channel:\n"
-            f"In the channel you are <@{bot_user.id}>!\n"
-            f"You will receive a chat history containing user messages and your own assistant messages. "
-            f"Each message is prefixed with its timestamp, message ID, and the sender's Discord ID (e.g. `[2024-01-01 12:00:00] [123456789] <@12345>: ...`). "
-            f"Please respond naturally to the very last message in the conversation, as it mentions you. "
-            f"You are expected to reply, but less metaphysics and more straight up answers like a user on a "
-            f"30 year old IRC board and not a talkative robot. Respond with ONLY the text/image content of your reply, "
-            f"without prefixing it with your own ID or message ID.\n"
-            f"CRITICAL INSTRUCTION: DO NOT start your own messages with a `[timestamp] [message ID]` prefix. Just write your text directly as a speaker.\n"
-            f"CRITICAL INSTRUCTION: When @mentioning other users in your reply, use THEIR Discord ID from the chat history — never use your own ID <@{bot_user.id}> to mention someone else.\n\n"
+            f"\n\n## How this chat reaches you\n"
+            f"You are <@{bot_user.id}> in this Discord channel.\n\n"
+            f"You get recent channel history as messages: other people's messages are user turns and yours are "
+            f"assistant turns. Each one starts with a header like `[2024-01-01 12:00:00] [123456789] <@12345>:` "
+            f"(timestamp, message ID, sender's Discord ID); that header is added by the bot, not typed by the "
+            f"sender. The last message is the one that mentioned you, so reply to it, using the earlier messages "
+            f"as context. Its timestamp is effectively the current date and time, so use it whenever you need "
+            f"to know today's date or how long ago something happened.\n\n"
+            f"Some content is filled in for you: linked pages, videos, and posts appear as fetched text or "
+            f"transcripts at the top of the message that linked them, voice messages appear as transcripts, replies "
+            f"quote the message being replied to, and other attachments appear only as a filename, so you can't "
+            f"see their contents. Images in a user turn right after one of your own messages, under your ID, are "
+            f"images your separate image tool generated; you can refer to them in your reply.\n\n"
+            f"Write only the text of your reply. Leave off the `[timestamp] [message ID]` header, because the "
+            f"bot posts as you automatically and a header would show up as literal text. To @mention someone, "
+            f"use their own `<@id>` from the history or the list below; <@{bot_user.id}> is you, so using it "
+            f"would ping yourself.\n\n"
             f"{legend_section}\n\n"
         )
 
