@@ -8,7 +8,7 @@ import asyncio
 import httpx
 from typing import List, Optional, Tuple
 from src.config import get_config
-from src.utils.cache_utils import PersistentCache
+from src.utils.cache_utils import PersistentCache, skip_recent_failures
 from src.db.logger import build_artifact, log_pipeline_step
 from src.utils.http_client import create_async_client
 from src.utils.discord_helper import url_to_base64_data_url
@@ -58,6 +58,7 @@ def extract_instagram_urls(text: str) -> List[str]:
     return urls
 
 
+@skip_recent_failures("instagram")
 async def get_instagram_context(url: str) -> Optional[Tuple[str, Optional[str]]]:
     """
     Fetch the content of an Instagram/Threads URL using RapidAPI.

@@ -243,7 +243,8 @@ async def get_mention_legend(
     # channel.members is all members who can see this channel
     lines = [f"You are <@{bot_user.id}>!"]
 
-    for member in channel.members:
+    # Sorted by ID so the list (part of the cached system prompt) doesn't reorder between requests.
+    for member in sorted(channel.members, key=lambda m: m.id):
         # use nickname if set, otherwise username
         name = member.display_name
         lines.append(f"@{name} = <@{member.id}>")

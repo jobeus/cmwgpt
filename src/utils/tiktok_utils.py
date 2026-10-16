@@ -2,7 +2,7 @@ import re
 import logging
 from typing import List, Optional
 
-from src.utils.cache_utils import PersistentCache
+from src.utils.cache_utils import PersistentCache, skip_recent_failures
 from src.utils.media_transcribe import download_and_transcribe_video
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,7 @@ def extract_tiktok_urls(text: str) -> List[str]:
     return urls
 
 
+@skip_recent_failures("tiktok")
 def get_tiktok_transcript(url: str) -> Optional[dict]:
     """
     Fetch the transcript for a TikTok video by downloading audio and processing with Groq.

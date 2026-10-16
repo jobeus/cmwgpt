@@ -2,16 +2,21 @@
 Cache Utilities - Persistent cross-restart caching
 """
 
+import functools
+import inspect
 import os
 import json
 import logging
 import tempfile
 import threading
-from typing import Any, Dict
+import time
+from typing import Any, Callable, Dict, Optional, TypeVar, cast
 
 logger = logging.getLogger(__name__)
 
 CACHE_DIR = ".cache"
+
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 class PersistentCache:
@@ -94,3 +99,80 @@ class PersistentCache:
             if key in self._cache:
                 del self._cache[key]
                 self._save()
+
+
+# ---------------------------------------------------------------------------
+# Fetch-failure caching
+# ---------------------------------------------------------------------------
+
+# How long a failed URL fetch is remembered before it's tried again. Long enough
+# that a dead link isn't re-fetched on every mention, short enough that a
+# transient failure (timeout, rate limit) recovers on its own.
+FETCH_FAILURE_TTL_SECONDS = 3600
+
+_fetch_failures: Optional[PersistentCache] = None
+
+
+def _failure_store() -> Optional[PersistentCache]:
+    """The shared failure cache, created on first use (disabled under tests unless patched)."""
+    global _fetch_failures
+    if _fetch_failures is None:
+        from src.config import get_config
+        if get_config().is_testing:
+            return None
+        _fetch_failures = PersistentCache("fetch_failures", max_size=1000)
+    return _fetch_failures
+
+
+def _recently_failed(failure_key: str) -> bool:
+    store = _failure_store()
+    if store is None:
+        return False
+    failed_at = store.get(failure_key)
+    if failed_at is None:
+        return False
+    if time.time() - failed_at < FETCH_FAILURE_TTL_SECONDS:
+        return True
+    store.delete(failure_key)
+    return False
+
+
+def _record_result(failure_key: str, result: Any) -> None:
+    store = _failure_store()
+    if store is None:
+        return
+    if result is None:
+        store[failure_key] = time.time()
+    elif failure_key in store:
+        store.delete(failure_key)
+
+
+def skip_recent_failures(kind: str) -> Callable[[F], F]:
+    """Decorate a fetcher ``fn(key, ...) -> result | None`` so a ``None`` (failure)
+    is remembered for ``FETCH_FAILURE_TTL_SECONDS`` and returned straight away for
+    that key instead of fetching again. Works on sync and async functions.
+    """
+    def decorator(fn: F) -> F:
+        if inspect.iscoroutinefunction(fn):
+            @functools.wraps(fn)
+            async def async_wrapper(key: str, *args: Any, **kwargs: Any) -> Any:
+                failure_key = f"{kind}:{key}"
+                if _recently_failed(failure_key):
+                    logger.debug(f"Skipping {failure_key}: failed within the last hour")
+                    return None
+                result = await fn(key, *args, **kwargs)
+                _record_result(failure_key, result)
+                return result
+            return cast(F, async_wrapper)
+
+        @functools.wraps(fn)
+        def sync_wrapper(key: str, *args: Any, **kwargs: Any) -> Any:
+            failure_key = f"{kind}:{key}"
+            if _recently_failed(failure_key):
+                logger.debug(f"Skipping {failure_key}: failed within the last hour")
+                return None
+            result = fn(key, *args, **kwargs)
+            _record_result(failure_key, result)
+            return result
+        return cast(F, sync_wrapper)
+    return decorator

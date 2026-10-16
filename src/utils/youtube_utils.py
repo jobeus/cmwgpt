@@ -4,7 +4,7 @@ import asyncio
 from typing import List, Optional
 from youtube_transcript_api import YouTubeTranscriptApi
 from src.config import get_config
-from src.utils.cache_utils import PersistentCache
+from src.utils.cache_utils import PersistentCache, skip_recent_failures
 from src.db.logger import build_artifact, log_pipeline_step
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,7 @@ def extract_video_ids(text: str) -> List[str]:
     return video_ids
 
 
+@skip_recent_failures("youtube")
 async def get_transcript(video_id: str) -> Optional[str]:
     """
     Fetch the transcript for a YouTube video.

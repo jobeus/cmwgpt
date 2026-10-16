@@ -10,7 +10,7 @@ from src.utils.ssrf_guard import assert_public_url
 
 import trafilatura
 from newspaper import Article, Config
-from src.utils.cache_utils import PersistentCache
+from src.utils.cache_utils import PersistentCache, skip_recent_failures
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,7 @@ def inject_article_cache(url: str, text: str) -> None:
     logger.debug(f"Directly injected cache for article: {url}")
 
 
+@skip_recent_failures("article")
 async def get_article_text(url: str) -> Optional[str]:
     """
     Fetch the text content for a URL, falling back from trafilatura to newspaper3k.

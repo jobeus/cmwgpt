@@ -19,6 +19,10 @@ from src.utils.downloader_utils import fetch_all_url_content
 
 logger = logging.getLogger(__name__)
 
+# How long after a mention the next one keeps extending the same history window
+# instead of starting over. Matches the Claude API's 5-minute prompt cache lifetime.
+HISTORY_WINDOW_SECONDS = 300
+
 # How many messages a channel's growing history window may gain before it resets
 # to the last INCLUDE_NUM_CHATLINES messages.
 MAX_HISTORY_GAP = 100
@@ -244,7 +248,7 @@ class MentionHandler:
 
         limit_lines = self._include_num_chatlines
 
-        if cache_entry and (current_time - cache_entry["timestamp"]) <= 600:
+        if cache_entry and (current_time - cache_entry["timestamp"]) <= HISTORY_WINDOW_SECONDS:
             oldest_message = cache_entry["oldest_message"]
             history_msgs.append(oldest_message)
             

@@ -70,3 +70,44 @@ class TestPersistentCache(unittest.TestCase):
             reloaded = PersistentCache("delete")
 
         self.assertNotIn("key", reloaded)
+
+
+class TestSkipRecentFailures(unittest.IsolatedAsyncioTestCase):
+    async def test_failure_is_remembered_then_expires(self):
+        from src.utils import cache_utils
+
+        calls = []
+
+        @cache_utils.skip_recent_failures("demo")
+        async def fetch(url):
+            calls.append(url)
+            return None
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch("src.utils.cache_utils.CACHE_DIR", tmpdir):
+            store = PersistentCache("fetch_failures")
+            with patch("src.utils.cache_utils._fetch_failures", store):
+                self.assertIsNone(await fetch("https://dead.example"))
+                self.assertIsNone(await fetch("https://dead.example"))
+                self.assertEqual(len(calls), 1)
+
+                with patch("src.utils.cache_utils.time.time",
+                           return_value=store.get("demo:https://dead.example") + 3601):
+                    await fetch("https://dead.example")
+                self.assertEqual(len(calls), 2)
+
+    def test_success_clears_failure_for_sync_fetcher(self):
+        from src.utils import cache_utils
+
+        results = iter([None, "text"])
+
+        @cache_utils.skip_recent_failures("demo")
+        def fetch(url):
+            return next(results)
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch("src.utils.cache_utils.CACHE_DIR", tmpdir):
+            store = PersistentCache("fetch_failures")
+            with patch("src.utils.cache_utils._fetch_failures", store):
+                self.assertIsNone(fetch("u"))
+                store["demo:u"] = 0  # pretend the failure is old
+                self.assertEqual(fetch("u"), "text")
+                self.assertNotIn("demo:u", store)

@@ -8,7 +8,7 @@ import asyncio
 import httpx
 from typing import List, Optional
 from src.config import get_config
-from src.utils.cache_utils import PersistentCache
+from src.utils.cache_utils import PersistentCache, skip_recent_failures
 from src.db.logger import build_artifact, log_pipeline_step
 from src.utils.http_client import create_async_client
 from src.utils.discord_helper import url_to_base64_data_url
@@ -76,6 +76,7 @@ def extract_media(data):
     return media_items
 
 
+@skip_recent_failures("twitter")
 async def get_tweet_context(tweet_url: str) -> Optional[Tuple[str, List[str]]]:
     """
     Fetch the text content of a tweet and its top replies using RapidAPI.

@@ -106,6 +106,33 @@ def build_anthropic_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, A
     return converted
 
 
+_EPHEMERAL = {"type": "ephemeral"}
+
+
+def apply_history_breakpoints(
+    api_messages: List[Dict[str, Any]], previous_index: Optional[int]
+) -> Optional[int]:
+    """Mark cache breakpoints on the history and return this request's history index.
+
+    The last message is the mention. Everything before it is history that the next
+    mention in the channel re-sends unchanged, so it gets a breakpoint (written now,
+    read next time). The mention itself is left unmarked because its rendering can
+    still change (Discord unfurls link embeds a moment after posting). A second
+    breakpoint goes where the previous request's history ended, so the read hits even
+    when more than 20 blocks (the API's lookback limit) were added since.
+    """
+    current_index = len(api_messages) - 2
+    if current_index < 0:
+        return None
+    marked = {current_index}
+    if previous_index is not None and 0 <= previous_index < current_index:
+        marked.add(previous_index)
+    for index in marked:
+        blocks = api_messages[index]["content"]
+        blocks[-1] = {**blocks[-1], "cache_control": _EPHEMERAL}
+    return current_index
+
+
 def _usage_cost(usage: Any) -> float:
     """Price a response's ``usage`` block in USD."""
     if usage is None:
@@ -128,6 +155,8 @@ class AnthropicService:
         self._api_key = api_key
         self._client: Optional[anthropic.AsyncAnthropic] = None
         self._bot_id_loader: Optional[Callable[[], Optional[int]]] = None
+        # channel_id -> index of the last history message marked in the previous request
+        self._history_breakpoints: Dict[int, int] = {}
 
     def set_client(self, client) -> None:
         """Set a custom client (useful for testing)."""
@@ -188,7 +217,7 @@ class AnthropicService:
         model: str,
         messages: List[Dict[str, Any]],
         system_prompt: Optional[str] = None,
-        channel_id: Optional[int] = None,  # noqa: ARG002 - identity kwarg shared by all services
+        channel_id: Optional[int] = None,
         state_service: Any = None,
         bot_id: Optional[int] = None,
         discord_user_id: Optional[int] = None,  # noqa: ARG002 - identity kwarg shared by all services
@@ -208,12 +237,12 @@ class AnthropicService:
             # On a safety decline, let the API re-run on its recommended fallback model.
             "betas": ["server-side-fallback-2026-07-01"],
             "fallbacks": "default",
-            # Cache the prompt up to the last block; the next mention in the channel
-            # re-sends the same system prompt and older history, so it reads from cache.
-            "cache_control": {"type": "ephemeral"},
         }
         if system_prompt:
-            kwargs["system"] = system_prompt
+            # Its own breakpoint, so the system prompt still reads from cache when the history doesn't.
+            kwargs["system"] = [{"type": "text", "text": system_prompt, "cache_control": _EPHEMERAL}]
+        previous_index = self._history_breakpoints.get(channel_id) if channel_id else None
+        history_index = apply_history_breakpoints(api_messages, previous_index)
         if search:
             kwargs["tools"] = [{
                 "type": "web_search_20260209",
@@ -253,6 +282,8 @@ class AnthropicService:
 
         if response is None:
             raise AnthropicServiceError("The Claude API returned no response.")
+        if channel_id and history_index is not None:
+            self._history_breakpoints[channel_id] = history_index
 
         if response.stop_reason == "refusal":
             details = getattr(response, "stop_details", None)
@@ -263,8 +294,11 @@ class AnthropicService:
         response_text = "".join(
             block.text for block in response.content if getattr(block, "type", None) == "text"
         ).strip()
+        usage = getattr(response, "usage", None)
         logger.info(
             f"[{response.model}] stop_reason={response.stop_reason} cost=${total_cost:.4f} "
+            f"cache_read={getattr(usage, 'cache_read_input_tokens', 0)} "
+            f"cache_write={getattr(usage, 'cache_creation_input_tokens', 0)} "
             f"response snippet: {response_text.replace(chr(10), ' ')[:150]}"
         )
         if not response_text:

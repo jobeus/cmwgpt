@@ -10,6 +10,7 @@ from src.services.anthropic_service import (
     build_anthropic_messages,
     is_direct_anthropic_model,
     _usage_cost,
+    apply_history_breakpoints,
 )
 from src.services.completion_dispatch import dispatch_completion
 
@@ -73,6 +74,36 @@ class TestHelpers(unittest.TestCase):
         self.assertAlmostEqual(cost, 2.00 + 1.00 + 0.02)
 
 
+def _history(n):
+    return [{"role": "user", "content": [{"type": "text", "text": f"m{i}"}]} for i in range(n)]
+
+
+def _marked(messages):
+    return [i for i, m in enumerate(messages) if "cache_control" in m["content"][-1]]
+
+
+class TestHistoryBreakpoints(unittest.TestCase):
+    def test_marks_message_before_mention(self):
+        messages = _history(5)
+        self.assertEqual(apply_history_breakpoints(messages, None), 3)
+        self.assertEqual(_marked(messages), [3])
+
+    def test_also_marks_previous_history_end(self):
+        messages = _history(40)
+        self.assertEqual(apply_history_breakpoints(messages, 10), 38)
+        self.assertEqual(_marked(messages), [10, 38])
+
+    def test_ignores_out_of_range_previous_index(self):
+        messages = _history(5)
+        apply_history_breakpoints(messages, 50)
+        self.assertEqual(_marked(messages), [3])
+
+    def test_single_message_gets_no_history_breakpoint(self):
+        messages = _history(1)
+        self.assertIsNone(apply_history_breakpoints(messages, None))
+        self.assertEqual(_marked(messages), [])
+
+
 class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
     def make_service(self, *responses):
         service = AnthropicService(api_key="test-key")
@@ -92,9 +123,19 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(cost, 0)
         kwargs = client.beta.messages.create.call_args.kwargs
         self.assertEqual(kwargs["model"], "claude-sonnet-5-5")
-        self.assertEqual(kwargs["system"], "be nice")
+        self.assertEqual(kwargs["system"][0]["text"], "be nice")
+        self.assertIn("cache_control", kwargs["system"][0])
         self.assertEqual(kwargs["tools"][0]["type"], "web_search_20260209")
         self.assertEqual(kwargs["fallbacks"], "default")
+
+    async def test_remembers_history_breakpoint_per_channel(self):
+        service, client = self.make_service(_response("one"), _response("two"))
+        await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=_history(3), channel_id=7)
+        await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=_history(30), channel_id=7)
+        second = client.beta.messages.create.call_args.kwargs["messages"]
+        self.assertEqual(_marked(second), [1, 28])
 
     async def test_search_false_omits_tools(self):
         service, client = self.make_service(_response("ok"))
