@@ -38,7 +38,7 @@ INTERACTION_CACHE_TTL = 600  # 10 minutes
 
 # Client-side request timeout (seconds). The google-genai SDK relies on the
 # injected httpx client's timeout, which otherwise defaults to httpx's 5s — far
-# too short for thinking models and the hybrid "google-high" web-search path.
+# too short for thinking models and the "google-high" web-search path.
 # Override with GEMINI_TIMEOUT_SECONDS.
 try:
     REQUEST_TIMEOUT_SECONDS = float(os.environ.get("GEMINI_TIMEOUT_SECONDS", "120"))

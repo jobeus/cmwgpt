@@ -35,7 +35,9 @@ The bot's main chat experience is **mention-based**:
 
 Sets the active text model for the current channel.
 
-Current choices exposed in code:
+Choices come from `src/services/model_catalog.py`. A model only appears when its API key
+is set (`OPENROUTER_API_KEY`, `GEMINI_API_KEY`, or `ANTHROPIC_API_KEY`), and a channel set to
+a model whose key is missing falls back to `DEFAULT_MODEL`.
 
 | Model | Notes |
 | --- | --- |
@@ -47,11 +49,9 @@ Current choices exposed in code:
 | `sonnet-5.5-direct` | `claude-sonnet-5-5` straight from the Claude API (search / web aware, needs `ANTHROPIC_API_KEY`) |
 | `google` | native Gemini (`gemini-3.8-flash`, search) |
 | `google-high` | native Gemini (`gemini-3.8-flash`, search, thinking) |
-| `hybrid` | two-phase: `google-high` gathers context, then `claude-sonnet-5.5` writes the reply |
 
-`google`/`google-high`/`hybrid` route through `GeminiService` (and, for `hybrid`,
-also `OpenAIService`); `sonnet-5.5-direct` routes through `AnthropicService`; the rest
-route through `OpenAIService` → OpenRouter. The
+`google`/`google-high` route through `GeminiService`, `sonnet-5.5-direct` routes through
+`AnthropicService`, and the rest route through `OpenAIService` → OpenRouter. The
 routing itself lives in `src/services/completion_dispatch.py`.
 
 ### `/systemprompt ...`

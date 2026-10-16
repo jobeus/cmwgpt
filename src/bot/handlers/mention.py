@@ -13,10 +13,9 @@ from src.utils.discord_error_utils import best_effort_typing, concise_error
 from src.services.openai_service import OpenAIServiceError
 from src.services.anthropic_service import AnthropicServiceError, is_direct_anthropic_model
 from src.services.gemini_service import GeminiServiceError, is_gemini_model
-from src.services.completion_dispatch import dispatch_completion, HybridConfig
+from src.services.completion_dispatch import dispatch_completion
 from src.utils.chat_context import build_chat_context
 from src.utils.downloader_utils import fetch_all_url_content
-from src.config import load_system_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -106,33 +105,6 @@ class MentionHandler:
                 # Identity threaded into every model call for this mention.
                 identity = {"channel_id": channel_id, "discord_user_id": message.author.id}
 
-                hybrid_cfg = None
-                if model == "hybrid":
-                    hybrid_summary_prompt = (
-                        f"\n\nYou are a chat CONTEXT GATHERER only, you are not participating in the chat:\n"
-                        f"Do not reply directly to the user. Instead, review the entire chat buffer provided. "
-                        f"You must summarize all the available information, perform any web searches needed to enrich the context, "
-                        f"and extract the main points or questions.\n"
-                        f"CRITICAL: Be sure to include the <@Discord_User_IDs> of the participants in your summary so the final responder knows exactly who said what, and clearly point out who is asking what question or mentioning the bot at the very end of the chat log.\n"
-                        f"CRITICAL: When referring to the bot in your summary, speak directly to the final responder as 'YOU' (e.g. 'User <@ID> asked YOU a question'). Do NOT refer to the bot in the third person (like '<@{bot_user.id}>' or 'the bot') so the final responder doesn't get confused.\n\n"
-                        f"CRITICAL: Explain what YOU, i.e. '<@{bot_user.id}>' has already responded to so we don't get 3 replies in a row about the same answer. You can mention you've responded to X Y Z before for context but don't imply we need another answer to the same thing!"
-                        f"CRITICAL: DO NOT MAKE THINGS UP, IF YOU CAN'T SEE CONTENT OR A VIDEO OR DON'T KNOW SOMETHING, SAY SO. No hallucinating allowed!!!\n\n"
-                        f"CRITICAL: Include relevant times and dates!\n\n"
-                        f"Provide a *detailed*, unfiltered, comprehensive briefing of information from the channel conversation, any relevant urls or summaries (summarized by you), "
-                        f"search results you found to do with the conversation + mention, and who asked what (YOU ARE *NOT* REPLYING IN THE CHANNEL -- you are SUMMARIZING THE CONVERSATION TO ANOTHER AI AGENT). "
-                        f"Another AI model will use this briefing to write the final response."
-                    )
-                    hybrid_cfg = HybridConfig(
-                        summary_prompt=hybrid_summary_prompt,
-                        phase2_system_prompt=load_system_prompt(prompt_path="system_prompt_hybrid.txt"),
-                        build_phase2_text=lambda s: (
-                            f"You are <@{bot_user.id}>; wherever the briefing says YOU or uses that ID, it means you. "
-                            f"Write your reply to the message that mentioned you, speaking as yourself rather than "
-                            f"about yourself in the third person.\n\n"
-                            f"<briefing>\n{s}\n</briefing>"
-                        ),
-                    )
-
                 reply_content, cost = await dispatch_completion(
                     model=model,
                     messages=recent_messages,
@@ -141,7 +113,6 @@ class MentionHandler:
                     gemini_service=self._gemini_service,
                     anthropic_service=self._anthropic_service,
                     identity=identity,
-                    hybrid=hybrid_cfg,
                 )
 
                 if reply_content is None:

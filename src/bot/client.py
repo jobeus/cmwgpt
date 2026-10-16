@@ -15,6 +15,7 @@ from src.bot.commands.image import ImageCommands
 from src.bot.commands.system import SystemCommands
 from src.bot.commands.death import DeathCommands
 from src.bot.commands.wikicount import WikiCountCommands
+from src.services.model_catalog import is_model_unavailable
 
 from src.utils.logger import setup_logger
 
@@ -313,6 +314,10 @@ class DiscordBotClient:
         if self.bot.user and self.bot.user in message.mentions and self.config.reply_to_mentions:
             model = self.services.state_service.get_model(
                 message.channel.id) or self.config.default_model
+            if is_model_unavailable(model, self.config):
+                logger.info(
+                    f"Model {model} for #{message.channel} is unavailable; using {self.config.default_model}")
+                model = self.config.default_model
 
             # Queue the mention for FIFO processing
             queued = await self.mention_handler.queue_mention(message, self.bot.user, model)

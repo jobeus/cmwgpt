@@ -130,6 +130,21 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         queued_model = client.mention_handler.queue_mention.await_args.args[2]
         self.assertEqual(queued_model, "fallback-model")
 
+    async def test_handle_message_replaces_retired_model_with_default(self):
+        client, bot_user = self.make_client(default_model="fallback-model")
+        client.services.state_service.get_model.return_value = "hybrid"
+        message = SimpleNamespace(
+            author=SimpleNamespace(bot=False),
+            channel=FakeTextChannel(channel_id=334),
+            mentions=[bot_user],
+        )
+
+        with patch("src.bot.client.discord.TextChannel", FakeTextChannel):
+            await client._handle_message(message)
+
+        queued_model = client.mention_handler.queue_mention.await_args.args[2]
+        self.assertEqual(queued_model, "fallback-model")
+
     async def test_handle_message_skips_mention_queue_when_replies_disabled(self):
         client, bot_user = self.make_client(reply_to_mentions=False)
         message = SimpleNamespace(

@@ -11,6 +11,7 @@ from discord import app_commands
 from discord.app_commands import Choice
 
 from src.config import get_system_prompt, get_config
+from src.services.model_catalog import available_models
 from src.utils.discord_helper import get_mention_legend
 from src.utils.discord_error_utils import safe_defer
 from src.utils.async_utils import safe_run
@@ -50,39 +51,15 @@ class SystemCommands:
     def _create_model_command(self) -> app_commands.Command:
         """Create the /model command."""
 
+        model_choices = [
+            Choice(name=option.label, value=option.value)
+            for option in available_models(get_config())
+        ]
+
         @app_commands.command(name="model",
                               description="View or set OpenAI model")
         @app_commands.describe(model="Model name to use")
-        @app_commands.choices(
-            model=[
-                Choice(
-                    name="google/gemini-2.5-flash",
-                    value="google/gemini-2.5-flash"),
-                Choice(
-                    name="bytedance-seed/seed-2.0-mini",
-                    value="bytedance-seed/seed-2.0-mini"),
-                Choice(
-                    name="bytedance-seed/seed-1.6-flash",
-                    value="bytedance-seed/seed-1.6-flash"),
-                Choice(
-                    name="qwen/qwen3.5-flash-02-23",
-                    value="qwen/qwen3.5-flash-02-23"),
-                Choice(
-                    name="anthropic/claude-sonnet-5.5 (search, web aware)",
-                    value="anthropic/claude-sonnet-5.5"),
-                Choice(
-                    name="sonnet-5.5-direct (Claude API, search, web aware)",
-                    value="sonnet-5.5-direct"),
-                Choice(
-                    name="google (gemini-3.8-flash, search)",
-                    value="google"),
-                Choice(
-                    name="google-high (gemini-3.8-flash, search, thinking)",
-                    value="google-high"),
-                Choice(
-                    name="hybrid (google-high + sonnet)",
-                    value="hybrid"),
-            ])
+        @app_commands.choices(model=model_choices)
         async def model_command(
                 interaction: discord.Interaction,
                 model: Optional[str] = None):
