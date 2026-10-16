@@ -20,6 +20,10 @@ from src.config import load_system_prompt
 
 logger = logging.getLogger(__name__)
 
+# How many messages a channel's growing history window may gain before it resets
+# to the last INCLUDE_NUM_CHATLINES messages.
+MAX_HISTORY_GAP = 100
+
 # Maximum number of channels to keep in the per-channel history cache before
 # evicting the least-recently-used entry.
 HISTORY_CACHE_MAX_CHANNELS = 200
@@ -273,12 +277,12 @@ class MentionHandler:
             oldest_message = cache_entry["oldest_message"]
             history_msgs.append(oldest_message)
             
-            # Fetch up to 40 messages after the oldest message
-            async for msg in message.channel.history(limit=40, after=oldest_message):
+            # Fetch up to MAX_HISTORY_GAP messages after the oldest message
+            async for msg in message.channel.history(limit=MAX_HISTORY_GAP, after=oldest_message):
                 history_msgs.append(msg)
 
-            if len(history_msgs) >= 40:
-                # The gap is too large (40+ messages since last bot interaction).
+            if len(history_msgs) >= MAX_HISTORY_GAP:
+                # The gap is too large (MAX_HISTORY_GAP+ messages since last bot interaction).
                 # To save cost and avoid giant context windows, we abandon the old
                 # interaction and start a fresh context from the most recent messages.
                 logger.info(f"Massive message gap detected in #{message.channel.name}. Resetting context.")
