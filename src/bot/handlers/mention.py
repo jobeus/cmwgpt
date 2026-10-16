@@ -11,6 +11,7 @@ import discord
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url, transcribe_audio_attachment
 from src.utils.discord_error_utils import best_effort_typing, concise_error
 from src.services.openai_service import OpenAIServiceError
+from src.services.anthropic_service import AnthropicServiceError, is_direct_anthropic_model
 from src.services.gemini_service import GeminiServiceError, is_gemini_model
 from src.services.completion_dispatch import dispatch_completion, HybridConfig
 from src.utils.chat_context import build_chat_context
@@ -37,6 +38,7 @@ class MentionHandler:
         system_prompt_loader: Callable[[], str],
         include_num_chatlines: int,
         gemini_service: Any = None,
+        anthropic_service: Any = None,
         mention_legend_provider: Callable[[discord.TextChannel, discord.User], Awaitable[str]] = get_mention_legend,
         attachment_converter: Callable[[discord.Attachment], Awaitable[str]] = attachment_to_base64_data_url,
         url_converter: Callable[[str], Awaitable[str]] = url_to_base64_data_url,
@@ -45,6 +47,7 @@ class MentionHandler:
         self._state_service = state_service
         self._openai_service = openai_service
         self._gemini_service = gemini_service
+        self._anthropic_service = anthropic_service
         self._message_service = message_service
         self._queue_service = queue_service
         self._system_prompt_loader = system_prompt_loader
@@ -93,7 +96,7 @@ class MentionHandler:
 
                 recent_messages, system_prompt = await self._prepare_mention_context(message, bot_user, model=model)
                 logger.info(
-                    f"Context prepared for mention by {message.author}, sending to {'Gemini' if is_gemini_model(model) else 'OpenRouter'}...")
+                    f"Context prepared for mention by {message.author}, sending to {'Gemini' if is_gemini_model(model) else 'Claude API' if is_direct_anthropic_model(model) else 'OpenRouter'}...")
                 channel_id = message.channel.id
 
                 # Identity threaded into every model call for this mention.
@@ -127,6 +130,7 @@ class MentionHandler:
                     system_prompt=system_prompt,
                     openai_service=self._openai_service,
                     gemini_service=self._gemini_service,
+                    anthropic_service=self._anthropic_service,
                     identity=identity,
                     hybrid=hybrid_cfg,
                 )
@@ -158,7 +162,7 @@ class MentionHandler:
                 else:
                     await self._message_service.send_channel_reply(message.channel, reply_text)
 
-            except (OpenAIServiceError, GeminiServiceError) as e:
+            except (OpenAIServiceError, GeminiServiceError, AnthropicServiceError) as e:
                 logger.error(f"❌ API error in mention handler:\\n{e}")
                 error_message = f"Sorry, I encountered an error while processing your mention: {str(e)}"
 

@@ -57,6 +57,14 @@ def setup_signal_handlers(bot_client):
             except Exception as e:
                 logger.error(f"Error closing OpenAI service: {e}")
 
+            # Close Anthropic service
+            try:
+                if getattr(bot_client.services, "anthropic_service", None) is not None:
+                    await bot_client.services.anthropic_service.close()
+                    logger.info("Anthropic service closed")
+            except Exception as e:
+                logger.error(f"Error closing Anthropic service: {e}")
+
             # Step 3: Close Discord bot
             print("🔌 Closing Discord connection...")
             try:

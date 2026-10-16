@@ -71,6 +71,9 @@ class SystemCommands:
                     name="anthropic/claude-sonnet-5.5 (search, web aware)",
                     value="anthropic/claude-sonnet-5.5"),
                 Choice(
+                    name="sonnet-5.5-direct (Claude API, search, web aware)",
+                    value="sonnet-5.5-direct"),
+                Choice(
                     name="google (gemini-3.8-flash, search)",
                     value="google"),
                 Choice(

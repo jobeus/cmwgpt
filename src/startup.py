@@ -10,6 +10,7 @@ from src.services.auto_update_service import AutoUpdateService
 from src.services.death_service import DeathService
 from src.services.message_service import MessageService
 from src.services.openai_service import OpenAIService
+from src.services.anthropic_service import AnthropicService
 from src.services.gemini_service import GeminiService
 from src.services.paste_service import PasteService
 from src.services.queue_service import QueueService
@@ -33,6 +34,7 @@ class AppServices:
     announcement_service: AnnouncementService
     death_service: DeathService
     mention_handler: MentionHandler
+    anthropic_service: Any = None
 
 
 def create_services(config: Optional[AppConfig] = None) -> AppServices:
@@ -42,6 +44,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     queue_service = QueueService()
     openai_service = OpenAIService()
     gemini_service = GeminiService(api_key=app_config.gemini_api_key)
+    anthropic_service = AnthropicService(api_key=app_config.anthropic_api_key)
     paste_service = PasteService(cache_injector=inject_article_cache)
     message_service = MessageService(paste_service_instance=paste_service)
     runpod_service = RunpodService()
@@ -66,6 +69,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         state_service=state_service,
         openai_service=openai_service,
         gemini_service=gemini_service,
+        anthropic_service=anthropic_service,
         message_service=message_service,
         queue_service=queue_service,
         system_prompt_loader=lambda: get_system_prompt(app_config.system_prompt_path),
@@ -85,6 +89,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         announcement_service=announcement_service,
         death_service=death_service,
         mention_handler=mention_handler,
+        anthropic_service=anthropic_service,
     )
 
 

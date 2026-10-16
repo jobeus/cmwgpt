@@ -6,6 +6,7 @@ array into a reply by routing across the same three paths:
 * ``hybrid``      — phase 1 ``google-high`` (Gemini) summarises + web-searches,
                     phase 2 Sonnet (OpenRouter) writes the final reply;
 * a Gemini model  — single Gemini call;
+* a direct model  — single Claude API call (``AnthropicService``, no OpenRouter);
 * anything else   — single OpenRouter call.
 
 This module owns that routing (and the identity kwargs threaded into each
@@ -19,6 +20,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from src.services.anthropic_service import is_direct_anthropic_model
 from src.services.gemini_service import is_gemini_model, get_thinking_level
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,7 @@ async def dispatch_completion(
     identity: Dict[str, Any],
     hybrid: Optional[HybridConfig] = None,
     label: str = "",
+    anthropic_service: Any = None,
 ) -> Tuple[ReplyContent, float]:
     """Route ``messages`` to the right model(s) and return ``(reply, cost)``.
 
@@ -52,7 +55,7 @@ async def dispatch_completion(
         model: The selected model (or ``"hybrid"``).
         messages: The prepared multimodal message array.
         system_prompt: System prompt for the single-call paths.
-        openai_service / gemini_service: The completion services.
+        openai_service / gemini_service / anthropic_service: The completion services.
         identity: Kwargs (``channel_id``/``bot_id``/``discord_user_id``) splatted
             into every service call. Each caller supplies its own set.
         hybrid: Required when ``model == "hybrid"``; ignored otherwise.
@@ -101,6 +104,13 @@ async def dispatch_completion(
             messages=messages,
             system_prompt=system_prompt,
             thinking_level=get_thinking_level(model),
+            **identity,
+        )
+    elif is_direct_anthropic_model(model) and anthropic_service:
+        reply_content, cost = await anthropic_service.get_chat_completion(
+            model=model,
+            messages=messages,
+            system_prompt=system_prompt,
             **identity,
         )
     else:

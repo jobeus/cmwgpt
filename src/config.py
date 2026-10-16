@@ -52,6 +52,7 @@ def load_resolved_env_file(env: Optional[Mapping[str, str]] = None) -> Optional[
 class AppConfig:
     openrouter_api_key: str
     gemini_api_key: str
+    anthropic_api_key: str
     runpod_io_api_key: str
     groq_api_key: str
     rapidapi_key: str
@@ -90,6 +91,7 @@ def load_config(
     return AppConfig(
         openrouter_api_key=source.get("OPENROUTER_API_KEY", "test-key-for-ci"),
         gemini_api_key=source.get("GEMINI_API_KEY", ""),
+        anthropic_api_key=source.get("ANTHROPIC_API_KEY", ""),
         runpod_io_api_key=source.get("RUNPOD_IO_API_KEY", ""),
         groq_api_key=source.get("GROQ_API_KEY", ""),
         rapidapi_key=source.get("RAPIDAPI_KEY", ""),

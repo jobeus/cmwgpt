@@ -44,12 +44,14 @@ Current choices exposed in code:
 | `bytedance-seed/seed-1.6-flash` | via OpenRouter |
 | `qwen/qwen3.5-flash-02-23` | via OpenRouter |
 | `anthropic/claude-sonnet-5.5` | search / web aware (via OpenRouter) |
+| `sonnet-5.5-direct` | `claude-sonnet-5-5` straight from the Claude API (search / web aware, needs `ANTHROPIC_API_KEY`) |
 | `google` | native Gemini (`gemini-3.8-flash`, search) |
 | `google-high` | native Gemini (`gemini-3.8-flash`, search, thinking) |
 | `hybrid` | two-phase: `google-high` gathers context, then `claude-sonnet-5.5` writes the reply |
 
 `google`/`google-high`/`hybrid` route through `GeminiService` (and, for `hybrid`,
-also `OpenAIService`); the rest route through `OpenAIService` → OpenRouter. The
+also `OpenAIService`); `sonnet-5.5-direct` routes through `AnthropicService`; the rest
+route through `OpenAIService` → OpenRouter. The
 routing itself lives in `src/services/completion_dispatch.py`.
 
 ### `/systemprompt ...`

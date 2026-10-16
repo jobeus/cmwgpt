@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 import httpx
+import httpx2
 
 from src.db.logger import log_api_request
 
@@ -71,6 +72,7 @@ def _is_excluded(url: str) -> bool:
 
 _DOMAIN_TO_SERVICE: Dict[str, str] = {
     "openrouter.ai": "openrouter",
+    "api.anthropic.com": "anthropic",
     "api.openai.com": "openai",
     "api.groq.com": "groq",
     "api.runpod.ai": "runpod",
@@ -152,6 +154,53 @@ def _encode_request_body(request: httpx.Request) -> str:
 # Async transport wrapper
 # ---------------------------------------------------------------------------
 
+async def _forward_and_log(transport: Any, request: Any, service_name_override: Optional[str]) -> Any:
+    """Forward ``request`` through ``transport`` and log the exchange to the DB.
+
+    Duck-typed so it serves both ``httpx`` and ``httpx2`` transports.
+    """
+    url = str(request.url)
+
+    if _is_excluded(url):
+        return await transport.handle_async_request(request)
+
+    service_name = service_name_override or _infer_service_name(url)
+
+    # Ensure request body is read
+    await request.aread()
+
+    try:
+        response = await transport.handle_async_request(request)
+        # Ensure response body is read so we can log it
+        await response.aread()
+
+        await log_api_request(
+            service_name=service_name,
+            method=request.method,
+            endpoint_url=url,
+            request_headers=dict(request.headers),
+            request_body=_encode_request_body(request),
+            response_status=response.status_code,
+            response_headers=dict(response.headers),
+            response_body=_encode_response_body(response),
+        )
+        return response
+
+    except Exception as exc:
+        # Log the failed request with the exception as the "response"
+        await log_api_request(
+            service_name=service_name,
+            method=request.method,
+            endpoint_url=url,
+            request_headers=dict(request.headers),
+            request_body=_encode_request_body(request),
+            response_status=0,
+            response_headers={},
+            response_body=f"TRANSPORT_ERROR: {type(exc).__name__}: {exc}",
+        )
+        raise
+
+
 class LoggingTransport(httpx.AsyncBaseTransport):
     """Async httpx transport that logs every request/response to the DB."""
 
@@ -166,46 +215,27 @@ class LoggingTransport(httpx.AsyncBaseTransport):
         self._service_name_override = service_name
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        url = str(request.url)
+        return await _forward_and_log(self._transport, request, self._service_name_override)
 
-        if _is_excluded(url):
-            return await self._transport.handle_async_request(request)
+    async def aclose(self) -> None:
+        await self._transport.aclose()
 
-        service_name = self._service_name_override or _infer_service_name(url)
 
-        # Ensure request body is read
-        await request.aread()
+class LoggingTransportHttpx2(httpx2.AsyncBaseTransport):
+    """``httpx2`` twin of :class:`LoggingTransport` (the Anthropic SDK 1.x is built on httpx2)."""
 
-        try:
-            response = await self._transport.handle_async_request(request)
-            # Ensure response body is read so we can log it
-            await response.aread()
+    def __init__(
+        self,
+        transport: Optional[httpx2.AsyncBaseTransport] = None,
+        *,
+        service_name: Optional[str] = None,
+        **transport_kwargs: Any,
+    ):
+        self._transport = transport or httpx2.AsyncHTTPTransport(**transport_kwargs)
+        self._service_name_override = service_name
 
-            await log_api_request(
-                service_name=service_name,
-                method=request.method,
-                endpoint_url=url,
-                request_headers=dict(request.headers),
-                request_body=_encode_request_body(request),
-                response_status=response.status_code,
-                response_headers=dict(response.headers),
-                response_body=_encode_response_body(response),
-            )
-            return response
-
-        except Exception as exc:
-            # Log the failed request with the exception as the "response"
-            await log_api_request(
-                service_name=service_name,
-                method=request.method,
-                endpoint_url=url,
-                request_headers=dict(request.headers),
-                request_body=_encode_request_body(request),
-                response_status=0,
-                response_headers={},
-                response_body=f"TRANSPORT_ERROR: {type(exc).__name__}: {exc}",
-            )
-            raise
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+        return await _forward_and_log(self._transport, request, self._service_name_override)
 
     async def aclose(self) -> None:
         await self._transport.aclose()
@@ -349,3 +379,23 @@ def create_sync_client(
         **transport_kwargs,
     )
     return httpx.Client(transport=wrapped, **kwargs)
+
+
+def create_async_httpx2_client(
+    *,
+    service_name: Optional[str] = None,
+    **kwargs: Any,
+) -> httpx2.AsyncClient:
+    """Like :func:`create_async_client`, but returns an ``httpx2.AsyncClient``."""
+    transport_kwargs = {}
+    for key in ("verify", "cert", "trust_env", "proxy"):
+        if key in kwargs:
+            transport_kwargs[key] = kwargs.pop(key)
+
+    user_transport = kwargs.pop("transport", None)
+    wrapped = LoggingTransportHttpx2(
+        transport=user_transport,
+        service_name=service_name,
+        **transport_kwargs,
+    )
+    return httpx2.AsyncClient(transport=wrapped, **kwargs)

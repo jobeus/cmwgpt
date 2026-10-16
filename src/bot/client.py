@@ -43,6 +43,9 @@ class DiscordBotClient:
         self.bot = commands.Bot(command_prefix="/", intents=intents)
         self.services.openai_service.set_bot_id_loader(
             lambda: self.bot.user.id if self.bot.user else None)
+        if getattr(self.services, "anthropic_service", None) is not None:
+            self.services.anthropic_service.set_bot_id_loader(
+                lambda: self.bot.user.id if self.bot.user else None)
 
         # Load any saved state from previous restart
         self._load_saved_state()
