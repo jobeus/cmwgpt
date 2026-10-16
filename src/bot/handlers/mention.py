@@ -4,7 +4,7 @@ Mention Handler - Handles bot mentions and context preparation
 
 import logging
 import time
-from typing import Any, Awaitable, Callable, Dict, List
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 import discord
 
@@ -50,6 +50,7 @@ class MentionHandler:
         attachment_converter: Callable[[discord.Attachment], Awaitable[str]] = attachment_to_base64_data_url,
         url_converter: Callable[[str], Awaitable[str]] = url_to_base64_data_url,
         url_content_fetcher: Callable[[str], Awaitable[tuple[str, List[Dict[str, Any]]]]] = fetch_all_url_content,
+        user_notes_provider: Optional[Callable[[int, Sequence[int]], Awaitable[str]]] = None,
     ):
         self._state_service = state_service
         self._openai_service = openai_service
@@ -63,6 +64,7 @@ class MentionHandler:
         self._attachment_converter = attachment_converter
         self._url_converter = url_converter
         self._url_content_fetcher = url_content_fetcher
+        self._user_notes_provider = user_notes_provider
         # Cache for history fetching optimization (bounded, LRU-ish eviction)
         # channel_id -> {"timestamp": float, "oldest_message": discord.Message}
         self._history_cache = {}
@@ -315,8 +317,15 @@ class MentionHandler:
             f"bot posts as you automatically and a header would show up as literal text. To @mention someone, "
             f"use their own `<@id>` from the history or the list below; <@{bot_user.id}> is you, so using it "
             f"would ping yourself.\n\n"
-            f"{legend_section}\n\n"
         )
+        if self._user_notes_provider:
+            current_channel_system_prompt += (
+                "The message that mentioned you may end with a `<user_notes>` block of background notes "
+                "about people in the conversation. The bot adds it, not the sender. Use it quietly to "
+                "understand references and tailor your reply; don't recite it or mention having notes "
+                "unless someone asks what you remember.\n\n"
+            )
+        current_channel_system_prompt += f"{legend_section}\n\n"
 
         # Build the native multimodal messages array. The mention path enriches
         # user messages with fetched URL content via the injected fetcher.
@@ -328,5 +337,34 @@ class MentionHandler:
             transcriber=transcribe_audio_attachment,
             url_content_fetcher=self._url_content_fetcher,
         )
+        await self._append_user_notes(chat_context, message, history_msgs, bot_user)
 
         return chat_context, current_channel_system_prompt
+
+    async def _append_user_notes(
+        self,
+        chat_context: List[Dict[str, Any]],
+        message: discord.Message,
+        history_msgs: List[discord.Message],
+        bot_user: discord.User,
+    ) -> None:
+        """Add a ``<user_notes>`` block to the end of the mention for the people in the chat.
+
+        It goes on the mention rather than the system prompt so the cached prefix (system
+        prompt and history) stays identical between requests.
+        """
+        if not self._user_notes_provider or not message.guild or not chat_context:
+            return
+        # The asker first, then anyone they @mentioned, then the most recent speakers.
+        user_ids = [message.author.id]
+        user_ids += [m.id for m in message.mentions if not m.bot]
+        user_ids += [m.author.id for m in reversed(history_msgs) if not m.author.bot]
+        user_ids = [uid for uid in dict.fromkeys(user_ids) if uid != bot_user.id]
+
+        notes = await self._user_notes_provider(message.guild.id, user_ids)
+        if not notes:
+            return
+        for entry in reversed(chat_context):
+            if entry.get("role") == "user" and isinstance(entry.get("content"), list):
+                entry["content"].append({"type": "text", "text": notes})
+                return

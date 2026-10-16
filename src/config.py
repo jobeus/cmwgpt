@@ -76,6 +76,8 @@ class AppConfig:
     max_cache_size: int
     is_testing: bool
     system_prompt_path: str = "system_prompt.txt"
+    # Model the nightly user-memory job uses to read chat and update profiles.
+    memory_model: str = "sonnet-5.5-direct"
 
 
 def load_config(
@@ -115,6 +117,7 @@ def load_config(
         max_cache_size=_read_int(source.get("MAX_CACHE_SIZE"), 200),
         is_testing=source.get("CI") == "true" or source.get("TESTING") == "true",
         system_prompt_path=system_prompt_path,
+        memory_model=source.get("MEMORY_MODEL", "sonnet-5.5-direct"),
     )
 
 

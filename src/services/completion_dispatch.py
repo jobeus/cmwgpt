@@ -30,6 +30,7 @@ async def dispatch_completion(
     gemini_service: Any,
     identity: Dict[str, Any],
     anthropic_service: Any = None,
+    search: bool = True,
 ) -> Tuple[ReplyContent, float]:
     """Route ``messages`` to the right model(s) and return ``(reply, cost)``.
 
@@ -40,6 +41,7 @@ async def dispatch_completion(
         openai_service / gemini_service / anthropic_service: The completion services.
         identity: Kwargs (``channel_id``/``bot_id``/``discord_user_id``) splatted
             into every service call. Each caller supplies its own set.
+        search: Whether the OpenRouter and Claude API routes may use web search.
     """
     reply_content: ReplyContent = None
     cost = 0.0
@@ -57,6 +59,7 @@ async def dispatch_completion(
             model=model,
             messages=messages,
             system_prompt=system_prompt,
+            search=search,
             **identity,
         )
     else:
@@ -64,6 +67,7 @@ async def dispatch_completion(
             model=model,
             messages=messages,
             system_prompt=system_prompt,
+            search=search,
             **identity,
         )
 

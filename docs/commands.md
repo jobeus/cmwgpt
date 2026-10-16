@@ -26,8 +26,38 @@ The bot's main chat experience is **mention-based**:
 | `/death set` | Configures deathwatch behavior | persisted service state |
 | `/death view` | Shows deathwatch settings | reads persisted state |
 | `/death reset` | Restores default deathwatch settings | persisted reset |
+| `/memory show` | Posts what the bot remembers about you | reads `user_memory` |
+| `/memory add` | Adds a note about yourself (500-character cap) | persisted per user, per server |
+| `/memory clear` | Forgets everything, or only your own notes | persisted per user, per server |
+| `/fillmemory` | Rebuilds everyone's learned memory from the last 7 days (admin only) | rewrites `user_memory` |
 | `/wikicount` | Looks up a Wikipedia article's average monthly pageviews | runtime action |
 | `/restart` | Triggers restart flow and `git pull` | runtime action |
+
+## Memory commands
+
+The bot keeps a short profile of each person, per server, in MariaDB (`user_memory`).
+Every night at 02:00 America/Denver, `MemoryService` reads the chat since the last run
+from every text channel it can see (message text, reply targets, embed titles and
+descriptions, and attachment names; no URL fetching or transcription). For each day it
+makes one `MEMORY_MODEL` call to pull out new facts about each speaker, then one small call
+per speaker to merge those facts into their profile, capped at 800 characters. When the
+bot replies to a mention, it adds the profiles of the asker, anyone they @mentioned and the
+recent speakers (up to 8 people) to the end of the mention. The cached system prompt and
+history stay unchanged.
+
+Each profile has two parts:
+
+- **Learned from chat**: rewritten by the nightly job.
+- **You told me**: added with `/memory add`. The job never rewrites it, and `/fillmemory` keeps it.
+
+Replies to `/memory` post publicly in the channel. Every change also writes a row to
+`user_memory_history`, so you can see how a profile changed and restore an earlier version.
+
+### `/fillmemory`
+
+Requires the same administrator permission as `/restart`. It wipes every learned profile
+in the server and rebuilds them from the last 7 days, posting progress after each day. The
+nightly job then picks up from where the fill ended.
 
 ## Model and prompt commands
 

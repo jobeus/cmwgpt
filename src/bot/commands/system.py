@@ -330,6 +330,11 @@ class SystemCommands:
             "`/systemprompt set [prompt]` - Set a custom AI personality for this channel\n"
             "`/systemprompt view` - View the current custom personality\n"
             "`/systemprompt reset` - Return to the default personality\n\n"
+            "**Memory:**\n"
+            "`/memory show` - See what the bot remembers about you\n"
+            "`/memory add [note]` - Tell the bot something to remember about you\n"
+            "`/memory clear` - Make the bot forget about you\n"
+            "`/fillmemory` - Rebuild everyone's memory from the last week (admin only)\n\n"
             "**Server Features:**\n"
             "`/death set|view|reset` - Manage global death announcements (death channel only)\n\n"
             "*Note: Commands may be queued if the bot is busy processing other requests.*")

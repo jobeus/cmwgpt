@@ -72,6 +72,14 @@ mariadb -u root -p cmwgpt < init_db.sql
 - API request logging
 - pipeline-step logging
 - artifacts/replay metadata consumed by the log viewer
+- per-user memory (`user_memory`, `user_memory_history`, `user_memory_job_state`)
+
+Every statement in `init_db.sql` is `IF NOT EXISTS`, so re-applying it to an existing
+database adds new tables without touching existing ones. With the docker-compose stack:
+
+```bash
+docker compose exec -T db sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"' < init_db.sql
+```
 
 If the schema is missing or incompatible, failures often appear later and indirectly, for example when:
 

@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from src.bot.handlers.mention import MentionHandler
 from src.config import AppConfig, get_system_prompt, load_config
+from src.db.memory_store import MemoryStore
 from src.services.announcement_service import AnnouncementService
 from src.services.auto_update_service import AutoUpdateService
 from src.services.death_service import DeathService
@@ -12,6 +13,7 @@ from src.services.message_service import MessageService
 from src.services.openai_service import OpenAIService
 from src.services.anthropic_service import AnthropicService
 from src.services.gemini_service import GeminiService
+from src.services.memory_service import MemoryService
 from src.services.paste_service import PasteService
 from src.services.queue_service import QueueService
 from src.services.restart_handler import RestartHandler
@@ -35,6 +37,8 @@ class AppServices:
     death_service: DeathService
     mention_handler: MentionHandler
     anthropic_service: Any = None
+    memory_store: Any = None
+    memory_service: Any = None
 
 
 def create_services(config: Optional[AppConfig] = None) -> AppServices:
@@ -65,6 +69,14 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         openai_service=openai_service,
         model=app_config.default_model,
     )
+    memory_store = MemoryStore()
+    memory_service = MemoryService(
+        store=memory_store,
+        config=app_config,
+        openai_service=openai_service,
+        gemini_service=gemini_service,
+        anthropic_service=anthropic_service,
+    )
     mention_handler = MentionHandler(
         state_service=state_service,
         openai_service=openai_service,
@@ -74,6 +86,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         queue_service=queue_service,
         system_prompt_loader=lambda: get_system_prompt(app_config.system_prompt_path),
         include_num_chatlines=app_config.include_num_chatlines,
+        user_notes_provider=memory_service.get_notes_block,
     )
 
     return AppServices(
@@ -90,6 +103,8 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         death_service=death_service,
         mention_handler=mention_handler,
         anthropic_service=anthropic_service,
+        memory_store=memory_store,
+        memory_service=memory_service,
     )
 
 

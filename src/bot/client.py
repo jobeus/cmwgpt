@@ -14,6 +14,7 @@ from src.config import AppConfig, get_system_prompt, load_config
 from src.bot.commands.image import ImageCommands
 from src.bot.commands.system import SystemCommands
 from src.bot.commands.death import DeathCommands
+from src.bot.commands.memory import MemoryCommands
 from src.bot.commands.wikicount import WikiCountCommands
 from src.services.model_catalog import is_model_unavailable
 
@@ -63,6 +64,10 @@ class DiscordBotClient:
 
         # Set up death service
         self.services.death_service.set_bot(self.bot)
+
+        # Set up the nightly user-memory job
+        if getattr(self.services, "memory_service", None) is not None:
+            self.services.memory_service.set_bot(self.bot)
 
         # Set up event handlers
         self._setup_events()
@@ -234,6 +239,9 @@ class DiscordBotClient:
             # Start the death service
             self.services.death_service.start()
 
+            if getattr(self.services, "memory_service", None) is not None:
+                self.services.memory_service.start()
+
             print(f"🤖 Logged in as {self.bot.user}")
 
             # Log auto-update status
@@ -297,6 +305,14 @@ class DiscordBotClient:
             state_service_instance=self.services.state_service,
         )
         wikicount_commands.setup_commands()
+
+        if getattr(self.services, "memory_service", None) is not None:
+            memory_commands = MemoryCommands(
+                self.bot,
+                memory_service=self.services.memory_service,
+                memory_store=self.services.memory_store,
+            )
+            memory_commands.setup_commands()
 
     async def _handle_message(self, message: discord.Message) -> None:
         """
@@ -362,6 +378,8 @@ class DiscordBotClient:
 
                 try:
                     self.services.death_service.stop()
+                    if getattr(self.services, "memory_service", None) is not None:
+                        self.services.memory_service.stop()
                     logger.info("Background services stopped")
                 except Exception as e:
                     logger.error(

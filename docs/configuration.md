@@ -31,6 +31,7 @@ These are loaded by `src/config.py`.
 | `GEMINI_TIMEOUT_SECONDS` | `120` | No | Client-side request timeout for Gemini calls |
 | `RUNPOD_IO_API_KEY` | empty | For image commands | Used by draw/edit flows |
 | `DEFAULT_MODEL` | `anthropic/claude-sonnet-5.5` | No | Fallback text model |
+| `MEMORY_MODEL` | `sonnet-5.5-direct` | No | Model the nightly user-memory job uses; the job is off when this model's API key is missing |
 | `DEFAULT_DRAW_MODEL` | `seedream` | No | Default draw model key |
 | `DEFAULT_EDIT_MODEL` | `seedream` | No | Default edit model key |
 | `INCLUDE_USERNAMES` | `true` | No | Include usernames in prompt context |
