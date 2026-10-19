@@ -35,6 +35,12 @@ WEB_SEARCH_MAX_USES = 5
 # A web-search turn can come back as ``pause_turn``; resume it this many times.
 MAX_CONTINUATIONS = 3
 
+# Cache diagnostics (beta): each request names the previous response in its
+# channel, and the API reports where the prompt-cache prefix diverged from it.
+# Fingerprints are only kept for requests that carry this beta, so it's sent
+# on every request.
+CACHE_DIAGNOSIS_BETA = "cache-diagnosis-2026-04-07"
+
 _DATA_URL_RE = re.compile(r"^data:(?P<mime>[\w/+.-]+);base64,(?P<data>.+)$", re.DOTALL)
 _SUPPORTED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 
@@ -140,6 +146,24 @@ def _usage_cost(usage: Any) -> float:
     return cost + searches * PRICE_WEB_SEARCH
 
 
+def _log_cache_diagnostics(api_model: str, channel_id: Optional[int], response: Any) -> None:
+    """Log why the prompt cache missed, from the response's cache diagnostics."""
+    diagnostics = getattr(response, "diagnostics", None)
+    if diagnostics is None:
+        return
+    reason = getattr(diagnostics, "cache_miss_reason", None)
+    where = f"[{api_model}] channel={channel_id}"
+    if reason is None:
+        # Either nothing to report or the comparison hadn't finished yet.
+        logger.debug(f"{where} cache diagnostics: no miss reported")
+        return
+    missed = getattr(reason, "cache_missed_input_tokens", None)
+    if missed:
+        logger.warning(f"{where} cache miss: {reason.type}, ~{missed} input tokens not read from cache")
+    else:
+        logger.info(f"{where} cache diagnostics: {reason.type}")
+
+
 class AnthropicService:
     """Service for handling direct Claude API interactions."""
 
@@ -149,6 +173,8 @@ class AnthropicService:
         self._bot_id_loader: Optional[Callable[[], Optional[int]]] = None
         # channel_id -> index of the last history message marked in the previous request
         self._history_breakpoints: Dict[int, int] = {}
+        # channel_id -> id of the previous response, for cache diagnostics
+        self._last_message_ids: Dict[int, str] = {}
 
     def set_client(self, client) -> None:
         """Set a custom client (useful for testing)."""
@@ -169,8 +195,13 @@ class AnthropicService:
         return self._client
 
     def clear_channel_cache(self, channel_id: int) -> None:
-        """Forget a channel's cache breakpoint (its history window was rebuilt)."""
+        """Forget a channel's cache state (its history window was rebuilt).
+
+        The next request starts a fresh diagnostics chain, so an expected
+        divergence isn't reported as a cache miss.
+        """
         self._history_breakpoints.pop(channel_id, None)
+        self._last_message_ids.pop(channel_id, None)
 
     async def close(self) -> None:
         """Close the Anthropic client and clean up resources."""
@@ -206,7 +237,7 @@ class AnthropicService:
             "max_tokens": MAX_TOKENS,
             "output_config": {"effort": EFFORT},
             # On a safety decline, let the API re-run on its recommended fallback model.
-            "betas": ["server-side-fallback-2026-07-01"],
+            "betas": ["server-side-fallback-2026-07-01", CACHE_DIAGNOSIS_BETA],
             "fallbacks": "default",
         }
         if system_prompt:
@@ -226,11 +257,18 @@ class AnthropicService:
         logger.info(f"[{api_model}] Prompt Snippet: {snippet[:150]}{'...' if len(snippet) > 150 else ''}")
 
         total_cost = 0.0
+        previous_message_id = self._last_message_ids.get(channel_id) if channel_id else None
         try:
             response = None
             for _ in range(MAX_CONTINUATIONS + 1):
-                response = await client.beta.messages.create(messages=api_messages, **kwargs)
+                response = await client.beta.messages.create(
+                    messages=api_messages,
+                    diagnostics={"previous_message_id": previous_message_id},
+                    **kwargs,
+                )
                 total_cost += _usage_cost(getattr(response, "usage", None))
+                _log_cache_diagnostics(api_model, channel_id, response)
+                previous_message_id = getattr(response, "id", None) or previous_message_id
                 if response.stop_reason != "pause_turn":
                     break
                 # Resume a paused server-tool turn by sending its content back.
@@ -255,6 +293,8 @@ class AnthropicService:
             raise AnthropicServiceError("The Claude API returned no response.")
         if channel_id and history_index is not None:
             self._history_breakpoints[channel_id] = history_index
+        if channel_id and previous_message_id:
+            self._last_message_ids[channel_id] = previous_message_id
 
         if response.stop_reason == "refusal":
             details = getattr(response, "stop_details", None)

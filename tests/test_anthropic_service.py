@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.anthropic_service import (
+    CACHE_DIAGNOSIS_BETA,
     AnthropicService,
     AnthropicServiceError,
     build_anthropic_messages,
@@ -25,8 +26,11 @@ def _usage(input_tokens=1000, output_tokens=500, searches=0):
     )
 
 
-def _response(text="hello", stop_reason="end_turn", usage=None, content=None, stop_details=None):
+def _response(text="hello", stop_reason="end_turn", usage=None, content=None, stop_details=None,
+              id="msg_1", diagnostics=None):
     return SimpleNamespace(
+        id=id,
+        diagnostics=diagnostics,
         content=content if content is not None else [SimpleNamespace(type="text", text=text)],
         stop_reason=stop_reason,
         stop_details=stop_details,
@@ -249,6 +253,70 @@ class TestDispatchRoutesDirect(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((reply, cost), ("reply", 0.01))
         openai_service.get_chat_completion.assert_not_awaited()
         anthropic_service.get_chat_completion.assert_awaited_once()
+
+
+USER = [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]
+
+
+class TestCacheDiagnostics(unittest.IsolatedAsyncioTestCase):
+    def make_service(self, *responses):
+        service = AnthropicService(api_key="test-key")
+        client = MagicMock()
+        client.beta.messages.create = AsyncMock(side_effect=list(responses))
+        service.set_client(client)
+        return service, client
+
+    def previous_ids(self, client):
+        return [c.kwargs["diagnostics"]["previous_message_id"] for c in client.beta.messages.create.call_args_list]
+
+    async def test_opts_in_on_every_request_and_chains_ids_per_channel(self):
+        service, client = self.make_service(
+            _response(id="msg_a"), _response(id="msg_b"), _response(id="msg_other"))
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=2)
+
+        self.assertEqual(self.previous_ids(client), [None, "msg_a", None])
+        for call in client.beta.messages.create.call_args_list:
+            self.assertIn(CACHE_DIAGNOSIS_BETA, call.kwargs["betas"])
+
+    async def test_calls_without_a_channel_never_chain(self):
+        service, client = self.make_service(_response(id="msg_a"), _response(id="msg_b"))
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER)
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER)
+        self.assertEqual(self.previous_ids(client), [None, None])
+
+    async def test_pause_turn_continuation_compares_against_the_paused_response(self):
+        service, client = self.make_service(
+            _response(id="msg_paused", stop_reason="pause_turn"), _response(id="msg_done"),
+            _response(id="msg_next"))
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
+        self.assertEqual(self.previous_ids(client), [None, "msg_paused", "msg_done"])
+
+    async def test_clear_channel_cache_restarts_the_chain(self):
+        service, client = self.make_service(_response(id="msg_a"), _response(id="msg_b"))
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
+        service.clear_channel_cache(1)
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
+        self.assertEqual(self.previous_ids(client), [None, None])
+
+    async def test_cache_miss_with_lost_tokens_is_a_warning(self):
+        reason = SimpleNamespace(type="system_changed", cache_missed_input_tokens=4200)
+        service, _ = self.make_service(
+            _response(diagnostics=SimpleNamespace(cache_miss_reason=reason)))
+        with self.assertLogs("src.services.anthropic_service", level="WARNING") as logs:
+            await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
+        self.assertTrue(any("system_changed" in line and "4200" in line for line in logs.output))
+
+    async def test_reasons_without_lost_tokens_are_info(self):
+        reason = SimpleNamespace(type="previous_message_not_found")
+        service, _ = self.make_service(
+            _response(diagnostics=SimpleNamespace(cache_miss_reason=reason)))
+        with self.assertLogs("src.services.anthropic_service", level="INFO") as logs:
+            await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
+        self.assertTrue(any("previous_message_not_found" in line for line in logs.output))
+        self.assertFalse(any(line.startswith("WARNING") for line in logs.output))
 
 
 if __name__ == "__main__":
