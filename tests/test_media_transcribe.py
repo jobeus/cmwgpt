@@ -1,6 +1,7 @@
 """Tests for shared media download + Groq transcription helpers."""
 
 import os
+import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -117,14 +118,17 @@ class TestTranscribeVideoUrl(unittest.IsolatedAsyncioTestCase):
 
         async def fake_download(url, path, **kwargs):
             dirs.append(os.path.dirname(path))
-            self.assertEqual(kwargs["max_bytes"], media_transcribe.MAX_VIDEO_DOWNLOAD_BYTES)
+            self.assertEqual(kwargs["timeout"], media_transcribe.DOWNLOAD_TIMEOUT_SECONDS)
+            self.assertNotIn("max_bytes", kwargs)  # no size limit on videos
             with open(path, "wb") as f:
                 f.write(b"mp4")
 
         def fake_ffmpeg(cmd, **kwargs):
             self.assertEqual(cmd[0], "ffmpeg")
-            self.assertIn("-vn", cmd)
-            self.assertEqual(kwargs["timeout"], media_transcribe.FFMPEG_TIMEOUT_SECONDS)
+            for arg in media_transcribe.SPEECH_AUDIO_ARGS:
+                self.assertIn(arg, cmd)
+            self.assertNotIn("-t", cmd)  # never truncated
+            self.assertNotIn("timeout", kwargs)
             with open(cmd[-1], "wb") as f:
                 f.write(b"mp3-bytes")
 
@@ -155,22 +159,58 @@ class TestTranscribeVideoUrl(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(os.path.exists(dirs[0]))
 
 
-class TestRejectLongMedia(unittest.TestCase):
-    def test_rejects_media_over_limit(self):
-        reason = media_transcribe._reject_long_media(
-            {"duration": media_transcribe.MAX_MEDIA_DURATION_SECONDS + 1})
-        self.assertIsNotNone(reason)
-
-    def test_allows_short_or_unknown_duration(self):
-        self.assertIsNone(media_transcribe._reject_long_media({"duration": 30}))
-        self.assertIsNone(media_transcribe._reject_long_media({}))
-        self.assertIsNone(media_transcribe._reject_long_media({"duration": None}, incomplete=True))
-
-    def test_ydl_opts_cap_size_and_duration(self):
+class TestYdlOptions(unittest.TestCase):
+    def test_no_length_or_size_limits_and_speech_sized_audio(self):
         opts = media_transcribe._build_ydl_opts("tiktok", "/tmp/x")
-        self.assertEqual(opts["max_filesize"], media_transcribe.MAX_VIDEO_DOWNLOAD_BYTES)
-        self.assertIs(opts["match_filter"], media_transcribe._reject_long_media)
+        self.assertNotIn("max_filesize", opts)
+        self.assertNotIn("match_filter", opts)
+        self.assertEqual(opts["postprocessors"][0]["preferredquality"], "32")
+        self.assertEqual(opts["postprocessor_args"], {"extractaudio": ["-ar", "16000", "-ac", "1"]})
+        self.assertEqual(len(opts["progress_hooks"]), 1)
         self.assertTrue(opts["outtmpl"].startswith(os.path.join("/tmp/x", "tiktok_")))
+
+    def test_deadline_hook_aborts_after_download_timeout(self):
+        with patch("src.utils.media_transcribe.time.monotonic", side_effect=[0.0, 10.0, 1000.0]):
+            hook = media_transcribe._download_deadline_hook()
+            hook({"status": "downloading"})
+            with self.assertRaises(media_transcribe.DownloadTimeout):
+                hook({"status": "downloading"})
+
+
+class TestTranscribeAudioFile(unittest.IsolatedAsyncioTestCase):
+    async def test_small_file_goes_up_in_one_request(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "a.mp3")
+            with open(path, "wb") as f:
+                f.write(b"small")
+            with patch("src.utils.media_transcribe.transcribe_audio", new_callable=AsyncMock,
+                       return_value="all of it") as mock_transcribe, patch(
+                "src.utils.media_transcribe.subprocess.run"
+            ) as mock_run:
+                self.assertEqual(await media_transcribe.transcribe_audio_file(path), "all of it")
+        mock_transcribe.assert_awaited_once_with(b"small", "a.mp3", "audio/mpeg")
+        mock_run.assert_not_called()
+
+    async def test_large_file_is_split_and_joined_in_order(self):
+        def fake_ffmpeg(cmd, **kwargs):
+            self.assertIn("segment", cmd)
+            self.assertIn(str(media_transcribe.CHUNK_SECONDS), cmd)
+            out_dir = os.path.dirname(cmd[-1])
+            for i in (1, 0, 2):  # written out of order on purpose
+                with open(os.path.join(out_dir, f"chunk_{i:04d}.mp3"), "wb") as f:
+                    f.write(f"c{i}".encode())
+
+        async def fake_transcribe(data, name, mime):
+            return {"c0": "one", "c1": "", "c2": "three"}[data.decode()]
+
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "big.mp3")
+            with open(path, "wb") as f:
+                f.write(b"x" * 50)
+            with patch.object(media_transcribe, "GROQ_MAX_UPLOAD_BYTES", 10), patch(
+                "src.utils.media_transcribe.subprocess.run", side_effect=fake_ffmpeg
+            ), patch("src.utils.media_transcribe.transcribe_audio", side_effect=fake_transcribe):
+                self.assertEqual(await media_transcribe.transcribe_audio_file(path), "one three")
 
 
 class TestDownloadAndTranscribeVideo(unittest.IsolatedAsyncioTestCase):
@@ -218,8 +258,6 @@ class TestDownloadAndTranscribeVideo(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args[1], "tiktok_1_a.mp3")
         self.assertEqual(args[2], "audio/mpeg")
         ydl = FakeYoutubeDL.instances[0]
-        self.assertEqual(ydl.opts["max_filesize"], media_transcribe.MAX_VIDEO_DOWNLOAD_BYTES)
-        self.assertIs(ydl.opts["match_filter"], media_transcribe._reject_long_media)
         self.assertNotIn("proxy", ydl.opts)
         # Private temp dir removed afterwards.
         self.assertFalse(os.path.exists(os.path.dirname(ydl.opts["outtmpl"])))
@@ -254,6 +292,15 @@ class TestDownloadAndTranscribeVideo(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "via proxy")
         self.assertEqual(FakeYoutubeDL.instances[1].opts["proxy"], "http://proxy")
         self.assertEqual(cache[self.URL], "via proxy")
+
+    async def test_download_timeout_fails_without_proxy_retry(self):
+        with patch("src.config._cached_config", cfg(groq_api_key="groq-key", transcript_proxy="http://proxy")), patch(
+            "src.utils.media_transcribe.yt_dlp.YoutubeDL",
+            side_effect=lambda opts: FakeYoutubeDL(
+                opts, error=media_transcribe.DownloadTimeout("download took longer than 180s")),
+        ):
+            self.assertIsNone(await self.run_dl({}))
+        self.assertEqual(len(FakeYoutubeDL.instances), 1)
 
     async def test_proxy_failure_returns_none(self):
         with patch("src.config._cached_config", cfg(groq_api_key="groq-key", transcript_proxy="http://proxy")), patch(

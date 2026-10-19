@@ -3,6 +3,7 @@ import base64
 import io
 import logging
 import os
+import tempfile
 import wave
 from typing import Optional
 
@@ -11,7 +12,7 @@ from PIL import Image
 
 from src.utils.cache_utils import LRUCache
 from src.utils.http_client import fetch_public
-from src.utils.media_transcribe import transcribe_audio
+from src.utils.media_transcribe import GROQ_MAX_UPLOAD_BYTES, transcribe_audio, transcribe_audio_file
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +222,15 @@ async def transcribe_audio_attachment(attachment: discord.Attachment) -> Optiona
         if os.path.splitext(filename)[1].lower() not in GROQ_AUDIO_EXTENSIONS:
             filename = os.path.splitext(filename)[0] + _MIME_TO_EXTENSION.get(content_type, ".ogg")
 
-        transcript = await transcribe_audio(file_bytes, filename, content_type)
+        if len(file_bytes) <= GROQ_MAX_UPLOAD_BYTES:
+            transcript = await transcribe_audio(file_bytes, filename, content_type)
+        else:
+            # Too big for one Groq upload: let the chunker split it.
+            with tempfile.TemporaryDirectory(prefix="attachment_") as temp_dir:
+                path = os.path.join(temp_dir, filename)
+                with open(path, "wb") as f:
+                    f.write(file_bytes)
+                transcript = await transcribe_audio_file(path, content_type)
         if transcript:
             logger.info(f"Successfully transcribed audio attachment {filename} using Groq.")
             _audio_transcript_cache[attachment.id] = transcript

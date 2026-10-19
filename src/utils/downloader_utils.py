@@ -20,8 +20,9 @@ logger = logging.getLogger(__name__)
 
 # At most this many fetches run at once across all sources of one message.
 MAX_CONCURRENT_FETCHES = 4
-# A single source (a video transcription, say) gets this long before it's dropped.
-PER_ITEM_TIMEOUT_SECONDS = 180
+# Page/transcript lookups that take longer than this are dropped. Sources that
+# transcribe video have no limit, so a long video still gets its full transcript.
+QUICK_FETCH_TIMEOUT_SECONDS = 120
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class _Source:
     header: str
     # (key, result) -> (text block, image data URLs)
     render: Callable[[str, Any], Tuple[str, List[str]]]
+    timeout: Optional[float] = None
 
 
 def _text_only(template: str) -> Callable[[str, Any], Tuple[str, List[str]]]:
@@ -53,7 +55,7 @@ def _render_instagram(key: str, result: Any) -> Tuple[str, List[str]]:
 SOURCES: List[_Source] = [
     _Source("youtube", extract_video_ids, get_transcript,
             "Included youtube link transcript follows:",
-            _text_only("Target Video ID {key} Transcript:\n{text}")),
+            _text_only("Target Video ID {key} Transcript:\n{text}"), QUICK_FETCH_TIMEOUT_SECONDS),
     _Source("tiktok", extract_tiktok_urls, get_tiktok_transcript,
             "Included TikTok video transcript follows:",
             _text_only("Target TikTok Video {key} Transcript:\n{text}")),
@@ -66,7 +68,7 @@ SOURCES: List[_Source] = [
             "Included Instagram/Threads posts follow:", _render_instagram),
     _Source("article", extract_target_urls, get_article_text,
             "Included article content follows:",
-            _text_only("URL content:\n{text}")),
+            _text_only("URL content:\n{text}"), QUICK_FETCH_TIMEOUT_SECONDS),
 ]
 
 
@@ -98,8 +100,7 @@ async def fetch_all_url_content(
     async def run(source: _Source, key: str) -> Optional[Tuple[str, List[str]]]:
         try:
             async with semaphore:
-                result = await asyncio.wait_for(
-                    source.fetch(key, cache_only=cache_only), PER_ITEM_TIMEOUT_SECONDS)
+                result = await asyncio.wait_for(source.fetch(key, cache_only=cache_only), source.timeout)
             if not result:
                 return None
             return source.render(key, result)

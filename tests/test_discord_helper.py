@@ -2,6 +2,7 @@
 
 import base64
 import io
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -316,6 +317,31 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(again, result)
         self.assertEqual(cache.get(5001), "This is a test transcript")
         mock_transcribe.assert_awaited_once_with(b"some-mp3-bytes", "test.mp3", "audio/mp3")
+
+    async def test_large_audio_attachment_goes_through_the_chunker(self):
+        attachment = MagicMock()
+        attachment.id = 5002
+        attachment.content_type = "audio/mpeg"
+        attachment.filename = "podcast.mp3"
+        attachment.read = AsyncMock(return_value=b"x" * 64)
+        seen = {}
+
+        async def fake_file_transcribe(path, mime):
+            with open(path, "rb") as f:
+                seen["bytes"] = f.read()
+            seen["name"], seen["mime"] = os.path.basename(path), mime
+            return "long transcript"
+
+        with patch("src.utils.discord_helper.GROQ_MAX_UPLOAD_BYTES", 10), patch(
+            "src.utils.discord_helper.transcribe_audio", new=AsyncMock()
+        ) as mock_single, patch(
+            "src.utils.discord_helper.transcribe_audio_file", side_effect=fake_file_transcribe
+        ), patch("src.utils.discord_helper._audio_transcript_cache", LRUCache(5)):
+            result = await discord_helper.transcribe_audio_attachment(attachment)
+
+        self.assertEqual(result, "long transcript")
+        self.assertEqual(seen, {"bytes": b"x" * 64, "name": "podcast.mp3", "mime": "audio/mpeg"})
+        mock_single.assert_not_called()
 
     async def test_transcribe_audio_attachment_pcm_to_wav(self):
         import wave

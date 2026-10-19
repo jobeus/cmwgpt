@@ -25,16 +25,16 @@ class ResponseTooLarge(Exception):
     """The response body exceeded the caller's byte limit."""
 
 
-async def _read_capped(response: httpx.Response, max_bytes: int, sink: Any = None) -> bytes:
+async def _read_capped(response: httpx.Response, max_bytes: Optional[int], sink: Any = None) -> bytes:
     declared = response.headers.get("content-length")
-    if declared and declared.isdigit() and int(declared) > max_bytes:
+    if max_bytes is not None and declared and declared.isdigit() and int(declared) > max_bytes:
         raise ResponseTooLarge(f"{response.url} declares {declared} bytes (limit {max_bytes})")
 
     chunks = []
     total = 0
     async for chunk in response.aiter_bytes():
         total += len(chunk)
-        if total > max_bytes:
+        if max_bytes is not None and total > max_bytes:
             raise ResponseTooLarge(f"{response.url} exceeded {max_bytes} bytes")
         if sink is not None:
             sink.write(chunk)
@@ -50,7 +50,7 @@ async def _fetch(
     params: Optional[Mapping[str, Any]],
     proxy: Optional[str],
     timeout: float,
-    max_bytes: int,
+    max_bytes: Optional[int],
     sink: Any = None,
 ) -> httpx.Response:
     async with httpx.AsyncClient(proxy=proxy, timeout=timeout, follow_redirects=False) as client:
@@ -104,18 +104,20 @@ async def download_public(
     path: str,
     *,
     headers: Optional[Mapping[str, str]] = None,
-    timeout: float = 120.0,
-    max_bytes: int = 100 * 1024 * 1024,
+    max_bytes: Optional[int] = None,
+    timeout: float = 180.0,
 ) -> None:
-    """Stream a user-supplied URL to ``path`` under the same guards as :func:`fetch_public`.
+    """Stream a user-supplied URL to ``path``, SSRF-checking every redirect hop.
 
-    Raises on a non-2xx status; a partial file is removed on failure.
+    No size limit by default (videos can be hours long); ``timeout`` bounds
+    the whole download. Raises on a non-2xx status; a partial file is removed
+    on failure.
     """
     try:
         with open(path, "wb") as f:
             response = await asyncio.wait_for(
-                _fetch(url, headers=headers, params=None, proxy=None, timeout=timeout,
-                       max_bytes=max_bytes, sink=f),
+                _fetch(url, headers=headers, params=None, proxy=None,
+                       timeout=60.0, max_bytes=max_bytes, sink=f),
                 timeout,
             )
         response.raise_for_status()

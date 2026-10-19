@@ -136,18 +136,27 @@ class TestDownloaderUtils(unittest.IsolatedAsyncioTestCase):
         async def hang(key, *, cache_only=False):
             await asyncio.sleep(10)
 
-        sources = fake_sources(
-            tiktok=(["https://vt.tiktok.com/1"], hang),
-            article=(["https://e.com"], AsyncMock(return_value="fast article")),
-        )
+        sources = [
+            dataclasses.replace(s, timeout=0.01) if s.name == "article" else s
+            for s in fake_sources(
+                article=(["https://slow.example"], hang),
+                youtube=(["dQw4w9WgXcQ"], AsyncMock(return_value="fast transcript")),
+            )
+        ]
 
-        with patch.object(downloader_utils, "SOURCES", sources), patch.object(
-            downloader_utils, "PER_ITEM_TIMEOUT_SECONDS", 0.01
-        ):
+        with patch.object(downloader_utils, "SOURCES", sources):
             text, _ = await downloader_utils.fetch_all_url_content("x")
 
-        self.assertIn("fast article", text)
-        self.assertNotIn("TikTok", text)
+        self.assertIn("fast transcript", text)
+        self.assertNotIn("URL content", text)
+
+    def test_only_quick_sources_have_a_timeout(self):
+        timeouts = {s.name: s.timeout for s in downloader_utils.SOURCES}
+        self.assertEqual(timeouts["youtube"], downloader_utils.QUICK_FETCH_TIMEOUT_SECONDS)
+        self.assertEqual(timeouts["article"], downloader_utils.QUICK_FETCH_TIMEOUT_SECONDS)
+        # Video sources: only their download step is time-limited.
+        for name in ("tiktok", "twitter", "facebook", "instagram"):
+            self.assertIsNone(timeouts[name], name)
 
 
 if __name__ == "__main__":

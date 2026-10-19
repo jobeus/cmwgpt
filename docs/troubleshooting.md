@@ -61,7 +61,8 @@ If one provider fails while others work, assume a **provider-specific dependency
 | Limit | Effect |
 | --- | --- |
 | SSRF guard | URLs (or any redirect hop) that resolve to a non-global address (loopback, private, link-local, CGNAT, reserved, ...) are refused |
-| Size cap / overall timeout | Very large or slow responses are cut off by `src/utils/http_client.py` and skipped |
+| Size cap / overall timeout | Very large or slow pages and images are cut off by `src/utils/http_client.py` and skipped (videos have no size cap) |
+| Video download time | A video download (direct or yt-dlp) that takes over 3 minutes is abandoned. Videos of any length are otherwise transcribed in full; Groq itself is near-instant |
 | History window | Only the newest 10 history messages fetch links; older messages use cached results only, so an uncached link further back adds nothing |
 
 The cause is logged at warning level in the normal bot log.
