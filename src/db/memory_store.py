@@ -70,6 +70,24 @@ class MemoryStore:
             guild_id, user_id, source,
         )
 
+    async def save_memory(
+        self,
+        guild_id: int,
+        user_id: int,
+        profile: str,
+        self_notes: str,
+        *,
+        source: str,
+        observations: Optional[str] = None,
+    ) -> None:
+        """Replace both the learned profile and the user's own notes."""
+        await self._write(
+            "INSERT INTO user_memory (guild_id, user_id, profile, self_notes) VALUES (%s, %s, %s, %s) "
+            "ON DUPLICATE KEY UPDATE profile = VALUES(profile), self_notes = VALUES(self_notes)",
+            (guild_id, user_id, profile, self_notes),
+            guild_id, user_id, source, observations,
+        )
+
     async def clear_user(self, guild_id: int, user_id: int) -> None:
         """Wipe both the learned profile and the user's own notes."""
         await self._write(

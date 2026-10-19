@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS user_memory_history (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     guild_id BIGINT UNSIGNED NOT NULL,
     user_id BIGINT UNSIGNED NOT NULL,
-    source VARCHAR(20) NOT NULL COMMENT 'nightly, fill, manual, clear',
+    source VARCHAR(20) NOT NULL COMMENT 'nightly, fill, manual, correct, clear',
     profile TEXT NOT NULL,
     self_notes TEXT NOT NULL,
     observations TEXT NULL COMMENT 'Facts extracted from the window, before merge',

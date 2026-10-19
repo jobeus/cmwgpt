@@ -20,16 +20,34 @@ logger = logging.getLogger(__name__)
 NO_PINGS = discord.AllowedMentions.none()
 
 
-def format_memory(user_id: int, profile: str, self_notes: str) -> str:
-    """The /memory show reply."""
+def format_memory(user_id: int, profile: str, self_notes: str, *, own: bool = True) -> str:
+    """The /memory show reply. ``own`` is False when an admin looks at someone else."""
     if not profile and not self_notes:
         return f"I don't remember anything about <@{user_id}> yet."
     sections = [f"**What I remember about <@{user_id}>**"]
     if profile:
         sections.append(f"**Learned from chat:**\n{profile}")
     if self_notes:
-        sections.append(f"**You told me:**\n{self_notes}")
+        sections.append(f"**{'You' if own else 'They'} told me:**\n{self_notes}")
     return "\n\n".join(sections)
+
+
+async def resolve_target(
+    interaction: discord.Interaction, user: Optional[discord.Member]
+) -> Optional[discord.abc.User]:
+    """Whose memory a /memory command acts on: the caller, or ``user`` when the caller is an admin.
+
+    Returns ``None`` (after telling the caller privately) when a non-admin names someone else.
+    Call before deferring, so the refusal can be private.
+    """
+    if user is None or user.id == interaction.user.id:
+        return interaction.user
+    if interaction.user.guild_permissions.administrator:
+        return user
+    await interaction.response.send_message(
+        "❌ Only administrators can view or change someone else's memory.", ephemeral=True
+    )
+    return None
 
 
 class MemoryCommands:
@@ -46,19 +64,36 @@ class MemoryCommands:
 
     def _create_memory_group(self) -> app_commands.Group:
         group = app_commands.Group(name="memory", description="See or change what the bot remembers about you")
+        user_help = "Admins only: act on this person instead of yourself"
 
-        @group.command(name="show", description="Show what the bot remembers about you")
-        async def memory_show(interaction: discord.Interaction):
-            if not await safe_defer(interaction, ephemeral=False, thinking=True):
+        @group.command(name="show", description="Privately show what the bot remembers about you")
+        @app_commands.describe(user=user_help)
+        async def memory_show(interaction: discord.Interaction, user: Optional[discord.Member] = None):
+            target = await resolve_target(interaction, user)
+            if target is None or not await safe_defer(interaction, ephemeral=True, thinking=True):
                 return
-            asyncio.create_task(safe_run(interaction, self._handle_show, interaction))
+            asyncio.create_task(safe_run(interaction, self._handle_show, interaction, target))
 
         @group.command(name="add", description="Tell the bot something to remember about you")
-        @app_commands.describe(note="Something about you, like 'I drive a 2019 Tacoma'")
-        async def memory_add(interaction: discord.Interaction, note: str):
-            if not await safe_defer(interaction, ephemeral=False, thinking=True):
+        @app_commands.describe(note="Something about you, like 'I drive a 2019 Tacoma'", user=user_help)
+        async def memory_add(interaction: discord.Interaction, note: str, user: Optional[discord.Member] = None):
+            target = await resolve_target(interaction, user)
+            if target is None or not await safe_defer(interaction, ephemeral=False, thinking=True):
                 return
-            asyncio.create_task(safe_run(interaction, self._handle_add, interaction, note))
+            asyncio.create_task(safe_run(interaction, self._handle_add, interaction, target, note))
+
+        @group.command(name="correct", description="Fix something the bot remembers about you")
+        @app_commands.describe(
+            correction="What's wrong and what's right, like 'I sold the Tacoma, I drive a Ranger now'",
+            user=user_help,
+        )
+        async def memory_correct(
+            interaction: discord.Interaction, correction: str, user: Optional[discord.Member] = None
+        ):
+            target = await resolve_target(interaction, user)
+            if target is None or not await safe_defer(interaction, ephemeral=False, thinking=True):
+                return
+            asyncio.create_task(safe_run(interaction, self._handle_correct, interaction, target, correction))
 
         @group.command(name="clear", description="Forget things about you")
         @app_commands.describe(what="What to forget (default: everything)")
@@ -90,29 +125,62 @@ class MemoryCommands:
 
         return fillmemory_command
 
-    async def _handle_show(self, interaction: discord.Interaction) -> None:
-        profile, self_notes = await self._store.get(interaction.guild_id, interaction.user.id)
+    async def _handle_show(self, interaction: discord.Interaction, target: discord.abc.User) -> None:
+        profile, self_notes = await self._store.get(interaction.guild_id, target.id)
         await interaction.followup.send(
-            format_memory(interaction.user.id, profile, self_notes), allowed_mentions=NO_PINGS
+            format_memory(target.id, profile, self_notes, own=target.id == interaction.user.id),
+            ephemeral=True,
+            allowed_mentions=NO_PINGS,
         )
 
-    async def _handle_add(self, interaction: discord.Interaction, note: str) -> None:
+    async def _handle_add(self, interaction: discord.Interaction, target: discord.abc.User, note: str) -> None:
         note = " ".join(note.split())
         if not note:
             await interaction.followup.send("That note is empty.")
             return
-        _, self_notes = await self._store.get(interaction.guild_id, interaction.user.id)
+        _, self_notes = await self._store.get(interaction.guild_id, target.id)
         updated = f"{self_notes}\n- {note}".strip() if self_notes else f"- {note}"
         if len(updated) > SELF_NOTES_MAX_CHARS:
             await interaction.followup.send(
-                f"Your notes are capped at {SELF_NOTES_MAX_CHARS} characters and that would go over "
-                f"({len(updated)}). Use `/memory clear` with \"only what I told you\" to start over.",
+                f"Notes are capped at {SELF_NOTES_MAX_CHARS} characters and that would go over "
+                f"({len(updated)}). Use `/memory correct` to trim them, or `/memory clear` with "
+                f"\"only what I told you\" to start over.",
                 allowed_mentions=NO_PINGS,
             )
             return
-        await self._store.save_self_notes(interaction.guild_id, interaction.user.id, updated, source="manual")
-        logger.info(f"[/memory add] {interaction.user} added a note")
-        await interaction.followup.send(f"Got it, <@{interaction.user.id}>. I'll remember: {note}", allowed_mentions=NO_PINGS)
+        await self._store.save_self_notes(interaction.guild_id, target.id, updated, source="manual")
+        logger.info(f"[/memory add] {interaction.user} added a note for {target}")
+        await interaction.followup.send(
+            f"Got it. I'll remember about <@{target.id}>: {note}", allowed_mentions=NO_PINGS
+        )
+
+    async def _handle_correct(
+        self, interaction: discord.Interaction, target: discord.abc.User, correction: str
+    ) -> None:
+        correction = correction.strip()
+        if not correction:
+            await interaction.followup.send("That correction is empty.")
+            return
+        if not self._memory_service.available:
+            await interaction.followup.send("Memory is off: the memory model has no API key configured.")
+            return
+        try:
+            profile, self_notes, _ = await self._memory_service.correct(
+                interaction.guild_id, target.id, getattr(target, "display_name", str(target)), correction
+            )
+        except ValueError:
+            logger.exception(f"[/memory correct] unusable model reply for {target}")
+            await interaction.followup.send("I couldn't apply that correction, so nothing changed. Try rewording it.")
+            return
+        logger.info(f"[/memory correct] {interaction.user} corrected memory for {target}")
+        await interaction.followup.send(
+            f"Updated what I remember about <@{target.id}>: {correction}", allowed_mentions=NO_PINGS
+        )
+        await interaction.followup.send(
+            format_memory(target.id, profile, self_notes, own=target.id == interaction.user.id),
+            ephemeral=True,
+            allowed_mentions=NO_PINGS,
+        )
 
     async def _handle_clear(self, interaction: discord.Interaction, what: str) -> None:
         if what == "notes":

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.bot.commands.memory import format_memory
+from src.bot.commands.memory import format_memory, resolve_target
 from src.bot.handlers.mention import MentionHandler
 from src.services.memory_service import (
     PROFILE_MAX_CHARS,
@@ -43,6 +43,13 @@ class FakeStore:
         self.job_states = []
         self.cleared_guilds = []
         self.processed_through = None
+
+    async def get(self, guild_id, user_id):
+        return self.rows.get(user_id, ("", ""))
+
+    async def save_memory(self, guild_id, user_id, profile, self_notes, **kwargs):
+        self.rows[user_id] = (profile, self_notes)
+        self.saved.append((user_id, profile, kwargs))
 
     async def get_many(self, guild_id, user_ids):
         return {uid: self.rows[uid] for uid in user_ids if uid in self.rows}
@@ -118,6 +125,7 @@ class TestHelpers(unittest.TestCase):
         text = format_memory(1, "Stable: has dogs", "- drives a Tacoma")
         self.assertIn("Learned from chat", text)
         self.assertIn("You told me", text)
+        self.assertIn("They told me", format_memory(1, "", "- x", own=False))
 
 
 class TestMemoryService(unittest.IsolatedAsyncioTestCase):
@@ -225,9 +233,55 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         service, _ = self.make_service(store, datetime.now(UTC))
         self.assertEqual(await service.get_notes_block(42, [1]), "")
 
+    async def test_correct_rewrites_both_parts_and_saves(self):
+        store = FakeStore({1: ("Current: truck shopping, Tacoma (2026-10-15)", "- drives a 2019 Tacoma")})
+        service, _ = self.make_service(store, datetime(2026, 10, 19, 18, 0, tzinfo=UTC))
+        reply = json.dumps({"profile": "Current: drives a Ranger now (2026-10-19)", "self_notes": "- drives a Ranger"})
+        with patch(
+            "src.services.memory_service.dispatch_completion", new=AsyncMock(return_value=(reply, 0.003))
+        ) as dispatch:
+            profile, notes, cost = await service.correct(42, 1, "Jobe", "sold the Tacoma, drive a Ranger now")
+        prompt = dispatch.await_args.kwargs["messages"][0]["content"][0]["text"]
+        self.assertIn("Today: 2026-10-19", prompt)
+        self.assertIn("- drives a 2019 Tacoma", prompt)
+        self.assertIn("Correction:\nsold the Tacoma, drive a Ranger now", prompt)
+        self.assertEqual(store.rows[1], (profile, notes))
+        self.assertEqual(notes, "- drives a Ranger")
+        self.assertEqual(store.saved[0][2]["source"], "correct")
+        self.assertEqual(cost, 0.003)
+
+    async def test_correct_leaves_memory_alone_on_bad_reply(self):
+        store = FakeStore({1: ("keep me", "- and me")})
+        service, _ = self.make_service(store, datetime(2026, 10, 19, tzinfo=UTC))
+        with patch("src.services.memory_service.dispatch_completion", new=AsyncMock(return_value=("sorry", 0.0))):
+            with self.assertRaises(ValueError):
+                await service.correct(42, 1, "Jobe", "whatever")
+        self.assertEqual(store.rows[1], ("keep me", "- and me"))
+        self.assertEqual(store.saved, [])
+
     def test_unavailable_without_api_key(self):
         service = MemoryService(store=FakeStore(), config=cfg(anthropic_api_key=""), openai_service=MagicMock())
         self.assertFalse(service.available)
+
+
+class TestResolveTarget(unittest.IsolatedAsyncioTestCase):
+    def make_interaction(self, admin):
+        caller = SimpleNamespace(id=1, guild_permissions=SimpleNamespace(administrator=admin))
+        return SimpleNamespace(user=caller, response=SimpleNamespace(send_message=AsyncMock()))
+
+    async def test_defaults_to_caller(self):
+        interaction = self.make_interaction(admin=False)
+        self.assertIs(await resolve_target(interaction, None), interaction.user)
+        self.assertIs(await resolve_target(interaction, SimpleNamespace(id=1)), interaction.user)
+
+    async def test_admin_can_target_others(self):
+        other = SimpleNamespace(id=2)
+        self.assertIs(await resolve_target(self.make_interaction(admin=True), other), other)
+
+    async def test_non_admin_is_refused_privately(self):
+        interaction = self.make_interaction(admin=False)
+        self.assertIsNone(await resolve_target(interaction, SimpleNamespace(id=2)))
+        self.assertTrue(interaction.response.send_message.await_args.kwargs["ephemeral"])
 
 
 class TestMentionNotes(unittest.IsolatedAsyncioTestCase):
