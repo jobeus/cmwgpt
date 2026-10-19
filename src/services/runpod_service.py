@@ -6,7 +6,6 @@ import httpx
 import logging
 from typing import Optional
 from src.config import get_config
-from src.utils.http_client import create_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +18,7 @@ class RunpodServiceError(Exception):
 class RunpodService:
     def __init__(self):
         self.api_key = get_config().runpod_io_api_key
+        self._http_client: Optional[httpx.AsyncClient] = None
         self.models = {
             "z-image": {
                 "url": "https://api.runpod.ai/v2/z-image-turbo/runsync",
@@ -146,6 +146,17 @@ class RunpodService:
     def is_configured(self) -> bool:
         return bool(self.api_key)
 
+    def _get_http_client(self) -> httpx.AsyncClient:
+        """One pooled client for all RunPod calls (image generation takes a while)."""
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(timeout=httpx.Timeout(90.0), follow_redirects=True)
+        return self._http_client
+
+    async def close(self) -> None:
+        client, self._http_client = self._http_client, None
+        if client is not None:
+            await client.aclose()
+
     async def _execute_request(self,
                                url: str,
                                payload: dict,
@@ -157,47 +168,46 @@ class RunpodService:
             "Authorization": f"Bearer {self.api_key}"
         }
 
-        timeout = httpx.Timeout(90.0)
-        async with create_async_client(timeout=timeout, follow_redirects=True, service_name="runpod") as client:
-            try:
-                logger.info(f"Sending {operation} request to Runpod: {url}...")
-                response = await client.post(url, headers=headers, json=payload)
-                response.raise_for_status()
-                data = response.json()
+        client = self._get_http_client()
+        try:
+            logger.info(f"Sending {operation} request to Runpod: {url}...")
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            data = response.json()
 
-                status = data.get("status")
-                if status == "COMPLETED":
-                    output = data.get("output", {})
-                    # Some endpoints return "result" instead of "image_url"
-                    image_url = output.get("image_url") or output.get("result")
-                    cost = output.get("cost")
+            status = data.get("status")
+            if status == "COMPLETED":
+                output = data.get("output", {})
+                # Some endpoints return "result" instead of "image_url"
+                image_url = output.get("image_url") or output.get("result")
+                cost = output.get("cost")
 
-                    if not image_url or not isinstance(image_url, str):
-                        raise RunpodServiceError(
-                            f"Runpod {operation} completed but no valid image URL found in output: {output}")
-
-                    logger.info(f"Downloading Runpod image from: {image_url}")
-                    img_response = await client.get(image_url)
-                    img_response.raise_for_status()
-
-                    return img_response.content, cost
-                elif status == "FAILED":
-                    error_msg = data.get("error", "Unknown error")
+                if not image_url or not isinstance(image_url, str):
                     raise RunpodServiceError(
-                        f"Runpod {operation} failed: {error_msg}")
-                else:
-                    raise RunpodServiceError(
-                        f"Runpod returned unexpected status: {status} - request might have timed out.")
+                        f"Runpod {operation} completed but no valid image URL found in output: {output}")
 
-            except httpx.HTTPError as e:
-                logger.error(f"HTTP error during Runpod API call: {e}")
+                logger.info(f"Downloading Runpod image from: {image_url}")
+                img_response = await client.get(image_url)
+                img_response.raise_for_status()
+
+                return img_response.content, cost
+            elif status == "FAILED":
+                error_msg = data.get("error", "Unknown error")
                 raise RunpodServiceError(
-                    f"Failed to communicate with Runpod API: {str(e)}")
-            except RunpodServiceError:
-                raise
-            except Exception as e:
-                logger.error(f"Unexpected error in Runpod service: {e}")
-                raise RunpodServiceError(f"Unexpected error: {str(e)}")
+                    f"Runpod {operation} failed: {error_msg}")
+            else:
+                raise RunpodServiceError(
+                    f"Runpod returned unexpected status: {status} - request might have timed out.")
+
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error during Runpod API call: {e}")
+            raise RunpodServiceError(
+                f"Failed to communicate with Runpod API: {str(e)}")
+        except RunpodServiceError:
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in Runpod service: {e}")
+            raise RunpodServiceError(f"Unexpected error: {str(e)}")
 
     async def generate_image(
             self, prompt: str, model: str, discord_user_id: Optional[int] = None, discord_channel_id: Optional[int] = None) -> tuple[bytes, Optional[float]]:
@@ -223,5 +233,3 @@ class RunpodService:
         model_config = self.edit_models[model]
         return await self._execute_request(model_config["url"], model_config["payload"](prompt, images), "edit", discord_user_id, discord_channel_id)
 
-
-runpod_service = RunpodService()

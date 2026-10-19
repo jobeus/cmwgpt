@@ -43,11 +43,12 @@ class DiscordBotClient:
         intents.message_content = True
         intents.members = True
         self.bot = commands.Bot(command_prefix="/", intents=intents)
-        self.services.openai_service.set_bot_id_loader(
-            lambda: self.bot.user.id if self.bot.user else None)
-        if getattr(self.services, "anthropic_service", None) is not None:
-            self.services.anthropic_service.set_bot_id_loader(
-                lambda: self.bot.user.id if self.bot.user else None)
+        self._shutdown_started = False
+        for service in (self.services.openai_service, self.services.gemini_service,
+                        getattr(self.services, "anthropic_service", None)):
+            if service is not None:
+                service.set_bot_id_loader(lambda: self.bot.user.id if self.bot.user else None)
+        self.services.restart_handler.set_shutdown_callback(self.shutdown)
 
         # Load any saved state from previous restart
         self._load_saved_state()
@@ -60,7 +61,6 @@ class DiscordBotClient:
 
         # Set up announcement service
         self.services.announcement_service.set_bot(self.bot)
-
 
         # Set up death service
         self.services.death_service.set_bot(self.bot)
@@ -162,43 +162,8 @@ class DiscordBotClient:
             logger.error(f"Error sending update announcement: {e}")
 
     def _check_for_restart_info(self) -> bool:
-        """
-        Check for restart info in the loaded state to determine if this was a manual restart.
-
-        Returns:
-            True if this was a manual restart, False otherwise
-        """
-        try:
-            import glob
-            import json
-
-            # Look for state files that might contain restart info
-            pattern = "/tmp/cmwgpt_state_backup_*.json"
-            state_files = glob.glob(pattern)
-
-            was_manual = False
-            for state_file in state_files:
-                try:
-                    with open(state_file, "r") as f:
-                        state_data = json.load(f)
-
-                    # Check if restart info is embedded in the state file
-                    restart_info = state_data.get("restart_info", {})
-                    if restart_info:
-                        was_manual = restart_info.get("manual_restart", False)
-                        logger.info(
-                            f"Found restart info in state: manual={was_manual}")
-                        break
-
-                except Exception as e:
-                    logger.warning(
-                        f"Error reading state file {state_file}: {e}")
-
-            return was_manual
-
-        except Exception as e:
-            logger.warning(f"Error checking for restart info: {e}")
-            return False
+        """True if the previous process was restarted manually (/restart)."""
+        return bool(self.services.state_service.restart_info.get("manual_restart", False))
 
     def _setup_events(self) -> None:
         """Set up Discord event handlers."""
@@ -234,7 +199,6 @@ class DiscordBotClient:
 
             # Start the auto-update service
             self.services.auto_update_service.start()
-
 
             # Start the death service
             self.services.death_service.start()
@@ -287,9 +251,9 @@ class DiscordBotClient:
             auto_update_service=self.services.auto_update_service,
             system_prompt_loader=lambda: get_system_prompt(self.config.system_prompt_path),
             default_model=self.config.default_model,
+            on_model_change=self._clear_model_caches,
         )
         system_commands.setup_commands()
-
 
         death_commands = DeathCommands(
             self.bot,
@@ -313,6 +277,12 @@ class DiscordBotClient:
                 memory_store=self.services.memory_store,
             )
             memory_commands.setup_commands()
+
+    def _clear_model_caches(self, channel_id: int) -> None:
+        """Drop per-channel provider state that a model switch makes stale."""
+        self.services.gemini_service.clear_channel_cache(channel_id)
+        if getattr(self.services, "anthropic_service", None) is not None:
+            self.services.anthropic_service.clear_channel_cache(channel_id)
 
     async def _handle_message(self, message: discord.Message) -> None:
         """
@@ -342,70 +312,26 @@ class DiscordBotClient:
                 logger.warning(
                     f"Failed to queue mention from {message.author} in #{message.channel} - queue may be full"
                 )
-                # Optionally, you could fall back to immediate processing:
-                # await mention_handler.handle_mention(message, self.bot.user,
-                # model)
-
 
         # Ensure other commands are still processed
         await self.bot.process_commands(message)
 
+    async def shutdown(self) -> None:
+        """Shut down services, then the Discord connection (which ends ``run``). Idempotent."""
+        if self._shutdown_started:
+            return
+        self._shutdown_started = True
+        from src.startup import shutdown_services
+
+        await shutdown_services(self.services)
+        if not self.bot.is_closed():
+            await self.bot.close()
+        logger.info("Bot shutdown complete.")
+
     def run(self) -> None:
-        """Start the Discord bot."""
+        """Start the Discord bot; returns once the bot has been closed."""
         print("🔌 Starting Discord bot...")
-        try:
-            self.bot.run(self.config.discord_bot_token)
-        except Exception as e:
-            logger.error(f"Bot failed to start: {e}")
-            raise
-        finally:
-            # Only perform cleanup if not already handled by signal handler
-            # The signal handler sets skip_cleanup flag to prevent duplicate
-            # cleanup
-            if not self.services.restart_handler.should_skip_cleanup():
-                logger.info("Performing bot shutdown cleanup...")
-
-                # Ensure services are properly shut down
-                import asyncio
-
-                try:
-                    # Stop auto-update service
-                    self.services.auto_update_service.stop()
-                    logger.info("Auto-update service stopped")
-                except Exception as e:
-                    logger.error(
-                        f"Error shutting down auto-update service: {e}")
-
-                try:
-                    self.services.death_service.stop()
-                    if getattr(self.services, "memory_service", None) is not None:
-                        self.services.memory_service.stop()
-                    logger.info("Background services stopped")
-                except Exception as e:
-                    logger.error(
-                        f"Error shutting down background services: {e}")
-
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # If we're in an async context, schedule the shutdown
-                        asyncio.create_task(self.services.queue_service.stop())
-                    else:
-                        # If we're not in an async context, run it
-                        loop.run_until_complete(self.services.queue_service.stop())
-                except Exception as e:
-                    logger.error(f"Error shutting down queue service: {e}")
-
-                # Never clean up temporary files during shutdown - they should only be
-                # cleaned up after successful loading on startup
-                logger.debug(
-                    "Skipping temp file cleanup during shutdown - files will be cleaned up on next startup after loading"
-                )
-            else:
-                logger.info(
-                    "Skipping bot cleanup - already handled by signal handler")
-
-            logger.info("Bot shutdown.")
+        self.bot.run(self.config.discord_bot_token)
 
 
 def create_bot() -> DiscordBotClient:

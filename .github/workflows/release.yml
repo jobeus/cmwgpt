@@ -22,30 +22,18 @@ jobs:
       with:
         python-version: 3.13
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v7
-      with:
-        node-version: 24
-
-    - name: Install PAM headers
-      run: sudo apt-get update && sudo apt-get install -y libpam0g-dev
-
     - name: Install dependencies
       run: |
         python -m venv .venv
         .venv/bin/python -m pip install --upgrade pip
         .venv/bin/python -m pip install -r requirements.txt
         .venv/bin/python -m pip install -r test_requirements.txt
-        cd log-viewer/backend && npm ci
-        cd ../frontend && npm ci
 
     - name: Run comprehensive tests
       run: |
         make typecheck
         make test
         make lint
-        cd log-viewer/backend && npm run build && npm run lint && npm run test
-        cd ../frontend && npm run build && npm run lint && npm run test
 
     - name: Security scan
       run: |
@@ -116,7 +104,7 @@ jobs:
           - Automatic linting and formatting
 
           ## Requirements
-          - Python 3.9+
+          - Python 3.11+
           - Discord Bot Token
           - OpenRouter API Key
         draft: false

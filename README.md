@@ -1,6 +1,6 @@
 # CMWGPT
 
-Mention-first Discord bot with URL-aware prompt enrichment, image generation/editing, and a MariaDB-backed log viewer.
+Mention-first Discord bot with URL-aware prompt enrichment, image generation/editing, and MariaDB-backed per-user memory.
 
 ## Start here
 
@@ -16,10 +16,8 @@ Mention-first Discord bot with URL-aware prompt enrichment, image generation/edi
 
 | Area | Purpose |
 | --- | --- |
-| `src/` | Python Discord bot, services, startup wiring, downloader utilities, DB logging |
+| `src/` | Python Discord bot, services, startup wiring, downloader utilities, memory storage |
 | `tests/` | Python unit/integration-style coverage for the bot and utilities |
-| `log-viewer/backend/` | Node/TypeScript API + Socket.IO service for reading logs |
-| `log-viewer/frontend/` | React/Vite UI for browsing API and pipeline logs |
 | `docs/` | Architecture, commands, configuration, development, deployment, and troubleshooting docs |
 
 ## What the bot actually does
@@ -30,8 +28,8 @@ Mention-first Discord bot with URL-aware prompt enrichment, image generation/edi
 | Context building | Recent channel history, reply context, embeds, and attachments are folded into the prompt |
 | URL enrichment | The bot can inject transcripts/context from YouTube, TikTok, Twitter/X, Facebook, and generic articles |
 | Images | Slash commands support image generation and image editing through `RunpodService` |
-| Logging | API requests and pipeline steps are written to MariaDB |
-| Observability | The log viewer backend/frontend read and stream those logs |
+| Memory | A nightly job learns short per-user profiles (stored in MariaDB) and adds them to mentions; `/memory` shows and edits them |
+| Observability | Python logging goes to stdout and `logs/`; there is no request log table or log viewer |
 
 ## Choose a workflow
 
@@ -49,7 +47,7 @@ python3 -m venv .venv
 
 ### 2. Full-stack development with Docker
 
-Use this if you want bot + MariaDB + log viewer together.
+Use this if you want bot + MariaDB together.
 
 ```bash
 cp .env.development.example .env.development
@@ -61,8 +59,8 @@ Default dev ports:
 | Service | Port |
 | --- | --- |
 | MariaDB | `3306` |
-| Log viewer backend | `3001` |
-| Log viewer frontend | `5173` |
+
+The bot itself does not listen on any port.
 
 ## Current user-facing commands
 
@@ -71,7 +69,7 @@ Default dev ports:
 | General | `/help`, `/model`, `/restart`, `/wikicount` |
 | Prompting | `/systemprompt set`, `/systemprompt view`, `/systemprompt reset` |
 | Images | `/draw`, `/drawmodel`, `/edit`, `/editmodel` |
-
+| Memory | `/memory show`, `/memory add`, `/memory correct`, `/memory clear`, `/fillmemory` |
 | Deathwatch | `/death set`, `/death view`, `/death reset` |
 
 Chat itself remains mention-based.
@@ -105,11 +103,13 @@ Chat itself remains mention-based.
 | `DB_PASSWORD` | empty | MariaDB password |
 | `DB_NAME` | `cmwgpt` | Database name |
 
+The database is only used for per-user memory (`user_memory` tables); see `docs/mariadb_setup.md`.
+
 For the full reference, see `docs/configuration.md`.
 
 ## Architecture in one paragraph
 
-`main.py` boots `src/startup.py`, which wires services like `StateService`, `QueueService`, `OpenAIService`, `GeminiService`, `RunpodService`, `DeathService`, and `MentionHandler` into `DiscordBotClient`. Mention replies are assembled by `src/bot/handlers/mention.py` (context built via `src/utils/chat_context.py`), enriched through `src/utils/downloader_utils.py`, then routed by `src/services/completion_dispatch.py` to OpenRouter, native Gemini, or the Claude API for text output, and logged into MariaDB. The log-viewer backend and frontend then query and stream those logs for inspection.
+`main.py` boots `src/startup.py`, which wires services like `StateService`, `QueueService`, `OpenAIService`, `GeminiService`, `RunpodService`, `DeathService`, `MemoryService`, and `MentionHandler` into `DiscordBotClient`. Mention replies are assembled by `src/bot/handlers/mention.py` (context built via `src/utils/chat_context.py`), enriched through `src/utils/downloader_utils.py`, then routed by `src/services/completion_dispatch.py` to OpenRouter, native Gemini, or the Claude API for text output. Outbound URL fetches go through `src/utils/http_client.py`, which re-checks the SSRF guard on every redirect and caps body size and total time. MariaDB holds only the per-user memory that `MemoryService` learns nightly and adds to mentions.
 
 For diagrams and a deeper walkthrough, see `docs/architecture.md`.
 
@@ -121,15 +121,14 @@ For diagrams and a deeper walkthrough, see `docs/architecture.md`.
 | Verbose Python suite | `make test-verbose` |
 | Coverage run | `make test-coverage` |
 | Direct pytest | `.venv/bin/python -m pytest` |
-| Frontend tests | `cd log-viewer/frontend && npm run test` |
 
-More detail: `tests/README.md` and `log-viewer/frontend/README.md`.
+More detail: `tests/README.md`.
 
 ## Important operational notes
 
 - Prefer `make run-direct` for local bot development.
-- `make run` uses `start.sh`, and the current wrapper assumes a `venv/` path while the Makefile creates `.venv/` by default.
-- `/restart` triggers the restart handler, which saves state, performs a `git pull`, and exits with code `42`.
+- `make run` uses `start.sh`, which uses `.venv/` (or a legacy `venv/`) and reruns the bot whenever it exits with code `42`.
+- `/restart` triggers the restart handler, which saves state, performs a `git pull`, runs the normal shutdown sequence (stop jobs, drain the queue, close clients, flush caches, close the DB pool), and exits with code `42` so `start.sh` or your process manager starts it again.
 
 ## Documentation map
 
@@ -141,5 +140,5 @@ The docs are meant to be read as a small system, not as isolated files:
 - `docs/configuration.md` - env vars and defaults
 - `docs/development.md` - local and Docker workflows
 - `docs/deployment.md` - runtime/deployment notes
-- `docs/mariadb_setup.md` - schema and DB setup
+- `docs/mariadb_setup.md` - memory schema and DB setup
 - `docs/troubleshooting.md` - common failure modes

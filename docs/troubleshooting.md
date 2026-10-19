@@ -9,9 +9,7 @@ Use this page like a triage board: start with the symptom, then work from the sh
 | Bot does not answer mentions | token, permissions, `REPLY_TO_MENTIONS`, whether the bot was actually mentioned |
 | Slash commands are missing/stale | `DISCORD_GUILD_ID`, guild membership, whether the bot restarted |
 | URL enrichment is missing | source-specific keys like `RAPIDAPI_KEY` / `GROQ_API_KEY` / `TRANSCRIPT_PROXY` |
-| Logs are missing | DB connectivity, schema application, backend access to MariaDB |
-| Log viewer login fails | auth mode, JWT config, dev auth credentials, PAM availability |
-| Frontend cannot reach backend | `VITE_API_URL`, `VITE_SOCKET_URL`, `VITE_BACKEND_PROXY_TARGET`, backend port/host |
+| `/memory` fails or mentions carry no user notes | DB connectivity, schema application, `MEMORY_MODEL` API key |
 | Restart behavior is confusing | `/restart` semantics, exit code `42`, wrapper vs direct run |
 | Tests fail unexpectedly | dependency install state and targeted reruns |
 
@@ -52,13 +50,23 @@ The downloader pipeline is **provider-specific**, so diagnose by source rather t
 | TikTok | `yt-dlp`, ffmpeg, Groq transcription | `GROQ_API_KEY`, media extraction path, proxy fallback |
 | Twitter/X | RapidAPI, optional Groq for embedded video | `RAPIDAPI_KEY`, then `GROQ_API_KEY` if video transcription is needed |
 | Facebook | `yt-dlp`, ffmpeg, Groq transcription | `GROQ_API_KEY`, media download path, optional proxy behavior |
-| Articles | `httpx`, `trafilatura`, `newspaper3k` fallback | URL reachability and extraction success |
+| Articles | `fetch_public` (`httpx`), `trafilatura` (with a `favor_recall` retry) | URL reachability and extraction success |
 
 ### Good debugging habit
 
 If one provider fails while others work, assume a **provider-specific dependency/config problem**, not a global mention or model issue.
 
-## Database/logging problems
+### Limits that can make a link look "missing"
+
+| Limit | Effect |
+| --- | --- |
+| SSRF guard | URLs (or any redirect hop) that resolve to a non-global address (loopback, private, link-local, CGNAT, reserved, ...) are refused |
+| Size cap / overall timeout | Very large or slow responses are cut off by `src/utils/http_client.py` and skipped |
+| History window | Only the newest 10 history messages fetch links; older messages use cached results only, so an uncached link further back adds nothing |
+
+The cause is logged at warning level in the normal bot log.
+
+## Database/memory problems
 
 ### Common causes
 
@@ -67,48 +75,11 @@ If one provider fails while others work, assume a **provider-specific dependency
 | Connection refused / timeout | `DB_HOST`, `DB_PORT`, service/container health |
 | Access denied | `DB_USER`, `DB_PASSWORD`, grants |
 | Wrong schema/database | `DB_NAME` and whether `init_db.sql` was applied |
-| Log viewer is empty | Backend DB access and schema presence before frontend debugging |
+| Profiles never update | `MEMORY_MODEL` has its API key; the nightly job is off without it |
 
-If the bot otherwise runs but logs are missing or the viewer is empty, verify MariaDB first.
+MariaDB is only used for per-user memory, so the bot keeps replying when it is down. If `/memory` fails or mentions never include user notes, verify MariaDB first.
 
 Reference: `docs/mariadb_setup.md`
-
-## Log viewer login problems
-
-The backend supports two auth modes:
-
-| Mode | Used when | What matters |
-| --- | --- | --- |
-| Development credential auth | `LOG_VIEWER_DEV_AUTH_ENABLED=true` | `LOG_VIEWER_DEV_USERNAME` and `LOG_VIEWER_DEV_PASSWORD` must be set |
-| PAM auth | Dev auth is disabled | The backend host environment must support PAM auth for the provided OS user |
-
-### Things to verify
-
-| Setting | Why |
-| --- | --- |
-| `JWT_SECRET` | Token signing/verification |
-| `LOG_VIEWER_ALLOWED_ORIGINS` | Browser access and CORS |
-| `LOG_VIEWER_DEV_AUTH_ENABLED` | Determines dev-auth path |
-| `LOG_VIEWER_DEV_USERNAME` / `LOG_VIEWER_DEV_PASSWORD` | Required if dev auth is enabled |
-
-If development auth is enabled but credentials are missing, login will fail due to backend misconfiguration.
-
-## Frontend cannot reach backend
-
-### First checks
-
-| Variable | Purpose |
-| --- | --- |
-| `VITE_API_URL` | HTTP base URL for login/log endpoints |
-| `VITE_SOCKET_URL` | Socket.IO connection target |
-| `VITE_BACKEND_PROXY_TARGET` | Vite proxy destination in dev |
-
-The default Vite setup expects:
-
-- `/api` to proxy to the backend
-- `/socket.io` to proxy to the backend websocket endpoint
-
-Also confirm the backend is actually listening on the expected host/port.
 
 ## Restart/update behavior is confusing
 
@@ -117,7 +88,7 @@ Also confirm the backend is actually listening on the expected host/port.
 | Fact | Meaning |
 | --- | --- |
 | `/restart` performs a `git pull` | It is not just a process restart |
-| Restart exits with code `42` | A supervisor must restart the process |
+| Restart runs the normal shutdown, then exits with code `42` | A supervisor (or `start.sh`) must restart the process |
 | `QUIET_UPDATES` only affects announcements | It does not disable the restart mechanism |
 
 For local development, `make run-direct` is usually easier to reason about than the wrapper-based run path.
@@ -126,18 +97,13 @@ Reference: `docs/auto-update.md`
 
 ## `make run` behaves oddly after restart
 
-The key mismatch is:
+`start.sh` only restarts the bot when it exits with code `42`, and it reinstalls `requirements.txt` before each restart. Any other exit code (including a crash) ends the loop.
 
-| Component | Expected virtualenv path |
-| --- | --- |
-| `Makefile` | `.venv/` |
-| `start.sh` restart wrapper | `venv/` |
+If wrapper-driven restarts behave strangely:
 
-If wrapper-driven restarts behave strangely, do one of these:
-
-- use `make run-direct`
-- create the path the wrapper expects
-- update the wrapper for your machine/workflow
+- check that `.venv/` (or a legacy `venv/`) exists, since the wrapper refuses to start without one
+- look at the shutdown lines in the log: the bot waits up to 90 seconds for queued replies before exiting
+- use `make run-direct` to rule the wrapper out
 
 ## Tests fail unexpectedly
 

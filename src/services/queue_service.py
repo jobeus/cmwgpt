@@ -11,7 +11,6 @@ This service provides a queue-based message processing system to ensure:
 
 import asyncio
 import logging
-import os
 from typing import Dict, Any, Callable, Awaitable
 from dataclasses import dataclass
 from enum import Enum
@@ -20,6 +19,10 @@ import discord
 from src.utils.discord_error_utils import concise_error, is_discord_server_error
 
 logger = logging.getLogger(__name__)
+
+# How long stop() waits for workers to finish the message they're on (a mention
+# reply can take a minute with search) before cancelling them.
+STOP_TIMEOUT_SECONDS = 90.0
 
 
 class MessageType(Enum):
@@ -108,7 +111,7 @@ class QueueService:
             try:
                 await asyncio.wait_for(
                     asyncio.gather(*workers, return_exceptions=True),
-                    timeout=10.0
+                    timeout=STOP_TIMEOUT_SECONDS
                 )
             except asyncio.TimeoutError:
                 logger.warning(
@@ -249,9 +252,10 @@ class QueueService:
         handler: Callable[[],
                           Awaitable[None]]) -> bool:
         """
-        Queue a restart signal for processing.
+        Queue a restart on the system (channel 0) worker.
 
-        Restart is broadcast to all active channel workers.
+        The handler only prepares the restart and schedules shutdown; the
+        other channels' workers finish their current message during shutdown.
 
         Args:
             handler: Async handler function to process the restart
@@ -321,10 +325,6 @@ class QueueService:
                 logger.debug(
                     f"Channel {channel_id} processing loop cancelled")
                 break
-            except SystemExit as e:
-                logger.info(
-                    f"Queue service received SystemExit signal (code {e.code}). Exiting process immediately.")
-                os._exit(e.code)
             except Exception as e:
                 # Catch *everything* else (discord.HTTPException, KeyError, ...)
                 # so an unexpected error can never kill the channel worker.
@@ -433,6 +433,3 @@ class QueueService:
         """Check if the queue service is running."""
         return self._is_running
 
-
-# Global queue service instance
-queue_service = QueueService()

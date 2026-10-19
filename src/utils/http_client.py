@@ -1,401 +1,127 @@
-"""
-Instrumented HTTP clients for automatic API request logging.
+"""Safe fetching of user-supplied URLs.
 
-Provides httpx transport wrappers that intercept every request/response
-and log them to `api_request_logs` via `log_api_request`.  Works for both
-async and sync httpx clients, and can be injected into the OpenAI and
-Google GenAI SDKs so their underlying HTTP traffic is captured too.
+Every redirect hop is re-checked against the SSRF guard (httpx would follow a
+public URL's 302 to ``169.254.169.254`` without asking), bodies are capped so a
+huge page or video can't exhaust memory, and the whole fetch gets one overall
+deadline instead of a per-read timeout.
 """
 
-import base64
-import logging
-import re
-from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+import asyncio
+import os
+from typing import Any, Mapping, Optional
+from urllib.parse import urljoin
 
 import httpx
-import httpx2
 
-from src.db.logger import log_api_request
+from src.utils.ssrf_guard import assert_public_url
 
-logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Exclusion rules
-# ---------------------------------------------------------------------------
-
-# Requests to these domains are never logged.
-EXCLUDED_DOMAINS: set[str] = {
-    "cdn.discordapp.com",
-    "media.discordapp.net",
-    "images-ext-1.discordapp.net",
-    "images-ext-2.discordapp.net",
-    "wikimedia.org",
-}
-
-# Requests whose URL path matches any of these patterns are never logged.
-EXCLUDED_PATH_PATTERNS: list[re.Pattern] = [
-    re.compile(r"/Deaths_in_\d{4}", re.IGNORECASE),
-]
-
-# Content-types considered "text" (response body stored as-is).
-_TEXT_CONTENT_TYPES = frozenset([
-    "application/json",
-    "application/xml",
-    "application/x-www-form-urlencoded",
-    "application/javascript",
-])
+MAX_REDIRECTS = 5
+DEFAULT_MAX_BYTES = 20 * 1024 * 1024
+_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+_WIRE_ENCODING_HEADERS = {"content-encoding", "content-length", "transfer-encoding"}
 
 
-def _is_excluded(url: str) -> bool:
-    """Return True if this URL should NOT be logged."""
-    parsed = urlparse(url)
-    hostname = (parsed.hostname or "").lower()
-
-    # Domain exclusion (exact or suffix match)
-    for domain in EXCLUDED_DOMAINS:
-        if hostname == domain or hostname.endswith("." + domain):
-            return True
-
-    # URL-path exclusion (regex)
-    for pattern in EXCLUDED_PATH_PATTERNS:
-        if pattern.search(parsed.path):
-            return True
-
-    return False
+class ResponseTooLarge(Exception):
+    """The response body exceeded the caller's byte limit."""
 
 
-# ---------------------------------------------------------------------------
-# Service-name inference
-# ---------------------------------------------------------------------------
+async def _read_capped(response: httpx.Response, max_bytes: int, sink: Any = None) -> bytes:
+    declared = response.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > max_bytes:
+        raise ResponseTooLarge(f"{response.url} declares {declared} bytes (limit {max_bytes})")
 
-_DOMAIN_TO_SERVICE: Dict[str, str] = {
-    "openrouter.ai": "openrouter",
-    "api.anthropic.com": "anthropic",
-    "api.openai.com": "openai",
-    "api.groq.com": "groq",
-    "api.runpod.ai": "runpod",
-    "generativelanguage.googleapis.com": "gemini",
-    "x-com2.p.rapidapi.com": "rapidapi/twitter",
-    "paste.rs": "paste.rs",
-}
-
-
-def _infer_service_name(url: str) -> str:
-    """Derive a short service name from the request URL."""
-    hostname = (urlparse(url).hostname or "").lower()
-
-    # Check exact matches first
-    if hostname in _DOMAIN_TO_SERVICE:
-        return _DOMAIN_TO_SERVICE[hostname]
-
-    # Check suffix matches (e.g. *.p.rapidapi.com)
-    for domain, name in _DOMAIN_TO_SERVICE.items():
-        if hostname.endswith("." + domain):
-            return name
-
-    # Fallback: strip common prefixes
-    for prefix in ("api.", "www."):
-        if hostname.startswith(prefix):
-            hostname = hostname[len(prefix):]
-    return hostname or "unknown"
+    chunks = []
+    total = 0
+    async for chunk in response.aiter_bytes():
+        total += len(chunk)
+        if total > max_bytes:
+            raise ResponseTooLarge(f"{response.url} exceeded {max_bytes} bytes")
+        if sink is not None:
+            sink.write(chunk)
+        else:
+            chunks.append(chunk)
+    return b"".join(chunks)
 
 
-# ---------------------------------------------------------------------------
-# Body encoding helpers
-# ---------------------------------------------------------------------------
+async def _fetch(
+    url: str,
+    *,
+    headers: Optional[Mapping[str, str]],
+    params: Optional[Mapping[str, Any]],
+    proxy: Optional[str],
+    timeout: float,
+    max_bytes: int,
+    sink: Any = None,
+) -> httpx.Response:
+    async with httpx.AsyncClient(proxy=proxy, timeout=timeout, follow_redirects=False) as client:
+        current = url
+        for _ in range(MAX_REDIRECTS + 1):
+            await assert_public_url(current)
+            async with client.stream("GET", current, headers=headers, params=params) as response:
+                location = response.headers.get("location")
+                if response.status_code in _REDIRECT_STATUSES and location:
+                    current = urljoin(str(response.url), location)
+                    params = None  # already baked into the redirect target
+                    continue
+                content = await _read_capped(response, max_bytes, sink)
+                # The body is already decoded, so drop the headers describing
+                # the wire encoding or httpx would try to decompress it again.
+                headers = [
+                    (k, v) for k, v in response.headers.multi_items()
+                    if k.lower() not in _WIRE_ENCODING_HEADERS
+                ]
+                return httpx.Response(
+                    response.status_code,
+                    headers=headers,
+                    content=content,
+                    request=response.request,
+                )
+        raise httpx.TooManyRedirects(f"More than {MAX_REDIRECTS} redirects for {url}")
 
-def _is_text_content_type(content_type: str) -> bool:
-    """Return True if the content-type header indicates text/readable data."""
-    ct = content_type.lower().split(";")[0].strip()
-    if ct.startswith("text/"):
-        return True
-    if ct in _TEXT_CONTENT_TYPES:
-        return True
-    return False
 
+async def fetch_public(
+    url: str,
+    *,
+    headers: Optional[Mapping[str, str]] = None,
+    params: Optional[Mapping[str, Any]] = None,
+    proxy: Optional[str] = None,
+    timeout: float = 15.0,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+) -> httpx.Response:
+    """GET a user-supplied URL, SSRF-checking every hop and capping the body.
 
-def _encode_response_body(response: httpx.Response) -> str:
-    """Encode the response body for DB storage.
-
-    Text responses are stored as-is (UTF-8 decoded).
-    Binary responses are stored as data: URLs so the content-type is
-    preserved and the payload can be rendered or decoded directly.
+    ``timeout`` bounds the whole fetch, redirects included. The returned
+    response is fully read; call ``raise_for_status()`` as usual.
     """
-    content_type = response.headers.get("content-type", "")
-    raw = response.content  # bytes, already read by this point
-
-    if _is_text_content_type(content_type):
-        return raw.decode("utf-8", errors="replace")
-
-    # Binary → data: URL
-    mime = content_type.split(";")[0].strip() or "application/octet-stream"
-    b64 = base64.b64encode(raw).decode("ascii")
-    return f"data:{mime};base64,{b64}"
+    return await asyncio.wait_for(
+        _fetch(url, headers=headers, params=params, proxy=proxy, timeout=timeout, max_bytes=max_bytes),
+        timeout,
+    )
 
 
-def _encode_request_body(request: httpx.Request) -> str:
-    """Encode the request body for DB storage."""
-    raw = request.content  # bytes
-    if not raw:
-        return ""
+async def download_public(
+    url: str,
+    path: str,
+    *,
+    headers: Optional[Mapping[str, str]] = None,
+    timeout: float = 120.0,
+    max_bytes: int = 100 * 1024 * 1024,
+) -> None:
+    """Stream a user-supplied URL to ``path`` under the same guards as :func:`fetch_public`.
 
-    # Multipart form data is binary – store as hex (same convention
-    # the existing manual loggers already use for audio uploads).
-    content_type = request.headers.get("content-type", "")
-    if "multipart/form-data" in content_type.lower():
-        return raw.hex()
-
-    return raw.decode("utf-8", errors="replace")
-
-
-# ---------------------------------------------------------------------------
-# Async transport wrapper
-# ---------------------------------------------------------------------------
-
-async def _forward_and_log(transport: Any, request: Any, service_name_override: Optional[str]) -> Any:
-    """Forward ``request`` through ``transport`` and log the exchange to the DB.
-
-    Duck-typed so it serves both ``httpx`` and ``httpx2`` transports.
+    Raises on a non-2xx status; a partial file is removed on failure.
     """
-    url = str(request.url)
-
-    if _is_excluded(url):
-        return await transport.handle_async_request(request)
-
-    service_name = service_name_override or _infer_service_name(url)
-
-    # Ensure request body is read
-    await request.aread()
-
     try:
-        response = await transport.handle_async_request(request)
-        # Ensure response body is read so we can log it
-        await response.aread()
-
-        await log_api_request(
-            service_name=service_name,
-            method=request.method,
-            endpoint_url=url,
-            request_headers=dict(request.headers),
-            request_body=_encode_request_body(request),
-            response_status=response.status_code,
-            response_headers=dict(response.headers),
-            response_body=_encode_response_body(response),
-        )
-        return response
-
-    except Exception as exc:
-        # Log the failed request with the exception as the "response"
-        await log_api_request(
-            service_name=service_name,
-            method=request.method,
-            endpoint_url=url,
-            request_headers=dict(request.headers),
-            request_body=_encode_request_body(request),
-            response_status=0,
-            response_headers={},
-            response_body=f"TRANSPORT_ERROR: {type(exc).__name__}: {exc}",
-        )
-        raise
-
-
-class LoggingTransport(httpx.AsyncBaseTransport):
-    """Async httpx transport that logs every request/response to the DB."""
-
-    def __init__(
-        self,
-        transport: Optional[httpx.AsyncBaseTransport] = None,
-        *,
-        service_name: Optional[str] = None,
-        **transport_kwargs: Any,
-    ):
-        self._transport = transport or httpx.AsyncHTTPTransport(**transport_kwargs)
-        self._service_name_override = service_name
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        return await _forward_and_log(self._transport, request, self._service_name_override)
-
-    async def aclose(self) -> None:
-        await self._transport.aclose()
-
-
-class LoggingTransportHttpx2(httpx2.AsyncBaseTransport):
-    """``httpx2`` twin of :class:`LoggingTransport` (the Anthropic SDK 1.x is built on httpx2)."""
-
-    def __init__(
-        self,
-        transport: Optional[httpx2.AsyncBaseTransport] = None,
-        *,
-        service_name: Optional[str] = None,
-        **transport_kwargs: Any,
-    ):
-        self._transport = transport or httpx2.AsyncHTTPTransport(**transport_kwargs)
-        self._service_name_override = service_name
-
-    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
-        return await _forward_and_log(self._transport, request, self._service_name_override)
-
-    async def aclose(self) -> None:
-        await self._transport.aclose()
-
-
-# ---------------------------------------------------------------------------
-# Sync transport wrapper
-# ---------------------------------------------------------------------------
-
-class LoggingSyncTransport(httpx.BaseTransport):
-    """Sync httpx transport that buffers log data for later async flush.
-
-    Because ``log_api_request`` is async but sync httpx transports run
-    outside an event loop (often inside ``asyncio.to_thread``), we buffer
-    the log entries and expose them via ``pending_logs``.  The caller is
-    responsible for flushing them on the async side.
-    """
-
-    def __init__(
-        self,
-        transport: Optional[httpx.BaseTransport] = None,
-        *,
-        service_name: Optional[str] = None,
-        **transport_kwargs: Any,
-    ):
-        self._transport = transport or httpx.HTTPTransport(**transport_kwargs)
-        self._service_name_override = service_name
-        self.pending_logs: List[Dict[str, Any]] = []
-
-    def handle_request(self, request: httpx.Request) -> httpx.Response:
-        url = str(request.url)
-
-        if _is_excluded(url):
-            return self._transport.handle_request(request)
-
-        service_name = self._service_name_override or _infer_service_name(url)
-
-        # Ensure request body is read
-        request.read()
-
+        with open(path, "wb") as f:
+            response = await asyncio.wait_for(
+                _fetch(url, headers=headers, params=None, proxy=None, timeout=timeout,
+                       max_bytes=max_bytes, sink=f),
+                timeout,
+            )
+        response.raise_for_status()
+    except BaseException:
         try:
-            response = self._transport.handle_request(request)
-            response.read()
-
-            self.pending_logs.append({
-                "service_name": service_name,
-                "method": request.method,
-                "endpoint_url": url,
-                "request_headers": dict(request.headers),
-                "request_body": _encode_request_body(request),
-                "response_status": response.status_code,
-                "response_headers": dict(response.headers),
-                "response_body": _encode_response_body(response),
-            })
-            return response
-
-        except Exception as exc:
-            self.pending_logs.append({
-                "service_name": service_name,
-                "method": request.method,
-                "endpoint_url": url,
-                "request_headers": dict(request.headers),
-                "request_body": _encode_request_body(request),
-                "response_status": 0,
-                "response_headers": {},
-                "response_body": f"TRANSPORT_ERROR: {type(exc).__name__}: {exc}",
-            })
-            raise
-
-    def close(self) -> None:
-        self._transport.close()
-
-
-async def flush_pending_logs(target: Any) -> None:
-    """
-    Flush buffered log entries to the DB.
-    Target can be either a LoggingSyncTransport or a direct list of log dicts.
-    """
-    if hasattr(target, "pending_logs"):
-        logs = target.pending_logs
-    else:
-        logs = target
-
-    for entry in logs:
-        await log_api_request(**entry)
-    logs.clear()
-
-
-# ---------------------------------------------------------------------------
-# Client factories
-# ---------------------------------------------------------------------------
-
-def create_async_client(
-    *,
-    service_name: Optional[str] = None,
-    **kwargs: Any,
-) -> httpx.AsyncClient:
-    """Create an ``httpx.AsyncClient`` with automatic request/response logging.
-
-    All keyword arguments are forwarded to ``httpx.AsyncClient`` except
-    ``transport``, which is wrapped by ``LoggingTransport``.
-    """
-    # Extract transport kwargs that should go to the underlying transport
-    transport_kwargs = {}
-    for key in ("verify", "cert", "trust_env", "proxy"):
-        if key in kwargs:
-            transport_kwargs[key] = kwargs.pop(key)
-
-    user_transport = kwargs.pop("transport", None)
-    wrapped = LoggingTransport(
-        transport=user_transport,
-        service_name=service_name,
-        **transport_kwargs,
-    )
-    return httpx.AsyncClient(transport=wrapped, **kwargs)
-
-
-def create_sync_client(
-    *,
-    service_name: Optional[str] = None,
-    **kwargs: Any,
-) -> httpx.Client:
-    """Create an ``httpx.Client`` with automatic request/response logging.
-
-    Returns a client whose transport buffers log entries.  After using the
-    client, call ``flush_pending_logs(client._transport)`` from an async
-    context to write them to the DB.
-
-    The ``LoggingSyncTransport`` is accessible via ``client._transport``
-    (httpx stores it there internally), or you can keep a reference to it.
-    """
-    transport_kwargs = {}
-    for key in ("verify", "cert", "trust_env", "proxy"):
-        if key in kwargs:
-            transport_kwargs[key] = kwargs.pop(key)
-
-    user_transport = kwargs.pop("transport", None)
-    wrapped = LoggingSyncTransport(
-        transport=user_transport,
-        service_name=service_name,
-        **transport_kwargs,
-    )
-    return httpx.Client(transport=wrapped, **kwargs)
-
-
-def create_async_httpx2_client(
-    *,
-    service_name: Optional[str] = None,
-    **kwargs: Any,
-) -> httpx2.AsyncClient:
-    """Like :func:`create_async_client`, but returns an ``httpx2.AsyncClient``."""
-    transport_kwargs = {}
-    for key in ("verify", "cert", "trust_env", "proxy"):
-        if key in kwargs:
-            transport_kwargs[key] = kwargs.pop(key)
-
-    user_transport = kwargs.pop("transport", None)
-    wrapped = LoggingTransportHttpx2(
-        transport=user_transport,
-        service_name=service_name,
-        **transport_kwargs,
-    )
-    return httpx2.AsyncClient(transport=wrapped, **kwargs)
+            os.remove(path)
+        except OSError:
+            pass
+        raise

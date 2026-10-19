@@ -367,7 +367,6 @@ password.txt
 # Don't commit my own prompt
 system_prompt.txt
 
-log-viewer/frontend/src/user_map.json
 
 # Local pip outdated-packages report
 outdated.txt

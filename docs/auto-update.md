@@ -7,7 +7,7 @@ This page explains the bot's **git-aware restart model** so it feels predictable
 | Component | Responsibility |
 | --- | --- |
 | `AutoUpdateService` | Periodically checks for remote git updates when enabled |
-| `RestartHandler` | Saves state, pulls code, and exits with restart code `42` |
+| `RestartHandler` | Saves state, pulls code, runs the normal shutdown, and exits with restart code `42` |
 | `AnnouncementService` | Announces relevant updates after the bot comes back up |
 
 Relevant code:
@@ -31,7 +31,8 @@ Relevant code:
 flowchart LR
     Trigger[Manual restart or auto-update trigger] --> Save[Save state to temp file]
     Save --> Pull[git pull]
-    Pull --> Exit[Exit with code 42]
+    Pull --> Shutdown[shutdown_services<br/>stop jobs, drain queue, close clients, flush caches, close DB pool]
+    Shutdown --> Exit[Exit with code 42]
     Exit --> Supervisor[Process supervisor restarts bot]
     Supervisor --> Boot[Bot boots again]
     Boot --> Announce[AnnouncementService may announce update]
@@ -44,8 +45,8 @@ The restart path is intentional and stateful:
 1. the bot marks restart as in progress
 2. it saves state to a temp file
 3. it performs `git pull`
-4. it pauses briefly for final operations
-5. it exits with code `42`
+4. it runs the normal shutdown sequence (`startup.shutdown_services`): stop background jobs, drain the queue for up to 90 seconds so in-flight replies finish, close the model/HTTP clients, flush caches, and close the DB pool
+5. `main.py` exits with code `42`
 
 That exit code is a signal to the **outer supervisor**, not an error to be ignored.
 
@@ -57,6 +58,7 @@ That means `/restart` is effectively:
 
 - save state
 - `git pull`
+- normal shutdown
 - exit for supervised restart
 
 If you expected “just restart the process,” that is not what this command does.
@@ -109,17 +111,9 @@ If no relevant changelog is found, the service can intentionally skip the announ
 
 ## Important local-development caveat
 
-The repository's `start.sh` wrapper assumes a `venv/` virtualenv path when reinstalling dependencies after restart.
+The repository's `start.sh` wrapper uses `.venv/` (or a legacy `venv/`). After each exit `42` it reinstalls `requirements.txt` and starts the bot again; any other exit code ends the loop.
 
-The Makefile, however, creates `.venv/` by default.
-
-### If you use wrapper-based restart locally
-
-Choose one:
-
-- create/use `venv/`
-- modify the wrapper for your environment
-- skip the wrapper and use `make run-direct`
+If you do not want restarts to reinstall dependencies or loop, skip the wrapper and use `make run-direct`.
 
 ## Practical mental model
 

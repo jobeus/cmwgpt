@@ -34,10 +34,11 @@ def extract_facebook_urls(text: str) -> List[str]:
 
 
 @skip_recent_failures("facebook")
-def get_facebook_transcript(url: str) -> Optional[dict]:
+async def get_facebook_transcript(url: str, *, cache_only: bool = False) -> Optional[str]:
+    """Transcribe a Facebook video (downloaded with yt-dlp, transcribed by Groq).
+
+    Results are cached to persistent disk. Returns ``None`` on failure (e.g.
+    the URL is not a video), or on a cache miss when ``cache_only`` is set.
     """
-    Fetch the transcript for a Facebook video by downloading audio and processing with Groq.
-    Results are cached to persistent disk. Returns ``None`` if it fails
-    (e.g. the URL is not a video).
-    """
-    return download_and_transcribe_video(url, _facebook_cache, label="Facebook", file_prefix="facebook")
+    return await download_and_transcribe_video(
+        url, _facebook_cache, label="Facebook", file_prefix="facebook", cache_only=cache_only)

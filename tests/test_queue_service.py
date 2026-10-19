@@ -515,7 +515,53 @@ class TestQueueService(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    def test_process_channel_messages_handles_restart_runtime_error_and_system_exit(self):
+    def test_stop_waits_stop_timeout_seconds_for_workers(self):
+        async def run_test():
+            from src.services.queue_service import STOP_TIMEOUT_SECONDS
+
+            self.assertEqual(STOP_TIMEOUT_SECONDS, 90.0)
+            await self.queue_service.start()
+            self.queue_service._ensure_channel_worker(100)
+
+            real_wait_for = asyncio.wait_for
+            with patch(
+                "src.services.queue_service.asyncio.wait_for", side_effect=real_wait_for
+            ) as mock_wait_for:
+                await self.queue_service.stop()
+
+            self.assertEqual(mock_wait_for.call_args.kwargs["timeout"], STOP_TIMEOUT_SECONDS)
+            self.assertEqual(self.queue_service._channel_workers, {})
+
+        self.loop.run_until_complete(run_test())
+
+    def test_stop_lets_in_flight_message_finish(self):
+        async def run_test():
+            from src.services.queue_service import MessageType, QueuedMessage
+
+            await self.queue_service.start()
+            started = asyncio.Event()
+            finished = []
+
+            async def slow_handler():
+                started.set()
+                await asyncio.sleep(0.05)
+                finished.append(True)
+
+            queue = self.queue_service._ensure_channel_worker(100)
+            await queue.put(QueuedMessage(
+                message_type=MessageType.RESTART,
+                handler=slow_handler,
+                timestamp=0.0,
+                channel_id=100,
+            ))
+            await started.wait()
+            await self.queue_service.stop()
+
+            self.assertEqual(finished, [True])
+
+        self.loop.run_until_complete(run_test())
+
+    def test_process_channel_messages_handles_restart_and_runtime_error(self):
         async def run_test():
             from src.services.queue_service import MessageType, QueuedMessage
 
@@ -552,26 +598,6 @@ class TestQueueService(unittest.TestCase):
             with patch.object(self.queue_service, "_handle_queued_message", new=AsyncMock(side_effect=RuntimeError("boom"))):
                 await self.queue_service._process_channel_messages(200)
             self.assertGreater(self.queue_service.get_stats()["messages_failed"], 0)
-
-            self.queue_service._is_running = True
-            queue = asyncio.Queue()
-            self.queue_service._channel_queues[300] = queue
-            await queue.put(MagicMock())
-            await queue.put(QueuedMessage(
-                message_type=MessageType.SHUTDOWN,
-                handler=None,
-                timestamp=0.0,
-                channel_id=300,
-            ))
-
-            def fake_exit(code):
-                self.queue_service._is_running = False
-
-            with patch.object(self.queue_service, "_handle_queued_message", new=AsyncMock(side_effect=SystemExit(5))), patch(
-                "src.services.queue_service.os._exit", side_effect=fake_exit
-            ) as mock_exit:
-                await self.queue_service._process_channel_messages(300)
-            mock_exit.assert_called_once_with(5)
 
         self.loop.run_until_complete(run_test())
 

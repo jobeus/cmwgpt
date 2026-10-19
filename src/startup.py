@@ -1,10 +1,13 @@
-"""Application startup and service composition."""
+"""Application startup, service composition, and shutdown."""
 
+import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from src.bot.handlers.mention import MentionHandler
 from src.config import AppConfig, get_system_prompt, load_config
+from src.db.connection import close_db_pool
 from src.db.memory_store import MemoryStore
 from src.services.announcement_service import AnnouncementService
 from src.services.auto_update_service import AutoUpdateService
@@ -19,7 +22,10 @@ from src.services.queue_service import QueueService
 from src.services.restart_handler import RestartHandler
 from src.services.runpod_service import RunpodService
 from src.services.state_service import StateService
+from src.utils.cache_utils import flush_all_caches
 from src.utils.url_utils import inject_article_cache
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -67,6 +73,8 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         state_service=state_service,
         death_channel_id=app_config.death_channel_id,
         openai_service=openai_service,
+        gemini_service=gemini_service,
+        anthropic_service=anthropic_service,
         model=app_config.default_model,
     )
     memory_store = MemoryStore()
@@ -106,6 +114,36 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         memory_store=memory_store,
         memory_service=memory_service,
     )
+
+
+async def shutdown_services(services: AppServices) -> None:
+    """Stop background jobs, let in-flight replies finish, then close every client.
+
+    Each step is independent: a failure is logged and the rest still run.
+    """
+    async def step(name: str, action) -> None:
+        try:
+            result = action()
+            if hasattr(result, "__await__"):
+                await result
+            logger.info(f"Shutdown: {name} done")
+        except Exception as e:
+            logger.error(f"Shutdown: {name} failed: {e}")
+
+    # stop() joins the git-monitor thread, which may be mid-fetch; keep that off the loop.
+    await step("auto-update stop", lambda: asyncio.to_thread(services.auto_update_service.stop))
+    if services.memory_service is not None:
+        await step("memory job stop", services.memory_service.stop)
+    await step("death service close", services.death_service.close)
+    # Lets each channel finish the reply it is working on (bounded by a timeout).
+    await step("queue drain", services.queue_service.stop)
+    await step("openai close", services.openai_service.close)
+    await step("gemini close", services.gemini_service.close)
+    if services.anthropic_service is not None:
+        await step("anthropic close", services.anthropic_service.close)
+    await step("runpod close", services.runpod_service.close)
+    await step("cache flush", flush_all_caches)
+    await step("db pool close", close_db_pool)
 
 
 def create_bot_client(config: Optional[AppConfig] = None):

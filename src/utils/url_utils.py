@@ -1,28 +1,42 @@
+import asyncio
 import re
 import logging
-import httpx
 from typing import List, Optional
-from urllib.parse import urlparse, urlunparse
-from src.config import get_config
-from src.db.logger import build_artifact, log_pipeline_step
-from src.utils.http_client import create_async_client
-from src.utils.ssrf_guard import assert_public_url
+from urllib.parse import unquote, urljoin, urlparse, urlunparse
 
+import httpx
 import trafilatura
-from newspaper import Article, Config
+
+from src.config import get_config
 from src.utils.cache_utils import PersistentCache, skip_recent_failures
+from src.utils.http_client import fetch_public
 
 logger = logging.getLogger(__name__)
 
 # Bounded persistent cache for articles: url -> extracted text
 _article_cache = PersistentCache('articles')
 
+MAX_HTML_BYTES = 5 * 1024 * 1024
 
-def _delete_cache_entry(cache, key: str) -> None:
-    if hasattr(cache, 'delete'):
-        cache.delete(key)
-    elif key in cache:
-        del cache[key]
+# Punctuation that ends a sentence around a link rather than belonging to it,
+# e.g. "(see https://example.org/x)." -> "https://example.org/x".
+_TRAILING_PUNCTUATION = ').,;:!?\'"]>'
+
+_BROWSER_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1',
+    'Dnt': '1',
+    'Cache-Control': 'max-age=0'
+}
 
 
 EXCLUDED_DOMAINS = {
@@ -54,6 +68,15 @@ def _is_excluded_media_url(parsed) -> bool:
     return any(path.endswith(ext) for ext in EXCLUDED_MEDIA_EXTENSIONS)
 
 
+def _strip_trailing_punctuation(url: str) -> str:
+    while url and url[-1] in _TRAILING_PUNCTUATION:
+        # Keep a closing paren that balances one inside the URL (Wikipedia-style links).
+        if url[-1] == ')' and url.count('(') >= url.count(')'):
+            break
+        url = url[:-1]
+    return url
+
+
 def extract_target_urls(text: str) -> List[str]:
     """
     Extract URLs from text, ignoring specific excluded domains.
@@ -68,10 +91,11 @@ def extract_target_urls(text: str) -> List[str]:
     urls = []
     
     for match in matches:
-        url = match.group(0)
-        # Add http:// if it starts with www. (needed for urlparse to work well)
-        parse_url = url if url.startswith('http') else 'http://' + url
-        parsed = urlparse(parse_url)
+        url = _strip_trailing_punctuation(match.group(0))
+        # A bare www. link needs a scheme to be fetchable at all.
+        if not url.startswith('http'):
+            url = 'https://' + url
+        parsed = urlparse(url)
         domain = parsed.netloc.lower()
 
         # Exclude domains with dedicated downloader/media handling and obvious binary media URLs
@@ -92,200 +116,92 @@ def inject_article_cache(url: str, text: str) -> None:
     logger.debug(f"Directly injected cache for article: {url}")
 
 
+async def _fetch_wikipedia(parsed) -> Optional[str]:
+    """Use the official API for Wikipedia (scraping gets 403s from datacenter IPs)."""
+    lang = parsed.netloc.split('.')[0]
+    params = {
+        "action": "query",
+        "prop": "extracts",
+        "explaintext": "1",
+        "titles": unquote(parsed.path[len('/wiki/'):]),
+        "format": "json",
+    }
+    async with httpx.AsyncClient(proxy=get_config().transcript_proxy or None, timeout=10.0) as client:
+        response = await client.get(
+            f"https://{lang}.wikipedia.org/w/api.php",
+            params=params,
+            headers={"User-Agent": "CMWGPT/1.0 (https://github.com/jobeus/cmwgpt)"},
+        )
+        response.raise_for_status()
+    for page in response.json().get("query", {}).get("pages", {}).values():
+        if page.get("extract"):
+            return page["extract"]
+    return None
+
+
+async def _resolve_vreddit(url: str, proxy: Optional[str]) -> str:
+    """Follow v.redd.it's redirect ourselves so we never hit www.reddit.com's bot wall."""
+    try:
+        async with httpx.AsyncClient(proxy=proxy, timeout=10.0, follow_redirects=False) as client:
+            response = await client.get(url, headers=_BROWSER_HEADERS)
+        location = response.headers.get("location")
+        if response.is_redirect and location:
+            return urljoin(url, location)
+    except Exception as e:
+        logger.debug(f"Failed to resolve v.redd.it redirect for {url}: {e}")
+    return url
+
+
+def _extract_text(html: str) -> Optional[str]:
+    """Main article text, falling back to trafilatura's recall-oriented mode."""
+    return trafilatura.extract(html) or trafilatura.extract(html, favor_recall=True)
+
+
 @skip_recent_failures("article")
-async def get_article_text(url: str) -> Optional[str]:
+async def get_article_text(url: str, *, cache_only: bool = False) -> Optional[str]:
     """
-    Fetch the text content for a URL, falling back from trafilatura to newspaper3k.
-    Results are cached to persistent disk.
+    Fetch the readable text of a web page. Results are cached to persistent disk.
+    Returns ``None`` on failure, or on a cache miss when ``cache_only`` is set.
     """
-    if url in _article_cache:
-        cached_result = _article_cache[url]
-        if cached_result is None:
-            logger.debug(f"Discarding legacy article failure sentinel for: {url}")
-            _delete_cache_entry(_article_cache, url)
-        else:
-            logger.debug(f"Cache hit for article: {url}")
-            return cached_result
+    cached = _article_cache.get(url)
+    if cached is not None or cache_only:
+        return cached
 
     try:
         logger.info(f"Fetching article for URL: {url}")
-        
         proxy = get_config().transcript_proxy or None
-            
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-            'Sec-Ch-Ua-Mobile': '?0',
-            'Sec-Ch-Ua-Platform': '"Windows"',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1',
-            'Dnt': '1',
-            'Cache-Control': 'max-age=0'
-        }
-
-        # The URL may get rewritten below (v.redd.it resolution, old.reddit swap).
-        # Fetch via fetch_url but always cache under the original url so future
-        # lookups (which use the original) actually hit.
+        # Fetch a possibly rewritten URL but always cache under the original,
+        # since that is what later lookups use.
         fetch_url = url
-
-        # Handle v.redd.it redirects manually first to avoid hitting Reddit's bot block on www.reddit.com
         parsed = urlparse(fetch_url)
-        
-        # Fast-path for Wikipedia using official API instead of scraping (avoids 403s on proxies/datacenters)
+
         if parsed.netloc.endswith('wikipedia.org') and parsed.path.startswith('/wiki/'):
             try:
-                from urllib.parse import unquote
-                title = unquote(parsed.path[6:])
-                lang = parsed.netloc.split('.')[0]
-                api_url = f"https://{lang}.wikipedia.org/w/api.php"
-                api_params = {
-                    "action": "query",
-                    "prop": "extracts",
-                    "explaintext": "1",
-                    "titles": title,
-                    "format": "json"
-                }
-                api_headers = {"User-Agent": "CMWGPT/1.0 (https://github.com/jobeus/cmwgpt)"}
-                
-                async with create_async_client(proxy=proxy, timeout=httpx.Timeout(10.0), follow_redirects=True) as api_client:
-                    api_resp = await api_client.get(api_url, params=api_params, headers=api_headers)
-                    api_resp.raise_for_status()
-                    data = api_resp.json()
-                    pages = data.get("query", {}).get("pages", {})
-                    for _, page_data in pages.items():
-                        if "extract" in page_data and page_data["extract"]:
-                            text = page_data["extract"]
-                            _article_cache[url] = text
-                            logger.info(f"Successfully fetched Wikipedia article via API: {url}")
-                            return text
+                text = await _fetch_wikipedia(parsed)
+                if text:
+                    _article_cache[url] = text
+                    return text
             except Exception as e:
                 logger.warning(f"Failed to fetch Wikipedia via API for {url}, falling back to scraper: {e}")
 
         if parsed.netloc.lower() == 'v.redd.it':
-            async with httpx.AsyncClient(proxy=proxy, timeout=10.0, follow_redirects=False) as preflight:
-                try:
-                    pre_resp = await preflight.get(fetch_url, headers=headers)
-                    if pre_resp.status_code in (301, 302, 303, 307, 308) and "Location" in pre_resp.headers:
-                        fetch_url = pre_resp.headers["Location"]
-                        parsed = urlparse(fetch_url)  # update parsed for next step
-                except Exception as e:
-                    logger.debug(f"Failed to resolve v.redd.it redirect for {fetch_url}: {e}")
+            fetch_url = await _resolve_vreddit(fetch_url, proxy)
+            parsed = urlparse(fetch_url)
 
-        # Swap reddit to old.reddit to bypass blocks and login walls.
-        # Rebuild via urlunparse so only the host is swapped, never a path/query
-        # substring that happens to contain the netloc text.
+        # old.reddit skips the login wall. Swap only the host, never a path substring.
         if 'reddit.com' in parsed.netloc.lower() and parsed.netloc.lower() != 'old.reddit.com':
-            parsed = parsed._replace(netloc='old.reddit.com')
-            fetch_url = urlunparse(parsed)
+            fetch_url = urlunparse(parsed._replace(netloc='old.reddit.com'))
 
-        # Refuse to fetch URLs that resolve to loopback/private/link-local
-        # addresses (SSRF guard for user-supplied links).
-        await assert_public_url(fetch_url)
+        response = await fetch_public(
+            fetch_url, headers=_BROWSER_HEADERS, proxy=proxy, timeout=15.0, max_bytes=MAX_HTML_BYTES)
+        response.raise_for_status()
 
-        async with create_async_client(proxy=proxy, timeout=httpx.Timeout(15.0), follow_redirects=True) as client:
-            response = await client.get(fetch_url, headers=headers)
-            response.raise_for_status()
-            html = response.text
-            actual_request_headers = dict(response.request.headers)
-            actual_response_status = response.status_code
-            actual_response_headers = dict(response.headers)
-        
-        await log_pipeline_step(
-            service_name="downloader/article/fetch",
-            endpoint_url=fetch_url,
-            title="Article URL → HTML",
-            step="article_fetch",
-            input_summary="Fetched article HTML from URL",
-            input_data={
-                "url": fetch_url,
-                "original_url": url,
-                "proxy": proxy,
-                "headers": headers,
-            },
-            output_summary="Received raw article HTML",
-            output_data={
-                "url": fetch_url,
-                "html": html,
-                "status_code": actual_response_status,
-            },
-            request_headers=actual_request_headers,
-            response_headers=actual_response_headers,
-            response_status=actual_response_status,
-            response_artifacts=[
-                build_artifact(
-                    name="article.html",
-                    media_type="text/html",
-                    text=html,
-                    extra={"url": url},
-                )
-            ],
-        )
-
-        # Try trafilatura first
-        extractor_used = "trafilatura"
-        text = trafilatura.extract(html)
-        
+        text = await asyncio.to_thread(_extract_text, response.text)
         if not text:
-            logger.info(f"Trafilatura failed or returned empty for {url}, falling back to newspaper3k")
-            extractor_used = "newspaper3k"
-            config = Config()
-            config.browser_user_agent = headers['User-Agent']
-            config.headers = headers
-            config.request_timeout = 15
-            if proxy:
-                config.proxies = {'http': proxy, 'https': proxy}
-            article = Article(fetch_url, config=config)
-            article.set_html(html)
-            article.parse()
-            text = article.text
-            
-        if not text:
-            logger.warning(f"Both trafilatura and newspaper3k failed to extract text for {url}")
+            logger.warning(f"No article text could be extracted for {url}")
             return None
 
         _article_cache[url] = text
-
-        await log_pipeline_step(
-            service_name="downloader/article/extract",
-            endpoint_url=url,
-            title="Article HTML → extracted text",
-            step="article_extract",
-            input_summary="Ran article extraction on fetched HTML",
-            input_data={
-                "url": url,
-                "html": html,
-                "extractor_attempt_order": ["trafilatura", "newspaper3k"],
-            },
-            output_summary=f"Extracted article text using {extractor_used}",
-            output_data={
-                "url": url,
-                "extractor_used": extractor_used,
-                "text": text,
-            },
-            response_status=200,
-            request_artifacts=[
-                build_artifact(
-                    name="article.html",
-                    media_type="text/html",
-                    text=html,
-                    extra={"url": url},
-                )
-            ],
-            response_artifacts=[
-                build_artifact(
-                    name="article.txt",
-                    media_type="text/plain",
-                    text=text,
-                    extra={"url": url, "extractor_used": extractor_used},
-                )
-            ],
-        )
-        
         return text
 
     except Exception as e:

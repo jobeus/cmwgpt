@@ -5,7 +5,6 @@ Accepts the same OpenAI-style message array the rest of the bot builds
 (``text`` / ``image_url`` parts) and converts it to Messages API content blocks.
 """
 
-import json
 import logging
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -13,8 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import anthropic
 
 from src.config import get_config
-from src.utils.http_client import create_async_httpx2_client
-from src.utils.message_utils import clean_openai_response
+from src.utils.message_utils import clean_openai_response, resolve_bot_id
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +87,6 @@ def build_anthropic_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, A
             continue
 
         content = msg.get("content", "")
-        if isinstance(content, str) and content.strip().startswith(("[", "{")):
-            try:
-                content = json.loads(content)
-            except (json.JSONDecodeError, ValueError):
-                pass
-
         parts = content if isinstance(content, list) else [content]
         blocks = [b for b in (_convert_part(p, role) for p in parts) if b is not None]
         if blocks:
@@ -169,25 +161,16 @@ class AnthropicService:
     def get_client(self) -> anthropic.AsyncAnthropic:
         """Get the Anthropic client with lazy initialization."""
         if self._client is None:
-            if get_config().is_testing:
-                class MockClient:
-                    def __getattr__(self, name):  # noqa: ARG002
-                        return lambda *args, **kwargs: None  # noqa: ARG005
-
-                self._client = MockClient()
-            else:
-                api_key = self._api_key or get_config().anthropic_api_key
-                if not api_key:
-                    raise AnthropicServiceError("ANTHROPIC_API_KEY is not configured.")
-                self._client = anthropic.AsyncAnthropic(
-                    api_key=api_key,
-                    max_retries=3,
-                    http_client=create_async_httpx2_client(
-                        service_name="anthropic",
-                        timeout=600.0,
-                    ),
-                )
+            api_key = self._api_key or get_config().anthropic_api_key
+            if not api_key:
+                raise AnthropicServiceError("ANTHROPIC_API_KEY is not configured.")
+            # The SDK retries connection errors, 408/409/429 and 5xx with backoff.
+            self._client = anthropic.AsyncAnthropic(api_key=api_key, max_retries=3, timeout=600.0)
         return self._client
+
+    def clear_channel_cache(self, channel_id: int) -> None:
+        """Forget a channel's cache breakpoint (its history window was rebuilt)."""
+        self._history_breakpoints.pop(channel_id, None)
 
     async def close(self) -> None:
         """Close the Anthropic client and clean up resources."""
@@ -199,18 +182,6 @@ class AnthropicService:
                 logger.error(f"Error closing Anthropic client: {e}")
             finally:
                 self._client = None
-
-    def _resolve_bot_id(self, bot_id: Optional[int], state_service: Any) -> Optional[int]:
-        if bot_id:
-            return bot_id
-        try:
-            if state_service and hasattr(state_service, "bot_id"):
-                return state_service.bot_id
-            if self._bot_id_loader:
-                return self._bot_id_loader()
-        except Exception as e:
-            logger.warning(f"Failed to get bot_id for cleaning: {e}")
-        return None
 
     async def get_chat_completion(
         self,
@@ -304,5 +275,5 @@ class AnthropicService:
         if not response_text:
             raise AnthropicServiceError("The Claude API returned an empty response.")
 
-        cleaned = clean_openai_response(response_text, bot_id=self._resolve_bot_id(bot_id, state_service))
+        cleaned = clean_openai_response(response_text, bot_id=resolve_bot_id(bot_id, state_service, self._bot_id_loader))
         return cleaned, total_cost

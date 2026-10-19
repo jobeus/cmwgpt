@@ -1,14 +1,14 @@
 # MariaDB setup
 
-MariaDB is the shared storage layer for **request logs** and **pipeline logs**. If the database is wrong, the bot may still run, but your observability story gets much worse.
+MariaDB stores **per-user memory**: the short profiles the bot learns about each person, per server, and adds to mentions. It is not used for anything else. If the database is wrong, the bot still replies, but `/memory`, `/fillmemory` and the nightly memory job will not work.
 
 ## What MariaDB is used for
 
 | Consumer | What it uses the DB for |
 | --- | --- |
-| `src/db/logger.py` | Writing API request logs and pipeline-step logs |
 | `src/db/connection.py` | Creating the async connection pool |
-| `log-viewer/backend` | Reading log rows for the API and realtime stream |
+| `src/db/memory_store.py` | Reading and writing the memory tables |
+| `src/services/memory_service.py` | Nightly job, `/memory` edits, and the notes added to mentions |
 
 ## Core configuration variables
 
@@ -18,7 +18,7 @@ MariaDB is the shared storage layer for **request logs** and **pipeline logs**. 
 | `DB_PORT` | MariaDB port |
 | `DB_USER` | App user |
 | `DB_PASSWORD` | App password |
-| `DB_NAME` | Database containing the log schema |
+| `DB_NAME` | Database containing the memory tables |
 
 ## Two setup paths
 
@@ -67,12 +67,13 @@ mariadb -u root -p cmwgpt < init_db.sql
 
 ## What the schema is responsible for
 
-`init_db.sql` creates the tables required for:
+`init_db.sql` creates the per-user memory tables:
 
-- API request logging
-- pipeline-step logging
-- artifacts/replay metadata consumed by the log viewer
-- per-user memory (`user_memory`, `user_memory_history`, `user_memory_job_state`)
+| Table | Holds |
+| --- | --- |
+| `user_memory` | One row per user per server: the learned profile and the user's own notes |
+| `user_memory_history` | A row for every change, so earlier versions can be restored |
+| `user_memory_job_state` | How far the nightly job has processed each server |
 
 Every statement in `init_db.sql` is `IF NOT EXISTS`, so re-applying it to an existing
 database adds new tables without touching existing ones. With the docker-compose stack:
@@ -83,9 +84,17 @@ docker compose exec -T db sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"' < in
 
 If the schema is missing or incompatible, failures often appear later and indirectly, for example when:
 
-- a downloader or model request tries to log metadata
-- a pipeline step tries to persist replay information
-- the log-viewer backend queries recent logs and finds nothing usable
+- `/memory` commands reply with an error
+- the nightly job logs a failure and profiles never change
+- mentions quietly go out without any user notes (reply-time lookups never raise)
+
+### Upgrading an older install
+
+Older versions also created an `api_request_logs` table for request logging. Nothing uses it any more, so you can remove it:
+
+```sql
+DROP TABLE IF EXISTS api_request_logs;
+```
 
 ## Preflight checklist before starting the app
 
@@ -94,7 +103,7 @@ If the schema is missing or incompatible, failures often appear later and indire
 | Database is reachable at `DB_HOST:DB_PORT` | Basic connectivity |
 | `DB_USER` can authenticate | Prevents write/read failures |
 | `DB_NAME` exists | Avoids connection or query errors |
-| `init_db.sql` has been applied | Required for logging and viewer functionality |
+| `init_db.sql` has been applied | Required for the memory features |
 
 ## Common local values
 
@@ -115,8 +124,8 @@ After setup, validate the DB path before blaming higher layers.
 | --- | --- |
 | Can the app user connect? | Confirms credentials/grants |
 | Does the schema exist? | Confirms init ran successfully |
-| Do new requests create rows? | Confirms the write path works |
-| Can the log-viewer backend read those rows? | Confirms observability end-to-end |
+| Does `/memory add` create a `user_memory` row? | Confirms the write path works |
+| Does `/memory show` return it? | Confirms the read path end-to-end |
 
 ## Troubleshooting shortcuts
 
@@ -124,8 +133,8 @@ After setup, validate the DB path before blaming higher layers.
 | --- | --- |
 | `Access denied` | `DB_USER`, `DB_PASSWORD`, grants |
 | Connection refused/timeout | host, port, container/service health |
-| Missing logs | schema applied and bot write path |
-| Viewer empty but bot runs | backend DB access and schema presence |
+| `/memory` fails but bot runs | schema applied and `DB_*` values |
+| Profiles never update | `MEMORY_MODEL` has an API key, and `user_memory_job_state.last_status` |
 
 ## See also
 

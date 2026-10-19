@@ -2,7 +2,6 @@
 WikiCount Command - Look up Wikipedia page views.
 """
 
-import asyncio
 import logging
 from urllib.parse import urlparse, unquote
 
@@ -32,9 +31,7 @@ class WikiCountCommands:
         async def wikicount(interaction: discord.Interaction, target: str):
             if not await safe_defer(interaction, ephemeral=False, thinking=True):
                 return
-            asyncio.create_task(
-                safe_run(interaction, self._handle_wikicount, interaction, target)
-            )
+            await safe_run(interaction, self._handle_wikicount, interaction, target)
 
     async def _handle_wikicount(self, interaction: discord.Interaction, target: str) -> None:
         # Determine the article title
@@ -62,17 +59,14 @@ class WikiCountCommands:
             # Reusing death service settings if any (default to PAGEVIEW_MONTHS)
             settings = self._state_service.get_death_settings() or {}
             months = settings.get("pageview_months", PAGEVIEW_MONTHS)
-            
-            # Obtain the shared session via the death service's public accessor
-            session = await self._death_service.get_session()
-            
-            avg_views = await self._death_service.get_avg_monthly_views(article_title, session)
+
+            avg_views = await self._death_service.get_avg_monthly_views(article_title)
             
             # Fallback to title case if views are 0 or None (e.g. "daveigh chase" -> "Daveigh_Chase")
             if not avg_views and "wikipedia.org/wiki/" not in target:
                 title_cased = target.strip().title().replace(" ", "_")
                 if title_cased != article_title:
-                    fallback_views = await self._death_service.get_avg_monthly_views(title_cased, session)
+                    fallback_views = await self._death_service.get_avg_monthly_views(title_cased)
                     if fallback_views:
                         article_title = title_cased
                         avg_views = fallback_views
@@ -83,6 +77,6 @@ class WikiCountCommands:
 
             await interaction.followup.send(f"**{article_title.replace('_', ' ')}**: {avg_views:,} avg monthly views over past {months} months")
             
-        except Exception as e:
+        except Exception:
             logger.exception(f"Error in /wikicount for {target}")
             await interaction.followup.send("An error occurred while fetching pageviews.")

@@ -544,7 +544,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(bot.tree.add_command.call_count, 4)
 
-    async def test_draw_command_wrapper_defers_and_schedules_safe_run(self):
+    async def test_draw_command_wrapper_defers_and_awaits_safe_run(self):
         interaction = MagicMock()
         interaction.response.defer = AsyncMock()
         commands = ImageCommands(
@@ -558,16 +558,14 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
         )
         draw = commands._create_draw_command()
 
-        with patch("src.bot.commands.image.safe_run", new=AsyncMock()) as mock_safe_run, patch(
-            "src.bot.commands.image.asyncio.create_task", side_effect=lambda coro: coro.close()
-        ) as mock_create_task:
+        with patch("src.bot.commands.image.safe_run", new=AsyncMock()) as mock_safe_run:
             await draw.callback(interaction, "a prompt", None, None, None, None, None)
 
         interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
         mock_safe_run.assert_called_once_with(interaction, commands._handle_draw_command, interaction, "a prompt", None, None, None, None, None)
-        mock_create_task.assert_called_once()
+        mock_safe_run.assert_awaited_once()
 
-    async def test_drawmodel_command_wrapper_defers_and_schedules_safe_run(self):
+    async def test_drawmodel_command_wrapper_defers_and_awaits_safe_run(self):
         interaction = MagicMock()
         interaction.response.defer = AsyncMock()
         commands = ImageCommands(
@@ -581,16 +579,14 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
         )
         drawmodel = commands._create_drawmodel_command()
 
-        with patch("src.bot.commands.image.safe_run", new=AsyncMock()) as mock_safe_run, patch(
-            "src.bot.commands.image.asyncio.create_task", side_effect=lambda coro: coro.close()
-        ) as mock_create_task:
+        with patch("src.bot.commands.image.safe_run", new=AsyncMock()) as mock_safe_run:
             await drawmodel.callback(interaction, "seedream")
 
         interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
         mock_safe_run.assert_called_once_with(interaction, commands._handle_drawmodel_command, interaction, "seedream")
-        mock_create_task.assert_called_once()
+        mock_safe_run.assert_awaited_once()
 
-    async def test_edit_command_wrapper_defers_and_schedules_safe_run(self):
+    async def test_edit_command_wrapper_defers_and_awaits_safe_run(self):
         interaction = MagicMock()
         interaction.response.defer = AsyncMock()
         edit_image = MagicMock()
@@ -605,9 +601,7 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
         )
         edit = commands._create_edit_command()
 
-        with patch("src.bot.commands.image.safe_run", new=AsyncMock()) as mock_safe_run, patch(
-            "src.bot.commands.image.asyncio.create_task", side_effect=lambda coro: coro.close()
-        ) as mock_create_task:
+        with patch("src.bot.commands.image.safe_run", new=AsyncMock()) as mock_safe_run:
             await edit.callback(interaction, "fix it", edit_image, None, None, None, "qwen")
 
         interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
@@ -622,9 +616,9 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             None,
             "qwen",
         )
-        mock_create_task.assert_called_once()
+        mock_safe_run.assert_awaited_once()
 
-    async def test_editmodel_command_wrapper_defers_and_schedules_safe_run(self):
+    async def test_editmodel_command_wrapper_defers_and_awaits_safe_run(self):
         interaction = MagicMock()
         interaction.response.defer = AsyncMock()
         commands = ImageCommands(
@@ -638,11 +632,9 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
         )
         editmodel = commands._create_editmodel_command()
 
-        with patch("src.bot.commands.image.safe_run", new=AsyncMock()) as mock_safe_run, patch(
-            "src.bot.commands.image.asyncio.create_task", side_effect=lambda coro: coro.close()
-        ) as mock_create_task:
+        with patch("src.bot.commands.image.safe_run", new=AsyncMock()) as mock_safe_run:
             await editmodel.callback(interaction, "pruna")
 
         interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
         mock_safe_run.assert_called_once_with(interaction, commands._handle_editmodel_command, interaction, "pruna")
-        mock_create_task.assert_called_once()
+        mock_safe_run.assert_awaited_once()

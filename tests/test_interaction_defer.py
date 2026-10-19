@@ -85,7 +85,7 @@ class TestInteractionDefer(unittest.TestCase):
         self.loop.run_until_complete(run_test())
 
     def test_draw_command_defers_interaction(self):
-        """Test that /draw command properly defers the interaction (async, no queue)."""
+        """Test that /draw defers the interaction, then awaits the handler via safe_run (no queue)."""
 
         async def run_test():
             # Create mock interaction
@@ -98,20 +98,22 @@ class TestInteractionDefer(unittest.TestCase):
             mock_interaction.channel.__str__ = MagicMock(
                 return_value="TestChannel")
 
-            with patch("src.bot.commands.image.asyncio.create_task") as mock_create_task:
+            with patch("src.bot.commands.image.safe_run", new=AsyncMock()) as mock_safe_run:
                 draw_command = self.image_commands._create_draw_command()
 
-                # Execute the command — /draw is fire-and-forget (no queue)
+                # /draw doesn't use the queue; it awaits safe_run directly.
                 await draw_command.callback(mock_interaction, "test prompt")
 
-                # Verify interaction was deferred first
                 mock_interaction.response.defer.assert_called_once_with(
                     ephemeral=False, thinking=True)
 
-                # Verify async execution was scheduled
-                mock_create_task.assert_called_once()
-                scheduled_coro = mock_create_task.call_args.args[0]
-                scheduled_coro.close()
+                mock_safe_run.assert_awaited_once()
+                args = mock_safe_run.await_args.args
+                self.assertIs(args[0], mock_interaction)
+                self.assertEqual(args[1], self.image_commands._handle_draw_command)
+                self.assertIs(args[2], mock_interaction)
+                self.assertEqual(args[3], "test prompt")
+                self.mock_queue_service.queue_command.assert_not_called()
 
                 mock_interaction.response.send_message.assert_not_called()
 

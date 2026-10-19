@@ -15,10 +15,9 @@ import warnings
 from typing import Any, Dict, List, Optional, Union
 
 import discord
+import httpx
 
-from src.config import get_config
-from src.utils.http_client import create_async_client
-from src.utils.message_utils import clean_openai_response
+from src.utils.message_utils import clean_openai_response, resolve_bot_id
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +35,8 @@ GEMINI_MODEL = "gemini-3.8-flash"
 # How long before a channel's cached interaction ID expires (seconds)
 INTERACTION_CACHE_TTL = 600  # 10 minutes
 
-# Client-side request timeout (seconds). The google-genai SDK relies on the
-# injected httpx client's timeout, which otherwise defaults to httpx's 5s — far
-# too short for thinking models and the "google-high" web-search path.
+# Client-side request timeout (seconds); thinking models and the "google-high"
+# web-search path need far more than an HTTP library's default.
 # Override with GEMINI_TIMEOUT_SECONDS.
 try:
     REQUEST_TIMEOUT_SECONDS = float(os.environ.get("GEMINI_TIMEOUT_SECONDS", "120"))
@@ -49,6 +47,14 @@ except ValueError:
 class GeminiServiceError(Exception):
     """Custom exception for Gemini service errors."""
     pass
+
+
+def _is_retryable(error: Exception) -> bool:
+    """Transient failures only: rate limits, server errors, timeouts, dropped connections."""
+    from google.genai import errors as genai_errors
+    if isinstance(error, genai_errors.APIError):
+        return error.code == 429 or (error.code or 0) >= 500
+    return isinstance(error, (httpx.TransportError, asyncio.TimeoutError, ConnectionError))
 
 
 class GeminiService:
@@ -96,27 +102,12 @@ class GeminiService:
     def _get_client(self):
         """Lazy-init the google-genai client."""
         if self._client is None:
-            if get_config().is_testing:
-                class MockClient:
-                    class _aio:
-                        class interactions:
-                            @staticmethod
-                            async def create(**kwargs):
-                                return None
-                    aio = _aio()
-                self._client = MockClient()
-            else:
-                from google import genai
-                from google.genai import types as genai_types
-                self._client = genai.Client(
-                    api_key=self._api_key,
-                    http_options=genai_types.HttpOptions(
-                        httpxAsyncClient=create_async_client(
-                            service_name="gemini",
-                            timeout=REQUEST_TIMEOUT_SECONDS,
-                        ),
-                    ),
-                )
+            from google import genai
+            from google.genai import types as genai_types
+            self._client = genai.Client(
+                api_key=self._api_key,
+                http_options=genai_types.HttpOptions(timeout=int(REQUEST_TIMEOUT_SECONDS * 1000)),
+            )
         return self._client
 
     def _build_input(self, messages: List[Dict[str, Any]], has_prev_interaction: bool) -> list:
@@ -441,16 +432,9 @@ class GeminiService:
                     logger.error(f"⚠️ Gemini response had no text or images. Raw keys: {list(interaction_dict.keys())}")
                     raise ValueError("Gemini returned an empty response.")
 
-                # Clean the response text
-                effective_bot_id = bot_id
-                if not effective_bot_id and self._bot_id_loader:
-                    try:
-                        effective_bot_id = self._bot_id_loader()
-                    except Exception:
-                        pass
-
                 if response_text:
-                    response_text = clean_openai_response(response_text, bot_id=effective_bot_id)
+                    response_text = clean_openai_response(
+                        response_text, bot_id=resolve_bot_id(bot_id, None, self._bot_id_loader))
 
                 # Calculate cost
                 cost = 0.0
@@ -485,13 +469,7 @@ class GeminiService:
                 error_str = str(e)
                 logger.error(f"Gemini API error on attempt {attempt + 1}/{max_retries}: {error_str}")
 
-                # Check for retryable errors
-                retryable = any(k in error_str.lower() for k in [
-                    "429", "rate limit", "500", "502", "503", "504",
-                    "timeout", "connection", "unavailable", "internal"
-                ])
-
-                if retryable and attempt < max_retries - 1:
+                if _is_retryable(e) and attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt)
                     logger.info(f"Retrying in {delay} seconds...")
                     await asyncio.sleep(delay)
@@ -506,8 +484,13 @@ class GeminiService:
         raise GeminiServiceError("Failed to get Gemini completion after all retry attempts")
 
     async def close(self) -> None:
-        """Clean up resources."""
-        self._client = None
+        """Close the client's connection pools."""
+        client, self._client = self._client, None
+        if client is not None:
+            try:
+                await client.aio.aclose()
+            except Exception as e:
+                logger.error(f"Error closing Gemini client: {e}")
 
     async def generate_image(
         self,

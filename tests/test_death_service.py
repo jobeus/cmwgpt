@@ -9,8 +9,7 @@ import asyncio
 import os
 import sys
 
-import aiohttp
-from types import SimpleNamespace
+import httpx
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -158,167 +157,6 @@ class TestDeathService(unittest.TestCase):
         self.assertFalse(self.service._first_poll)
         self.assertEqual(self.service._known_names, current)
 
-    # ----- Pageview threshold -----
-
-    @patch("src.services.death_service.MIN_AVG_MONTHLY_VIEWS", 1_000_000)
-    def test_pageview_above_threshold(self):
-        """Should announce when avg views >= threshold."""
-        async def run_test():
-            mock_resp = AsyncMock()
-            mock_resp.status = 200
-            mock_resp.json = AsyncMock(return_value={
-                "items": [{"views": 1_500_000}] * 12
-            })
-
-            mock_session = MagicMock()
-            mock_session.get = MagicMock(return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=mock_resp),
-                __aexit__=AsyncMock(return_value=False),
-            ))
-
-            result = await self.service.get_avg_monthly_views(
-                "Famous_Person", mock_session
-            )
-            self.assertEqual(result, 1_500_000)
-
-        self.loop.run_until_complete(run_test())
-
-    @patch("src.services.death_service.MIN_AVG_MONTHLY_VIEWS", 1_000_000)
-    def test_pageview_below_threshold(self):
-        """Should not announce when avg views < threshold."""
-        async def run_test():
-            mock_resp = AsyncMock()
-            mock_resp.status = 200
-            mock_resp.json = AsyncMock(return_value={
-                "items": [{"views": 500}] * 12
-            })
-
-            mock_session = MagicMock()
-            mock_session.get = MagicMock(return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=mock_resp),
-                __aexit__=AsyncMock(return_value=False),
-            ))
-
-            result = await self.service.get_avg_monthly_views(
-                "Obscure_Person", mock_session
-            )
-            self.assertEqual(result, 500)
-
-        self.loop.run_until_complete(run_test())
-
-    def test_pageview_api_404_returns_zero(self):
-        """Should return 0 on 404 HTTP error (no pageviews)."""
-        async def run_test():
-            mock_resp = AsyncMock()
-            mock_resp.status = 404
-
-            mock_session = MagicMock()
-            mock_session.get = MagicMock(return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=mock_resp),
-                __aexit__=AsyncMock(return_value=False),
-            ))
-
-            result = await self.service.get_avg_monthly_views(
-                "Missing_Person", mock_session
-            )
-            self.assertEqual(result, 0)
-
-        self.loop.run_until_complete(run_test())
-
-    def test_pageview_api_504_is_retried_until_it_succeeds(self):
-        """A transient upstream timeout is retried, not reported as unknown."""
-        async def run_test():
-            timeout_resp = AsyncMock()
-            timeout_resp.status = 504
-            timeout_resp.text = AsyncMock(return_value=
-                '{"httpCode":504,"httpReason":"upstream request timeout"}'
-            )
-            ok_resp = AsyncMock()
-            ok_resp.status = 200
-            ok_resp.json = AsyncMock(return_value={"items": [{"views": 300}] * 3})
-
-            session = MagicMock()
-            session.get = MagicMock(side_effect=[
-                AsyncMock(__aenter__=AsyncMock(return_value=timeout_resp), __aexit__=AsyncMock(return_value=False)),
-                AsyncMock(__aenter__=AsyncMock(return_value=ok_resp), __aexit__=AsyncMock(return_value=False)),
-            ])
-
-            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()):
-                result = await self.service.get_avg_monthly_views("Dolly_Parton", session)
-
-            self.assertEqual(result, 300)
-            self.assertEqual(session.get.call_count, 2)
-
-        self.loop.run_until_complete(run_test())
-
-    def test_pageview_network_error_is_retried(self):
-        """Connection failures are retried before giving up."""
-        async def run_test():
-            ok_resp = AsyncMock()
-            ok_resp.status = 200
-            ok_resp.json = AsyncMock(return_value={"items": [{"views": 90}]})
-
-            session = MagicMock()
-            session.get = MagicMock(side_effect=[
-                aiohttp.ClientError("connection reset"),
-                AsyncMock(__aenter__=AsyncMock(return_value=ok_resp), __aexit__=AsyncMock(return_value=False)),
-            ])
-
-            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()):
-                result = await self.service.get_avg_monthly_views("Flaky", session)
-
-            self.assertEqual(result, 90)
-
-            # Never-recovering network errors give up as unknown, not as zero.
-            session = MagicMock()
-            session.get = MagicMock(side_effect=asyncio.TimeoutError())
-            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()):
-                self.assertIsNone(await self.service.get_avg_monthly_views("Dead", session))
-            self.assertEqual(session.get.call_count, 3)
-
-        self.loop.run_until_complete(run_test())
-
-    def test_unchecked_name_is_announced_on_a_later_poll(self):
-        """A name whose views could not be fetched is retried and then announced."""
-        async def run_test():
-            self.service._first_poll = False
-            self.service._known_names = set()
-
-            ok_resp = AsyncMock()
-            ok_resp.status = 200
-            ok_resp.text = AsyncMock(return_value=SAMPLE_HTML)
-            session = MagicMock()
-            session.get = MagicMock(return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=ok_resp),
-                __aexit__=AsyncMock(return_value=False),
-            ))
-
-            with patch.object(self.service, "_get_session", AsyncMock(return_value=session)), \
-                patch.object(self.service, "_save_state"), \
-                patch.object(self.service, "_announce", AsyncMock()) as mock_announce, \
-                patch.object(
-                    self.service,
-                    "get_avg_monthly_views",
-                    AsyncMock(side_effect=[None, 5_000_000]),
-                ), \
-                patch(
-                    "src.services.death_service.parse_deaths_html",
-                    return_value=[("Famous One", "Famous_One")],
-                ):
-                # First poll: the pageviews API is down.
-                await self.service._poll_once()
-                mock_announce.assert_not_awaited()
-                self.assertEqual(self.service._known_names, set())
-
-                # Second poll: same name is still "new", the API recovers.
-                await self.service._poll_once()
-                mock_announce.assert_awaited_once_with("Famous One", "Famous_One", 5_000_000)
-                self.assertEqual(
-                    self.service._known_names, {("Famous One", "Famous_One")}
-                )
-
-        self.loop.run_until_complete(run_test())
-
     # ----- Announcement -----
 
     def test_announce_sends_rip_message(self):
@@ -360,23 +198,6 @@ class TestDeathService(unittest.TestCase):
         self.assertEqual(parse_article_title("kevin keegan"), "Kevin_keegan")
         self.assertEqual(parse_article_title("  "), "")
         self.assertEqual(parse_article_title(""), "")
-
-    def test_force_announce_calls_announce(self):
-        """force_announce bypasses the threshold and announces, without touching dedup state."""
-        async def run_test():
-            with patch.object(self.service, "_get_session", AsyncMock(return_value=MagicMock())), \
-                patch.object(self.service, "get_avg_monthly_views", AsyncMock(return_value=123)), \
-                patch.object(self.service, "_announce", AsyncMock()) as mock_announce:
-                ok, msg = await self.service.force_announce(
-                    "https://en.wikipedia.org/wiki/Kevin_Keegan"
-                )
-
-            self.assertTrue(ok)
-            mock_announce.assert_awaited_once_with("Kevin Keegan", "Kevin_Keegan", 123)
-            # Force testing must not pollute the real dedup set.
-            self.assertNotIn("Kevin_Keegan", self.service._announced_titles)
-
-        self.loop.run_until_complete(run_test())
 
     def test_force_announce_rejects_bad_input(self):
         async def run_test():
@@ -472,54 +293,6 @@ class TestDeathService(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    def test_get_setting_and_get_session_reuse(self):
-        self.state_service.get_death_settings.return_value = {"interval": 9}
-        self.assertEqual(self.service._get_setting("interval", 15), 9)
-        self.assertEqual(self.service._get_setting("missing", 15), 15)
-
-        async def run_test():
-            session_one = await self.service._get_session()
-            session_two = await self.service._get_session()
-            self.assertIs(session_one, session_two)
-            await session_one.close()
-
-        self.loop.run_until_complete(run_test())
-
-    def test_public_get_session_returns_shared_session(self):
-        async def run_test():
-            session_public = await self.service.get_session()
-            session_private = await self.service._get_session()
-            self.assertIs(session_public, session_private)
-            await session_public.close()
-
-        self.loop.run_until_complete(run_test())
-
-    def test_stop_closes_session_even_when_never_started(self):
-        """Sessions created outside the poll loop (e.g. /wikicount) are closed by stop()."""
-        async def run_test():
-            session = await self.service.get_session()
-            self.assertFalse(session.closed)
-
-            # Service was never started (like when DEATH_CHANNEL_ID is unset)
-            self.assertFalse(self.service._running)
-            self.service.stop()
-            self.assertIsNone(self.service._session)
-
-            # Let the scheduled close task run
-            await asyncio.sleep(0.01)
-            self.assertTrue(session.closed)
-
-        self.loop.run_until_complete(run_test())
-
-    def test_stop_closes_session_without_running_loop(self):
-        fake_session = SimpleNamespace(closed=False, close=AsyncMock())
-        self.service._session = fake_session
-
-        self.service.stop()
-
-        fake_session.close.assert_awaited_once_with()
-        self.assertIsNone(self.service._session)
-
     def test_start_already_running_and_stop_when_not_running(self):
         def fake_create_task(coro):
             coro.close()
@@ -548,163 +321,6 @@ class TestDeathService(unittest.TestCase):
             self.service._known_names = set()
             self.service._load_state()
             self.assertEqual(self.service._known_names, set())
-
-    def test_poll_once_sets_baseline_and_handles_status_and_new_names(self):
-        async def run_test():
-            async def fake_views(article_title, session):
-                if article_title == "New_One":
-                    return 200000
-                if article_title == "Low_Views":
-                    return 1000
-                if article_title == "No_Data":
-                    return None
-                if article_title == "Boom":
-                    raise RuntimeError("boom")
-                raise AssertionError(f"unexpected article {article_title}")
-
-            bad_resp = AsyncMock()
-            bad_resp.status = 500
-            ok_resp = AsyncMock()
-            ok_resp.status = 200
-            ok_resp.text = AsyncMock(return_value=SAMPLE_HTML)
-
-            session = MagicMock()
-            session.get = MagicMock(side_effect=[
-                AsyncMock(__aenter__=AsyncMock(return_value=bad_resp), __aexit__=AsyncMock(return_value=False)),
-                AsyncMock(__aenter__=AsyncMock(return_value=ok_resp), __aexit__=AsyncMock(return_value=False)),
-                AsyncMock(__aenter__=AsyncMock(return_value=ok_resp), __aexit__=AsyncMock(return_value=False)),
-            ])
-
-            with patch.object(self.service, "_get_session", AsyncMock(return_value=session)), patch.object(
-                self.service, "_save_state"
-            ) as mock_save, patch.object(
-                self.service, "get_avg_monthly_views", AsyncMock(side_effect=fake_views)
-            ) as mock_views, patch.object(
-                self.service, "_announce", AsyncMock()
-            ) as mock_announce, patch(
-                "src.services.death_service.parse_deaths_html",
-                side_effect=[
-                    [("John Doe", "John_Doe")],
-                    [
-                        ("John Doe", "John_Doe"),
-                        ("New One", "New_One"),
-                        ("Low Views", "Low_Views"),
-                        ("No Data", "No_Data"),
-                        ("Boom", "Boom"),
-                    ],
-                ],
-            ):
-                await self.service._poll_once()
-                self.assertTrue(self.service._first_poll)
-
-                await self.service._poll_once()
-                self.assertFalse(self.service._first_poll)
-                self.assertEqual(self.service._known_names, {("John Doe", "John_Doe")})
-
-                await self.service._poll_once()
-
-            # One save covering the known-names and announced-set updates.
-            self.assertEqual(mock_save.call_count, 1)
-            self.assertEqual(mock_views.await_count, 4)
-            mock_announce.assert_awaited_once_with("New One", "New_One", 200000)
-            self.assertIn("New_One", self.service._announced_titles)
-            # "No Data" (views unavailable) and "Boom" (lookup raised) must not
-            # be recorded as seen, so the next poll retries them.
-            self.assertEqual(
-                self.service._known_names,
-                {
-                    ("John Doe", "John_Doe"),
-                    ("New One", "New_One"),
-                    ("Low Views", "Low_Views"),
-                },
-            )
-
-        self.loop.run_until_complete(run_test())
-
-    def test_already_announced_name_not_reannounced(self):
-        """A name that reappears after being announced is never announced again."""
-        async def run_test():
-            self.service._first_poll = False
-            self.service._known_names = set()
-            self.service._announced_titles = {"Famous_One"}
-
-            session = MagicMock()
-            ok_resp = AsyncMock()
-            ok_resp.status = 200
-            ok_resp.text = AsyncMock(return_value=SAMPLE_HTML)
-            session.get = MagicMock(return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=ok_resp),
-                __aexit__=AsyncMock(return_value=False),
-            ))
-
-            with patch.object(self.service, "_get_session", AsyncMock(return_value=session)), \
-                patch.object(self.service, "_save_state"), \
-                patch.object(self.service, "get_avg_monthly_views", AsyncMock(return_value=5_000_000)) as mock_views, \
-                patch.object(self.service, "_announce", AsyncMock()) as mock_announce, \
-                patch(
-                    "src.services.death_service.parse_deaths_html",
-                    return_value=[("Famous One", "Famous_One")],
-                ):
-                await self.service._poll_once()
-
-            # Already announced → we never even fetch views or announce again.
-            mock_views.assert_not_awaited()
-            mock_announce.assert_not_awaited()
-
-        self.loop.run_until_complete(run_test())
-
-    def test_announce_appends_model_summary(self):
-        """The announcement includes the model's 'known for' summary when available."""
-        async def run_test():
-            mock_openai = MagicMock()
-            mock_openai.get_chat_completion = AsyncMock(
-                return_value=("Legendary footballer and manager.", 0.0)
-            )
-            self.service._openai_service = mock_openai
-            self.service._model = "anthropic/claude-sonnet-5.5"
-
-            mock_channel = AsyncMock()
-            self.mock_bot.get_channel.return_value = mock_channel
-
-            await self.service._announce("Kevin Keegan", "Kevin_Keegan", 2_000_000)
-
-            # Two separate sends: the RIP line with the URL as-is, then the
-            # AI summary as a follow-up.
-            self.assertEqual(mock_channel.send.call_count, 2)
-            first = mock_channel.send.call_args_list[0][0][0]
-            second = mock_channel.send.call_args_list[1][0][0]
-            self.assertEqual(
-                first, "RIP Kevin Keegan - https://en.wikipedia.org/wiki/Kevin_Keegan"
-            )
-            self.assertEqual(second, "Legendary footballer and manager.")
-
-            # The model was prompted with the name and wiki link.
-            prompt = mock_openai.get_chat_completion.call_args.kwargs["messages"][0]["content"]
-            self.assertIn("Kevin Keegan", prompt)
-            self.assertIn("https://en.wikipedia.org/wiki/Kevin_Keegan", prompt)
-
-        self.loop.run_until_complete(run_test())
-
-    def test_write_limerick_returns_model_output(self):
-        """write_limerick prompts with the name and wiki link, returns the verse."""
-        async def run_test():
-            mock_openai = MagicMock()
-            mock_openai.get_chat_completion = AsyncMock(
-                return_value=("There once was a keeper named Kev...", 0.0)
-            )
-            self.service._openai_service = mock_openai
-            self.service._model = "anthropic/claude-sonnet-5.5"
-
-            ok, message = await self.service.write_limerick("Kevin Keegan")
-
-            self.assertTrue(ok)
-            self.assertEqual(message, "There once was a keeper named Kev...")
-            prompt = mock_openai.get_chat_completion.call_args.kwargs["messages"][0]["content"]
-            self.assertIn("Kevin Keegan", prompt)
-            self.assertIn("https://en.wikipedia.org/wiki/Kevin_Keegan", prompt)
-            self.assertIn("limerick", prompt.lower())
-
-        self.loop.run_until_complete(run_test())
 
     def test_write_limerick_without_model_configured(self):
         async def run_test():
@@ -789,51 +405,6 @@ class TestDeathService(unittest.TestCase):
         self.assertEqual(reloaded._announced_titles, {"John_Doe"})
         self.assertEqual(reloaded._known_names, {("John Doe", "John_Doe")})
 
-    def testget_avg_monthly_views_handles_empty_items_429_and_other_errors(self):
-        async def run_test():
-            empty_resp = AsyncMock()
-            empty_resp.status = 200
-            empty_resp.json = AsyncMock(return_value={"items": []})
-            session = MagicMock()
-            session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=empty_resp), __aexit__=AsyncMock(return_value=False)))
-            self.assertEqual(await self.service.get_avg_monthly_views("Missing", session), 0)
-
-            rate_resp = AsyncMock()
-            rate_resp.status = 429
-            rate_resp.text = AsyncMock(return_value="rate limited")
-            other_resp = AsyncMock()
-            other_resp.status = 500
-            other_resp.text = AsyncMock(return_value="oops")
-            bad_request_resp = AsyncMock()
-            bad_request_resp.status = 400
-            bad_request_resp.text = AsyncMock(return_value="bad title")
-            session = MagicMock()
-            session.get = MagicMock(side_effect=[
-                AsyncMock(__aenter__=AsyncMock(return_value=rate_resp), __aexit__=AsyncMock(return_value=False)),
-                AsyncMock(__aenter__=AsyncMock(return_value=rate_resp), __aexit__=AsyncMock(return_value=False)),
-                AsyncMock(__aenter__=AsyncMock(return_value=rate_resp), __aexit__=AsyncMock(return_value=False)),
-            ])
-            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
-                self.assertIsNone(await self.service.get_avg_monthly_views("Rate Limited", session))
-            # Backoff happens between attempts, not after the last one.
-            self.assertEqual(mock_sleep.await_count, 2)
-            self.assertEqual(session.get.call_count, 3)
-
-            # 5xx is transient too: retry the full budget, then give up as unknown.
-            session = MagicMock()
-            session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=other_resp), __aexit__=AsyncMock(return_value=False)))
-            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()):
-                self.assertIsNone(await self.service.get_avg_monthly_views("Oops", session))
-            self.assertEqual(session.get.call_count, 3)
-
-            # A non-transient 4xx is not worth retrying.
-            session = MagicMock()
-            session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=bad_request_resp), __aexit__=AsyncMock(return_value=False)))
-            self.assertIsNone(await self.service.get_avg_monthly_views("Bad", session))
-            self.assertEqual(session.get.call_count, 1)
-
-        self.loop.run_until_complete(run_test())
-
     def test_announce_handles_missing_bot_and_http_error(self):
         async def run_test():
             self.service._bot = None
@@ -847,21 +418,440 @@ class TestDeathService(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    def test_poll_loop_handles_errors_and_closes_session(self):
+    # ----- Pageviews (httpx) -----
+
+    def _fake_http(self, *responses):
+        """Install a fake shared httpx client whose get() yields ``responses`` in order."""
+        http = MagicMock()
+        if len(responses) == 1 and not isinstance(responses[0], BaseException):
+            http.get = AsyncMock(return_value=responses[0])
+        else:
+            http.get = AsyncMock(side_effect=list(responses))
+        http.aclose = AsyncMock()
+        self.service._http = http
+        return http
+
+    def test_pageview_average_is_computed(self):
+        async def run_test():
+            self._fake_http(httpx.Response(200, json={"items": [{"views": 1_500_000}] * 12}))
+            self.assertEqual(await self.service.get_avg_monthly_views("Famous_Person"), 1_500_000)
+
+            self._fake_http(httpx.Response(200, json={"items": [{"views": 500}] * 12}))
+            self.assertEqual(await self.service.get_avg_monthly_views("Obscure_Person"), 500)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_pageview_url_is_encoded(self):
+        async def run_test():
+            http = self._fake_http(httpx.Response(200, json={"items": [{"views": 1}]}))
+            await self.service.get_avg_monthly_views("René Dupont")
+            url = http.get.await_args.args[0]
+            self.assertIn("/Ren%C3%A9_Dupont/monthly/", url)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_pageview_api_404_returns_zero(self):
+        async def run_test():
+            self._fake_http(httpx.Response(404))
+            self.assertEqual(await self.service.get_avg_monthly_views("Missing_Person"), 0)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_pageview_api_504_is_retried_until_it_succeeds(self):
+        async def run_test():
+            http = self._fake_http(
+                httpx.Response(504, text='{"httpCode":504,"httpReason":"upstream request timeout"}'),
+                httpx.Response(200, json={"items": [{"views": 300}] * 3}),
+            )
+            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()):
+                result = await self.service.get_avg_monthly_views("Dolly_Parton")
+            self.assertEqual(result, 300)
+            self.assertEqual(http.get.await_count, 2)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_pageview_network_error_is_retried(self):
+        async def run_test():
+            self._fake_http(
+                httpx.ConnectError("connection reset"),
+                httpx.Response(200, json={"items": [{"views": 90}]}),
+            )
+            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()):
+                self.assertEqual(await self.service.get_avg_monthly_views("Flaky"), 90)
+
+            # Never-recovering network errors give up as unknown, not as zero.
+            http = self._fake_http(asyncio.TimeoutError(), asyncio.TimeoutError(), asyncio.TimeoutError())
+            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()):
+                self.assertIsNone(await self.service.get_avg_monthly_views("Dead"))
+            self.assertEqual(http.get.await_count, 3)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_get_avg_monthly_views_handles_empty_items_429_and_other_errors(self):
+        async def run_test():
+            self._fake_http(httpx.Response(200, json={"items": []}))
+            self.assertEqual(await self.service.get_avg_monthly_views("Missing"), 0)
+
+            http = self._fake_http(*[httpx.Response(429, text="rate limited") for _ in range(3)])
+            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+                self.assertIsNone(await self.service.get_avg_monthly_views("Rate Limited"))
+            # Backoff happens between attempts, not after the last one.
+            self.assertEqual(mock_sleep.await_count, 2)
+            self.assertEqual(http.get.await_count, 3)
+
+            # 5xx is transient too: retry the full budget, then give up as unknown.
+            http = self._fake_http(httpx.Response(500, text="oops"))
+            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()):
+                self.assertIsNone(await self.service.get_avg_monthly_views("Oops"))
+            self.assertEqual(http.get.await_count, 3)
+
+            # A non-transient 4xx is not worth retrying.
+            http = self._fake_http(httpx.Response(400, text="bad title"))
+            self.assertIsNone(await self.service.get_avg_monthly_views("Bad"))
+            self.assertEqual(http.get.await_count, 1)
+
+        self.loop.run_until_complete(run_test())
+
+    # ----- Polling -----
+
+    def test_unchecked_name_is_announced_on_a_later_poll(self):
+        """A name whose views could not be fetched is retried and then announced."""
+        async def run_test():
+            self.service._first_poll = False
+            self.service._known_names = set()
+            self._fake_http(httpx.Response(200, text=SAMPLE_HTML))
+
+            with patch.object(self.service, "_save_state"), \
+                patch.object(self.service, "_announce", AsyncMock()) as mock_announce, \
+                patch.object(
+                    self.service,
+                    "get_avg_monthly_views",
+                    AsyncMock(side_effect=[None, 5_000_000]),
+                ), \
+                patch(
+                    "src.services.death_service.parse_deaths_html",
+                    return_value=[("Famous One", "Famous_One")],
+                ):
+                # First poll: the pageviews API is down.
+                await self.service._poll_once()
+                mock_announce.assert_not_awaited()
+                self.assertEqual(self.service._known_names, set())
+
+                # Second poll: same name is still "new", the API recovers.
+                await self.service._poll_once()
+                mock_announce.assert_awaited_once_with("Famous One", "Famous_One", 5_000_000)
+                self.assertEqual(
+                    self.service._known_names, {("Famous One", "Famous_One")}
+                )
+
+        self.loop.run_until_complete(run_test())
+
+    def test_poll_once_sets_baseline_and_handles_status_and_new_names(self):
+        async def run_test():
+            async def fake_views(article_title):
+                if article_title == "New_One":
+                    return 200000
+                if article_title == "Low_Views":
+                    return 1000
+                if article_title == "No_Data":
+                    return None
+                if article_title == "Boom":
+                    raise RuntimeError("boom")
+                raise AssertionError(f"unexpected article {article_title}")
+
+            self._fake_http(
+                httpx.Response(500),
+                httpx.Response(200, text=SAMPLE_HTML),
+                httpx.Response(200, text=SAMPLE_HTML),
+            )
+
+            with patch.object(self.service, "_save_state") as mock_save, patch.object(
+                self.service, "get_avg_monthly_views", AsyncMock(side_effect=fake_views)
+            ) as mock_views, patch.object(
+                self.service, "_announce", AsyncMock()
+            ) as mock_announce, patch(
+                "src.services.death_service.parse_deaths_html",
+                side_effect=[
+                    [("John Doe", "John_Doe")],
+                    [
+                        ("John Doe", "John_Doe"),
+                        ("New One", "New_One"),
+                        ("Low Views", "Low_Views"),
+                        ("No Data", "No_Data"),
+                        ("Boom", "Boom"),
+                    ],
+                ],
+            ):
+                await self.service._poll_once()
+                self.assertTrue(self.service._first_poll)
+
+                await self.service._poll_once()
+                self.assertFalse(self.service._first_poll)
+                self.assertEqual(self.service._known_names, {("John Doe", "John_Doe")})
+
+                await self.service._poll_once()
+
+            # One save covering the known-names and announced-set updates.
+            self.assertEqual(mock_save.call_count, 1)
+            self.assertEqual(mock_views.await_count, 4)
+            mock_announce.assert_awaited_once_with("New One", "New_One", 200000)
+            self.assertIn("New_One", self.service._announced_titles)
+            # "No Data" (views unavailable) and "Boom" (lookup raised) must not
+            # be recorded as seen, so the next poll retries them.
+            self.assertEqual(
+                self.service._known_names,
+                {
+                    ("John Doe", "John_Doe"),
+                    ("New One", "New_One"),
+                    ("Low Views", "Low_Views"),
+                },
+            )
+
+        self.loop.run_until_complete(run_test())
+
+    def test_poll_once_sends_etag_and_skips_parse_on_304(self):
+        async def run_test():
+            http = self._fake_http(
+                httpx.Response(200, text=SAMPLE_HTML, headers={"ETag": '"v1"'}),
+                httpx.Response(304),
+            )
+            with patch("src.services.death_service.parse_deaths_html",
+                       return_value=[("John Doe", "John_Doe")]) as mock_parse:
+                await self.service._poll_once()
+                self.assertEqual(self.service._deaths_page_etag, '"v1"')
+                self.assertEqual(http.get.await_args_list[0].kwargs["headers"], {})
+
+                await self.service._poll_once()
+                self.assertEqual(
+                    http.get.await_args_list[1].kwargs["headers"], {"If-None-Match": '"v1"'}
+                )
+            mock_parse.assert_called_once_with(SAMPLE_HTML)
+            self.assertEqual(self.service._known_names, {("John Doe", "John_Doe")})
+
+        self.loop.run_until_complete(run_test())
+
+    def test_poll_once_parses_off_the_event_loop(self):
+        async def run_test():
+            self._fake_http(httpx.Response(200, text=SAMPLE_HTML))
+
+            async def fake_to_thread(fn, *args):
+                return fn(*args)
+
+            with patch("src.services.death_service.asyncio.to_thread",
+                       side_effect=fake_to_thread) as mock_to_thread:
+                await self.service._poll_once()
+
+            from src.services.death_service import parse_deaths_html
+            mock_to_thread.assert_called_once_with(parse_deaths_html, SAMPLE_HTML)
+            self.assertEqual(len(self.service._known_names), 4)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_already_announced_name_not_reannounced(self):
+        """A name that reappears after being announced is never announced again."""
+        async def run_test():
+            self.service._first_poll = False
+            self.service._known_names = set()
+            self.service._announced_titles = {"Famous_One"}
+            self._fake_http(httpx.Response(200, text=SAMPLE_HTML))
+
+            with patch.object(self.service, "_save_state"), \
+                patch.object(self.service, "get_avg_monthly_views", AsyncMock(return_value=5_000_000)) as mock_views, \
+                patch.object(self.service, "_announce", AsyncMock()) as mock_announce, \
+                patch(
+                    "src.services.death_service.parse_deaths_html",
+                    return_value=[("Famous One", "Famous_One")],
+                ):
+                await self.service._poll_once()
+
+            # Already announced → we never even fetch views or announce again.
+            mock_views.assert_not_awaited()
+            mock_announce.assert_not_awaited()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_poll_loop_survives_errors(self):
         async def run_test():
             self.service._running = True
-            self.service._session = SimpleNamespace(closed=False, close=AsyncMock())
+            calls = []
 
             async def fake_poll_once():
+                calls.append(1)
                 self.service._running = False
                 raise RuntimeError("boom")
 
             self.service._poll_once = fake_poll_once
 
-            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()):
+            with patch("src.services.death_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
                 await self.service._poll_loop()
 
-            self.service._session.close.assert_awaited_once()
+            self.assertEqual(len(calls), 1)
+            mock_sleep.assert_awaited_once()
+
+        self.loop.run_until_complete(run_test())
+
+    # ----- HTTP client lifecycle -----
+
+    def test_get_setting_and_client_reuse(self):
+        self.state_service.get_death_settings.return_value = {"interval": 9}
+        self.assertEqual(self.service._get_setting("interval", 15), 9)
+        self.assertEqual(self.service._get_setting("missing", 15), 15)
+
+        async def run_test():
+            client_one = self.service._client()
+            client_two = self.service._client()
+            self.assertIsInstance(client_one, httpx.AsyncClient)
+            self.assertIs(client_one, client_two)
+            self.assertIn("cmwgpt-bot", client_one.headers["User-Agent"])
+            await self.service.close()
+            self.assertTrue(client_one.is_closed)
+            self.assertIsNone(self.service._http)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_stop_does_not_close_client(self):
+        http = self._fake_http(httpx.Response(200))
+        self.service.stop()
+        http.aclose.assert_not_awaited()
+        self.assertIs(self.service._http, http)
+
+    def test_close_stops_and_closes_client(self):
+        async def run_test():
+            http = self._fake_http(httpx.Response(200))
+            with patch.object(self.service, "stop") as mock_stop:
+                await self.service.close()
+            mock_stop.assert_called_once_with()
+            http.aclose.assert_awaited_once_with()
+            self.assertIsNone(self.service._http)
+
+            # Closing again with no client is a no-op.
+            await self.service.close()
+
+        self.loop.run_until_complete(run_test())
+
+    # ----- Limericks -----
+
+    def test_force_announce_calls_announce(self):
+        """force_announce bypasses the threshold and announces, without touching dedup state."""
+        async def run_test():
+            with patch.object(self.service, "get_avg_monthly_views", AsyncMock(return_value=123)) as mock_views, \
+                patch.object(self.service, "_announce", AsyncMock()) as mock_announce:
+                ok, msg = await self.service.force_announce(
+                    "https://en.wikipedia.org/wiki/Kevin_Keegan"
+                )
+
+            self.assertTrue(ok)
+            mock_views.assert_awaited_once_with("Kevin_Keegan")
+            mock_announce.assert_awaited_once_with("Kevin Keegan", "Kevin_Keegan", 123)
+            # Force testing must not pollute the real dedup set.
+            self.assertNotIn("Kevin_Keegan", self.service._announced_titles)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_announce_appends_model_summary(self):
+        """The announcement includes the model's 'known for' summary when available."""
+        async def run_test():
+            mock_openai = MagicMock()
+            mock_openai.get_chat_completion = AsyncMock(
+                return_value=("Legendary footballer and manager.", 0.0)
+            )
+            self.service._openai_service = mock_openai
+            self.service._model = "openrouter/some-model"
+
+            mock_channel = AsyncMock()
+            self.mock_bot.get_channel.return_value = mock_channel
+
+            await self.service._announce("Kevin Keegan", "Kevin_Keegan", 2_000_000)
+
+            # Two separate sends: the RIP line with the URL as-is, then the
+            # AI summary as a follow-up.
+            self.assertEqual(mock_channel.send.call_count, 2)
+            first = mock_channel.send.call_args_list[0][0][0]
+            second = mock_channel.send.call_args_list[1][0][0]
+            self.assertEqual(
+                first, "RIP Kevin Keegan - https://en.wikipedia.org/wiki/Kevin_Keegan"
+            )
+            self.assertEqual(second, "Legendary footballer and manager.")
+
+            # The model was prompted with the name and wiki link.
+            prompt = mock_openai.get_chat_completion.call_args.kwargs["messages"][0]["content"][0]["text"]
+            self.assertIn("Kevin Keegan", prompt)
+            self.assertIn("https://en.wikipedia.org/wiki/Kevin_Keegan", prompt)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_write_limerick_returns_model_output(self):
+        """write_limerick prompts with the name and wiki link, returns the verse."""
+        async def run_test():
+            mock_openai = MagicMock()
+            mock_openai.get_chat_completion = AsyncMock(
+                return_value=("There once was a keeper named Kev...", 0.0)
+            )
+            self.service._openai_service = mock_openai
+            self.service._model = "openrouter/some-model"
+
+            ok, message = await self.service.write_limerick("Kevin Keegan")
+
+            self.assertTrue(ok)
+            self.assertEqual(message, "There once was a keeper named Kev...")
+            kwargs = mock_openai.get_chat_completion.call_args.kwargs
+            prompt = kwargs["messages"][0]["content"][0]["text"]
+            self.assertIn("Kevin Keegan", prompt)
+            self.assertIn("https://en.wikipedia.org/wiki/Kevin_Keegan", prompt)
+            self.assertIn("limerick", prompt.lower())
+            self.assertFalse(kwargs["search"])
+
+        self.loop.run_until_complete(run_test())
+
+    def test_write_limerick_routes_gemini_model_to_gemini_service(self):
+        async def run_test():
+            from src.services.death_service import DeathService
+            gemini = MagicMock()
+            gemini.get_chat_completion = AsyncMock(return_value=({"text": "  Gemini verse  "}, 0.0))
+            openai = MagicMock()
+            openai.get_chat_completion = AsyncMock()
+            svc = DeathService(
+                state_service=self.state_service,
+                state_file="/tmp/_test_death_names.json",
+                death_channel_id="12345",
+                openai_service=openai,
+                gemini_service=gemini,
+                model="gemini-model",
+            )
+            with patch("src.services.completion_dispatch.is_gemini_model", return_value=True), \
+                    patch("src.services.completion_dispatch.get_thinking_level", return_value=None):
+                ok, message = await svc.write_limerick("Kevin Keegan")
+
+            self.assertTrue(ok)
+            self.assertEqual(message, "Gemini verse")
+            gemini.get_chat_completion.assert_awaited_once()
+            openai.get_chat_completion.assert_not_awaited()
+
+        self.loop.run_until_complete(run_test())
+
+    def test_write_limerick_routes_direct_claude_model_to_anthropic_service(self):
+        async def run_test():
+            from src.services.death_service import DeathService
+            anthropic = MagicMock()
+            anthropic.get_chat_completion = AsyncMock(return_value=("Claude verse", 0.0))
+            openai = MagicMock()
+            openai.get_chat_completion = AsyncMock()
+            svc = DeathService(
+                state_service=self.state_service,
+                state_file="/tmp/_test_death_names.json",
+                death_channel_id="12345",
+                openai_service=openai,
+                anthropic_service=anthropic,
+                model="direct-claude",
+            )
+            with patch("src.services.completion_dispatch.is_gemini_model", return_value=False), \
+                    patch("src.services.completion_dispatch.is_direct_anthropic_model", return_value=True):
+                ok, message = await svc.write_limerick("Kevin Keegan")
+
+            self.assertTrue(ok)
+            self.assertEqual(message, "Claude verse")
+            self.assertFalse(anthropic.get_chat_completion.await_args.kwargs["search"])
+            openai.get_chat_completion.assert_not_awaited()
 
         self.loop.run_until_complete(run_test())
 

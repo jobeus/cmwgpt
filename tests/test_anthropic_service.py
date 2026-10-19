@@ -2,7 +2,7 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.anthropic_service import (
     AnthropicService,
@@ -63,11 +63,16 @@ class TestHelpers(unittest.TestCase):
         messages = [
             {"role": "assistant", "content": [{"type": "text", "text": "earlier reply"}]},
             {"role": "user", "content": [{"type": "text", "text": "   "}]},
-            {"role": "user", "content": '[{"type": "text", "text": "json string"}]'},
+            {"role": "user", "content": "plain string"},
         ]
         result = build_anthropic_messages(messages)
         self.assertEqual([m["role"] for m in result], ["user", "assistant", "user"])
-        self.assertEqual(result[2]["content"][0]["text"], "json string")
+        self.assertEqual(result[2]["content"][0]["text"], "plain string")
+
+    def test_build_messages_passes_json_looking_string_through_as_text(self):
+        raw = '[{"type": "text", "text": "json string"}]'
+        result = build_anthropic_messages([{"role": "user", "content": raw}])
+        self.assertEqual(result, [{"role": "user", "content": [{"type": "text", "text": raw}]}])
 
     def test_usage_cost(self):
         cost = _usage_cost(_usage(input_tokens=1_000_000, output_tokens=100_000, searches=2))
@@ -182,6 +187,47 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(AnthropicServiceError):
             await service.get_chat_completion(
                 model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}])
+
+    async def test_clear_channel_cache_drops_history_breakpoint(self):
+        service, client = self.make_service(_response("one"), _response("two"))
+        await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=_history(3), channel_id=7)
+        self.assertEqual(service._history_breakpoints, {7: 1})
+
+        service.clear_channel_cache(7)
+        service.clear_channel_cache(999)  # unknown channel is a no-op
+        self.assertEqual(service._history_breakpoints, {})
+
+        await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=_history(30), channel_id=7)
+        second = client.beta.messages.create.call_args.kwargs["messages"]
+        self.assertEqual(_marked(second), [28])
+
+    async def test_strips_bot_mention_using_resolved_bot_id(self):
+        service, _ = self.make_service(_response("<@42> hello"), _response("<@42> hello"))
+        service.set_bot_id_loader(lambda: 42)
+        text, _ = await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}])
+        self.assertNotIn("<@42>", text)
+
+        with patch("src.services.anthropic_service.resolve_bot_id", return_value=None) as mock_resolve:
+            await service.get_chat_completion(
+                model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}], bot_id=7)
+        mock_resolve.assert_called_once_with(7, None, service._bot_id_loader)
+
+    def test_get_client_uses_stock_sdk_with_retries_and_timeout(self):
+        service = AnthropicService(api_key="test-key")
+        with patch("src.services.anthropic_service.anthropic.AsyncAnthropic") as mock_cls:
+            client = service.get_client()
+            self.assertIs(service.get_client(), client)
+        mock_cls.assert_called_once_with(api_key="test-key", max_retries=3, timeout=600.0)
+
+    def test_get_client_requires_api_key(self):
+        service = AnthropicService(api_key=None)
+        with patch("src.services.anthropic_service.get_config",
+                   return_value=SimpleNamespace(anthropic_api_key="")):
+            with self.assertRaises(AnthropicServiceError):
+                service.get_client()
 
 
 class TestDispatchRoutesDirect(unittest.IsolatedAsyncioTestCase):

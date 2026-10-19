@@ -22,10 +22,12 @@ from datetime import datetime, timezone
 from typing import Optional, Set, Tuple, Any
 from urllib.parse import unquote, urlparse
 
-import aiohttp
+import httpx
 import discord
 from bs4 import BeautifulSoup
 from discord.ext import commands
+
+from src.services.completion_dispatch import dispatch_completion
 
 logger = logging.getLogger(__name__)
 
@@ -115,11 +117,15 @@ class DeathService:
         state_file: str = STATE_FILE,
         openai_service=None,
         model: Optional[str] = None,
+        gemini_service=None,
+        anthropic_service=None,
     ):
         self._state_service = state_service
         self._death_channel_id = death_channel_id
         self._state_file = state_file
         self._openai_service = openai_service
+        self._gemini_service = gemini_service
+        self._anthropic_service = anthropic_service
         self._model = model
         self._bot: Optional[commands.Bot] = None
         self._task: Optional[asyncio.Task] = None
@@ -129,7 +135,9 @@ class DeathService:
         # is never announced twice, even across restarts or if it disappears
         # from the deaths page and later reappears.
         self._announced_titles: Set[str] = set()
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._http: Optional[httpx.AsyncClient] = None
+        # Validator for the deaths page, so an unchanged page isn't re-parsed.
+        self._deaths_page_etag: Optional[str] = None
         self._first_poll = True
 
         # Try to load persisted state
@@ -165,31 +173,20 @@ class DeathService:
         logger.info("DeathService started")
 
     def stop(self) -> None:
-        """Stop the polling task, close the HTTP session, and persist state."""
+        """Stop the polling task and persist state."""
         if self._running:
             self._running = False
             if self._task and not self._task.done():
                 self._task.cancel()
             self._save_state()
             logger.info("DeathService stopped")
-        # Close the session even if the poll loop never ran (e.g. when
-        # DEATH_CHANNEL_ID is unset but /wikicount created a session).
-        self._close_session()
 
-    def _close_session(self) -> None:
-        """Close the shared HTTP session if one was created."""
-        session = self._session
-        if session is None or session.closed:
-            return
-        self._session = None
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        if loop is not None and loop.is_running():
-            loop.create_task(session.close())
-        else:
-            asyncio.run(session.close())
+    async def close(self) -> None:
+        """Stop polling and close the HTTP client."""
+        self.stop()
+        http, self._http = self._http, None
+        if http is not None:
+            await http.aclose()
 
     # -- state persistence --------------------------------------------------
 
@@ -237,22 +234,13 @@ class DeathService:
 
     # -- main loop ----------------------------------------------------------
 
-    async def _get_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
+    def _client(self) -> httpx.AsyncClient:
+        if self._http is None:
+            self._http = httpx.AsyncClient(
                 headers={"Api-User-Agent": USER_AGENT, "User-Agent": USER_AGENT},
-                timeout=aiohttp.ClientTimeout(total=30, sock_connect=10),
+                timeout=httpx.Timeout(30.0, connect=10.0),
             )
-        return self._session
-
-    async def get_session(self) -> aiohttp.ClientSession:
-        """Public accessor: get or create the shared HTTP session.
-
-        Used by callers outside this service (e.g. /wikicount) so they don't
-        have to reach into private state. The session is closed by ``stop()``
-        even if the poll loop never ran.
-        """
-        return await self._get_session()
+        return self._http
 
     async def _poll_loop(self) -> None:
         """Fetch the deaths page every POLL_INTERVAL_SECONDS."""
@@ -262,7 +250,7 @@ class DeathService:
                     await self._poll_once()
                 except asyncio.CancelledError:
                     raise
-                except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                except (httpx.HTTPError, asyncio.TimeoutError) as exc:
                     logger.warning(f"Network error during death-page poll: {exc}")
                 except Exception:
                     logger.exception("Error during death-page poll")
@@ -271,23 +259,23 @@ class DeathService:
                 await asyncio.sleep(interval)
         except asyncio.CancelledError:
             pass
-        finally:
-            if self._session and not self._session.closed:
-                await self._session.close()
 
     async def _poll_once(self) -> None:
         """Single poll iteration."""
         year = datetime.now(timezone.utc).year
         url = f"https://en.wikipedia.org/api/rest_v1/page/html/Deaths_in_{year}"
 
-        session = await self._get_session()
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                logger.warning(f"Deaths page returned {resp.status}")
-                return
-            html = await resp.text()
+        headers = {"If-None-Match": self._deaths_page_etag} if self._deaths_page_etag else {}
+        resp = await self._client().get(url, headers=headers)
+        if resp.status_code == 304:
+            return
+        if resp.status_code != 200:
+            logger.warning(f"Deaths page returned {resp.status_code}")
+            return
+        self._deaths_page_etag = resp.headers.get("etag")
 
-        current = set(parse_deaths_html(html))
+        # The page is large and grows all year; parse it off the event loop.
+        current = set(await asyncio.to_thread(parse_deaths_html, resp.text))
 
         if self._first_poll:
             # Baseline — don't announce anything
@@ -323,7 +311,7 @@ class DeathService:
                     continue
 
                 min_views = self._get_setting("min_views", MIN_AVG_MONTHLY_VIEWS)
-                avg_views = await self.get_avg_monthly_views(article_title, session)
+                avg_views = await self.get_avg_monthly_views(article_title)
 
                 if avg_views is None:
                     logger.warning(
@@ -357,9 +345,7 @@ class DeathService:
 
     # -- pageviews ----------------------------------------------------------
 
-    async def get_avg_monthly_views(
-        self, article_title: str, session: aiohttp.ClientSession
-    ) -> Optional[int]:
+    async def get_avg_monthly_views(self, article_title: str) -> Optional[int]:
         """
         Return the average monthly pageviews for *article_title* over the
         last PAGEVIEW_MONTHS months, or None on failure.
@@ -401,45 +387,34 @@ class DeathService:
         for attempt in range(max_retries):
             last_attempt = attempt == max_retries - 1
             try:
-                async with session.get(url) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        items = data.get("items", [])
-                        if not items:
-                            return 0
-                        total = sum(item.get("views", 0) for item in items)
-                        return total // len(items)
+                resp = await self._client().get(url)
+                if resp.status_code == 200:
+                    items = resp.json().get("items", [])
+                    if not items:
+                        return 0
+                    return sum(item.get("views", 0) for item in items) // len(items)
 
-                    if resp.status == 404:
-                        return 0  # No data / page doesn't exist
+                if resp.status_code == 404:
+                    return 0  # No data / page doesn't exist
 
-                    # Rate limits and upstream 5xx (502/503/504) are transient:
-                    # back off and try again rather than giving up on the death.
-                    if resp.status == 429 or resp.status >= 500:
-                        text = await resp.text()
-                        if last_attempt:
-                            logger.warning(
-                                f"Pageviews API returned {resp.status} for {article_title}: {text}"
-                            )
-                            break
-                        delay = base_delay * (2 ** attempt)
-                        logger.warning(
-                            f"Pageviews API returned {resp.status} for {article_title}: {text} — "
-                            f"retrying in {delay}s (attempt {attempt + 1}/{max_retries})"
-                        )
-                        await asyncio.sleep(delay)
-                        continue
-
-                    text = await resp.text()
+                # Rate limits and upstream 5xx are transient: back off and retry.
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    if last_attempt:
+                        logger.warning(f"Pageviews API returned {resp.status_code} for {article_title}: {resp.text}")
+                        break
+                    delay = base_delay * (2 ** attempt)
                     logger.warning(
-                        f"Pageviews API returned {resp.status} for {article_title}: {text}"
+                        f"Pageviews API returned {resp.status_code} for {article_title}: {resp.text} — "
+                        f"retrying in {delay}s (attempt {attempt + 1}/{max_retries})"
                     )
-                    return None
-            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                    await asyncio.sleep(delay)
+                    continue
+
+                logger.warning(f"Pageviews API returned {resp.status_code} for {article_title}: {resp.text}")
+                return None
+            except (httpx.HTTPError, asyncio.TimeoutError) as exc:
                 if last_attempt:
-                    logger.warning(
-                        f"Network error fetching pageviews for {article_title}: {exc}"
-                    )
+                    logger.warning(f"Network error fetching pageviews for {article_title}: {exc}")
                     break
                 delay = base_delay * (2 ** attempt)
                 logger.warning(
@@ -510,12 +485,19 @@ class DeathService:
             f"posted as-is, so give only a title line and the limerick."
         )
         try:
-            summary, _cost = await self._openai_service.get_chat_completion(
+            reply, _cost = await dispatch_completion(
                 model=self._model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": [{"type": "text", "text": prompt}]}],
+                system_prompt=None,
+                openai_service=self._openai_service,
+                gemini_service=self._gemini_service,
+                anthropic_service=self._anthropic_service,
+                identity={},
+                search=False,
             )
-            summary = (summary or "").strip()
-            return summary or None
+            if isinstance(reply, dict):
+                reply = reply.get("text", "")
+            return str(reply or "").strip() or None
         except Exception:
             logger.exception(f"Failed to summarize {display_name} for death announcement")
             return None
@@ -561,8 +543,7 @@ class DeathService:
         # intentionally not enforced here.
         avg_views = 0
         try:
-            session = await self._get_session()
-            avg_views = await self.get_avg_monthly_views(article_title, session) or 0
+            avg_views = await self.get_avg_monthly_views(article_title) or 0
         except Exception:
             logger.exception(f"force_announce: failed to fetch pageviews for {article_title}")
 

@@ -264,8 +264,9 @@ class MentionHandler:
                 # interaction and start a fresh context from the most recent messages.
                 logger.info(f"Massive message gap detected in #{message.channel.name}. Resetting context.")
                 history_msgs = []
-                if self._gemini_service:
-                    self._gemini_service.clear_channel_cache(channel_id)
+                for service in (self._gemini_service, self._anthropic_service):
+                    if service:
+                        service.clear_channel_cache(channel_id)
                     
                 async for msg in message.channel.history(limit=limit_lines):
                     history_msgs.append(msg)
@@ -277,9 +278,11 @@ class MentionHandler:
                 # Update timestamp for this channel
                 self._history_cache[channel_id]["timestamp"] = current_time
         else:
-            # History window reset — also clear Gemini conversation cache
-            if self._gemini_service:
-                self._gemini_service.clear_channel_cache(channel_id)
+            # History window reset: the providers' per-channel continuation
+            # state no longer matches what we're about to send.
+            for service in (self._gemini_service, self._anthropic_service):
+                if service:
+                    service.clear_channel_cache(channel_id)
 
             async for msg in message.channel.history(limit=limit_lines):
                 history_msgs.append(msg)

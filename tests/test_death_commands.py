@@ -199,9 +199,7 @@ class TestDeathCommands(unittest.IsolatedAsyncioTestCase):
         interaction = make_interaction(channel_id=123)
         interaction.user.guild_permissions.administrator = False
 
-        with patch("src.bot.commands.death.safe_run", new=AsyncMock()), patch(
-            "src.bot.commands.death.asyncio.create_task", side_effect=lambda coro: coro.close()
-        ):
+        with patch("src.bot.commands.death.safe_run", new=AsyncMock()):
             await limerick(interaction, "Kevin Keegan")
 
         interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
@@ -230,9 +228,7 @@ class TestDeathCommands(unittest.IsolatedAsyncioTestCase):
     async def test_death_wrappers_defer_and_schedule_safe_run(self):
         commands, _ = self.make_commands(death_channel_id="123")
 
-        with patch("src.bot.commands.death.safe_run", new=AsyncMock()) as mock_safe_run, patch(
-            "src.bot.commands.death.asyncio.create_task", side_effect=lambda coro: coro.close()
-        ) as mock_create_task:
+        with patch("src.bot.commands.death.safe_run", new=AsyncMock()) as mock_safe_run:
             group = commands._create_death_group()
             set_cmd = next(cmd for cmd in group.commands if cmd.name == "set")
             reset_cmd = next(cmd for cmd in group.commands if cmd.name == "reset")
@@ -248,4 +244,4 @@ class TestDeathCommands(unittest.IsolatedAsyncioTestCase):
             await view_cmd.callback(interaction)
 
         self.assertEqual(mock_safe_run.call_count, 3)
-        self.assertEqual(mock_create_task.call_count, 3)
+        self.assertEqual(mock_safe_run.await_count, 3)

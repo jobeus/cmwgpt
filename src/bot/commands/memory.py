@@ -2,7 +2,6 @@
 Memory Commands - /memory (view and edit your own memory) and /fillmemory (rebuild from the last week).
 """
 
-import asyncio
 import logging
 from typing import Optional
 
@@ -72,7 +71,7 @@ class MemoryCommands:
             target = await resolve_target(interaction, user)
             if target is None or not await safe_defer(interaction, ephemeral=True, thinking=True):
                 return
-            asyncio.create_task(safe_run(interaction, self._handle_show, interaction, target))
+            await safe_run(interaction, self._handle_show, interaction, target)
 
         @group.command(name="add", description="Tell the bot something to remember about you")
         @app_commands.describe(note="Something about you, like 'I drive a 2019 Tacoma'", user=user_help)
@@ -80,7 +79,7 @@ class MemoryCommands:
             target = await resolve_target(interaction, user)
             if target is None or not await safe_defer(interaction, ephemeral=False, thinking=True):
                 return
-            asyncio.create_task(safe_run(interaction, self._handle_add, interaction, target, note))
+            await safe_run(interaction, self._handle_add, interaction, target, note)
 
         @group.command(name="correct", description="Fix something the bot remembers about you")
         @app_commands.describe(
@@ -93,7 +92,7 @@ class MemoryCommands:
             target = await resolve_target(interaction, user)
             if target is None or not await safe_defer(interaction, ephemeral=False, thinking=True):
                 return
-            asyncio.create_task(safe_run(interaction, self._handle_correct, interaction, target, correction))
+            await safe_run(interaction, self._handle_correct, interaction, target, correction)
 
         @group.command(name="clear", description="Forget things about you")
         @app_commands.describe(what="What to forget (default: everything)")
@@ -104,7 +103,7 @@ class MemoryCommands:
         async def memory_clear(interaction: discord.Interaction, what: Optional[str] = "all"):
             if not await safe_defer(interaction, ephemeral=False, thinking=True):
                 return
-            asyncio.create_task(safe_run(interaction, self._handle_clear, interaction, what or "all"))
+            await safe_run(interaction, self._handle_clear, interaction, what or "all")
 
         return group
 
@@ -121,7 +120,7 @@ class MemoryCommands:
                 return
             if not await safe_defer(interaction, ephemeral=False, thinking=True):
                 return
-            asyncio.create_task(safe_run(interaction, self._handle_fill, interaction))
+            await safe_run(interaction, self._handle_fill, interaction)
 
         return fillmemory_command
 

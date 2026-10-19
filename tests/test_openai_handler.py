@@ -1,23 +1,16 @@
 """Unit tests for OpenAI service module."""
 
-import os
-import sys
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 from tests.config_helpers import cfg
 
-from src.services.openai_service import OpenAIService, OpenAIServiceError, openai_service
-
-# Add parent directory to path to import modules
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(
-    0,
-    os.path.join(
-        os.path.dirname(
-            os.path.dirname(
-                os.path.abspath(__file__))),
-        "src"))
+from src.services.openai_service import (
+    SDK_MAX_RETRIES,
+    SOFT_RETRY_ATTEMPTS,
+    OpenAIService,
+    OpenAIServiceError,
+)
 
 
 class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
@@ -27,8 +20,8 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         """Set up test environment with mock client."""
         self.mock_client = AsyncMock()
         self.mock_client.default_headers = {}
-        openai_service.set_client(self.mock_client)
-        openai_service.set_bot_id_loader(None)
+        self.service = OpenAIService()
+        self.service.set_client(self.mock_client)
 
     async def test_get_chat_completion_success(self):
         """Test successful chat completion."""
@@ -42,7 +35,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         messages = [{"role": "user", "content": "Hello"}]
         system_prompt = "You are a helpful assistant."
 
-        result, _ = await openai_service.get_chat_completion(model, messages, system_prompt)
+        result, _ = await self.service.get_chat_completion(model, messages, system_prompt)
 
         self.assertEqual(result, "Hello! How can I help you today?")
 
@@ -78,7 +71,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
 
                 messages = [{"role": "user", "content": "Test"}]
 
-                result, _ = await openai_service.get_chat_completion(model, messages)
+                result, _ = await self.service.get_chat_completion(model, messages)
 
                 self.assertEqual(result, f"Response from {model}")
 
@@ -90,7 +83,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         mock_response.choices = [mock_choice]
         self.mock_client.chat.completions.create.return_value = mock_response
 
-        result, _ = await openai_service.get_chat_completion("google/gemini-2.5-flash", [])
+        result, _ = await self.service.get_chat_completion("google/gemini-2.5-flash", [])
         self.assertEqual(result, "I'm ready to help!")
 
     async def test_chat_completion_complex_messages(self):
@@ -111,9 +104,12 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         ]
         system_prompt = "You are a helpful assistant."
 
-        result, _ = await openai_service.get_chat_completion("google/gemini-2.5-flash", messages, system_prompt)
+        result, _ = await self.service.get_chat_completion("google/gemini-2.5-flash", messages, system_prompt)
 
         self.assertEqual(result, "Complex response")
+        # JSON-looking string content is no longer parsed; it is sent as-is.
+        sent = self.mock_client.chat.completions.create.call_args.kwargs["messages"]
+        self.assertEqual([m["content"] for m in sent[1:]], [m["content"] for m in messages])
 
     @patch("src.services.openai_service.clean_openai_response", return_value="cleaned")
     async def test_chat_completion_uses_injected_bot_id_loader(self, mock_clean):
@@ -122,9 +118,9 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
         mock_choice.message.content = "<@12345> Hello"
         mock_response.choices = [mock_choice]
         self.mock_client.chat.completions.create.return_value = mock_response
-        openai_service.set_bot_id_loader(lambda: 12345)
+        self.service.set_bot_id_loader(lambda: 12345)
 
-        result, _ = await openai_service.get_chat_completion("gpt-5-mini", [{"role": "user", "content": "hi"}])
+        result, _ = await self.service.get_chat_completion("gpt-5-mini", [{"role": "user", "content": "hi"}])
 
         self.assertEqual(result, "cleaned")
         mock_clean.assert_called_once_with("<@12345> Hello", bot_id=12345)
@@ -148,7 +144,7 @@ class TestOpenAIHandler(unittest.IsolatedAsyncioTestCase):
             }
         ]
 
-        result, _ = await openai_service.get_chat_completion("gpt-test", messages)
+        result, _ = await self.service.get_chat_completion("gpt-test", messages)
 
         self.assertEqual(result, "Filtered response")
         
@@ -209,22 +205,23 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
         self.client.chat.completions.create = AsyncMock()
         self.service.set_client(self.client)
 
-    def test_get_client_uses_testing_stub_and_real_client_factory(self):
-        service = OpenAIService()
-
-        with patch("src.config._cached_config", cfg(is_testing=True)):
-            client = service.get_client()
-            self.assertTrue(callable(client.anything))
-
+    def test_get_client_builds_stock_sdk_client_with_retries(self):
         service = OpenAIService()
         fake_client = MagicMock()
-        with patch("src.config._cached_config", cfg(is_testing=False)), patch(
+        with patch("src.config._cached_config", cfg(is_testing=True, openrouter_api_key="or-key")), patch(
             "src.services.openai_service.AsyncOpenAI", return_value=fake_client
         ) as mock_factory:
             client = service.get_client()
+            self.assertIs(service.get_client(), client)
 
         self.assertIs(client, fake_client)
         mock_factory.assert_called_once()
+        kwargs = mock_factory.call_args.kwargs
+        self.assertEqual(kwargs["base_url"], "https://openrouter.ai/api/v1")
+        self.assertEqual(kwargs["api_key"], "or-key")
+        self.assertEqual(kwargs["max_retries"], SDK_MAX_RETRIES)
+        self.assertEqual(SDK_MAX_RETRIES, 3)
+        self.assertNotIn("http_client", kwargs)
 
     async def test_close_resets_client_on_success_and_failure(self):
         closing_client = MagicMock()
@@ -308,7 +305,7 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "cleaned")
         self.client.chat.completions.create.assert_awaited_once()
 
-    async def test_get_chat_completion_preserves_invalid_json_and_uses_state_service_bot_id(self):
+    async def test_get_chat_completion_passes_string_content_through_and_uses_state_service_bot_id(self):
         self.client.chat.completions.create.return_value = make_response("hello")
         state_service = SimpleNamespace(bot_id=555)
         messages = [
@@ -341,37 +338,18 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
         with (
             patch("src.services.openai_service.clean_openai_response", return_value="cleaned") as mock_clean,
             patch("src.services.openai_service.logger.warning") as mock_warning,
+            self.assertLogs("src.utils.message_utils", level="WARNING") as bot_id_logs,
         ):
             result, _ = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
 
         self.assertEqual(result, "cleaned")
         mock_clean.assert_called_once_with("hello", bot_id=None)
+        self.assertTrue(any("Failed to get bot_id" in msg for msg in bot_id_logs.output))
         warning_messages = [call.args[0] for call in mock_warning.call_args_list]
-        self.assertTrue(any("Failed to get bot_id" in msg for msg in warning_messages))
         self.assertTrue(any("Failed to parse cost" in msg for msg in warning_messages))
 
-    async def test_get_chat_completion_retries_rate_limit_then_succeeds(self):
-        self.client.chat.completions.create.side_effect = [
-            FakeRateLimitError("slow down"),
-            make_response("hello"),
-        ]
-
-        with patch("src.services.openai_service.RateLimitError", FakeRateLimitError), patch(
-            "src.services.openai_service.clean_openai_response", return_value="done"
-        ), patch(
-            "src.services.openai_service.asyncio.sleep", new=AsyncMock()
-        ) as mock_sleep:
-            result, _ = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
-
-        self.assertEqual(result, "done")
-        mock_sleep.assert_awaited_once_with(1.0)
-
-    async def test_get_chat_completion_raises_after_rate_limit_retries_exhausted(self):
-        self.client.chat.completions.create.side_effect = [
-            FakeRateLimitError("slow down 1"),
-            FakeRateLimitError("slow down 2"),
-            FakeRateLimitError("slow down 3"),
-        ]
+    async def test_rate_limit_error_raises_immediately_without_manual_retry(self):
+        self.client.chat.completions.create.side_effect = FakeRateLimitError("slow down")
 
         with patch("src.services.openai_service.RateLimitError", FakeRateLimitError), patch(
             "src.services.openai_service.asyncio.sleep", new=AsyncMock()
@@ -379,8 +357,9 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(OpenAIServiceError) as ctx:
                 await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
 
-        self.assertIn("Rate limit exceeded after 3 attempts", str(ctx.exception))
-        self.assertEqual(mock_sleep.await_count, 2)
+        self.assertIn("Rate limit exceeded", str(ctx.exception))
+        self.client.chat.completions.create.assert_awaited_once()
+        mock_sleep.assert_not_awaited()
 
     async def test_get_chat_completion_handles_authentication_errors(self):
         self.client.chat.completions.create.side_effect = FakeAuthenticationError("bad key")
@@ -391,12 +370,8 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("Authentication failed", str(ctx.exception))
 
-    async def test_get_chat_completion_raises_after_connection_retries_exhausted(self):
-        self.client.chat.completions.create.side_effect = [
-            FakeAPIConnectionError("offline 1"),
-            FakeAPIConnectionError("offline 2"),
-            FakeAPIConnectionError("offline 3"),
-        ]
+    async def test_connection_error_raises_immediately_without_manual_retry(self):
+        self.client.chat.completions.create.side_effect = FakeAPIConnectionError("offline")
 
         with patch("src.services.openai_service.APIConnectionError", FakeAPIConnectionError), patch(
             "src.services.openai_service.asyncio.sleep", new=AsyncMock()
@@ -404,8 +379,23 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(OpenAIServiceError) as ctx:
                 await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
 
-        self.assertIn("Connection failed after 3 attempts", str(ctx.exception))
-        self.assertEqual(mock_sleep.await_count, 2)
+        self.assertIn("Connection to OpenRouter failed", str(ctx.exception))
+        self.client.chat.completions.create.assert_awaited_once()
+        mock_sleep.assert_not_awaited()
+
+    async def test_api_error_raises_immediately_and_dumps_request(self):
+        self.client.chat.completions.create.side_effect = FakeAPIError("upstream")
+
+        with patch("src.services.openai_service.APIError", FakeAPIError), patch.object(
+            self.service, "_dump_bad_request"
+        ) as mock_dump, patch("src.services.openai_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+            with self.assertRaises(OpenAIServiceError) as ctx:
+                await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+
+        self.assertIn("OpenRouter API error: upstream", str(ctx.exception))
+        self.client.chat.completions.create.assert_awaited_once()
+        mock_sleep.assert_not_awaited()
+        mock_dump.assert_called_once()
 
     async def test_get_chat_completion_retries_retryable_soft_error_then_succeeds(self):
         self.client.chat.completions.create.side_effect = [
@@ -423,22 +413,18 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "ok")
         mock_sleep.assert_awaited_once_with(1.0)
 
-    async def test_get_chat_completion_raises_after_api_error_retries_exhausted(self):
-        self.client.chat.completions.create.side_effect = [
-            FakeAPIError("upstream 1"),
-            FakeAPIError("upstream 2"),
-            FakeAPIError("upstream 3"),
-        ]
+    async def test_retryable_soft_error_gives_up_after_soft_retry_attempts(self):
+        self.client.chat.completions.create.return_value = make_response(error={"code": 503, "message": "down"})
 
-        with patch("src.services.openai_service.APIError", FakeAPIError), patch.object(
-            self.service, "_dump_bad_request"
-        ) as mock_dump, patch("src.services.openai_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+        with patch.object(self.service, "_dump_bad_request"), patch(
+            "src.services.openai_service.asyncio.sleep", new=AsyncMock()
+        ) as mock_sleep:
             with self.assertRaises(OpenAIServiceError) as ctx:
                 await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
 
-        self.assertIn("OpenAI API error after 3 attempts", str(ctx.exception))
-        self.assertEqual(mock_sleep.await_count, 2)
-        mock_dump.assert_called_once()
+        self.assertIn("Upstream error 503: down", str(ctx.exception))
+        self.assertEqual(self.client.chat.completions.create.await_count, SOFT_RETRY_ATTEMPTS)
+        self.assertEqual(mock_sleep.await_count, SOFT_RETRY_ATTEMPTS - 1)
 
     async def test_get_chat_completion_raises_for_non_retryable_soft_error(self):
         self.client.chat.completions.create.return_value = make_response(
@@ -449,7 +435,8 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(OpenAIServiceError) as ctx:
                 await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
 
-        self.assertIn("Non-retryable soft-error 400", str(ctx.exception))
+        self.assertIn("Upstream error 400: bad request", str(ctx.exception))
+        self.client.chat.completions.create.assert_awaited_once()
         mock_dump.assert_called_once()
 
     async def test_get_chat_completion_handles_bad_request_errors(self):
@@ -482,9 +469,29 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(OpenAIServiceError) as ctx:
                 await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
 
-        self.assertIn("Unexpected error: The model API returned an empty response.", str(ctx.exception))
-        self.assertEqual(mock_sleep.await_count, 2)
+        self.assertIn("The model API returned an empty response.", str(ctx.exception))
+        self.assertEqual(self.client.chat.completions.create.await_count, SOFT_RETRY_ATTEMPTS)
+        self.assertEqual(mock_sleep.await_count, SOFT_RETRY_ATTEMPTS - 1)
         mock_dump.assert_called_once()
+
+    async def test_empty_response_is_retried_then_succeeds(self):
+        self.client.chat.completions.create.side_effect = [make_response(""), make_response("second")]
+
+        with patch("src.services.openai_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+            result, _ = await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+
+        self.assertEqual(result, "second")
+        mock_sleep.assert_awaited_once_with(1.0)
+
+    async def test_search_plugin_only_for_sonnet_and_only_when_search_enabled(self):
+        self.client.chat.completions.create.return_value = make_response("hi")
+
+        await self.service.get_chat_completion(
+            "anthropic/claude-sonnet-5.5", [{"role": "user", "content": "hi"}], search=False)
+        self.assertNotIn("plugins", self.client.chat.completions.create.call_args.kwargs["extra_body"])
+
+        await self.service.get_chat_completion("gpt-test", [{"role": "user", "content": "hi"}])
+        self.assertNotIn("plugins", self.client.chat.completions.create.call_args.kwargs["extra_body"])
 
 
 if __name__ == "__main__":

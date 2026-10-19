@@ -12,7 +12,8 @@ import discord
 import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from typing import Union, List
+import logging
+from typing import Any, Callable, List, Optional, Union
 
 
 PROMPT_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -138,3 +139,21 @@ def clean_openai_response(response: str, bot_id: int = None) -> str:
     cleaned = cleaned.replace("\\\\", "\\")
 
     return cleaned
+
+
+def resolve_bot_id(
+    bot_id: Optional[int],
+    state_service: Any = None,
+    bot_id_loader: Optional[Callable[[], Optional[int]]] = None,
+) -> Optional[int]:
+    """The bot's user ID for reply cleaning: explicit, else from state, else the loader."""
+    if bot_id:
+        return bot_id
+    try:
+        if state_service is not None and getattr(state_service, "bot_id", None):
+            return state_service.bot_id
+        if bot_id_loader:
+            return bot_id_loader()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Failed to get bot_id for cleaning: {e}")
+    return None

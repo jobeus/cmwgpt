@@ -1,36 +1,14 @@
 """Tests for Twitter/X URL helpers."""
 
 import unittest
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+from unittest.mock import AsyncMock, patch
+
+import httpx
 
 from src.utils import twitter_utils
 from tests.config_helpers import cfg
 
-
-class FakeAsyncClientContext:
-    def __init__(self, client):
-        self._client = client
-
-    async def __aenter__(self):
-        return self._client
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-
-class FakeStreamContext:
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-    def raise_for_status(self):
-        return None
-
-    async def aiter_bytes(self):
-        yield b"video-bytes"
+_RealAsyncClient = httpx.AsyncClient
 
 
 def build_tweet_result(author, text):
@@ -40,7 +18,36 @@ def build_tweet_result(author, text):
     }
 
 
+def tweet_payload(main, *replies, media=None):
+    main = dict(main)
+    if media is not None:
+        main["legacy"] = {**main["legacy"], "extended_entities": {"media": media}}
+    entries = [{"content": {"itemContent": {"tweet_results": {"result": main}}}}]
+    for reply in replies:
+        entries.append({"content": {"itemContent": {"tweet_results": {"result": reply}}}})
+    return {"data": {"threaded_conversation_with_injections_v2": {"instructions": [None, {"entries": entries}]}}}
+
+
 class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Keep the shared fetch-failure store out of these tests.
+        patcher = patch("src.utils.cache_utils._failure_store", return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.requests = []
+
+    def use_api(self, handler):
+        def wrapped(request):
+            self.requests.append(request)
+            return handler(request)
+
+        def factory(*args, **kwargs):
+            return _RealAsyncClient(*args, transport=httpx.MockTransport(wrapped), **kwargs)
+
+        patcher = patch("src.utils.twitter_utils.httpx.AsyncClient", factory)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_extract_twitter_urls_normalizes_and_deduplicates(self):
         text = "https://twitter.com/a/status/1 https://xcancel.com/a/status/1 https://x.com/a/status/1"
 
@@ -102,149 +109,156 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(media[0]["url"], "low")
         self.assertEqual(twitter_utils.extract_media({}), [])
 
-    async def test_get_tweet_context_returns_cached_values_and_retries_legacy_failure_sentinels(self):
-        legacy_cache = {"https://x.com/ok": "cached", "https://x.com/bad": None}
+    async def test_get_tweet_context_returns_cached_tuple_without_fetching(self):
+        cache = {"https://x.com/a/status/1": ["cached context", ["data:image/png;base64,AAA"]]}
+        self.use_api(lambda request: httpx.Response(500))
 
-        with patch("src.utils.twitter_utils._twitter_cache", legacy_cache), patch(
-            "src.config._cached_config", cfg(rapidapi_key="")
+        with patch("src.utils.twitter_utils._twitter_cache", cache), patch(
+            "src.config._cached_config", cfg(rapidapi_key="rapid-key")
         ):
-            self.assertEqual(await twitter_utils.get_tweet_context("https://x.com/ok"), "cached")
-            # The None failure sentinel is discarded so the fetch is retried
-            # (here it fails again because no API key is configured).
-            self.assertIsNone(await twitter_utils.get_tweet_context("https://x.com/bad"))
+            result = await twitter_utils.get_tweet_context("https://x.com/a/status/1")
 
-        self.assertNotIn("https://x.com/bad", legacy_cache)
+        # JSON round-trips tuples as lists; the getter still returns a tuple.
+        self.assertEqual(result, ("cached context", ["data:image/png;base64,AAA"]))
+        self.assertEqual(self.requests, [])
+
+    async def test_get_tweet_context_cache_only_miss_returns_none(self):
+        self.use_api(lambda request: httpx.Response(500))
+        with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
+            "src.config._cached_config", cfg(rapidapi_key="rapid-key")
+        ):
+            self.assertIsNone(await twitter_utils.get_tweet_context("https://x.com/a/status/1", cache_only=True))
+        self.assertEqual(self.requests, [])
 
     async def test_get_tweet_context_requires_api_key(self):
-        with patch("src.config._cached_config", cfg(rapidapi_key="")):
+        with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
+            "src.config._cached_config", cfg(rapidapi_key="")
+        ):
             self.assertIsNone(await twitter_utils.get_tweet_context("https://x.com/a/status/1"))
 
     async def test_get_tweet_context_rejects_urls_without_status_id(self):
+        self.use_api(lambda request: httpx.Response(200, json={}))
         with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
             "src.config._cached_config", cfg(rapidapi_key="rapid-key")
-        ), patch("src.utils.twitter_utils.create_async_client") as mock_create_client:
+        ):
             result = await twitter_utils.get_tweet_context("https://x.com/elonmusk")
 
         self.assertIsNone(result)
-        mock_create_client.assert_not_called()
+        self.assertEqual(self.requests, [])
 
     async def test_get_tweet_context_fetches_context_and_replies(self):
         fake_cache = {}
-        fake_response = MagicMock()
-        fake_response.raise_for_status.return_value = None
-        fake_response.json.return_value = {
-            "data": {
-                "threaded_conversation_with_injections_v2": {
-                    "instructions": [
-                        None,
-                        {"entries": [
-                            {"content": {"itemContent": {"tweet_results": {"result": build_tweet_result("Alice", "Main post")}}}},
-                            {"content": {"itemContent": {"tweet_results": {"result": build_tweet_result("Bob", "Reply one")}}}},
-                        ]}
-                    ]
-                }
-            }
-        }
-        fake_response.request = SimpleNamespace(method="GET", url="https://api.example/tweet", headers={"X": "1"}, content=b"")
-        fake_response.status_code = 200
-        fake_response.headers = {"Content-Type": "application/json"}
-        fake_client = MagicMock()
-        fake_client.get = AsyncMock(return_value=fake_response)
+        payload = tweet_payload(build_tweet_result("Alice", "Main post"), build_tweet_result("Bob", "Reply one"))
+        self.use_api(lambda request: httpx.Response(200, json=payload))
 
         with patch("src.utils.twitter_utils._twitter_cache", fake_cache), patch(
-            "src.config._cached_config", cfg(rapidapi_key="rapid-key", groq_api_key="")
-        ), patch(
-            "src.utils.twitter_utils.create_async_client",
-            side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client),
-        ), patch("src.utils.twitter_utils.extract_media", return_value=[]):
-            result = await twitter_utils.get_tweet_context("https://x.com/a/status/123?foo=bar")
+            "src.config._cached_config", cfg(rapidapi_key="rapid-key")
+        ), patch("src.utils.twitter_utils.transcribe_video_url", new_callable=AsyncMock) as mock_video:
+            result = await twitter_utils.get_tweet_context("https://x.com/a/status/123/photo/1?foo=bar")
 
-        # result is a tuple: (context, [])
-        context = result[0]
+        context, images = result
         self.assertIn("Tweet by Alice:\nMain post", context)
-        self.assertIn("↳ Bob: Reply one", context)
-        self.assertEqual(fake_cache["https://x.com/a/status/123?foo=bar"], result)
+        self.assertIn("Top replies:\n  ↳ Bob: Reply one", context)
+        self.assertEqual(images, [])
+        self.assertEqual(fake_cache["https://x.com/a/status/123/photo/1?foo=bar"], (context, []))
+        mock_video.assert_not_called()
 
-    async def test_get_tweet_context_returns_none_on_parse_error(self):
-        fake_response = MagicMock()
-        fake_response.raise_for_status.return_value = None
-        fake_response.json.return_value = {"bad": "shape"}
-        fake_response.request = SimpleNamespace(method="GET", url="https://api.example/tweet", headers={}, content=b"")
-        fake_response.status_code = 200
-        fake_response.headers = {}
-        fake_client = MagicMock()
-        fake_client.get = AsyncMock(return_value=fake_response)
+        request = self.requests[0]
+        self.assertEqual(request.url.params["id"], "123")
+        self.assertEqual(request.headers["x-rapidapi-key"], "rapid-key")
+        self.assertEqual(request.url.host, twitter_utils.RAPIDAPI_HOST)
+
+    async def test_get_tweet_context_prefers_note_tweet_text(self):
+        main = build_tweet_result("Alice", "truncated…")
+        main["note_tweet"] = {"note_tweet_results": {"result": {"text": "The full long post"}}}
+        self.use_api(lambda request: httpx.Response(200, json=tweet_payload(main)))
 
         with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
             "src.config._cached_config", cfg(rapidapi_key="rapid-key")
-        ), patch("src.utils.twitter_utils.create_async_client", side_effect=lambda **kwargs: FakeAsyncClientContext(fake_client)):
-            result = await twitter_utils.get_tweet_context("https://x.com/a/status/123")
+        ):
+            context, _ = await twitter_utils.get_tweet_context("https://x.com/a/status/9")
 
-        self.assertIsNone(result)
+        self.assertIn("The full long post", context)
+        self.assertNotIn("Top replies", context)
 
-    async def test_get_tweet_context_includes_video_transcript_when_available(self):
+    async def test_get_tweet_context_returns_none_on_parse_error(self):
         fake_cache = {}
-        first_response = MagicMock()
-        first_response.raise_for_status.return_value = None
-        first_response.json.return_value = {
-            "data": {
-                "threaded_conversation_with_injections_v2": {
-                    "instructions": [
-                        None,
-                        {"entries": [
-                            {"content": {"itemContent": {"tweet_results": {"result": build_tweet_result("Alice", "Main post")}}}},
-                            {"content": {"itemContent": {"tweet_results": {"result": build_tweet_result("Bob", "Reply one")}}}},
-                        ]}
-                    ]
-                }
-            }
-        }
-        first_response.request = SimpleNamespace(method="GET", url="https://api.example/tweet", headers={}, content=b"")
-        first_response.status_code = 200
-        first_response.headers = {}
-
-        fetch_client = MagicMock()
-        fetch_client.get = AsyncMock(return_value=first_response)
-
-        stream_client = MagicMock()
-        stream_client.stream.return_value = FakeStreamContext()
-
-        groq_request = SimpleNamespace(
-            method="POST",
-            url="https://api.groq.com/openai/v1/audio/transcriptions",
-            headers={"Authorization": "Bearer groq"},
-            content=b"audio",
-            aread=AsyncMock(),
-        )
-        groq_response = SimpleNamespace(
-            raise_for_status=lambda: None,
-            text="video words",
-            request=groq_request,
-            status_code=200,
-            headers={"Content-Type": "text/plain"},
-        )
-        post_client = MagicMock()
-        post_client.post = AsyncMock(return_value=groq_response)
-
-        contexts = [
-            FakeAsyncClientContext(fetch_client),
-            FakeAsyncClientContext(stream_client),
-            FakeAsyncClientContext(post_client),
-        ]
+        self.use_api(lambda request: httpx.Response(200, json={"bad": "shape"}))
 
         with patch("src.utils.twitter_utils._twitter_cache", fake_cache), patch(
-            "src.config._cached_config", cfg(rapidapi_key="rapid-key", groq_api_key="groq-key")
-        ), patch(
-            "src.utils.twitter_utils.create_async_client", side_effect=contexts
-        ), patch("src.utils.twitter_utils.extract_media", return_value=[{"type": "video", "url": "https://cdn.example/video.mp4"}]), patch(
-            "src.utils.twitter_utils.asyncio.to_thread", new=AsyncMock(return_value=None)
-        ), patch("src.utils.twitter_utils.os.path.exists", return_value=True), patch(
-            "src.utils.twitter_utils.os.remove"
-        ) as mock_remove, patch("builtins.open", mock_open(read_data=b"audio-bytes")), patch(
-            "src.utils.twitter_utils.uuid.uuid4", return_value=SimpleNamespace(hex="abc123")
+            "src.config._cached_config", cfg(rapidapi_key="rapid-key")
         ):
             result = await twitter_utils.get_tweet_context("https://x.com/a/status/123")
 
-        context = result[0]
+        self.assertIsNone(result)
+        self.assertEqual(fake_cache, {})
+
+    async def test_get_tweet_context_returns_none_on_http_error(self):
+        self.use_api(lambda request: httpx.Response(429, text="rate limited"))
+
+        with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
+            "src.config._cached_config", cfg(rapidapi_key="rapid-key")
+        ):
+            self.assertIsNone(await twitter_utils.get_tweet_context("https://x.com/a/status/123"))
+
+    async def test_get_tweet_context_includes_video_transcript(self):
+        media = [{"video_info": {"variants": [
+            {"content_type": "video/mp4", "bitrate": 900, "url": "https://video.twimg.com/high.mp4"},
+            {"content_type": "video/mp4", "bitrate": 100, "url": "https://video.twimg.com/low.mp4"},
+        ]}}]
+        payload = tweet_payload(build_tweet_result("Alice", "Main post"), media=media)
+        self.use_api(lambda request: httpx.Response(200, json=payload))
+
+        with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
+            "src.config._cached_config", cfg(rapidapi_key="rapid-key")
+        ), patch(
+            "src.utils.twitter_utils.transcribe_video_url", new_callable=AsyncMock, return_value="video words"
+        ) as mock_video:
+            context, _ = await twitter_utils.get_tweet_context("https://x.com/a/status/123")
+
         self.assertIn("transcript of video: video words", context)
-        self.assertEqual(mock_remove.call_count, 2)
+        mock_video.assert_awaited_once_with("https://video.twimg.com/low.mp4")
+
+    async def test_get_tweet_context_survives_video_failure(self):
+        media = [{"video_info": {"variants": [
+            {"content_type": "video/mp4", "bitrate": 100, "url": "https://video.twimg.com/v.mp4"}]}}]
+        payload = tweet_payload(build_tweet_result("Alice", "Main post"), media=media)
+        self.use_api(lambda request: httpx.Response(200, json=payload))
+
+        with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
+            "src.config._cached_config", cfg(rapidapi_key="rapid-key")
+        ), patch(
+            "src.utils.twitter_utils.transcribe_video_url", new_callable=AsyncMock,
+            side_effect=RuntimeError("ffmpeg died"),
+        ):
+            context, _ = await twitter_utils.get_tweet_context("https://x.com/a/status/123")
+
+        self.assertIn("Main post", context)
+        self.assertNotIn("transcript of video", context)
+
+    async def test_get_tweet_context_caches_photos_as_base64_data_urls(self):
+        fake_cache = {}
+        media = [
+            {"type": "photo", "media_url_https": "https://pbs.twimg.com/1.jpg"},
+            {"type": "photo", "media_url_https": "https://pbs.twimg.com/2.jpg"},
+        ]
+        payload = tweet_payload(build_tweet_result("Alice", "Look"), media=media)
+        self.use_api(lambda request: httpx.Response(200, json=payload))
+
+        async def fake_data_url(url):
+            if url.endswith("2.jpg"):
+                raise RuntimeError("fetch failed")
+            return "data:image/jpeg;base64,ONE"
+
+        with patch("src.utils.twitter_utils._twitter_cache", fake_cache), patch(
+            "src.config._cached_config", cfg(rapidapi_key="rapid-key")
+        ), patch("src.utils.twitter_utils.url_to_base64_data_url", side_effect=fake_data_url):
+            context, images = await twitter_utils.get_tweet_context("https://x.com/a/status/5")
+
+        # A failed photo is skipped; the rest are kept as base64 in the cache.
+        self.assertEqual(images, ["data:image/jpeg;base64,ONE"])
+        self.assertEqual(fake_cache["https://x.com/a/status/5"], (context, ["data:image/jpeg;base64,ONE"]))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -2,7 +2,6 @@
 Death Commands - Configure the death service (restricted to DEATH_CHANNEL_ID).
 """
 
-import asyncio
 import logging
 from typing import Optional
 
@@ -46,9 +45,7 @@ class DeathCommands:
                 return
             if not await safe_defer(interaction, ephemeral=True, thinking=True):
                 return
-            asyncio.create_task(
-                safe_run(interaction, self._handle_forcedeath, interaction, url)
-            )
+            await safe_run(interaction, self._handle_forcedeath, interaction, url)
 
     def _create_limerick_command(self) -> None:
         """Create the /limerick command (open to everyone)."""
@@ -60,9 +57,7 @@ class DeathCommands:
         async def limerick(interaction: discord.Interaction, person: str):
             if not await safe_defer(interaction, thinking=True):
                 return
-            asyncio.create_task(
-                safe_run(interaction, self._handle_limerick, interaction, person)
-            )
+            await safe_run(interaction, self._handle_limerick, interaction, person)
 
     async def _handle_limerick(self, interaction: discord.Interaction, person: str) -> None:
         """Handle the /limerick command."""
@@ -105,9 +100,7 @@ class DeathCommands:
                 pageview_months: Optional[app_commands.Range[int, 1, 60]] = None):
             if not await safe_defer(interaction, ephemeral=True, thinking=True):
                 return
-            asyncio.create_task(
-                safe_run(interaction, self._handle_death_set, interaction, poll_interval, min_views, pageview_months)
-            )
+            await safe_run(interaction, self._handle_death_set, interaction, poll_interval, min_views, pageview_months)
 
         @death_group.command(
             name="reset",
@@ -115,9 +108,7 @@ class DeathCommands:
         async def death_reset(interaction: discord.Interaction):
             if not await safe_defer(interaction, ephemeral=True, thinking=True):
                 return
-            asyncio.create_task(
-                safe_run(interaction, self._handle_death_reset, interaction)
-            )
+            await safe_run(interaction, self._handle_death_reset, interaction)
 
         @death_group.command(
             name="view",
@@ -125,9 +116,7 @@ class DeathCommands:
         async def death_view(interaction: discord.Interaction):
             if not await safe_defer(interaction, ephemeral=True, thinking=True):
                 return
-            asyncio.create_task(
-                safe_run(interaction, self._handle_death_view, interaction)
-            )
+            await safe_run(interaction, self._handle_death_view, interaction)
 
         return death_group
 

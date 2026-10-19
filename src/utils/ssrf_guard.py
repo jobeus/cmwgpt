@@ -1,9 +1,12 @@
 """Guard against SSRF when fetching user-supplied URLs server-side.
 
-Resolves the target host and rejects URLs that point at loopback, private
-(RFC1918), link-local, multicast, or unspecified addresses, so a user-supplied
-link can't be used to probe the local network or cloud metadata endpoints.
-Public URLs pass through unchanged.
+Resolves the target host and rejects URLs that point at anything but a
+globally routable address (loopback, private, link-local, CGNAT, multicast,
+reserved, ...), so a user-supplied link can't be used to probe the local
+network or cloud metadata endpoints. Public URLs pass through unchanged.
+
+This only checks one URL; ``src.utils.http_client.fetch_public`` re-runs it
+on every redirect hop.
 """
 
 import asyncio
@@ -28,6 +31,11 @@ def _blocked_reason(addr) -> Optional[str]:
         return "multicast"
     if addr.is_unspecified:
         return "unspecified"
+    mapped = getattr(addr, "ipv4_mapped", None)
+    if mapped is not None:
+        return _blocked_reason(mapped)
+    if not addr.is_global:
+        return "non-public"
     return None
 
 

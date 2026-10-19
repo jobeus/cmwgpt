@@ -1,9 +1,8 @@
 """Tests for DiscordBotClient lifecycle and message orchestration."""
 
-import asyncio
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import src.startup
 from src.bot.client import DiscordBotClient
@@ -12,19 +11,6 @@ from src.bot.client import DiscordBotClient
 class FakeTextChannel:
     def __init__(self, channel_id=123):
         self.id = channel_id
-
-
-class FakeStoppedLoop:
-    def is_running(self):
-        return False
-
-    def run_until_complete(self, coro):
-        return asyncio.run(coro)
-
-
-class FakeRunningLoop:
-    def is_running(self):
-        return True
 
 
 class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
@@ -265,6 +251,7 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
             paste_service=MagicMock(),
             runpod_service=MagicMock(),
             gemini_service=MagicMock(),
+            anthropic_service=MagicMock(),
         )
         services.state_service.load_state_from_temp_files.return_value = False
         services.state_service.get_last_git_sha.return_value = None
@@ -281,7 +268,15 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         self.assertIs(client.bot, fake_bot)
         self.assertTrue(intents.message_content)
         self.assertTrue(intents.members)
-        services.openai_service.set_bot_id_loader.assert_called_once()
+        for service in (services.openai_service, services.gemini_service, services.anthropic_service):
+            service.set_bot_id_loader.assert_called_once()
+            self.assertIsNone(service.set_bot_id_loader.call_args.args[0]())
+        fake_bot.user = SimpleNamespace(id=4242)
+        self.assertEqual(services.anthropic_service.set_bot_id_loader.call_args.args[0](), 4242)
+        services.restart_handler.set_shutdown_callback.assert_called_once_with(client.shutdown)
+        self.assertEqual(
+            mock_system.call_args.kwargs["on_model_change"], client._clear_model_caches
+        )
         services.state_service.load_state_from_temp_files.assert_called_once_with()
         services.state_service.set_last_git_sha.assert_called_once_with("abc123")
         services.auto_update_service.set_restart_callback.assert_called_once_with(
@@ -293,74 +288,75 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         mock_system.return_value.setup_commands.assert_called_once_with()
         mock_death.return_value.setup_commands.assert_called_once_with()
 
-    async def test_check_for_restart_info_reads_manual_restart_from_state_files(self):
-        client = object.__new__(DiscordBotClient)
+    async def test_check_for_restart_info_reads_manual_restart_from_state_service(self):
+        client, _ = self.make_client()
+        client.services.state_service.restart_info = {"manual_restart": True}
+        self.assertTrue(client._check_for_restart_info())
 
-        with patch("glob.glob", return_value=["/tmp/cmwgpt_state_backup_test.json"]), patch(
-            "builtins.open", mock_open(read_data='{"restart_info": {"manual_restart": true}}')
-        ):
-            result = client._check_for_restart_info()
+        client.services.state_service.restart_info = {"manual_restart": False}
+        self.assertFalse(client._check_for_restart_info())
 
-        self.assertTrue(result)
+        client.services.state_service.restart_info = {}
+        self.assertFalse(client._check_for_restart_info())
 
-    async def test_check_for_restart_info_handles_bad_files_and_false_case(self):
-        client = object.__new__(DiscordBotClient)
+    async def test_clear_model_caches_clears_gemini_and_anthropic(self):
+        client, _ = self.make_client()
+        client.services.gemini_service = MagicMock()
+        client.services.anthropic_service = MagicMock()
 
-        bad_handle = MagicMock()
-        bad_handle.__enter__.side_effect = ValueError("bad json")
-        good_handle = mock_open(read_data='{"restart_info": {"manual_restart": false}}').return_value
+        client._clear_model_caches(55)
 
-        with patch("glob.glob", return_value=["/tmp/a.json", "/tmp/b.json"]), patch(
-            "builtins.open", side_effect=[bad_handle, good_handle]
-        ):
-            result = client._check_for_restart_info()
+        client.services.gemini_service.clear_channel_cache.assert_called_once_with(55)
+        client.services.anthropic_service.clear_channel_cache.assert_called_once_with(55)
 
-        self.assertFalse(result)
+        client.services.anthropic_service = None
+        client._clear_model_caches(56)
+        client.services.gemini_service.clear_channel_cache.assert_called_with(56)
 
-    async def test_run_performs_cleanup_when_not_skipped(self):
-        client = object.__new__(DiscordBotClient)
-        client.config = SimpleNamespace(discord_bot_token="token")
-        bot = MagicMock()
-        bot.run.side_effect = RuntimeError("startup failed")
-        client.bot = bot
-        client.services = SimpleNamespace(
-            restart_handler=MagicMock(),
-            auto_update_service=MagicMock(),
-            death_service=MagicMock(),
-            queue_service=MagicMock(),
-        )
-        client.services.restart_handler.should_skip_cleanup.return_value = False
-        client.services.queue_service.stop = AsyncMock()
-
-        with patch("asyncio.get_event_loop", return_value=FakeRunningLoop()), patch(
-            "asyncio.create_task", side_effect=lambda coro: coro.close()
-        ) as mock_create_task:
-            with self.assertRaises(RuntimeError):
-                client.run()
-
-        client.services.auto_update_service.stop.assert_called_once_with()
-        client.services.death_service.stop.assert_called_once_with()
-        client.services.queue_service.stop.assert_called_once_with()
-        mock_create_task.assert_called_once()
-
-    async def test_run_skips_cleanup_when_restart_handler_requests_it(self):
+    async def test_run_only_runs_the_bot(self):
         client = object.__new__(DiscordBotClient)
         client.config = SimpleNamespace(discord_bot_token="token")
-        bot = MagicMock()
-        client.bot = bot
-        client.services = SimpleNamespace(
-            restart_handler=MagicMock(),
-            auto_update_service=MagicMock(),
-            death_service=MagicMock(),
-            queue_service=MagicMock(),
-        )
-        client.services.restart_handler.should_skip_cleanup.return_value = True
-        client.services.queue_service.stop = AsyncMock()
+        client.bot = MagicMock()
+        client.services = MagicMock()
 
-        client.run()
+        with patch("src.startup.shutdown_services", new=AsyncMock()) as mock_shutdown:
+            client.run()
 
-        client.services.auto_update_service.stop.assert_not_called()
-        client.services.queue_service.stop.assert_not_awaited()
+        client.bot.run.assert_called_once_with("token")
+        mock_shutdown.assert_not_awaited()
+
+    async def test_shutdown_runs_services_shutdown_then_closes_bot_once(self):
+        client, _ = self.make_client()
+        client._shutdown_started = False
+        client.bot.is_closed.return_value = False
+        client.bot.close = AsyncMock()
+        order = MagicMock()
+
+        async def fake_shutdown_services(services):
+            self.assertIs(services, client.services)
+            order("services")
+
+        client.bot.close.side_effect = lambda: order("close")
+
+        with patch("src.startup.shutdown_services", side_effect=fake_shutdown_services) as mock_shutdown:
+            await client.shutdown()
+            await client.shutdown()
+
+        mock_shutdown.assert_called_once_with(client.services)
+        client.bot.close.assert_awaited_once_with()
+        self.assertEqual([c.args[0] for c in order.call_args_list], ["services", "close"])
+
+    async def test_shutdown_skips_close_when_bot_already_closed(self):
+        client, _ = self.make_client()
+        client._shutdown_started = False
+        client.bot.is_closed.return_value = True
+        client.bot.close = AsyncMock()
+
+        with patch("src.startup.shutdown_services", new=AsyncMock()) as mock_shutdown:
+            await client.shutdown()
+
+        mock_shutdown.assert_awaited_once_with(client.services)
+        client.bot.close.assert_not_awaited()
 
     async def test_load_saved_state_and_git_sha_helpers_cover_fresh_and_error_paths(self):
         client = object.__new__(DiscordBotClient)

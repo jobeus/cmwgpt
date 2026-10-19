@@ -5,8 +5,6 @@ from typing import Callable, Optional
 
 import httpx
 
-from src.utils.url_utils import inject_article_cache
-from src.utils.http_client import create_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +17,7 @@ class PasteService:
         base_url: str = "https://paste.rs",
         *,
         cache_injector: Optional[Callable[[str, str], None]] = None,
-        client_factory=create_async_client,
+        client_factory=httpx.AsyncClient,
     ):
         self.base_url = base_url
         self._cache_injector = cache_injector
@@ -67,5 +65,3 @@ class PasteService:
         """
         return await self.upload_text(markdown_text)
 
-
-paste_service = PasteService(cache_injector=inject_article_cache)

@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.message_service import MessageService
+from src.services.message_service import SEND_ATTEMPTS, MessageService
 
 
 class FakeHTTPException(Exception):
@@ -14,7 +14,30 @@ class FakeHTTPException(Exception):
         self.response = SimpleNamespace(headers=headers or {})
 
 
+def _patch_http():
+    return patch("src.services.message_service.HTTPException", FakeHTTPException)
+
+
+def _patch_sleep():
+    return patch("src.services.message_service.asyncio.sleep", new=AsyncMock())
+
+
+def _fake_file():
+    f = MagicMock()
+    f.reset = MagicMock()
+    return f
+
+
 class TestMessageService(unittest.IsolatedAsyncioTestCase):
+    async def test_short_reply_sent_with_content_kwarg_and_suppressed_embeds(self):
+        channel = MagicMock()
+        channel.send = AsyncMock()
+        service = MessageService()
+
+        await service.send_channel_reply(channel, "hello")
+
+        channel.send.assert_awaited_once_with(content="hello", files=[], suppress_embeds=True)
+
     async def test_long_reply_uses_injected_paste_service(self):
         paste_service = MagicMock()
         paste_service.upload_markdown = AsyncMock(return_value="https://paste.rs/long.md")
@@ -24,9 +47,9 @@ class TestMessageService(unittest.IsolatedAsyncioTestCase):
 
         await service.send_channel_reply(channel, "x" * 2500)
 
-        paste_service.upload_markdown.assert_awaited_once()
+        paste_service.upload_markdown.assert_awaited_once_with("x" * 2500)
         channel.send.assert_awaited_once()
-        sent_message = channel.send.await_args.args[0]
+        sent_message = channel.send.await_args.kwargs["content"]
         self.assertIn("too long", sent_message)
         self.assertIn("https://paste.rs/long.md", sent_message)
 
@@ -38,364 +61,194 @@ class TestMessageService(unittest.IsolatedAsyncioTestCase):
         await service.send_channel_reply(channel, "x" * 2500)
 
         channel.send.assert_awaited_once()
-        sent_message = channel.send.await_args.args[0]
+        sent_message = channel.send.await_args.kwargs["content"]
         self.assertIn("over 2000 characters", sent_message.lower())
 
-    async def test_send_channel_reply_retries_rate_limit_with_retry_after(self):
+    async def test_paste_upload_happens_once_even_when_send_is_retried(self):
+        paste_service = MagicMock()
+        paste_service.upload_markdown = AsyncMock(return_value="https://paste.rs/x.md")
         channel = MagicMock()
-        channel.send = AsyncMock(side_effect=[FakeHTTPException(429, {"Retry-After": "0"}), None])
+        channel.send = AsyncMock(side_effect=[FakeHTTPException(503), None])
+        service = MessageService(paste_service_instance=paste_service)
+
+        with _patch_http(), _patch_sleep():
+            await service.send_channel_reply(channel, "x" * 2500)
+
+        paste_service.upload_markdown.assert_awaited_once()
+        self.assertEqual(channel.send.await_count, 2)
+
+    async def test_rate_limit_is_not_retried_here(self):
+        channel = MagicMock()
+        channel.send = AsyncMock(side_effect=FakeHTTPException(429))
         service = MessageService()
 
-        with patch("src.services.message_service.HTTPException", FakeHTTPException), patch(
-            "src.services.message_service.asyncio.sleep", new=AsyncMock()
-        ) as mock_sleep:
+        with _patch_http(), _patch_sleep() as mock_sleep:
+            with self.assertRaises(FakeHTTPException):
+                await service.send_channel_reply(channel, "hello")
+
+        channel.send.assert_awaited_once()
+        mock_sleep.assert_not_awaited()
+
+    async def test_other_4xx_raises_without_retry(self):
+        channel = MagicMock()
+        channel.send = AsyncMock(side_effect=FakeHTTPException(400))
+        service = MessageService()
+
+        with _patch_http(), _patch_sleep() as mock_sleep:
+            with self.assertRaises(FakeHTTPException):
+                await service.send_channel_reply(channel, "hello")
+
+        channel.send.assert_awaited_once()
+        mock_sleep.assert_not_awaited()
+
+    async def test_server_error_retried_with_backoff_then_succeeds(self):
+        channel = MagicMock()
+        channel.send = AsyncMock(side_effect=[FakeHTTPException(500), FakeHTTPException(502), None])
+        service = MessageService()
+
+        with _patch_http(), _patch_sleep() as mock_sleep:
             await service.send_channel_reply(channel, "hello")
 
-        self.assertEqual(channel.send.await_count, 2)
-        mock_sleep.assert_awaited_once_with(0.0)
+        self.assertEqual(channel.send.await_count, 3)
+        self.assertEqual([c.args[0] for c in mock_sleep.await_args_list], [1.0, 2.0])
 
-    async def test_send_channel_reply_retries_unexpected_then_raises_and_handles_http_errors(self):
+    async def test_server_error_exhausts_attempts_then_raises(self):
         channel = MagicMock()
-        channel.send = AsyncMock(side_effect=[RuntimeError("boom"), RuntimeError("boom again"), RuntimeError("boom thrice")])
-        service = MessageService()
-
-        with patch("src.services.message_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
-            with self.assertRaises(RuntimeError):
-                await service.send_channel_reply(channel, "hello")
-
-        self.assertEqual(mock_sleep.await_count, 2)
-
         channel.send = AsyncMock(side_effect=FakeHTTPException(500))
-        with patch("src.services.message_service.HTTPException", FakeHTTPException):
+        service = MessageService()
+
+        with _patch_http(), _patch_sleep() as mock_sleep:
             with self.assertRaises(FakeHTTPException):
                 await service.send_channel_reply(channel, "hello")
 
-    async def test_send_channel_reply_retries_rate_limit_without_retry_after_then_raises(self):
+        self.assertEqual(channel.send.await_count, SEND_ATTEMPTS)
+        self.assertEqual(mock_sleep.await_count, SEND_ATTEMPTS - 1)
+
+    async def test_unexpected_errors_retried_then_raise(self):
         channel = MagicMock()
-        channel.send = AsyncMock(side_effect=[FakeHTTPException(429), FakeHTTPException(429), FakeHTTPException(429)])
+        channel.send = AsyncMock(side_effect=[RuntimeError("a"), RuntimeError("b"), RuntimeError("c")])
         service = MessageService()
 
-        with patch("src.services.message_service.HTTPException", FakeHTTPException), patch(
-            "src.services.message_service.asyncio.sleep", new=AsyncMock()
-        ) as mock_sleep:
-            with self.assertRaises(FakeHTTPException):
-                await service.send_channel_reply(channel, "hello")
-
-        self.assertEqual(mock_sleep.await_count, 2)
-
-    async def test_send_channel_reply_handles_forbidden_and_not_found(self):
-        service = MessageService()
-
-        forbidden = type("FakeForbidden", (Exception,), {})
-        not_found = type("FakeNotFound", (Exception,), {})
-
-        channel = MagicMock()
-        channel.send = AsyncMock(side_effect=forbidden("nope"))
-        with patch("src.services.message_service.Forbidden", forbidden), patch("src.services.message_service.NotFound", not_found):
-            with self.assertRaises(forbidden):
-                await service.send_channel_reply(channel, "hello")
-
-        channel.send = AsyncMock(side_effect=not_found("gone"))
-        with patch("src.services.message_service.Forbidden", forbidden), patch("src.services.message_service.NotFound", not_found):
-            with self.assertRaises(not_found):
-                await service.send_channel_reply(channel, "hello")
-
-    async def test_send_interaction_followup_sends_short_content_directly(self):
-        interaction = MagicMock()
-        interaction.followup.send = AsyncMock()
-        service = MessageService()
-
-        await service.send_interaction_followup(interaction, "> prompt", "reply")
-
-        interaction.followup.send.assert_awaited_once_with(
-            content="> prompt\nreply", suppress_embeds=True
-        )
-
-    async def test_send_interaction_followup_handles_paste_failure_cleanly(self):
-        paste_service = MagicMock()
-        paste_service.upload_markdown = AsyncMock(side_effect=RuntimeError("boom"))
-        interaction = MagicMock()
-        interaction.followup.send = AsyncMock()
-        service = MessageService(paste_service_instance=paste_service)
-
-        await service.send_interaction_followup(interaction, "> prompt", "x" * 2500)
-
-        interaction.followup.send.assert_awaited_once()
-        sent_message = interaction.followup.send.await_args.kwargs["content"]
-        self.assertIn("problem uploading", sent_message)
-
-    async def test_send_interaction_followup_retries_rate_limit_with_retry_after(self):
-        interaction = MagicMock()
-        interaction.followup.send = AsyncMock(side_effect=[FakeHTTPException(429, {"Retry-After": "0"}), None])
-        service = MessageService()
-
-        with patch("src.services.message_service.HTTPException", FakeHTTPException), patch(
-            "src.services.message_service.asyncio.sleep", new=AsyncMock()
-        ) as mock_sleep:
-            await service.send_interaction_followup(interaction, "> prompt", "reply")
-
-        self.assertEqual(interaction.followup.send.await_count, 2)
-        mock_sleep.assert_awaited_once_with(0.0)
-
-    async def test_send_interaction_followup_retries_without_retry_after_then_raises(self):
-        interaction = MagicMock()
-        interaction.followup.send = AsyncMock(side_effect=[FakeHTTPException(429), FakeHTTPException(429), FakeHTTPException(429)])
-        service = MessageService()
-
-        with patch("src.services.message_service.HTTPException", FakeHTTPException), patch(
-            "src.services.message_service.asyncio.sleep", new=AsyncMock()
-        ) as mock_sleep:
-            with self.assertRaises(FakeHTTPException):
-                await service.send_interaction_followup(interaction, "> prompt", "reply")
-
-        self.assertEqual(mock_sleep.await_count, 2)
-
-    async def test_send_interaction_followup_handles_non_429_http_and_other_retries(self):
-        interaction = MagicMock()
-        interaction.followup.send = AsyncMock(side_effect=FakeHTTPException(500))
-        service = MessageService()
-
-        with patch("src.services.message_service.HTTPException", FakeHTTPException):
-            with self.assertRaises(FakeHTTPException):
-                await service.send_interaction_followup(interaction, "> prompt", "reply")
-
-        interaction.followup.send = AsyncMock(side_effect=[RuntimeError("boom"), RuntimeError("boom2"), RuntimeError("boom3")])
-        with patch("src.services.message_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+        with _patch_sleep() as mock_sleep:
             with self.assertRaises(RuntimeError):
-                await service.send_interaction_followup(interaction, "> prompt", "reply")
+                await service.send_channel_reply(channel, "hello")
+
         self.assertEqual(mock_sleep.await_count, 2)
 
-    async def test_send_interaction_followup_handles_forbidden_and_not_found(self):
-        service = MessageService()
-        forbidden = type("FakeForbidden", (Exception,), {})
-        not_found = type("FakeNotFound", (Exception,), {})
-        interaction = MagicMock()
-
-        interaction.followup.send = AsyncMock(side_effect=forbidden("nope"))
-        with patch("src.services.message_service.Forbidden", forbidden), patch("src.services.message_service.NotFound", not_found):
-            with self.assertRaises(forbidden):
-                await service.send_interaction_followup(interaction, "> prompt", "reply")
-
-        interaction.followup.send = AsyncMock(side_effect=not_found("gone"))
-        with patch("src.services.message_service.Forbidden", forbidden), patch("src.services.message_service.NotFound", not_found):
-            with self.assertRaises(not_found):
-                await service.send_interaction_followup(interaction, "> prompt", "reply")
-
-    async def test_send_interaction_followup_with_files_retries_rate_limit(self):
-        interaction = MagicMock()
-        interaction.followup.send = AsyncMock(side_effect=[FakeHTTPException(429), None])
-        service = MessageService()
-
-        with patch("src.services.message_service.HTTPException", FakeHTTPException), patch(
-            "src.services.message_service.asyncio.sleep", new=AsyncMock()
-        ) as mock_sleep:
-            await service.send_interaction_followup_with_files(
-                interaction,
-                "> prompt",
-                "reply",
-                files=["file-a"],
-            )
-
-        self.assertEqual(interaction.followup.send.await_count, 2)
+        channel.send = AsyncMock(side_effect=[RuntimeError("boom"), None])
+        with _patch_sleep() as mock_sleep:
+            await service.send_channel_reply(channel, "hello")
         mock_sleep.assert_awaited_once_with(1.0)
 
-    async def test_send_interaction_followup_with_files_handles_paste_failure_and_rate_limit_exhaustion(self):
-        paste_service = MagicMock()
-        paste_service.upload_markdown = AsyncMock(side_effect=RuntimeError("boom"))
-        interaction = MagicMock()
-        interaction.followup.send = AsyncMock()
-        service = MessageService(paste_service_instance=paste_service)
-
-        await service.send_interaction_followup_with_files(interaction, "> prompt", "x" * 2500, files=["file-a"])
-        self.assertIn("problem uploading", interaction.followup.send.await_args.kwargs["content"])
-
-        interaction.followup.send = AsyncMock(side_effect=[FakeHTTPException(429), FakeHTTPException(429), FakeHTTPException(429)])
-        with patch("src.services.message_service.HTTPException", FakeHTTPException), patch(
-            "src.services.message_service.asyncio.sleep", new=AsyncMock()
-        ) as mock_sleep:
-            with self.assertRaises(FakeHTTPException):
-                await service.send_interaction_followup_with_files(interaction, "> prompt", "reply", files=["file-a"])
-
-        self.assertEqual(mock_sleep.await_count, 2)
-
-    async def test_send_interaction_followup_with_files_uses_empty_files_and_handles_non_413_errors(self):
-        interaction = MagicMock()
-        interaction.followup.send = AsyncMock()
-        service = MessageService()
-
-        await service.send_interaction_followup_with_files(interaction, "> prompt", "reply")
-        self.assertEqual(interaction.followup.send.await_args.kwargs["files"], [])
-
-        interaction.followup.send = AsyncMock(side_effect=FakeHTTPException(500))
-        with patch("src.services.message_service.HTTPException", FakeHTTPException):
-            with self.assertRaises(FakeHTTPException):
-                await service.send_interaction_followup_with_files(interaction, "> prompt", "reply")
-
-    async def test_send_interaction_followup_with_files_handles_forbidden_not_found_and_unexpected_raise(self):
+    async def test_forbidden_and_not_found_raise_immediately(self):
         service = MessageService()
         forbidden = type("FakeForbidden", (Exception,), {})
         not_found = type("FakeNotFound", (Exception,), {})
 
-        interaction = MagicMock()
-        interaction.followup.send = AsyncMock(side_effect=forbidden("nope"))
-        with patch("src.services.message_service.Forbidden", forbidden), patch("src.services.message_service.NotFound", not_found):
-            with self.assertRaises(forbidden):
-                await service.send_interaction_followup_with_files(interaction, "> prompt", "reply", files=["file-a"])
+        for exc in (forbidden("nope"), not_found("gone")):
+            channel = MagicMock()
+            channel.send = AsyncMock(side_effect=exc)
+            with patch("src.services.message_service.Forbidden", forbidden), \
+                    patch("src.services.message_service.NotFound", not_found), _patch_sleep() as mock_sleep:
+                with self.assertRaises(type(exc)):
+                    await service.send_channel_reply_with_files(channel, "reply", files=[_fake_file()])
+            channel.send.assert_awaited_once()
+            mock_sleep.assert_not_awaited()
 
-        interaction.followup.send = AsyncMock(side_effect=not_found("gone"))
-        with patch("src.services.message_service.Forbidden", forbidden), patch("src.services.message_service.NotFound", not_found):
-            with self.assertRaises(not_found):
-                await service.send_interaction_followup_with_files(interaction, "> prompt", "reply", files=["file-a"])
-
-        interaction.followup.send = AsyncMock(side_effect=[RuntimeError("boom"), RuntimeError("boom2"), RuntimeError("boom3")])
-        with patch("src.services.message_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
-            with self.assertRaises(RuntimeError):
-                await service.send_interaction_followup_with_files(interaction, "> prompt", "reply", files=["file-a"])
-        self.assertEqual(mock_sleep.await_count, 2)
-
-    async def test_send_interaction_followup_with_files_handles_payload_too_large(self):
-        interaction = MagicMock()
-        interaction.followup.send = AsyncMock(side_effect=[FakeHTTPException(413), None])
-        service = MessageService()
-
-        with patch("src.services.message_service.HTTPException", FakeHTTPException):
-            await service.send_interaction_followup_with_files(
-                interaction,
-                "> prompt",
-                "reply",
-                files=["file-a"],
-            )
-
-        self.assertEqual(interaction.followup.send.await_count, 2)
-        error_call = interaction.followup.send.await_args_list[-1]
-        self.assertIn("too large", error_call.kwargs["content"].lower())
-
-    async def test_send_channel_reply_with_files_handles_payload_too_large(self):
-        channel = MagicMock()
-        channel.send = AsyncMock(side_effect=[FakeHTTPException(413), None])
-        service = MessageService()
-
-        with patch("src.services.message_service.HTTPException", FakeHTTPException):
-            await service.send_channel_reply_with_files(channel, "reply", files=["file-a"])
-
-        self.assertEqual(channel.send.await_count, 2)
-        error_call = channel.send.await_args_list[-1]
-        self.assertIn("too large", error_call.kwargs["content"].lower())
-
-    async def test_send_channel_reply_with_files_retries_rate_limit(self):
-        channel = MagicMock()
-        channel.send = AsyncMock(side_effect=[FakeHTTPException(429), None])
-        service = MessageService()
-
-        with patch("src.services.message_service.HTTPException", FakeHTTPException), patch(
-            "src.services.message_service.asyncio.sleep", new=AsyncMock()
-        ) as mock_sleep:
-            await service.send_channel_reply_with_files(channel, "reply", files=["file-a"])
-
-        self.assertEqual(channel.send.await_count, 2)
-        mock_sleep.assert_awaited_once_with(1.0)
-
-    async def test_send_channel_reply_with_files_uses_empty_files_and_handles_non_413_errors(self):
+    async def test_with_files_defaults_to_empty_files(self):
         channel = MagicMock()
         channel.send = AsyncMock()
         service = MessageService()
 
         await service.send_channel_reply_with_files(channel, "reply")
-        self.assertEqual(channel.send.await_args.kwargs["files"], [])
 
-        channel.send = AsyncMock(side_effect=FakeHTTPException(500))
-        with patch("src.services.message_service.HTTPException", FakeHTTPException):
-            with self.assertRaises(FakeHTTPException):
-                await service.send_channel_reply_with_files(channel, "reply", files=["file-a"])
+        channel.send.assert_awaited_once_with(content="reply", files=[], suppress_embeds=True)
 
-    async def test_send_channel_reply_with_files_handles_forbidden_not_found_and_unexpected_raise(self):
-        service = MessageService()
-        forbidden = type("FakeForbidden", (Exception,), {})
-        not_found = type("FakeNotFound", (Exception,), {})
-
+    async def test_with_files_resets_files_before_each_attempt(self):
         channel = MagicMock()
-        channel.send = AsyncMock(side_effect=forbidden("nope"))
-        with patch("src.services.message_service.Forbidden", forbidden), patch("src.services.message_service.NotFound", not_found):
-            with self.assertRaises(forbidden):
-                await service.send_channel_reply_with_files(channel, "reply", files=["file-a"])
+        channel.send = AsyncMock(side_effect=[FakeHTTPException(500), None])
+        service = MessageService()
+        f = _fake_file()
 
-        channel.send = AsyncMock(side_effect=not_found("gone"))
-        with patch("src.services.message_service.Forbidden", forbidden), patch("src.services.message_service.NotFound", not_found):
-            with self.assertRaises(not_found):
-                await service.send_channel_reply_with_files(channel, "reply", files=["file-a"])
+        with _patch_http(), _patch_sleep():
+            await service.send_channel_reply_with_files(channel, "reply", files=[f])
 
-        channel.send = AsyncMock(side_effect=[RuntimeError("boom"), RuntimeError("boom2"), RuntimeError("boom3")])
-        with patch("src.services.message_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
-            with self.assertRaises(RuntimeError):
-                await service.send_channel_reply_with_files(channel, "reply", files=["file-a"])
-        self.assertEqual(mock_sleep.await_count, 2)
+        self.assertEqual(f.reset.call_count, 2)
+        self.assertEqual(channel.send.await_args.kwargs["files"], [f])
 
-    async def test_send_interaction_followup_with_files_retries_unexpected_errors(self):
-        interaction = MagicMock()
-        interaction.followup.send = AsyncMock(side_effect=[RuntimeError("boom"), None])
+    async def test_with_files_handles_payload_too_large(self):
+        channel = MagicMock()
+        channel.send = AsyncMock(side_effect=[FakeHTTPException(413), None])
         service = MessageService()
 
-        with patch("src.services.message_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
-            await service.send_interaction_followup_with_files(
-                interaction,
-                "> prompt",
-                "reply",
-                files=["file-a"],
-            )
+        with _patch_http():
+            await service.send_channel_reply_with_files(channel, "reply", files=[_fake_file()])
 
-        self.assertEqual(interaction.followup.send.await_count, 2)
-        mock_sleep.assert_awaited_once_with(1.0)
+        self.assertEqual(channel.send.await_count, 2)
+        error_call = channel.send.await_args_list[-1]
+        self.assertIn("too large", error_call.kwargs["content"].lower())
+        self.assertNotIn("files", error_call.kwargs)
 
-    async def test_send_channel_reply_with_files_uses_paste_service_for_long_messages(self):
+    async def test_413_without_files_raises(self):
+        channel = MagicMock()
+        channel.send = AsyncMock(side_effect=FakeHTTPException(413))
+        service = MessageService()
+
+        with _patch_http():
+            with self.assertRaises(FakeHTTPException):
+                await service.send_channel_reply(channel, "reply")
+
+    async def test_with_files_uses_paste_service_for_long_messages(self):
         paste_service = MagicMock()
         paste_service.upload_markdown = AsyncMock(return_value="https://paste.rs/files.md")
         channel = MagicMock()
         channel.send = AsyncMock()
         service = MessageService(paste_service_instance=paste_service)
 
-        await service.send_channel_reply_with_files(channel, "x" * 2500, files=["file-a"])
+        await service.send_channel_reply_with_files(channel, "x" * 2500, files=[_fake_file()])
 
         paste_service.upload_markdown.assert_awaited_once()
-        channel.send.assert_awaited_once()
-        sent_message = channel.send.await_args.kwargs["content"]
-        self.assertIn("https://paste.rs/files.md", sent_message)
+        self.assertIn("https://paste.rs/files.md", channel.send.await_args.kwargs["content"])
 
-    async def test_send_channel_reply_with_files_handles_paste_failure_and_rate_limit_exhaustion(self):
+    async def test_with_files_handles_paste_failure(self):
         paste_service = MagicMock()
         paste_service.upload_markdown = AsyncMock(side_effect=RuntimeError("boom"))
         channel = MagicMock()
         channel.send = AsyncMock()
         service = MessageService(paste_service_instance=paste_service)
 
-        await service.send_channel_reply_with_files(channel, "x" * 2500, files=["file-a"])
+        await service.send_channel_reply_with_files(channel, "x" * 2500, files=[_fake_file()])
         self.assertIn("problem uploading", channel.send.await_args.kwargs["content"])
 
-        channel.send = AsyncMock(side_effect=[FakeHTTPException(429), FakeHTTPException(429), FakeHTTPException(429)])
-        with patch("src.services.message_service.HTTPException", FakeHTTPException), patch(
-            "src.services.message_service.asyncio.sleep", new=AsyncMock()
-        ) as mock_sleep:
-            with self.assertRaises(FakeHTTPException):
-                await service.send_channel_reply_with_files(channel, "reply", files=["file-a"])
+    async def test_interaction_followup_sends_text_with_ephemeral_flag(self):
+        interaction = MagicMock()
+        interaction.followup.send = AsyncMock()
+        service = MessageService()
 
-        self.assertEqual(mock_sleep.await_count, 2)
+        await service.send_interaction_followup(interaction, "reply")
+        interaction.followup.send.assert_awaited_once_with(
+            content="reply", files=[], suppress_embeds=True, ephemeral=False
+        )
 
-    async def test_send_interaction_followup_with_files_uses_paste_service_for_long_messages(self):
+        interaction.followup.send = AsyncMock()
+        await service.send_interaction_followup(interaction, "secret", ephemeral=True)
+        interaction.followup.send.assert_awaited_once_with(
+            content="secret", files=[], suppress_embeds=True, ephemeral=True
+        )
+
+    async def test_interaction_followup_uses_paste_and_retries(self):
         paste_service = MagicMock()
         paste_service.upload_markdown = AsyncMock(return_value="https://paste.rs/followup.md")
         interaction = MagicMock()
-        interaction.followup.send = AsyncMock()
+        interaction.followup.send = AsyncMock(side_effect=[FakeHTTPException(500), None])
         service = MessageService(paste_service_instance=paste_service)
 
-        await service.send_interaction_followup_with_files(
-            interaction,
-            "> prompt",
-            "x" * 2500,
-            files=["file-a"],
-        )
+        with _patch_http(), _patch_sleep():
+            await service.send_interaction_followup(interaction, "x" * 2500)
 
         paste_service.upload_markdown.assert_awaited_once()
-        sent_message = interaction.followup.send.await_args.kwargs["content"]
-        self.assertIn("https://paste.rs/followup.md", sent_message)
+        self.assertEqual(interaction.followup.send.await_count, 2)
+        self.assertIn("https://paste.rs/followup.md", interaction.followup.send.await_args.kwargs["content"])
 
     async def test_set_paste_service_and_format_prompt_message_delegate(self):
         service = MessageService()

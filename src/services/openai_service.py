@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import tempfile
-import httpx
 from typing import List, Dict, Any, Optional, Callable
 
 from openai import (
@@ -21,10 +20,15 @@ from openai import (
 
 
 from src.config import get_config
-from src.utils.message_utils import clean_openai_response
-from src.utils.http_client import create_async_client
+from src.utils.message_utils import clean_openai_response, resolve_bot_id
 
 logger = logging.getLogger(__name__)
+
+SDK_MAX_RETRIES = 3
+# Upstream errors OpenRouter reports inside an HTTP 200, worth one more try.
+RETRYABLE_SOFT_ERRORS = {429, 500, 502, 503, 504}
+SOFT_RETRY_ATTEMPTS = 2
+SOFT_RETRY_DELAY_SECONDS = 1.0
 
 
 class OpenAIServiceError(Exception):
@@ -50,26 +54,16 @@ class OpenAIService:
     def get_client(self) -> AsyncOpenAI:
         """Get OpenAI client with lazy initialization."""
         if self._client is None:
-            if get_config().is_testing:
-                # In testing environment, create a mock-friendly client
-                # Don't try to create a real client in testing
-                class MockClient:
-                    def __getattr__(self, name):  # noqa: ARG002
-                        return lambda *args, **kwargs: None  # noqa: ARG005
-
-                self._client = MockClient()
-            else:
-                self._client = AsyncOpenAI(
-                    base_url="https://openrouter.ai/api/v1",
-                    api_key=get_config().openrouter_api_key,
-                    default_headers={
-                        "HTTP-Referer": "https://github.com/jobeus/cmwgpt",
-                        "X-Title": "CMWGPT Discord Bot"
-                    },
-                    http_client=create_async_client(
-                        service_name="openrouter",
-                    ),
-                )
+            # The SDK retries connection errors, 408/409/429 and 5xx with backoff.
+            self._client = AsyncOpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=get_config().openrouter_api_key,
+                default_headers={
+                    "HTTP-Referer": "https://github.com/jobeus/cmwgpt",
+                    "X-Title": "CMWGPT Discord Bot"
+                },
+                max_retries=SDK_MAX_RETRIES,
+            )
         return self._client
 
     def _dump_bad_request(self, kwargs_dict: Dict[str, Any], client: AsyncOpenAI) -> None:
@@ -133,226 +127,107 @@ class OpenAIService:
         search: bool = True,
     ) -> tuple[str, float]:
         """
-        Gets a chat completion using the standard Chat Completions API.
+        Gets a chat completion from OpenRouter's Chat Completions API.
+
+        Transport-level failures are retried by the SDK itself; this loop only
+        retries what the SDK can't see: an upstream error returned inside an
+        HTTP 200, or an empty reply.
         """
         client = self.get_client()
 
-        # Prepare input for the chat completions API
-        api_input = []
+        api_input: List[Dict[str, Any]] = []
         if system_prompt:
             api_input.append({"role": "system", "content": system_prompt})
-
-        # Remove any existing system messages from the conversation if
-        # duplicate
         for msg in messages:
-            if msg.get("role") != "system":
-                # Parse JSON content if needed (for complex payloads like
-                # attachments)
-                content = msg.get("content", "")
-                parsed_content = content
-                if isinstance(
-                        content, str) and content.strip().startswith(
-                        ("[", "{")):
-                    try:
-                        # Try to parse as JSON - if successful, use parsed
-                        # content
-                        parsed_content = json.loads(content)
-                    except (json.JSONDecodeError, ValueError):
-                        # If parsing fails, keep original content
-                        pass
+            if msg.get("role") == "system":
+                continue
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                # OpenRouter only takes text and image parts here (no audio).
+                content = [p for p in content if not isinstance(p, dict) or p.get("type") in ("text", "image_url")]
+            api_input.append({"role": msg.get("role"), "content": content})
 
-                if isinstance(parsed_content, list):
-                    filtered_content = []
-                    for part in parsed_content:
-                        if isinstance(part, dict):
-                            if part.get("type") in ("text", "image_url"):
-                                filtered_content.append(part)
-                        else:
-                            filtered_content.append(part)
-                    parsed_content = filtered_content
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": api_input,
+            "extra_body": {"provider": {"sort": "price"}},
+        }
+        if search and model == "anthropic/claude-sonnet-5.5":
+            kwargs["extra_body"]["plugins"] = [{"id": "web", "engine": "native"}]
 
-                api_input.append({
-                    "role": msg.get("role"),
-                    "content": parsed_content
-                })
+        logger.info(f"[{model}] Prompt Snippet: {_prompt_snippet(api_input)}")
 
-        max_retries = 3
-        base_delay = 1.0
-
-        for attempt in range(max_retries):
+        for attempt in range(1, SOFT_RETRY_ATTEMPTS + 1):
             try:
-                logger.debug(
-                    f"Attempting response creation for model {model} (attempt {attempt + 1}/{max_retries})")
-
-                # actual_model = f"{model}:online" if not model.endswith(":online") else model
-                actual_model = model
-
-                # Generate a snippet of the latest message
-                last_msg_snippet = "(empty prompt)"
-                if api_input:
-                    last_msg_ptr = api_input[-1].get('content', '')
-                    if isinstance(last_msg_ptr, list):
-                        for part in last_msg_ptr:
-                            if part.get('type') == 'text':
-                                last_msg_snippet = part.get('text', '').replace("\n", " ")
-                                break
-                    elif isinstance(last_msg_ptr, str):
-                        last_msg_snippet = last_msg_ptr.replace("\n", " ")
-
-                snippet_trunc = last_msg_snippet[:150] + ("..." if len(last_msg_snippet) > 150 else "")
-                logger.info(f"[{actual_model}] Prompt Snippet: {snippet_trunc}")
-
-                kwargs = {
-                    "model": actual_model,
-                    "messages": api_input,
-                    "extra_body": {
-                        "provider": {
-                            "sort": "price"
-                        }
-                    }
-                }
-
-                if search and actual_model == "anthropic/claude-sonnet-5.5":
-                    kwargs["extra_body"]["plugins"] = [{
-                        "id": "web",
-                        "engine": "native"
-                    }]
-
                 response = await client.chat.completions.create(**kwargs)
-
-                if hasattr(response, 'error') and response.error is not None:
-                    error_data = response.error
-                    if isinstance(error_data, dict):
-                        error_code = error_data.get('code')
-                        error_message = error_data.get('message', 'Unknown Error')
-
-                        logger.error(f"Captured Soft-Error Payload in HTTP 200: {error_code} - {error_message}")
-                        logger.error(f"Full soft-error data: {json.dumps(error_data, indent=2, default=str)}")
-                        logger.error(f"Full raw response object: {response}")
-                        self._dump_bad_request(kwargs, client)
-
-                        if error_code in [429, 500, 502, 503, 504]:
-                            # Force this up to the retry loop catcher
-                            raise APIError(message=f"Upstream provider error: {error_code}", request=None, body=error_data)
-
-                        raise OpenAIServiceError(f"Non-retryable soft-error {error_code}: {error_message}")
-
-                # Safely inspect choices to avoid "object of type NoneType has no len()"
-                num_choices = len(response.choices) if getattr(response, 'choices', None) else 0
-                logger.info(
-                    f"[{actual_model}] got response object! number of choices={num_choices}")
-
-                if getattr(response, 'choices', None):
-                    response_text = response.choices[0].message.content
-
-                    # Print response snippet
-                    text_snippet = response_text.strip().replace("\n", " ")[:150] if response_text else "(empty)"
-                    logger.info(f"[{actual_model}] response snippet: {text_snippet}{'...' if len(response_text or '') > 150 else ''}")
-
-                    if not response_text:
-                        logger.error(f"⚠️ OpenAI response text was empty! Raw response object: {response}")
-                        raise ValueError("The model API returned an empty response.")  # Changed from OpenAIServiceError to allow caught retry
-
-                    # Attempt to get the bot_id if not explicitly provided
-                    effective_bot_id = bot_id
-                    if not effective_bot_id:
-                        try:
-                            if state_service and hasattr(state_service, 'bot_id'):
-                                effective_bot_id = state_service.bot_id
-                            elif self._bot_id_loader:
-                                effective_bot_id = self._bot_id_loader()
-                        except Exception as e:
-                            logger.warning(f"Failed to get bot_id for cleaning: {e}")
-                    
-                    cleaned_text = clean_openai_response(response_text, bot_id=effective_bot_id)
-                    
-                    try:
-                        cost = 0.0
-                        if hasattr(response, 'usage') and response.usage:
-                            model_extra = getattr(response.usage, 'model_extra', None)
-                            if isinstance(model_extra, dict):
-                                cost_details = model_extra.get('cost_details', {})
-                                if isinstance(cost_details, dict):
-                                    cost = cost_details.get('upstream_inference_cost', 0.0)
-                    except Exception as e:
-                        logger.warning(f"Failed to parse cost: {e}")
-
-                    return cleaned_text, cost
-                
-                logger.error(f"❌ Failed to get a proper response from the model. Raw response: {response}")
-                self._dump_bad_request(kwargs, client)
-                return "Failed to get a response from the model.", 0.0
-
-            except RateLimitError as e:
-                logger.warning(f"Rate limit hit on attempt {attempt + 1}: {e}")
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2**attempt)  # Exponential backoff
-                    logger.info(f"Retrying in {delay} seconds...")
-                    await asyncio.sleep(delay)
-                    continue
-                logger.error("Max retries exceeded for rate limit")
-                raise OpenAIServiceError(
-                    f"Rate limit exceeded after {max_retries} attempts. Please try again later."
-                ) from e
-
             except AuthenticationError as e:
                 logger.error(f"Authentication error: {e}")
-                raise OpenAIServiceError(
-                    "Authentication failed. Please check API key configuration."
-                ) from e
-
-            except APIConnectionError as e:
-                logger.warning(
-                    f"Connection error on attempt {attempt + 1}: {e}"
-                )
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2**attempt)
-                    logger.info(f"Retrying in {delay} seconds...")
-                    await asyncio.sleep(delay)
-                    continue
-                logger.error("Max retries exceeded for connection error")
-                raise OpenAIServiceError(
-                    f"Connection failed after {max_retries} attempts. Please try again later."
-                ) from e
-
+                raise OpenAIServiceError("Authentication failed. Please check API key configuration.") from e
             except BadRequestError as e:
                 logger.error(f"Bad request error: {e}")
                 self._dump_bad_request(kwargs, client)
-                raise OpenAIServiceError(
-                    f"Invalid request: {e.message if hasattr(e, 'message') else str(e)}") from e
-
+                raise OpenAIServiceError(f"Invalid request: {getattr(e, 'message', str(e))}") from e
+            except RateLimitError as e:
+                raise OpenAIServiceError("Rate limit exceeded. Please try again later.") from e
+            except APIConnectionError as e:
+                raise OpenAIServiceError("Connection to OpenRouter failed. Please try again later.") from e
             except APIError as e:
-                logger.error(f"OpenAI API error on attempt {attempt + 1}: {e}")
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2**attempt)
-                    logger.info(f"Retrying in {delay} seconds...")
-                    await asyncio.sleep(delay)
-                    continue
-                logger.error("Max retries exceeded for API error")
                 self._dump_bad_request(kwargs, client)
-                raise OpenAIServiceError(
-                    f"OpenAI API error after {max_retries} attempts: {str(e)}"
-                ) from e
+                raise OpenAIServiceError(f"OpenRouter API error: {e}") from e
 
-            except OpenAIServiceError:
-                # Re-raise our own exceptions without modification
-                raise
+            error_data = getattr(response, "error", None)
+            if isinstance(error_data, dict):
+                error_code = error_data.get("code")
+                error_message = error_data.get("message", "Unknown Error")
+                logger.error(f"Soft error in HTTP 200 (attempt {attempt}): {error_code} - {error_message}")
+                logger.error(f"Full soft-error data: {json.dumps(error_data, indent=2, default=str)}")
+                self._dump_bad_request(kwargs, client)
+                if error_code in RETRYABLE_SOFT_ERRORS and attempt < SOFT_RETRY_ATTEMPTS:
+                    await asyncio.sleep(SOFT_RETRY_DELAY_SECONDS * attempt)
+                    continue
+                raise OpenAIServiceError(f"Upstream error {error_code}: {error_message}")
 
-            except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
-                logger.error(f"Parsing/HTTP error on attempt {attempt + 1}: {e}")
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2**attempt)
-                    logger.info(f"Retrying in {delay} seconds...")
-                    await asyncio.sleep(delay)
+            choices = getattr(response, "choices", None)
+            if not choices:
+                logger.error(f"Failed to get a proper response from the model. Raw response: {response}")
+                self._dump_bad_request(kwargs, client)
+                return "Failed to get a response from the model.", 0.0
+
+            response_text = choices[0].message.content
+            if not response_text:
+                logger.error(f"Empty response text (attempt {attempt}). Raw response object: {response}")
+                if attempt < SOFT_RETRY_ATTEMPTS:
+                    await asyncio.sleep(SOFT_RETRY_DELAY_SECONDS * attempt)
                     continue
                 self._dump_bad_request(kwargs, client)
-                raise OpenAIServiceError(f"Unexpected error: {str(e)}") from e
+                raise OpenAIServiceError("The model API returned an empty response.")
 
-        # This should never be reached, but just in case
-        raise OpenAIServiceError(
-            "Failed to get chat completion after all retry attempts"
-        )
+            snippet = response_text.strip().replace("\n", " ")
+            logger.info(f"[{model}] response snippet: {snippet[:150]}{'...' if len(snippet) > 150 else ''}")
+            cleaned = clean_openai_response(
+                response_text, bot_id=resolve_bot_id(bot_id, state_service, self._bot_id_loader))
+            return cleaned, _response_cost(response)
+
+        raise OpenAIServiceError("Failed to get chat completion after all retry attempts")
 
 
-# Global service instance
-openai_service = OpenAIService()
+def _prompt_snippet(api_input: List[Dict[str, Any]]) -> str:
+    if not api_input:
+        return "(empty prompt)"
+    content = api_input[-1].get("content", "")
+    if isinstance(content, list):
+        content = next((p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"), "")
+    text = str(content).replace("\n", " ")
+    return text[:150] + ("..." if len(text) > 150 else "")
+
+
+def _response_cost(response: Any) -> float:
+    try:
+        model_extra = getattr(getattr(response, "usage", None), "model_extra", None)
+        if isinstance(model_extra, dict):
+            cost_details = model_extra.get("cost_details", {})
+            if isinstance(cost_details, dict):
+                return cost_details.get("upstream_inference_cost", 0.0) or 0.0
+    except Exception as e:
+        logger.warning(f"Failed to parse cost: {e}")
+    return 0.0

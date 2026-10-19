@@ -2,9 +2,8 @@
 System Commands - Handles system/admin Discord commands
 """
 
-import asyncio
 import logging
-from typing import Optional
+from typing import Callable, Optional
 
 import discord
 from discord import app_commands
@@ -17,6 +16,18 @@ from src.utils.discord_error_utils import safe_defer
 from src.utils.async_utils import safe_run
 
 logger = logging.getLogger(__name__)
+
+DISCORD_MESSAGE_LIMIT = 2000
+
+
+def _code_block_message(header: str, body: str) -> str:
+    """``header`` plus ``body`` in a code block, truncated to fit one Discord message."""
+    content = f"{header}\n```\n{body}\n```"
+    if len(content) <= DISCORD_MESSAGE_LIMIT:
+        return content
+    suffix = "\n```\n*[truncated]*"
+    room = DISCORD_MESSAGE_LIMIT - len(f"{header}\n```\n") - len(suffix)
+    return f"{header}\n```\n{body[:room]}{suffix}"
 
 
 class SystemCommands:
@@ -32,6 +43,7 @@ class SystemCommands:
         system_prompt_loader=get_system_prompt,
         default_model: Optional[str] = None,
         mention_legend_provider=get_mention_legend,
+        on_model_change: Optional[Callable[[int], None]] = None,
     ):
         self.bot = bot
         self._queue_service = queue_service_instance
@@ -40,6 +52,8 @@ class SystemCommands:
         self._system_prompt_loader = system_prompt_loader
         self._default_model = get_config().default_model if default_model is None else default_model
         self._mention_legend_provider = mention_legend_provider
+        # Called with the channel ID after /model changes it (to drop per-model caches).
+        self._on_model_change = on_model_change
 
     def setup_commands(self) -> None:
         """Set up all system-related commands."""
@@ -137,10 +151,7 @@ class SystemCommands:
             if not await safe_defer(interaction, ephemeral=True, thinking=True):
                 return
 
-            # Fire-and-forget: read-only, no state mutation
-            asyncio.create_task(
-                safe_run(interaction, self._handle_systemprompt_view, interaction)
-            )
+            await safe_run(interaction, self._handle_systemprompt_view, interaction)
 
         return systemprompt_group
 
@@ -162,6 +173,8 @@ class SystemCommands:
 
         if model:
             self._state_service.set_model(channel_id, model)
+            if self._on_model_change:
+                self._on_model_change(channel_id)
             logger.info(f"[/model] Channel {channel_id}: model set to {model}")
             await interaction.followup.send(f"Model set to `{model}`.", ephemeral=True)
         else:
@@ -206,7 +219,7 @@ class SystemCommands:
             logger.info(
                 f"[/systemprompt set] Channel {channel_id}: displayed current system prompt.")
             await interaction.followup.send(
-                f"Current system prompt for this channel:\n```\n{current_prompt}\n```", ephemeral=True
+                _code_block_message("Current system prompt for this channel:", current_prompt), ephemeral=True
             )
 
     async def _handle_systemprompt_view(
@@ -232,14 +245,10 @@ class SystemCommands:
         logger.info(
             f"[/systemprompt view] Channel {channel_id}: displayed full composed system prompt.")
 
-        # Discord has a 2000-char message limit; use a code block
-        content = f"**Full system prompt for this channel (as sent to the model):**\n```\n{full_prompt}\n```"
-        if len(content) > 2000:
-            # Truncate if too long for Discord
-            max_prompt_len = 2000 - len("**Full system prompt for this channel (as sent to the model):**\n```\n\n```\n*[truncated]*")
-            content = f"**Full system prompt for this channel (as sent to the model):**\n```\n{full_prompt[:max_prompt_len]}\n```\n*[truncated]*"
-
-        await interaction.followup.send(content, ephemeral=True)
+        await interaction.followup.send(
+            _code_block_message("**Full system prompt for this channel (as sent to the model):**", full_prompt),
+            ephemeral=True,
+        )
 
     async def _handle_systemprompt_reset(
             self, interaction: discord.Interaction) -> None:
@@ -304,10 +313,7 @@ class SystemCommands:
             if not await safe_defer(interaction, ephemeral=True, thinking=True):
                 return
 
-            # Fire-and-forget: help is stateless, no need to queue
-            asyncio.create_task(
-                safe_run(interaction, self._handle_help_command, interaction)
-            )
+            await safe_run(interaction, self._handle_help_command, interaction)
         return help_command
 
     async def _handle_help_command(

@@ -27,6 +27,35 @@ class TestAssertPublicUrlSync(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 ssrf_guard.assert_public_url_sync(url)
 
+    def test_blocks_cgnat_and_other_non_global_addresses(self):
+        for url in [
+            "http://100.64.0.1/",
+            "http://100.100.100.200/latest/meta-data/",  # Alibaba Cloud metadata
+            "http://100.127.255.254/",
+            "http://192.0.2.10/",  # TEST-NET-1 documentation range
+        ]:
+            with self.subTest(url=url), self.assertRaises(ValueError) as ctx:
+                ssrf_guard.assert_public_url_sync(url)
+            self.assertIn("non-public", str(ctx.exception))
+
+    def test_blocks_ipv4_mapped_ipv6_private_addresses(self):
+        for url in [
+            "http://[::ffff:127.0.0.1]/",
+            "http://[::ffff:10.0.0.1]/",
+            "http://[::ffff:169.254.169.254]/",
+            "http://[::ffff:100.64.0.1]/",
+        ]:
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                ssrf_guard.assert_public_url_sync(url)
+
+    def test_allows_ipv4_mapped_ipv6_public_address(self):
+        ssrf_guard.assert_public_url_sync("http://[::ffff:93.184.216.34]/")
+
+    def test_blocks_hostname_resolving_to_cgnat_address(self):
+        with patch("src.utils.ssrf_guard.socket.getaddrinfo", return_value=addrinfo("100.100.100.200")):
+            with self.assertRaises(ValueError):
+                ssrf_guard.assert_public_url_sync("https://metadata.example.com/")
+
     def test_allows_public_literal_address(self):
         ssrf_guard.assert_public_url_sync("http://93.184.216.34/page")
 

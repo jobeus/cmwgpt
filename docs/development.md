@@ -10,9 +10,9 @@ This page is optimized for the three workflows people actually use in this repo:
 
 | Workflow | Best when | Main command path |
 | --- | --- | --- |
-| Local bot-only | You are changing Python bot logic and do not need the full viewer stack | `.venv` + `python main.py` |
-| Full-stack Docker | You want bot + DB + backend + frontend together | `docker compose --env-file .env.development up --build` |
-| Focused test/debug loop | You are iterating on a single area | `make test-specific`, direct `pytest`, targeted frontend tests |
+| Local bot-only | You are changing Python bot logic and do not need the Docker stack | `.venv` + `python main.py` |
+| Full-stack Docker | You want bot + DB together | `docker compose --env-file .env.development up --build` |
+| Focused test/debug loop | You are iterating on a single area | `make test-specific`, direct `pytest` |
 
 ## Local Python setup
 
@@ -52,7 +52,7 @@ Why this is preferred:
 make run
 ```
 
-This uses `start.sh`. The important caveat is that the wrapper currently assumes a `venv/` path when reinstalling after restart, while the Makefile creates `.venv/` by default.
+This uses `start.sh`, which runs `main.py` from `.venv/` (or a legacy `venv/`) and, whenever the bot exits with code `42` (after `/restart` or an auto-update), reinstalls requirements and starts it again.
 
 ## Running the full stack with Docker
 
@@ -65,10 +65,10 @@ This starts:
 
 | Service | Purpose |
 | --- | --- |
-| `db` | MariaDB storage for logs |
-| `bot` | Python Discord bot |
-| `backend` | Log-viewer API + Socket.IO service |
-| `frontend` | React/Vite UI |
+| `db` | MariaDB storage for per-user memory |
+| `bot` | Python Discord bot (`python:3.13-slim` image) |
+
+CI runs only the Python job, on Python 3.13.
 
 ## Fast command cheat sheet
 
@@ -101,13 +101,8 @@ Examples:
 
 ```bash
 .venv/bin/python -m pytest tests/test_state_service.py
+.venv/bin/python -m pytest tests/test_memory_service.py
 ```
-
-### Working on the frontend
-
-The frontend is usually run through Docker in this repo, but standalone work is also possible inside `log-viewer/frontend/`.
-
-See `log-viewer/frontend/README.md` for the frontend-specific workflow and env details.
 
 ## Debugging heuristics that save time
 
@@ -116,7 +111,7 @@ See `log-viewer/frontend/README.md` for the frontend-specific workflow and env d
 | Bot does not answer mentions | `REPLY_TO_MENTIONS`, Discord permissions, correct mention path |
 | Commands look stale | `DISCORD_GUILD_ID`, command sync behavior, whether the bot restarted |
 | URL enrichment missing | `RAPIDAPI_KEY`, `GROQ_API_KEY`, `TRANSCRIPT_PROXY` |
-| Logs missing from viewer | MariaDB connectivity and `init_db.sql` before frontend debugging |
+| `/memory` errors or no profiles in mentions | MariaDB connectivity, `DB_*` values, and whether `init_db.sql` was applied |
 | Restart flow weirdness | whether you used `make run` vs `make run-direct` |
 
 ## Suggested file-entry points for contributors
@@ -127,5 +122,5 @@ See `log-viewer/frontend/README.md` for the frontend-specific workflow and env d
 | Understand runtime orchestration | `src/bot/client.py` |
 | Understand mention requests | `src/bot/handlers/mention.py` |
 | Understand downloader behavior | `src/utils/downloader_utils.py` |
-| Understand DB logging | `src/db/logger.py` |
-| Understand frontend behavior | `log-viewer/frontend/src/App.tsx` |
+| Understand per-user memory | `src/services/memory_service.py`, `src/db/memory_store.py` |
+| Understand outbound fetches | `src/utils/http_client.py`, `src/utils/ssrf_guard.py` |

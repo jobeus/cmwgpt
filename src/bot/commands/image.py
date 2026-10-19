@@ -2,7 +2,6 @@
 Image Commands - Handles image generation Discord commands
 """
 
-import asyncio
 import base64
 import io
 import logging
@@ -14,7 +13,6 @@ from discord.app_commands import Choice
 from discord.ext import commands
 from src.services.openai_service import OpenAIServiceError
 from src.services.runpod_service import RunpodServiceError
-from src.services.gemini_service import GeminiServiceError
 from src.utils.async_utils import safe_run
 from src.utils.discord_error_utils import best_effort_typing, safe_defer
 
@@ -93,10 +91,7 @@ class ImageCommands:
             if not await safe_defer(interaction, ephemeral=False, thinking=True):
                 return
 
-            # Fire-and-forget: image commands run async, not queued
-            asyncio.create_task(
-                safe_run(interaction, self._handle_draw_command, interaction, prompt, image1, image2, image3, image4, model)
-            )
+            await safe_run(interaction, self._handle_draw_command, interaction, prompt, image1, image2, image3, image4, model)
 
         return draw
 
@@ -261,10 +256,7 @@ class ImageCommands:
             if not await safe_defer(interaction, ephemeral=False, thinking=True):
                 return
 
-            # Fire-and-forget: model config commands run async, not queued
-            asyncio.create_task(
-                safe_run(interaction, self._handle_drawmodel_command, interaction, model)
-            )
+            await safe_run(interaction, self._handle_drawmodel_command, interaction, model)
         return drawmodel_command
 
     async def _handle_drawmodel_command(self,
@@ -324,10 +316,7 @@ class ImageCommands:
             if not await safe_defer(interaction, ephemeral=False, thinking=True):
                 return
 
-            # Fire-and-forget: image commands run async, not queued
-            asyncio.create_task(
-                safe_run(interaction, self._handle_edit_command, interaction, prompt, edit_image, image2, image3, image4, model)
-            )
+            await safe_run(interaction, self._handle_edit_command, interaction, prompt, edit_image, image2, image3, image4, model)
 
         return edit
 
@@ -475,10 +464,7 @@ class ImageCommands:
             if not await safe_defer(interaction, ephemeral=False, thinking=True):
                 return
 
-            # Fire-and-forget: model config commands run async, not queued
-            asyncio.create_task(
-                safe_run(interaction, self._handle_editmodel_command, interaction, model)
-            )
+            await safe_run(interaction, self._handle_editmodel_command, interaction, model)
         return editmodel_command
 
     async def _handle_editmodel_command(self,

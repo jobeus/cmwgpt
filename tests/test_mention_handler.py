@@ -18,7 +18,8 @@ class AsyncTyping:
 
 
 class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
-    def make_handler(self, *, attachment_converter=None, url_converter=None, url_content_fetcher=None):
+    def make_handler(self, *, attachment_converter=None, url_converter=None, url_content_fetcher=None,
+                     gemini_service=None, anthropic_service=None):
         queue_service = MagicMock()
         queue_service.queue_mention = AsyncMock(return_value=True)
         state_service = MagicMock()
@@ -38,6 +39,8 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             attachment_converter=attachment_converter or AsyncMock(return_value="data:file/plain;base64,AAA"),
             url_converter=url_converter or AsyncMock(return_value="data:image/png;base64,BBB"),
             url_content_fetcher=url_content_fetcher or AsyncMock(return_value=("", [])),
+            gemini_service=gemini_service,
+            anthropic_service=anthropic_service,
         )
         return handler, state_service, queue_service, openai_service, message_service
 
@@ -57,7 +60,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_prepare_context_handles_reply_urls_and_assistant_image_split(self):
-        async def url_content_fetcher(text):
+        async def url_content_fetcher(text, *, cache_only):
             return ("[fetched-url]\n", []) if "https://site.example" in text else ("", [])
 
         url_converter = AsyncMock(return_value="data:image/png;base64,IMG")
@@ -85,7 +88,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             title="preview",
             description=None,
             url=None,
-            image=SimpleNamespace(url="https://img.example/preview.png"),
+            image=SimpleNamespace(url="https://img.example/preview.png", proxy_url=None),
             thumbnail=None,
         )
         bot_user = SimpleNamespace(id=999)
@@ -181,7 +184,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             description="embed desc",
             url="https://embed.example",
             image=None,
-            thumbnail=SimpleNamespace(url="https://img.example/thumb.png"),
+            thumbnail=SimpleNamespace(url="https://img.example/thumb.png", proxy_url=None),
         )
         mention_msg = SimpleNamespace(
             author=SimpleNamespace(id=123),
@@ -322,7 +325,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             title="preview",
             description=None,
             url=None,
-            image=SimpleNamespace(url="https://img.example/preview.png"),
+            image=SimpleNamespace(url="https://img.example/preview.png", proxy_url=None),
             thumbnail=None,
         )
         empty_msg = SimpleNamespace(
@@ -487,3 +490,84 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             await handler.handle_mention(message, SimpleNamespace(id=999), "gpt-test")
 
         self.assertTrue(any("Failed to send fallback error message" in call.args[0] for call in mock_error.call_args_list))
+
+    def _simple_msg(self, msg_id, channel, content="hi", author_id=111):
+        return SimpleNamespace(
+            author=SimpleNamespace(id=author_id),
+            id=msg_id,
+            content=content,
+            channel=channel,
+            reference=None,
+            attachments=[],
+            embeds=[],
+            created_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+        )
+
+    async def test_prepare_context_calls_url_fetcher_with_cache_only_flag(self):
+        fetcher = AsyncMock(return_value=("", []))
+        handler, _, _, _, _ = self.make_handler(url_content_fetcher=fetcher)
+        channel = MagicMock()
+        channel.id = 42
+        channel.name = "links"
+        mention_msg = self._simple_msg(1, channel, content="see https://site.example")
+
+        async def history(limit=None, after=None):
+            yield mention_msg
+
+        channel.history = history
+
+        await handler._prepare_mention_context(mention_msg, SimpleNamespace(id=999))
+
+        fetcher.assert_awaited_once()
+        self.assertIn("see https://site.example", fetcher.await_args.args[0])
+        self.assertEqual(fetcher.await_args.kwargs, {"cache_only": False})
+
+    async def test_history_window_reset_clears_gemini_and_anthropic_caches(self):
+        gemini_service = MagicMock()
+        anthropic_service = MagicMock()
+        handler, _, _, _, _ = self.make_handler(
+            gemini_service=gemini_service, anthropic_service=anthropic_service
+        )
+        channel = MagicMock()
+        channel.id = 77
+        channel.name = "fresh"
+        mention_msg = self._simple_msg(1, channel)
+
+        async def history(limit=None, after=None):
+            yield mention_msg
+
+        channel.history = history
+
+        await handler._prepare_mention_context(mention_msg, SimpleNamespace(id=999))
+
+        gemini_service.clear_channel_cache.assert_called_once_with(77)
+        anthropic_service.clear_channel_cache.assert_called_once_with(77)
+
+    async def test_massive_history_gap_clears_gemini_and_anthropic_caches(self):
+        from src.bot.handlers.mention import MAX_HISTORY_GAP
+
+        gemini_service = MagicMock()
+        anthropic_service = MagicMock()
+        handler, _, _, _, _ = self.make_handler(
+            gemini_service=gemini_service, anthropic_service=anthropic_service
+        )
+        channel = MagicMock()
+        channel.id = 78
+        channel.name = "busy"
+        oldest = self._simple_msg(1, channel)
+        mention_msg = self._simple_msg(2, channel)
+        gap_msgs = [self._simple_msg(100 + i, channel) for i in range(MAX_HISTORY_GAP)]
+
+        async def history(limit=None, after=None):
+            for msg in (gap_msgs if after is not None else [mention_msg]):
+                yield msg
+
+        channel.history = history
+        handler._history_cache[78] = {"timestamp": 1000, "oldest_message": oldest}
+
+        with patch("src.bot.handlers.mention.time", MagicMock(time=MagicMock(return_value=1001))):
+            await handler._prepare_mention_context(mention_msg, SimpleNamespace(id=999))
+
+        gemini_service.clear_channel_cache.assert_called_once_with(78)
+        anthropic_service.clear_channel_cache.assert_called_once_with(78)
+        self.assertIs(handler._history_cache[78]["oldest_message"], mention_msg)

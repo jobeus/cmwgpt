@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 async def safe_run(interaction: discord.Interaction,
                    handler: callable, *args, **kwargs) -> None:
     """
-    Safely run an async command handler as a fire-and-forget task.
+    Run an async command handler, reporting any error to the user.
 
     Catches all exceptions and sends an error message back through
     the interaction's followup, so unhandled errors don't crash silently.

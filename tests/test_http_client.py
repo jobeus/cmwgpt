@@ -1,167 +1,237 @@
-import base64
+"""Tests for the SSRF-safe HTTP fetch helpers."""
+
+import asyncio
+import gzip
+import os
+import tempfile
+import unittest
+from unittest.mock import patch
+
 import httpx
-import pytest
-from unittest.mock import AsyncMock, patch
 
-from src.utils.http_client import (
-    create_async_client,
-    create_sync_client,
-    flush_pending_logs,
-)
+from src.utils import http_client
+from src.utils.http_client import ResponseTooLarge, download_public, fetch_public
+
+_RealAsyncClient = httpx.AsyncClient
 
 
-@pytest.fixture
-def mock_log_api_request():
-    with patch("src.utils.http_client.log_api_request", new_callable=AsyncMock) as mock:
-        yield mock
+def _client_factory(handler, captured=None):
+    """Return an AsyncClient replacement that routes requests to ``handler``."""
+    def factory(*args, **kwargs):
+        if captured is not None:
+            captured.append(dict(kwargs))
+        kwargs.pop("proxy", None)
+        return _RealAsyncClient(*args, transport=httpx.MockTransport(handler), **kwargs)
+    return factory
 
 
-@pytest.mark.asyncio
-async def test_async_transport_success(mock_log_api_request):
-    """Test that a successful async request logs everything correctly."""
-    class MockTransport(httpx.AsyncBaseTransport):
-        async def handle_async_request(self, request):
-            return httpx.Response(
-                200,
-                headers={"Content-Type": "application/json", "X-Custom": "test"},
-                text='{"status": "ok"}',
-                request=request,
-            )
+class HttpClientTestCase(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.checked = []
 
-        async def aclose(self):
-            pass
+        async def fake_assert(url):
+            self.checked.append(url)
+            host = httpx.URL(url).host
+            if host.startswith("10.") or host == "169.254.169.254":
+                raise ValueError(f"Refusing to fetch non-public URL {url}")
 
-    client = create_async_client(transport=MockTransport(), service_name="test_service")
-    
-    response = await client.post(
-        "https://api.example.com/data",
-        headers={"X-Req": "abc"},
-        json={"req": "data"}
-    )
-    
-    assert response.status_code == 200
-    mock_log_api_request.assert_awaited_once()
-    
-    call_kwargs = mock_log_api_request.call_args.kwargs
-    assert call_kwargs["service_name"] == "test_service"
-    assert call_kwargs["method"] == "POST"
-    assert call_kwargs["endpoint_url"] == "https://api.example.com/data"
-    assert call_kwargs["request_headers"].get("x-req") == "abc"
-    assert call_kwargs["request_body"] == '{"req":"data"}'
-    assert call_kwargs["response_status"] == 200
-    assert call_kwargs["response_headers"].get("content-type") == "application/json"
-    assert call_kwargs["response_body"] == '{"status": "ok"}'
+        patcher = patch("src.utils.http_client.assert_public_url", side_effect=fake_assert)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def use_handler(self, handler, captured=None):
+        patcher = patch("src.utils.http_client.httpx.AsyncClient", _client_factory(handler, captured))
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
 
-@pytest.mark.asyncio
-async def test_async_transport_exception(mock_log_api_request):
-    """Test that a transport exception logs an error row."""
-    class MockTransport(httpx.AsyncBaseTransport):
-        async def handle_async_request(self, request):
-            raise httpx.ConnectTimeout("Connection timed out")
+class TestFetchPublic(HttpClientTestCase):
+    async def test_normal_fetch_returns_fully_read_response(self):
+        captured = []
 
-        async def aclose(self):
-            pass
+        def handler(request):
+            self.assertEqual(request.headers["x-test"], "1")
+            self.assertEqual(request.url.params["q"], "abc")
+            return httpx.Response(200, text="hello", headers={"content-type": "text/plain"})
 
-    client = create_async_client(transport=MockTransport())
-    
-    with pytest.raises(httpx.ConnectTimeout):
-        await client.get("https://api.groq.com/test")
-        
-    mock_log_api_request.assert_awaited_once()
-    call_kwargs = mock_log_api_request.call_args.kwargs
-    assert call_kwargs["service_name"] == "groq"  # inferred correctly
-    assert call_kwargs["response_status"] == 0
-    assert "ConnectTimeout" in call_kwargs["response_body"]
+        self.use_handler(handler, captured)
+
+        response = await fetch_public(
+            "https://example.com/page", headers={"X-Test": "1"}, params={"q": "abc"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.text, "hello")
+        self.assertEqual(response.headers["content-type"], "text/plain")
+        self.assertEqual(self.checked, ["https://example.com/page"])
+        self.assertFalse(captured[0]["follow_redirects"])
+
+    async def test_follows_redirects_checking_every_hop(self):
+        def handler(request):
+            if request.url.path == "/start":
+                return httpx.Response(302, headers={"location": "/middle"})
+            if request.url.path == "/middle":
+                return httpx.Response(301, headers={"location": "https://other.example/final"})
+            return httpx.Response(200, text="done")
+
+        self.use_handler(handler)
+
+        response = await fetch_public("https://example.com/start")
+
+        self.assertEqual(response.text, "done")
+        self.assertEqual(self.checked, [
+            "https://example.com/start",
+            "https://example.com/middle",
+            "https://other.example/final",
+        ])
+
+    async def test_redirect_to_private_address_is_refused(self):
+        requested = []
+
+        def handler(request):
+            requested.append(str(request.url))
+            return httpx.Response(302, headers={"location": "http://169.254.169.254/latest/meta-data/"})
+
+        self.use_handler(handler)
+
+        with self.assertRaises(ValueError):
+            await fetch_public("https://example.com/redirect")
+
+        self.assertEqual(requested, ["https://example.com/redirect"])
+
+    async def test_initial_private_url_is_refused_without_request(self):
+        requested = []
+        self.use_handler(lambda request: requested.append(request) or httpx.Response(200))
+
+        with self.assertRaises(ValueError):
+            await fetch_public("http://10.0.0.1/")
+
+        self.assertEqual(requested, [])
+
+    async def test_too_many_redirects_raises(self):
+        self.use_handler(lambda request: httpx.Response(302, headers={"location": "/loop"}))
+
+        with self.assertRaises(httpx.TooManyRedirects):
+            await fetch_public("https://example.com/loop")
+
+        self.assertEqual(len(self.checked), http_client.MAX_REDIRECTS + 1)
+
+    async def test_body_over_limit_raises(self):
+        # Streamed body with no Content-Length so the byte counter is what trips.
+        async def body():
+            for _ in range(10):
+                yield b"x" * 100
+
+        self.use_handler(lambda request: httpx.Response(200, content=body()))
+
+        with self.assertRaises(ResponseTooLarge):
+            await fetch_public("https://example.com/big", max_bytes=500)
+
+    async def test_declared_content_length_over_limit_raises(self):
+        self.use_handler(lambda request: httpx.Response(
+            200, content=b"small", headers={"content-length": "999999"}))
+
+        with self.assertRaises(ResponseTooLarge):
+            await fetch_public("https://example.com/declared", max_bytes=1000)
+
+    async def test_body_at_limit_is_allowed(self):
+        self.use_handler(lambda request: httpx.Response(200, content=b"x" * 500))
+
+        response = await fetch_public("https://example.com/exact", max_bytes=500)
+
+        self.assertEqual(len(response.content), 500)
+
+    async def test_gzip_encoded_response_comes_back_decoded(self):
+        payload = "hello gzip " * 50
+        self.use_handler(lambda request: httpx.Response(
+            200,
+            content=gzip.compress(payload.encode()),
+            headers={"content-encoding": "gzip", "content-type": "text/plain"},
+        ))
+
+        response = await fetch_public("https://example.com/gz")
+
+        self.assertEqual(response.text, payload)
+        self.assertEqual(response.content, payload.encode())
+        self.assertNotIn("content-encoding", response.headers)
+        self.assertEqual(response.headers["content-type"], "text/plain")
+
+    async def test_error_status_is_returned_for_caller_to_check(self):
+        self.use_handler(lambda request: httpx.Response(404, text="missing"))
+
+        response = await fetch_public("https://example.com/missing")
+
+        self.assertEqual(response.status_code, 404)
+        with self.assertRaises(httpx.HTTPStatusError):
+            response.raise_for_status()
+
+    async def test_whole_fetch_deadline(self):
+        async def slow_fetch(*args, **kwargs):
+            await asyncio.sleep(10)
+
+        with patch("src.utils.http_client._fetch", side_effect=slow_fetch):
+            with self.assertRaises(asyncio.TimeoutError):
+                await fetch_public("https://example.com/slow", timeout=0.01)
+
+    async def test_passes_proxy_to_client(self):
+        captured = []
+        self.use_handler(lambda request: httpx.Response(200), captured)
+
+        await fetch_public("https://example.com/", proxy="http://proxy:8080")
+
+        self.assertEqual(captured[0]["proxy"], "http://proxy:8080")
 
 
-@pytest.mark.asyncio
-async def test_sync_transport_buffers_and_flushes(mock_log_api_request):
-    """Test that the sync transport buffers logs and flush writes them."""
-    class MockSyncTransport(httpx.BaseTransport):
-        def handle_request(self, request):
-            return httpx.Response(201, text="created", request=request)
-            
-        def close(self):
-            pass
+class TestDownloadPublic(HttpClientTestCase):
+    def setUp(self):
+        super().setUp()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.path = os.path.join(self._tmp.name, "video.mp4")
 
-    client = create_sync_client(transport=MockSyncTransport())
-    client.get("https://openrouter.ai/test")
-    
-    transport = client._transport
-    assert len(transport.pending_logs) == 1
-    
-    log_entry = transport.pending_logs[0]
-    assert log_entry["service_name"] == "openrouter"
-    
-    mock_log_api_request.assert_not_called()
-    
-    await flush_pending_logs(transport)
-    assert len(transport.pending_logs) == 0
-    mock_log_api_request.assert_awaited_once()
+    async def test_streams_body_to_file(self):
+        def handler(request):
+            if request.url.path == "/v":
+                return httpx.Response(302, headers={"location": "/real.mp4"})
+            return httpx.Response(200, content=b"video-bytes")
 
+        self.use_handler(handler)
 
-@pytest.mark.asyncio
-async def test_domain_exclusion(mock_log_api_request):
-    """Test that excluded domains are skipped."""
-    class MockTransport(httpx.AsyncBaseTransport):
-        async def handle_async_request(self, request):
-            return httpx.Response(200, request=request)
+        await download_public("https://cdn.example/v", self.path)
 
-        async def aclose(self):
-            pass
+        with open(self.path, "rb") as f:
+            self.assertEqual(f.read(), b"video-bytes")
+        self.assertEqual(len(self.checked), 2)
 
-    client = create_async_client(transport=MockTransport())
-    await client.get("https://cdn.discordapp.com/attachments/123/456/img.png")
-    await client.get("https://media.discordapp.net/test.jpg")
-    await client.get("https://wikimedia.org/api/rest_v1/")
-    
-    mock_log_api_request.assert_not_called()
+    async def test_too_large_download_removes_partial_file(self):
+        async def body():
+            for _ in range(10):
+                yield b"x" * 100
 
+        self.use_handler(lambda request: httpx.Response(200, content=body()))
 
-@pytest.mark.asyncio
-async def test_path_exclusion(mock_log_api_request):
-    """Test that specific Wikipedia paths are excluded."""
-    class MockTransport(httpx.AsyncBaseTransport):
-        async def handle_async_request(self, request):
-            return httpx.Response(200, request=request)
+        with self.assertRaises(ResponseTooLarge):
+            await download_public("https://cdn.example/big.mp4", self.path, max_bytes=250)
 
-        async def aclose(self):
-            pass
+        self.assertFalse(os.path.exists(self.path))
 
-    client = create_async_client(transport=MockTransport())
-    await client.get("https://en.wikipedia.org/wiki/Deaths_in_2024")
-    mock_log_api_request.assert_not_called()
-    
-    # But a normal wikipedia URL should be logged
-    await client.get("https://en.wikipedia.org/wiki/Python_(programming_language)")
-    assert mock_log_api_request.call_count == 1
+    async def test_http_error_removes_file(self):
+        self.use_handler(lambda request: httpx.Response(500, content=b"oops"))
+
+        with self.assertRaises(httpx.HTTPStatusError):
+            await download_public("https://cdn.example/err.mp4", self.path)
+
+        self.assertFalse(os.path.exists(self.path))
+
+    async def test_redirect_to_private_address_is_refused(self):
+        self.use_handler(lambda request: httpx.Response(
+            302, headers={"location": "http://10.0.0.5/secret"}))
+
+        with self.assertRaises(ValueError):
+            await download_public("https://cdn.example/v.mp4", self.path)
+
+        self.assertFalse(os.path.exists(self.path))
 
 
-@pytest.mark.asyncio
-async def test_binary_response_base64_encoding(mock_log_api_request):
-    """Test that binary responses are base64-encoded as data URLs."""
-    binary_data = b"\\x89PNG\\r\\n\\x1a\\n\\x00\\x00\\x00\\rIHDR"
-    
-    class MockTransport(httpx.AsyncBaseTransport):
-        async def handle_async_request(self, request):
-            return httpx.Response(
-                200,
-                headers={"Content-Type": "image/png"},
-                content=binary_data,
-                request=request,
-            )
-
-        async def aclose(self):
-            pass
-
-    client = create_async_client(transport=MockTransport())
-    await client.get("https://api.runpod.ai/v2/some-image")
-    
-    mock_log_api_request.assert_awaited_once()
-    call_kwargs = mock_log_api_request.call_args.kwargs
-    
-    expected_b64 = base64.b64encode(binary_data).decode("ascii")
-    expected_data_url = f"data:image/png;base64,{expected_b64}"
-    
-    assert call_kwargs["response_body"] == expected_data_url
+if __name__ == "__main__":
+    unittest.main()

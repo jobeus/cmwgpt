@@ -41,9 +41,11 @@ def extract_tiktok_urls(text: str) -> List[str]:
 
 
 @skip_recent_failures("tiktok")
-def get_tiktok_transcript(url: str) -> Optional[dict]:
+async def get_tiktok_transcript(url: str, *, cache_only: bool = False) -> Optional[str]:
+    """Transcribe a TikTok video (downloaded with yt-dlp, transcribed by Groq).
+
+    Results are cached to persistent disk. Returns ``None`` on failure (e.g.
+    the URL is not a video), or on a cache miss when ``cache_only`` is set.
     """
-    Fetch the transcript for a TikTok video by downloading audio and processing with Groq.
-    Results are cached to persistent disk.
-    """
-    return download_and_transcribe_video(url, _tiktok_cache, label="TikTok", file_prefix="tiktok")
+    return await download_and_transcribe_video(
+        url, _tiktok_cache, label="TikTok", file_prefix="tiktok", cache_only=cache_only)

@@ -49,6 +49,19 @@ class TestSystemCommands(unittest.IsolatedAsyncioTestCase):
         state_service.set_model.assert_called_once_with(321, "gpt-test")
         interaction.followup.send.assert_awaited_once_with("Model set to `gpt-test`.", ephemeral=True)
 
+    async def test_handle_model_command_calls_on_model_change_only_when_setting(self):
+        commands, _, _, state_service = self.make_commands()
+        on_change = MagicMock()
+        commands._on_model_change = on_change
+        state_service.get_model.return_value = "x"
+        interaction = make_interaction(channel_id=321)
+
+        await commands._handle_model_command(interaction, None)
+        on_change.assert_not_called()
+
+        await commands._handle_model_command(interaction, "gpt-test")
+        on_change.assert_called_once_with(321)
+
     async def test_handle_model_command_reports_current_or_default_model(self):
         commands, _, _, state_service = self.make_commands(default_model="fallback-model")
         interaction = make_interaction(channel_id=654)
@@ -88,7 +101,28 @@ class TestSystemCommands(unittest.IsolatedAsyncioTestCase):
         state_service.get_system_prompt.assert_called_once_with(333)
         sent_content = interaction.followup.send.await_args.args[0]
         self.assertIn("[truncated]", sent_content)
-        self.assertLessEqual(len(sent_content), 2015)
+        self.assertLessEqual(len(sent_content), 2000)
+        self.assertTrue(sent_content.startswith("**Full system prompt"))
+
+    async def test_handle_systemprompt_set_without_prompt_truncates_long_content(self):
+        commands, _, _, _ = self.make_commands(current_prompt="y" * 3000)
+        interaction = make_interaction(channel_id=334)
+
+        await commands._handle_systemprompt_set(interaction, None)
+
+        sent_content = interaction.followup.send.await_args.args[0]
+        self.assertIn("[truncated]", sent_content)
+        self.assertLessEqual(len(sent_content), 2000)
+        self.assertTrue(sent_content.startswith("Current system prompt for this channel:"))
+
+    async def test_handle_systemprompt_set_short_prompt_is_not_truncated(self):
+        commands, _, _, _ = self.make_commands(current_prompt="short")
+        interaction = make_interaction(channel_id=335)
+
+        await commands._handle_systemprompt_set(interaction, None)
+
+        sent_content = interaction.followup.send.await_args.args[0]
+        self.assertEqual(sent_content, "Current system prompt for this channel:\n```\nshort\n```")
 
     async def test_handle_systemprompt_reset_clears_prompt(self):
         commands, _, _, state_service = self.make_commands()
@@ -171,20 +205,18 @@ class TestSystemCommands(unittest.IsolatedAsyncioTestCase):
             "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
         )
 
-    async def test_systemprompt_view_wrapper_schedules_safe_run(self):
+    async def test_systemprompt_view_wrapper_awaits_safe_run(self):
         commands, _, _, _ = self.make_commands()
         interaction = make_interaction()
         group = commands._create_systemprompt_group()
         view_command = next(cmd for cmd in group.commands if cmd.name == "view")
 
-        with patch("src.bot.commands.system.safe_run", new=AsyncMock()) as mock_safe_run, patch(
-            "src.bot.commands.system.asyncio.create_task", side_effect=lambda coro: coro.close()
-        ) as mock_create_task:
+        with patch("src.bot.commands.system.safe_run", new=AsyncMock()) as mock_safe_run:
             await view_command.callback(interaction)
 
         interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
         mock_safe_run.assert_called_once_with(interaction, commands._handle_systemprompt_view, interaction)
-        mock_create_task.assert_called_once()
+        mock_safe_run.assert_awaited_once()
 
     async def test_systemprompt_reset_wrapper_reports_busy_when_queue_is_full(self):
         commands, _, queue_service, _ = self.make_commands()
@@ -201,19 +233,17 @@ class TestSystemCommands(unittest.IsolatedAsyncioTestCase):
             "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
         )
 
-    async def test_help_command_wrapper_schedules_safe_run(self):
+    async def test_help_command_wrapper_awaits_safe_run(self):
         commands, _, _, _ = self.make_commands()
         interaction = make_interaction()
         help_command = commands._create_help_command()
 
-        with patch("src.bot.commands.system.safe_run", new=AsyncMock()) as mock_safe_run, patch(
-            "src.bot.commands.system.asyncio.create_task", side_effect=lambda coro: coro.close()
-        ) as mock_create_task:
+        with patch("src.bot.commands.system.safe_run", new=AsyncMock()) as mock_safe_run:
             await help_command.callback(interaction)
 
         interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
         mock_safe_run.assert_called_once_with(interaction, commands._handle_help_command, interaction)
-        mock_create_task.assert_called_once()
+        mock_safe_run.assert_awaited_once()
 
     async def test_handle_help_command_sends_help_text(self):
         commands, _, _, _ = self.make_commands()

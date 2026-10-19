@@ -1,101 +1,154 @@
 """Tests for aggregated downloader utility behavior."""
 
+import asyncio
+import dataclasses
 import unittest
 from unittest.mock import AsyncMock, patch
 
 from src.utils import downloader_utils
 
 
-class FakeRequest:
-    def __init__(self):
-        self.method = "POST"
-        self.url = "https://api.groq.com/openai/v1/audio/transcriptions"
-        self.headers = {"X-Test": "1"}
-        self.content = b"abc123"
-        self.was_read = False
+def fake_sources(**overrides):
+    """Copy SOURCES, swapping in ``name=(keys, fetch)`` and finding nothing for the rest.
 
-    def read(self):
-        self.was_read = True
-
-
-class FakeGroqResponse:
-    def __init__(self):
-        self.request = FakeRequest()
-        self.status_code = 200
-        self.headers = {"Content-Type": "text/plain"}
+    The real headers and renderers are kept so the output format is exercised.
+    """
+    sources = []
+    for source in downloader_utils.SOURCES:
+        keys, fetch = overrides.get(source.name, ([], AsyncMock(return_value=None)))
+        sources.append(dataclasses.replace(
+            source, extract=lambda text, keys=keys: list(keys), fetch=fetch))
+    return sources
 
 
 class TestDownloaderUtils(unittest.IsolatedAsyncioTestCase):
-    async def test_fetch_all_url_content_returns_empty_for_no_text(self):
+    async def test_returns_empty_for_no_text(self):
         self.assertEqual(await downloader_utils.fetch_all_url_content(""), ("", []))
 
-    async def test_fetch_all_url_content_aggregates_all_supported_sources(self):
-        groq_response = FakeGroqResponse()
+    async def test_returns_empty_when_no_urls(self):
+        with patch.object(downloader_utils, "SOURCES", fake_sources()):
+            self.assertEqual(await downloader_utils.fetch_all_url_content("no links here"), ("", []))
 
-        async def fake_to_thread(func, url):
-            if func is downloader_utils.get_tiktok_transcript:
-                return {
-                    "transcript_text": "tiktok transcript",
-                    "groq_response": groq_response,
-                    "audio_artifact": {"name": "tik.mp3", "media_type": "audio/mpeg"},
-                    "download_strategy": "direct",
-                    "pending_logs": [],
-                }
-            if func is downloader_utils.get_facebook_transcript:
-                return {
-                    "transcript_text": "facebook transcript",
-                    "groq_response": groq_response,
-                    "audio_artifact": {"name": "fb.mp3", "media_type": "audio/mpeg"},
-                    "download_strategy": "direct",
-                    "pending_logs": [],
-                }
-            raise AssertionError("unexpected to_thread call")
+    def test_sources_are_in_prompt_order(self):
+        self.assertEqual([s.name for s in downloader_utils.SOURCES],
+                         ["youtube", "tiktok", "twitter", "facebook", "instagram", "article"])
 
-        with patch("src.utils.downloader_utils.extract_video_ids", return_value=["abc"]), patch(
-            "src.utils.downloader_utils.get_transcript", new=AsyncMock(return_value="youtube transcript")
-        ), patch("src.utils.downloader_utils.extract_tiktok_urls", return_value=["https://vt.tiktok.com/1"]), patch(
-            "src.utils.downloader_utils.extract_twitter_urls", return_value=["https://x.com/a/status/1"]
-        ), patch(
-            "src.utils.downloader_utils.get_tweet_context", new=AsyncMock(return_value=("tweet context", []))
-        ), patch("src.utils.downloader_utils.extract_facebook_urls", return_value=["https://fb.watch/1"]), patch(
-            "src.utils.downloader_utils.extract_target_urls", return_value=["https://example.com/article"]
-        ), patch(
-            "src.utils.downloader_utils.get_article_text", new=AsyncMock(return_value="article text")
-        ), patch("src.utils.downloader_utils.extract_instagram_urls", return_value=["https://instagram.com/p/1"]), patch(
-            "src.utils.downloader_utils.get_instagram_context", new=AsyncMock(return_value=("instagram context", []))
-        ), patch("src.utils.downloader_utils.asyncio.to_thread", new=AsyncMock(side_effect=fake_to_thread)), patch(
-            "src.utils.downloader_utils.log_pipeline_step", new=AsyncMock()
-        ) as mock_log_step:
-            result = await downloader_utils.fetch_all_url_content("look at these links")
+    async def test_aggregates_all_supported_sources_in_order(self):
+        sources = fake_sources(
+            youtube=(["abc"], AsyncMock(return_value="youtube transcript")),
+            tiktok=(["https://vt.tiktok.com/1"], AsyncMock(return_value="tiktok transcript")),
+            twitter=(["https://x.com/a/status/1"], AsyncMock(
+                return_value=("tweet context", ["data:image/png;base64,TWEET"]))),
+            facebook=(["https://fb.watch/1"], AsyncMock(return_value="facebook transcript")),
+            instagram=(["https://instagram.com/p/1"], AsyncMock(
+                return_value=("instagram context", "data:image/jpeg;base64,IG"))),
+            article=(["https://example.com/a", "https://example.com/b"],
+                     AsyncMock(side_effect=["article A", "article B"])),
+        )
 
-        text_result = result[0]
-        self.assertIn("Included youtube link transcript", text_result)
-        self.assertIn("youtube transcript", text_result)
-        self.assertIn("Included TikTok video transcript", text_result)
-        self.assertIn("tweet context", text_result)
-        self.assertIn("Included Facebook video transcript", text_result)
-        self.assertIn("instagram context", text_result)
-        self.assertIn("Included article content follows", text_result)
-        self.assertTrue(text_result.endswith("\n\n"))
-        self.assertEqual(mock_log_step.await_count, 6)
+        with patch.object(downloader_utils, "SOURCES", sources):
+            text, images = await downloader_utils.fetch_all_url_content("look at these links")
 
-    async def test_fetch_all_url_content_continues_when_some_sources_fail(self):
-        async def fake_to_thread(func, url):
-            raise RuntimeError(f"fail {url}")
+        expected = (
+            "------\nIncluded youtube link transcript follows:\n\n"
+            "Target Video ID abc Transcript:\nyoutube transcript"
+            "\n\n------\nIncluded TikTok video transcript follows:\n\n"
+            "Target TikTok Video https://vt.tiktok.com/1 Transcript:\ntiktok transcript"
+            "\n\n------\nIncluded Twitter post context follows:\n\n"
+            "Target Tweet https://x.com/a/status/1 Context:\ntweet context"
+            "\n\n------\nIncluded Facebook video transcript follows:\n\n"
+            "Target Facebook Video https://fb.watch/1 Transcript:\nfacebook transcript"
+            "\n\n------\nIncluded Instagram/Threads posts follow:\n\n"
+            "Instagram/Threads Post https://instagram.com/p/1:\ninstagram context"
+            "\n\n------\nIncluded article content follows:\n\n"
+            "URL content:\narticle A\n\nURL content:\narticle B"
+            "\n\n"
+        )
+        self.assertEqual(text, expected)
+        self.assertEqual(images, [
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,TWEET"}},
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,IG"}},
+        ])
 
-        with patch("src.utils.downloader_utils.extract_video_ids", return_value=["abc"]), patch(
-            "src.utils.downloader_utils.get_transcript", new=AsyncMock(side_effect=RuntimeError("yt fail"))
-        ), patch("src.utils.downloader_utils.extract_tiktok_urls", return_value=["https://vt.tiktok.com/1"]), patch(
-            "src.utils.downloader_utils.extract_twitter_urls", return_value=["https://x.com/a/status/1"]
-        ), patch(
-            "src.utils.downloader_utils.get_tweet_context", new=AsyncMock(return_value=("tweet ok", []))
-        ), patch("src.utils.downloader_utils.extract_facebook_urls", return_value=["https://fb.watch/1"]), patch(
-            "src.utils.downloader_utils.extract_target_urls", return_value=["https://example.com/article"]
-        ), patch(
-            "src.utils.downloader_utils.get_article_text", new=AsyncMock(return_value=None)
-        ), patch("src.utils.downloader_utils.asyncio.to_thread", new=AsyncMock(side_effect=fake_to_thread)):
-            result = await downloader_utils.fetch_all_url_content("mixed")
+    async def test_instagram_without_image_adds_no_image_part(self):
+        sources = fake_sources(instagram=(["https://instagram.com/p/1"], AsyncMock(return_value=("ctx", None))))
+        with patch.object(downloader_utils, "SOURCES", sources):
+            text, images = await downloader_utils.fetch_all_url_content("x")
+        self.assertIn("ctx", text)
+        self.assertEqual(images, [])
 
-        text_result = result[0]
-        self.assertIn("tweet ok", text_result)
-        self.assertNotIn("youtube transcript", text_result)
+    async def test_continues_when_some_sources_fail(self):
+        sources = fake_sources(
+            youtube=(["abc"], AsyncMock(side_effect=RuntimeError("yt fail"))),
+            twitter=(["https://x.com/a/status/1"], AsyncMock(return_value=("tweet ok", []))),
+            article=(["https://example.com/article"], AsyncMock(return_value=None)),
+        )
+
+        with patch.object(downloader_utils, "SOURCES", sources):
+            text, images = await downloader_utils.fetch_all_url_content("mixed")
+
+        self.assertIn("tweet ok", text)
+        self.assertNotIn("youtube", text)
+        self.assertNotIn("article content", text)
+        self.assertEqual(images, [])
+
+    async def test_all_failures_return_empty_text(self):
+        sources = fake_sources(youtube=(["abc"], AsyncMock(return_value=None)))
+        with patch.object(downloader_utils, "SOURCES", sources):
+            self.assertEqual(await downloader_utils.fetch_all_url_content("x"), ("", []))
+
+    async def test_cache_only_is_forwarded_to_every_fetch(self):
+        yt = AsyncMock(return_value="t")
+        art = AsyncMock(return_value="a")
+        sources = fake_sources(youtube=(["abc"], yt), article=(["https://e.com"], art))
+
+        with patch.object(downloader_utils, "SOURCES", sources):
+            await downloader_utils.fetch_all_url_content("x", cache_only=True)
+            await downloader_utils.fetch_all_url_content("x")
+
+        self.assertEqual([c.kwargs for c in yt.await_args_list], [{"cache_only": True}, {"cache_only": False}])
+        art.assert_any_await("https://e.com", cache_only=True)
+
+    async def test_fetches_run_concurrently_up_to_limit(self):
+        running = 0
+        peak = 0
+
+        async def slow(key, *, cache_only=False):
+            nonlocal running, peak
+            running += 1
+            peak = max(peak, running)
+            await asyncio.sleep(0.01)
+            running -= 1
+            return f"text {key}"
+
+        keys = [f"https://e.com/{i}" for i in range(10)]
+        sources = fake_sources(article=(keys, slow))
+
+        with patch.object(downloader_utils, "SOURCES", sources):
+            text, _ = await downloader_utils.fetch_all_url_content("x")
+
+        self.assertEqual(peak, downloader_utils.MAX_CONCURRENT_FETCHES)
+        # Order of results follows the order links were found, not completion order.
+        positions = [text.index(f"text {k}") for k in keys]
+        self.assertEqual(positions, sorted(positions))
+
+    async def test_slow_item_is_dropped_after_timeout(self):
+        async def hang(key, *, cache_only=False):
+            await asyncio.sleep(10)
+
+        sources = fake_sources(
+            tiktok=(["https://vt.tiktok.com/1"], hang),
+            article=(["https://e.com"], AsyncMock(return_value="fast article")),
+        )
+
+        with patch.object(downloader_utils, "SOURCES", sources), patch.object(
+            downloader_utils, "PER_ITEM_TIMEOUT_SECONDS", 0.01
+        ):
+            text, _ = await downloader_utils.fetch_all_url_content("x")
+
+        self.assertIn("fast article", text)
+        self.assertNotIn("TikTok", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

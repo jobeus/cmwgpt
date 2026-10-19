@@ -6,7 +6,7 @@ This page is about **how to run the system responsibly**, not just how to start 
 
 | Shape | Good for | What you run |
 | --- | --- | --- |
-| Bot-only runtime | Hosting the Python bot with an existing/local MariaDB instance | `python main.py` under a supervisor |
+| Bot-only runtime | Hosting the Python bot, with an existing/local MariaDB instance for per-user memory | `python main.py` under a supervisor |
 | Full Docker stack | Development and local end-to-end testing | `docker compose --env-file .env.development up --build` |
 
 ## Important expectation-setting
@@ -16,9 +16,8 @@ The repository ships a **good development stack**, not a hardened production pla
 What it does provide well:
 
 - a runnable Python bot
-- MariaDB-backed request/pipeline logging
-- a separate backend/frontend log viewer
-- a compose setup that brings the whole stack up together
+- MariaDB-backed per-user memory
+- a compose setup that brings the bot and database up together
 
 What it does **not** currently try to be:
 
@@ -33,8 +32,8 @@ What it does **not** currently try to be:
 
 | Requirement | Why it matters |
 | --- | --- |
-| Python 3.11+ | Required runtime for the bot |
-| Reachable MariaDB instance | Logging and viewer data depend on it |
+| Python 3.13 | Runtime used by CI and the Docker image |
+| Reachable MariaDB instance | Per-user memory (`/memory`, nightly job) depends on it; the bot still replies without it |
 | `DISCORD_BOT_TOKEN` | Discord authentication |
 | `OPENROUTER_API_KEY` | Text completions |
 | `RUNPOD_IO_API_KEY` | Needed if image commands are used |
@@ -44,7 +43,7 @@ What it does **not** currently try to be:
 
 1. Create and populate the env file.
 2. Install Python dependencies.
-3. Apply `init_db.sql` to the target database.
+3. Apply `init_db.sql` to the target database (creates the memory tables).
 4. Start the bot under a real process supervisor.
 
 Typical install/run shape:
@@ -57,7 +56,7 @@ python3 -m venv .venv
 
 ## Why a process supervisor is not optional
 
-The restart flow intentionally exits with code `42`.
+The restart flow saves state, runs `git pull`, then runs the normal shutdown sequence (stop background jobs, drain the queue for up to 90 seconds, close clients, flush caches, close the DB pool) and intentionally exits with code `42`.
 
 That means the bot expects an outer process manager to bring it back up after:
 
@@ -71,6 +70,8 @@ Recommended supervisors include:
 - `pm2`
 - any equivalent service manager that reliably restarts on exit
 
+`start.sh` (used by `make run`) is a minimal wrapper: it reruns `main.py` after exit `42`, reinstalling requirements first.
+
 ### Supervisor behavior you want
 
 | Behavior | Why |
@@ -82,14 +83,12 @@ Recommended supervisors include:
 
 ## Full Docker stack
 
-`docker-compose.yml` defines the local full-stack environment:
+`docker-compose.yml` defines the local full-stack environment (the bot image is `python:3.13-slim`):
 
 | Service | Purpose |
 | --- | --- |
 | `db` | MariaDB 11.7 |
 | `bot` | Python Discord bot |
-| `backend` | Log-viewer API + Socket.IO service |
-| `frontend` | Vite/React UI |
 
 Bring it up with:
 
@@ -101,15 +100,9 @@ docker compose --env-file .env.development up --build
 
 | Port | Service |
 | --- | --- |
-| `3306` | MariaDB |
-| `3001` | Log-viewer backend |
-| `5173` | Log-viewer frontend |
+| `3306` | MariaDB (host port set by `DB_EXPOSE_PORT`) |
 
-### Runtime notes for the backend/frontend side
-
-- In Docker, the backend container maps `PORT` from `LOG_VIEWER_PORT`.
-- The backend host is typically `0.0.0.0` in Docker and `127.0.0.1` by default outside it.
-- The frontend dev server proxies `/api` and `/socket.io` to the backend target.
+The bot does not listen on any port.
 
 ## Production-minded checklist
 
@@ -117,12 +110,10 @@ Even if you are not doing “real production,” these are the minimum responsib
 
 | Area | What to verify |
 | --- | --- |
-| Secrets | Strong `JWT_SECRET`, real DB credentials, real API keys |
-| Origins | `LOG_VIEWER_ALLOWED_ORIGINS` set correctly |
-| Database | `init_db.sql` applied before services expect logs |
+| Secrets | Real DB credentials, real API keys, a non-default `MARIADB_ROOT_PASSWORD` |
+| Database | `init_db.sql` applied before memory features are used |
 | Restart behavior | Supervisor restarts the bot after exit `42` |
 | Git-based updates | Only enable `KEEP_UP_TO_DATE_WITH_GIT` where `git pull` is safe and expected |
-| Auth mode | Do not rely on dev auth settings in production |
 
 ## Auto-update and git-based restart considerations
 

@@ -2,7 +2,6 @@
 
 from typing import Protocol
 
-import requests  # noqa: F401
 
 
 class MarkdownPasteUploader(Protocol):

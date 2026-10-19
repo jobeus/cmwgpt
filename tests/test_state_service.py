@@ -1,357 +1,51 @@
 """
 Unit tests for the StateService class.
-Tests thread-safe state management functionality.
+Tests per-channel settings, settings-file persistence and restart state.
 """
 
-from src.services.state_service import StateService
-import unittest
-import threading
-import sys
-import os
 import json
+import os
+import shutil
 import tempfile
+import threading
+import unittest
 from unittest.mock import patch
 
-# Add parent directory to path to import modules
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.services.state_service import StateService
 
 
 class TestStateService(unittest.TestCase):
     """Test thread-safe state management."""
 
     def setUp(self):
-        """Set up test environment."""
-        self.temp_settings_file = tempfile.NamedTemporaryFile(delete=False).name
-        os.environ["CMWGPT_SETTINGS_FILE"] = self.temp_settings_file
+        self.temp_dir = tempfile.mkdtemp()
+        self.temp_settings_file = os.path.join(self.temp_dir, "settings.json")
+        self._env_patch = patch.dict(os.environ, {"CMWGPT_SETTINGS_FILE": self.temp_settings_file})
+        self._env_patch.start()
         self.state_service = StateService()
 
     def tearDown(self):
-        """Clean up test environment."""
-        self.state_service.clear_all_data()
-        if os.path.exists(self.temp_settings_file):
-            os.remove(self.temp_settings_file)
-        if "CMWGPT_SETTINGS_FILE" in os.environ:
-            del os.environ["CMWGPT_SETTINGS_FILE"]
+        self._env_patch.stop()
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def test_conversation_management(self):
-        """Test conversation storage and retrieval."""
-        channel_id = 12345
-        conversation = [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there!"},
-        ]
-
-        # Test setting and getting conversation
-        self.state_service.set_conversation(channel_id, conversation)
-        retrieved = self.state_service.get_conversation(channel_id)
-
-        self.assertEqual(retrieved, conversation)
-        self.assertIsNot(retrieved, conversation)  # Should be a copy
-
-        # Test getting non-existent conversation
-        self.assertIsNone(self.state_service.get_conversation(99999))
-
-        # Test adding message to conversation
-        new_message = {"role": "user", "content": "How are you?"}
-        self.state_service.add_message_to_conversation(channel_id, new_message)
-
-        updated = self.state_service.get_conversation(channel_id)
-        self.assertEqual(len(updated), 4)
-        self.assertEqual(updated[-1], new_message)
-
-        # Test clearing conversation
-        self.state_service.clear_conversation(channel_id)
-        self.assertIsNone(self.state_service.get_conversation(channel_id))
+    def _state_file(self, name):
+        return os.path.join(self.temp_dir, name)
 
     def test_model_management(self):
-        """Test model storage and retrieval."""
-        channel_id = 12345
-        model = "gpt-5-mini"
-
-        # Test setting and getting model
-        self.state_service.set_model(channel_id, model)
-        retrieved = self.state_service.get_model(channel_id)
-
-        self.assertEqual(retrieved, model)
-
-        # Test getting non-existent model
+        self.state_service.set_model(12345, "gpt-5-mini")
+        self.assertEqual(self.state_service.get_model(12345), "gpt-5-mini")
         self.assertIsNone(self.state_service.get_model(99999))
 
-        # Test getting all models
-        all_models = self.state_service.get_all_models()
-        self.assertEqual(all_models[channel_id], model)
-
     def test_system_prompt_management(self):
-        """Test system prompt storage and retrieval."""
         channel_id = 12345
         prompt = "You are a coding assistant."
 
-        # Test setting and getting system prompt
         self.state_service.set_system_prompt(channel_id, prompt)
-        retrieved = self.state_service.get_system_prompt(channel_id)
-
-        self.assertEqual(retrieved, prompt)
-
-        # Test getting non-existent prompt
+        self.assertEqual(self.state_service.get_system_prompt(channel_id), prompt)
         self.assertIsNone(self.state_service.get_system_prompt(99999))
 
-        # Test clearing system prompt
         self.state_service.clear_system_prompt(channel_id)
         self.assertIsNone(self.state_service.get_system_prompt(channel_id))
-
-        # Test getting all system prompts
-        self.state_service.set_system_prompt(channel_id, prompt)
-        all_prompts = self.state_service.get_all_system_prompts()
-        self.assertEqual(all_prompts[channel_id], prompt)
-
-    def test_thread_safety(self):
-        """Test thread safety of state operations."""
-        channel_id = 12345
-        num_threads = 10
-        operations_per_thread = 50
-
-        results = []
-        errors = []
-
-        def worker_thread(thread_id):
-            """Worker function for thread safety test."""
-            try:
-                for i in range(operations_per_thread):
-                    # Set conversation
-                    conversation = [
-                        {"role": "user", "content": f"Thread {thread_id}, message {i}"}]
-                    self.state_service.set_conversation(
-                        channel_id + thread_id, conversation)
-
-                    # Set model
-                    model = f"model-{thread_id}-{i}"
-                    self.state_service.set_model(channel_id + thread_id, model)
-
-                    # Set system prompt
-                    prompt = f"Prompt for thread {thread_id}, iteration {i}"
-                    self.state_service.set_system_prompt(
-                        channel_id + thread_id, prompt)
-
-                    # Read back values
-                    retrieved_conv = self.state_service.get_conversation(
-                        channel_id + thread_id)
-                    retrieved_model = self.state_service.get_model(
-                        channel_id + thread_id)
-                    retrieved_prompt = self.state_service.get_system_prompt(
-                        channel_id + thread_id)
-
-                    # Verify values
-                    if retrieved_conv != conversation:
-                        errors.append(
-                            f"Conversation mismatch in thread {thread_id}")
-                    if retrieved_model != model:
-                        errors.append(f"Model mismatch in thread {thread_id}")
-                    if retrieved_prompt != prompt:
-                        errors.append(f"Prompt mismatch in thread {thread_id}")
-
-                results.append(f"Thread {thread_id} completed successfully")
-
-            except Exception as e:
-                errors.append(f"Thread {thread_id} failed: {e}")
-
-        # Start threads
-        threads = []
-        for i in range(num_threads):
-            thread = threading.Thread(target=worker_thread, args=(i,))
-            threads.append(thread)
-            thread.start()
-
-        # Wait for all threads to complete
-        for thread in threads:
-            thread.join()
-
-        # Check results
-        self.assertEqual(
-            len(results),
-            num_threads,
-            f"Not all threads completed. Errors: {errors}")
-        self.assertEqual(len(errors), 0, f"Thread safety errors: {errors}")
-
-    def test_stats_and_utilities(self):
-        """Test utility methods and statistics."""
-        # Test initial stats
-        stats = self.state_service.get_stats()
-        self.assertEqual(stats["conversations"], 0)
-        self.assertEqual(stats["models"], 0)
-        self.assertEqual(stats["system_prompts"], 0)
-
-        # Add some data
-        self.state_service.set_conversation(
-            1, [{"role": "user", "content": "test"}])
-        self.state_service.set_model(1, "test-model")
-        self.state_service.set_system_prompt(1, "test-prompt")
-
-        # Check updated stats
-        stats = self.state_service.get_stats()
-        self.assertEqual(stats["conversations"], 1)
-        self.assertEqual(stats["models"], 1)
-        self.assertEqual(stats["system_prompts"], 1)
-
-        # Test clear all data
-        self.state_service.clear_all_data()
-        stats = self.state_service.get_stats()
-        self.assertEqual(stats["conversations"], 0)
-        self.assertEqual(stats["models"], 0)
-        self.assertEqual(stats["system_prompts"], 0)
-
-    def test_get_all_methods(self):
-        """Test methods that return all stored data."""
-        # Add test data
-        channels = [1, 2, 3]
-        for i, channel_id in enumerate(channels):
-            self.state_service.set_conversation(
-                channel_id, [{"role": "user", "content": f"conv {i}"}])
-            self.state_service.set_model(channel_id, f"model-{i}")
-            self.state_service.set_system_prompt(channel_id, f"prompt-{i}")
-
-        # Test get_all methods
-        all_conversations = self.state_service.get_all_conversations()
-        all_models = self.state_service.get_all_models()
-        all_prompts = self.state_service.get_all_system_prompts()
-
-        self.assertEqual(len(all_conversations), 3)
-        self.assertEqual(len(all_models), 3)
-        self.assertEqual(len(all_prompts), 3)
-
-        # Verify data integrity
-        for i, channel_id in enumerate(channels):
-            self.assertEqual(
-                all_conversations[channel_id][0]["content"],
-                f"conv {i}")
-            self.assertEqual(all_models[channel_id], f"model-{i}")
-            self.assertEqual(all_prompts[channel_id], f"prompt-{i}")
-
-    def test_add_message_to_new_conversation(self):
-        """Test adding message to a channel with no existing conversation."""
-        channel_id = 12345
-        message = {"role": "user", "content": "First message"}
-
-        # Add message to non-existent conversation
-        self.state_service.add_message_to_conversation(channel_id, message)
-
-        # Should create new conversation with the message
-        conversation = self.state_service.get_conversation(channel_id)
-        self.assertEqual(len(conversation), 1)
-        self.assertEqual(conversation[0], message)
-
-    def test_response_id_management(self):
-        """Test response ID storage and retrieval for conversation continuity."""
-        channel_id = 12345
-        response_id = "resp_abc123"
-
-        # Test getting non-existent response ID
-        self.assertIsNone(self.state_service.get_response_id(channel_id))
-
-        # Test setting and getting response ID
-        self.state_service.set_response_id(channel_id, response_id)
-        retrieved = self.state_service.get_response_id(channel_id)
-        self.assertEqual(retrieved, response_id)
-
-        # Test updating response ID
-        new_response_id = "resp_def456"
-        self.state_service.set_response_id(channel_id, new_response_id)
-        retrieved = self.state_service.get_response_id(channel_id)
-        self.assertEqual(retrieved, new_response_id)
-
-        # Test clearing response ID
-        self.state_service.clear_response_id(channel_id)
-        self.assertIsNone(self.state_service.get_response_id(channel_id))
-
-        # Test clearing non-existent response ID (should not raise error)
-        self.state_service.clear_response_id(99999)
-
-    def test_response_id_isolation(self):
-        """Test that response IDs are isolated per channel."""
-        channel1 = 12345
-        channel2 = 67890
-        response_id1 = "resp_abc123"
-        response_id2 = "resp_def456"
-
-        # Set different response IDs for different channels
-        self.state_service.set_response_id(channel1, response_id1)
-        self.state_service.set_response_id(channel2, response_id2)
-
-        # Verify isolation
-        self.assertEqual(
-            self.state_service.get_response_id(channel1),
-            response_id1)
-        self.assertEqual(
-            self.state_service.get_response_id(channel2),
-            response_id2)
-
-        # Clear one channel's response ID
-        self.state_service.clear_response_id(channel1)
-        self.assertIsNone(self.state_service.get_response_id(channel1))
-        self.assertEqual(
-            self.state_service.get_response_id(channel2),
-            response_id2)
-
-    def test_get_all_response_ids(self):
-        """Test getting all response IDs."""
-        channels = [12345, 67890, 11111]
-        response_ids = ["resp_abc123", "resp_def456", "resp_ghi789"]
-
-        # Set response IDs for multiple channels
-        for channel, response_id in zip(channels, response_ids):
-            self.state_service.set_response_id(channel, response_id)
-
-        # Get all response IDs
-        all_response_ids = self.state_service.get_all_response_ids()
-
-        # Verify all response IDs are present
-        self.assertEqual(len(all_response_ids), 3)
-        for channel, response_id in zip(channels, response_ids):
-            self.assertEqual(all_response_ids[channel], response_id)
-
-    def test_response_id_persistence(self):
-        """Test that response IDs are included in state persistence."""
-
-        channel_id = 12345
-        response_id = "resp_abc123"
-        conversation = [{"role": "user", "content": "Hello"}]
-
-        # Set up state
-        self.state_service.set_response_id(channel_id, response_id)
-        self.state_service.set_conversation(channel_id, conversation)
-
-        # Save state to temp file
-        temp_file = self.state_service.save_state_to_temp_file()
-        self.assertIsNotNone(temp_file)
-
-        try:
-            # Verify the temp file contains response IDs
-            with open(temp_file, 'r', encoding='utf-8') as f:
-                state_data = json.load(f)
-
-            self.assertIn('response_ids', state_data)
-            self.assertEqual(state_data['response_ids']
-                             [str(channel_id)], response_id)
-
-            # Create new state service and load from temp file
-            new_state_service = StateService()
-            success = new_state_service.load_state_from_temp_files()
-            self.assertTrue(success)
-
-            # Verify response ID was restored
-            restored_response_id = new_state_service.get_response_id(
-                channel_id)
-            self.assertEqual(restored_response_id, response_id)
-
-            # Verify other data was also restored
-            restored_conversation = new_state_service.get_conversation(
-                channel_id)
-            self.assertEqual(restored_conversation, conversation)
-
-        finally:
-            # Clean up temp file
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
 
     def test_draw_edit_death_active_and_git_sha_management(self):
         self.state_service.set_draw_model(1, "draw-model")
@@ -367,55 +61,93 @@ class TestStateService(unittest.TestCase):
         self.assertEqual(self.state_service.get_last_git_sha(), "abc123")
 
         self.state_service.clear_death_settings()
-        self.state_service.clear_active_channels()
-
         self.assertIsNone(self.state_service.get_death_settings())
-        self.assertEqual(self.state_service.get_active_channels(), set())
 
-    def test_get_channel_context_and_update_channel_context_copy_values(self):
-        self.state_service.update_channel_context(
-            5,
-            conversation=[{"role": "user", "content": "hello"}],
-            model="gpt-test",
-            draw_model="seedream",
-            edit_model="qwen",
-            system_prompt="be helpful",
-            response_id="resp-1",
-            ignored_field="nope",
-        )
+    def test_getters_return_copies(self):
+        settings = {"interval": 30}
+        self.state_service.set_death_settings(settings)
+        settings["interval"] = 99
+        self.assertEqual(self.state_service.get_death_settings(), {"interval": 30})
 
-        context = self.state_service.get_channel_context(5)
-        self.assertEqual(context["model"], "gpt-test")
-        self.assertEqual(context["draw_model"], "seedream")
-        self.assertEqual(context["edit_model"], "qwen")
-        self.assertEqual(context["response_id"], "resp-1")
+        self.state_service.mark_channel_active(1)
+        channels = self.state_service.get_active_channels()
+        channels.add(2)
+        self.assertEqual(self.state_service.get_active_channels(), {1})
 
-        missing = self.state_service.get_channel_context(999)
-        self.assertIsNone(missing["conversation"])
-        self.assertIsNone(missing["model"])
+    def test_thread_safety(self):
+        num_threads = 10
+        operations_per_thread = 50
+        errors = []
 
-    def test_add_message_and_update_response_id_and_clear_conversation_preserves_other_data(self):
-        self.state_service.set_model(7, "gpt-test")
-        self.state_service.add_message_and_update_response_id(
-            7, {"role": "user", "content": "hello"}, "resp-7"
-        )
+        def worker_thread(thread_id):
+            try:
+                channel_id = 12345 + thread_id
+                for i in range(operations_per_thread):
+                    model = f"model-{thread_id}-{i}"
+                    prompt = f"Prompt for thread {thread_id}, iteration {i}"
+                    self.state_service.set_model(channel_id, model)
+                    self.state_service.set_system_prompt(channel_id, prompt)
+                    self.state_service.mark_channel_active(channel_id)
+                    if self.state_service.get_model(channel_id) != model:
+                        errors.append(f"Model mismatch in thread {thread_id}")
+                    if self.state_service.get_system_prompt(channel_id) != prompt:
+                        errors.append(f"Prompt mismatch in thread {thread_id}")
+            except Exception as e:
+                errors.append(f"Thread {thread_id} failed: {e}")
 
-        self.assertEqual(self.state_service.get_response_id(7), "resp-7")
-        self.assertEqual(self.state_service.get_conversation(7)[0]["content"], "hello")
+        threads = [threading.Thread(target=worker_thread, args=(i,)) for i in range(num_threads)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
 
-        self.state_service.clear_conversation(7)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(self.state_service.get_active_channels()), num_threads)
 
-        self.assertIsNone(self.state_service.get_conversation(7))
-        self.assertIsNone(self.state_service.get_response_id(7))
-        self.assertEqual(self.state_service.get_model(7), "gpt-test")
+    # -- settings file --------------------------------------------------------
 
-    def test_save_state_to_temp_file_includes_restart_info_and_handles_failures(self):
-        self.state_service.set_conversation(1, [{"role": "user", "content": "hello"}])
+    def test_settings_persist_to_file_and_reload(self):
         self.state_service.set_model(1, "gpt-test")
         self.state_service.set_draw_model(1, "seedream")
-        self.state_service.set_edit_model(1, "qwen")
+        self.state_service.set_edit_model(2, "qwen")
         self.state_service.set_system_prompt(1, "be helpful")
-        self.state_service.set_response_id(1, "resp-1")
+        self.state_service.set_death_settings({"interval": 30})
+
+        with open(self.temp_settings_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(data["models"], {"1": "gpt-test"})
+        self.assertEqual(data["draw_models"], {"1": "seedream"})
+        self.assertEqual(data["edit_models"], {"2": "qwen"})
+        self.assertEqual(data["system_prompts"], {"1": "be helpful"})
+        self.assertEqual(data["death_settings"], {"interval": 30})
+
+        reloaded = StateService()
+        self.assertEqual(reloaded.get_model(1), "gpt-test")
+        self.assertEqual(reloaded.get_draw_model(1), "seedream")
+        self.assertEqual(reloaded.get_edit_model(2), "qwen")
+        self.assertEqual(reloaded.get_system_prompt(1), "be helpful")
+        self.assertEqual(reloaded.get_death_settings(), {"interval": 30})
+
+    def test_cleared_system_prompt_is_omitted_from_settings_file(self):
+        self.state_service.set_system_prompt(1, "be helpful")
+        self.state_service.clear_system_prompt(1)
+
+        with open(self.temp_settings_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(data["system_prompts"], {})
+        self.assertIsNone(StateService().get_system_prompt(1))
+
+    def test_corrupt_settings_file_starts_empty(self):
+        with open(self.temp_settings_file, "w", encoding="utf-8") as f:
+            f.write("not json")
+        service = StateService()
+        self.assertIsNone(service.get_model(1))
+        self.assertIsNone(service.get_death_settings())
+
+    # -- restart state --------------------------------------------------------
+
+    def test_save_state_to_temp_file_writes_only_restart_fields(self):
+        self.state_service.set_model(1, "gpt-test")
         self.state_service.set_death_settings({"interval": 30})
         self.state_service.mark_channel_active(1)
         self.state_service.set_last_git_sha("abc123")
@@ -425,57 +157,92 @@ class TestStateService(unittest.TestCase):
         ):
             temp_file = self.state_service.save_state_to_temp_file({"manual_restart": True})
 
-        self.assertEqual(temp_file, "/tmp/cmwgpt_state_backup_1234567890_4321.json")
-        with open(temp_file, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        self.assertEqual(state["restart_info"], {"manual_restart": True})
-        self.assertEqual(state["last_git_sha"], "abc123")
-        os.remove(temp_file)
+        try:
+            self.assertEqual(temp_file, "/tmp/cmwgpt_state_backup_1234567890_4321.json")
+            self.assertEqual(os.stat(temp_file).st_mode & 0o777, 0o600)
+            with open(temp_file, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            self.assertEqual(
+                state,
+                {
+                    "active_channels": [1],
+                    "last_git_sha": "abc123",
+                    "timestamp": 1234567890,
+                    "pid": 4321,
+                    "restart_info": {"manual_restart": True},
+                },
+            )
+        finally:
+            if temp_file and os.path.exists(temp_file):
+                os.remove(temp_file)
 
-        with patch("builtins.open", side_effect=OSError("denied")):
+    def test_save_state_to_temp_file_omits_restart_info_when_not_given_and_handles_failure(self):
+        with patch("src.services.state_service.time.time", return_value=1234567891), patch(
+            "src.services.state_service.os.getpid", return_value=4322
+        ):
+            temp_file = self.state_service.save_state_to_temp_file()
+        try:
+            with open(temp_file, "r", encoding="utf-8") as f:
+                self.assertNotIn("restart_info", json.load(f))
+        finally:
+            os.remove(temp_file)
+
+        with patch("src.services.state_service.os.open", side_effect=OSError("denied")):
             self.assertIsNone(self.state_service.save_state_to_temp_file())
 
+    def test_restart_info_round_trip(self):
+        self.assertEqual(self.state_service.restart_info, {})
+        self.state_service.mark_channel_active(5)
+        self.state_service.set_last_git_sha("abc123")
+
+        pattern = os.path.join(self.temp_dir, "cmwgpt_state_backup_*.json")
+        saved = self.state_service.save_state_to_temp_file({"manual_restart": True})
+        self.assertIsNotNone(saved)
+        # Move the file into the test dir so other /tmp state files don't interfere.
+        shutil.move(saved, self._state_file(os.path.basename(saved)))
+
+        restored = StateService()
+        with patch("src.services.state_service.STATE_FILE_PATTERN", pattern):
+            self.assertTrue(restored.load_state_from_temp_files())
+
+        self.assertEqual(restored.get_active_channels(), {5})
+        self.assertEqual(restored.get_last_git_sha(), "abc123")
+        self.assertEqual(restored.restart_info, {"manual_restart": True})
+        # The property hands out a copy.
+        restored.restart_info["manual_restart"] = False
+        self.assertTrue(restored.restart_info["manual_restart"])
+
     def test_load_state_from_temp_files_skips_invalid_then_loads_valid_and_cleans_up(self):
-        invalid = tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8")
-        valid = tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8")
-        try:
-            json.dump({"bad": "shape"}, invalid)
-            invalid.close()
-            json.dump(
-                {
-                    "conversations": {"5": [{"role": "user", "content": "hello"}]},
-                    "response_ids": {"5": "resp-5"},
-                    "last_git_sha": "abc123",
-                },
-                valid,
-            )
-            valid.close()
+        # Sorted newest-first, so the invalid file (later name) is tried first.
+        valid = self._state_file("cmwgpt_state_backup_1_1.json")
+        invalid = self._state_file("cmwgpt_state_backup_2_2.json")
+        with open(invalid, "w", encoding="utf-8") as f:
+            f.write("{not json")
+        with open(valid, "w", encoding="utf-8") as f:
+            json.dump({"active_channels": ["5"], "last_git_sha": "abc123"}, f)
 
-            with patch("src.services.state_service.glob.glob", return_value=[invalid.name, valid.name]):
-                loaded = self.state_service.load_state_from_temp_files()
+        with patch("src.services.state_service.glob.glob", return_value=[valid, invalid]):
+            loaded = self.state_service.load_state_from_temp_files()
 
-            self.assertTrue(loaded)
-            self.assertEqual(self.state_service.get_conversation(5)[0]["content"], "hello")
-            self.assertEqual(self.state_service.get_last_git_sha(), "abc123")
-            self.assertEqual(self.state_service.get_active_channels(), {5})
-            self.assertFalse(os.path.exists(invalid.name))
-            self.assertFalse(os.path.exists(valid.name))
-        finally:
-            for path in [invalid.name, valid.name]:
-                if os.path.exists(path):
-                    os.remove(path)
+        self.assertTrue(loaded)
+        self.assertEqual(self.state_service.get_active_channels(), {5})
+        self.assertEqual(self.state_service.get_last_git_sha(), "abc123")
+        self.assertEqual(self.state_service.restart_info, {})
+        self.assertFalse(os.path.exists(invalid))
+        self.assertFalse(os.path.exists(valid))
 
-    def test_load_state_from_temp_files_and_cleanup_temp_files_handle_missing_files_and_errors(self):
+    def test_load_state_from_temp_files_handles_missing_files_and_remove_errors(self):
         with patch("src.services.state_service.glob.glob", return_value=[]):
             self.assertFalse(self.state_service.load_state_from_temp_files())
 
-        with patch("src.services.state_service.glob.glob", side_effect=OSError("boom")):
-            self.assertFalse(self.state_service.load_state_from_temp_files())
-
-        with patch("src.services.state_service.glob.glob", return_value=["/tmp/a.json", "/tmp/b.json"]), patch(
-            "src.services.state_service.os.remove", side_effect=[OSError("denied"), None]
+        path = self._state_file("cmwgpt_state_backup_3_3.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"active_channels": [7]}, f)
+        with patch("src.services.state_service.glob.glob", return_value=[path]), patch(
+            "src.services.state_service.os.remove", side_effect=OSError("denied")
         ):
-            self.state_service.cleanup_temp_files()
+            self.assertTrue(self.state_service.load_state_from_temp_files())
+        self.assertEqual(self.state_service.get_active_channels(), {7})
 
 
 if __name__ == "__main__":

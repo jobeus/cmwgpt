@@ -8,17 +8,6 @@ import httpx
 from src.services.runpod_service import RunpodService, RunpodServiceError
 
 
-class FakeClientContext:
-    def __init__(self, client):
-        self._client = client
-
-    async def __aenter__(self):
-        return self._client
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-
 class FakeClient:
     def __init__(self, post_response=None, get_response=None):
         self._post_response = post_response
@@ -102,7 +91,22 @@ class TestRunpodService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(edit_call.args[3:], (3, 4))
         self.assertEqual(edit_call.args[1]["input"]["images"], ["img1"])
 
-    async def test_execute_request_returns_image_bytes_and_logs_request(self):
+    async def test_http_client_is_pooled_and_closed(self):
+        service = self.make_service()
+
+        client = service._get_http_client()
+        self.assertIsInstance(client, httpx.AsyncClient)
+        self.assertIs(service._get_http_client(), client)
+
+        await service.close()
+        self.assertTrue(client.is_closed)
+        self.assertIsNone(service._http_client)
+        # A second close is a no-op, and a fresh client is created on demand.
+        await service.close()
+        self.assertIsNot(service._get_http_client(), client)
+        await service.close()
+
+    async def test_execute_request_returns_image_bytes(self):
         service = self.make_service()
         post_request = httpx.Request("POST", "https://api.runpod.ai/test", content=b'{"prompt":"hello"}')
         post_response = httpx.Response(
@@ -118,17 +122,14 @@ class TestRunpodService(unittest.IsolatedAsyncioTestCase):
         )
         fake_client = FakeClient(post_response=post_response, get_response=image_response)
 
-        with patch(
-            "src.services.runpod_service.create_async_client",
-            side_effect=lambda **kwargs: FakeClientContext(fake_client),
-        ):
-            content, cost = await service._execute_request(
-                "https://api.runpod.ai/test",
-                {"input": {"prompt": "hello"}},
-                "generate",
-                discord_user_id=12,
-                discord_channel_id=34,
-            )
+        service._http_client = fake_client
+        content, cost = await service._execute_request(
+            "https://api.runpod.ai/test",
+            {"input": {"prompt": "hello"}},
+            "generate",
+            discord_user_id=12,
+            discord_channel_id=34,
+        )
 
         self.assertEqual(content, b"PNGDATA")
         self.assertEqual(cost, 0.25)
@@ -146,13 +147,10 @@ class TestRunpodService(unittest.IsolatedAsyncioTestCase):
             request=httpx.Request("GET", "https://cdn.example.com/result.png"),
         )
 
-        with patch(
-            "src.services.runpod_service.create_async_client",
-            side_effect=lambda **kwargs: FakeClientContext(FakeClient(post_response, image_response)),
-        ):
-            content, cost = await service._execute_request(
-                "https://api.runpod.ai/test", {"input": {}}, "edit"
-            )
+        service._http_client = FakeClient(post_response, image_response)
+        content, cost = await service._execute_request(
+            "https://api.runpod.ai/test", {"input": {}}, "edit"
+        )
 
         self.assertEqual(content, b"RESULTDATA")
         self.assertIsNone(cost)
@@ -165,12 +163,9 @@ class TestRunpodService(unittest.IsolatedAsyncioTestCase):
             request=httpx.Request("POST", "https://api.runpod.ai/test", content=b"{}"),
         )
 
-        with patch(
-            "src.services.runpod_service.create_async_client",
-            side_effect=lambda **kwargs: FakeClientContext(FakeClient(post_response=failed_response)),
-        ):
-            with self.assertRaises(RunpodServiceError) as ctx:
-                await service._execute_request("https://api.runpod.ai/test", {"input": {}}, "generate")
+        service._http_client = FakeClient(post_response=failed_response)
+        with self.assertRaises(RunpodServiceError) as ctx:
+            await service._execute_request("https://api.runpod.ai/test", {"input": {}}, "generate")
 
         self.assertIn("model exploded", str(ctx.exception))
 
@@ -187,20 +182,14 @@ class TestRunpodService(unittest.IsolatedAsyncioTestCase):
             request=httpx.Request("POST", "https://api.runpod.ai/test", content=b"{}"),
         )
 
-        with patch(
-            "src.services.runpod_service.create_async_client",
-            side_effect=lambda **kwargs: FakeClientContext(FakeClient(post_response=missing_url_response)),
-        ):
-            with self.assertRaises(RunpodServiceError) as ctx:
-                await service._execute_request("https://api.runpod.ai/test", {"input": {}}, "generate")
+        service._http_client = FakeClient(post_response=missing_url_response)
+        with self.assertRaises(RunpodServiceError) as ctx:
+            await service._execute_request("https://api.runpod.ai/test", {"input": {}}, "generate")
         self.assertIn("no valid image URL", str(ctx.exception))
 
-        with patch(
-            "src.services.runpod_service.create_async_client",
-            side_effect=lambda **kwargs: FakeClientContext(FakeClient(post_response=weird_status_response)),
-        ):
-            with self.assertRaises(RunpodServiceError) as ctx:
-                await service._execute_request("https://api.runpod.ai/test", {"input": {}}, "generate")
+        service._http_client = FakeClient(post_response=weird_status_response)
+        with self.assertRaises(RunpodServiceError) as ctx:
+            await service._execute_request("https://api.runpod.ai/test", {"input": {}}, "generate")
         self.assertIn("unexpected status", str(ctx.exception))
 
     async def test_execute_request_wraps_http_errors(self):
@@ -210,12 +199,9 @@ class TestRunpodService(unittest.IsolatedAsyncioTestCase):
             request=httpx.Request("POST", "https://api.runpod.ai/test", content=b"{}"),
         )
 
-        with patch(
-            "src.services.runpod_service.create_async_client",
-            side_effect=lambda **kwargs: FakeClientContext(FakeClient(post_response=error_response)),
-        ):
-            with self.assertRaises(RunpodServiceError) as ctx:
-                await service._execute_request("https://api.runpod.ai/test", {"input": {}}, "generate")
+        service._http_client = FakeClient(post_response=error_response)
+        with self.assertRaises(RunpodServiceError) as ctx:
+            await service._execute_request("https://api.runpod.ai/test", {"input": {}}, "generate")
 
         self.assertIn("Failed to communicate with Runpod API", str(ctx.exception))
 
@@ -233,11 +219,8 @@ class TestRunpodService(unittest.IsolatedAsyncioTestCase):
             def json(self):
                 raise ValueError("bad json")
 
-        with patch(
-            "src.services.runpod_service.create_async_client",
-            side_effect=lambda **kwargs: FakeClientContext(FakeClient(post_response=BadResponse())),
-        ):
-            with self.assertRaises(RunpodServiceError) as ctx:
-                await service._execute_request("https://api.runpod.ai/test", {"input": {}}, "generate")
+        service._http_client = FakeClient(post_response=BadResponse())
+        with self.assertRaises(RunpodServiceError) as ctx:
+            await service._execute_request("https://api.runpod.ai/test", {"input": {}}, "generate")
 
         self.assertIn("Unexpected error: bad json", str(ctx.exception))

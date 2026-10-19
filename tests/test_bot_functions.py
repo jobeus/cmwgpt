@@ -28,13 +28,11 @@ class TestBotFunctions(unittest.TestCase):
         """Set up test environment."""
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
-        from src.services.message_service import message_service
-        self._message_service = message_service
-        self._original_paste_service = message_service._paste_service
+        from src.services.message_service import MessageService
+        self._message_service = MessageService()
 
     def tearDown(self):
         """Clean up test environment."""
-        self._message_service.set_paste_service(self._original_paste_service)
         self.loop.close()
 
     def _set_mock_paste_service(self, upload_mock):
@@ -147,7 +145,7 @@ class TestBotFunctions(unittest.TestCase):
         """Test message service send_channel_reply with short message."""
 
         async def run_test():
-            from src.services.message_service import message_service
+            message_service = self._message_service
             mock_upload = AsyncMock()
             self._set_mock_paste_service(mock_upload)
 
@@ -161,7 +159,7 @@ class TestBotFunctions(unittest.TestCase):
 
             # Verify direct send was called
             mock_channel.send.assert_called_once_with(
-                short_message, suppress_embeds=True)
+                content=short_message, files=[], suppress_embeds=True)
             mock_upload.assert_not_called()
 
         self.loop.run_until_complete(run_test())
@@ -170,7 +168,7 @@ class TestBotFunctions(unittest.TestCase):
         """Test message service send_channel_reply with long message that needs pasting."""
 
         async def run_test():
-            from src.services.message_service import message_service
+            message_service = self._message_service
             mock_upload = AsyncMock(return_value="https://paste.rs/abc123.md")
             self._set_mock_paste_service(mock_upload)
 
@@ -190,7 +188,7 @@ class TestBotFunctions(unittest.TestCase):
                 "My response was too long to post here, so I've uploaded it to: https://paste.rs/abc123.md"
             )
             mock_channel.send.assert_called_once_with(
-                expected_message, suppress_embeds=True)
+                content=expected_message, files=[], suppress_embeds=True)
 
         self.loop.run_until_complete(run_test())
 
@@ -198,7 +196,7 @@ class TestBotFunctions(unittest.TestCase):
         """Test message service send_channel_reply when paste upload fails."""
 
         async def run_test():
-            from src.services.message_service import message_service
+            message_service = self._message_service
             mock_upload = AsyncMock(side_effect=Exception("Upload failed"))
             self._set_mock_paste_service(mock_upload)
 
@@ -219,7 +217,7 @@ class TestBotFunctions(unittest.TestCase):
                 "(discord limit), and there was a problem uploading it to paste service. "
                 "Sorry, try again later.")
             mock_channel.send.assert_called_once_with(
-                expected_message, suppress_embeds=True)
+                content=expected_message, files=[], suppress_embeds=True)
 
         self.loop.run_until_complete(run_test())
 
@@ -227,24 +225,17 @@ class TestBotFunctions(unittest.TestCase):
         """Test message service send_interaction_followup with short message."""
 
         async def run_test():
-            from src.services.message_service import message_service
+            message_service = self._message_service
             mock_upload = AsyncMock()
             self._set_mock_paste_service(mock_upload)
 
-            # Mock interaction
             mock_interaction = MagicMock()
             mock_interaction.followup = AsyncMock()
 
-            # Test parameters
-            base_content = "> Test prompt"
-            reply_text = "Short reply"
+            await message_service.send_interaction_followup(mock_interaction, "Short reply")
 
-            await message_service.send_interaction_followup(mock_interaction, base_content, reply_text)
-
-            # Verify direct followup was called
-            expected_content = f"{base_content}\n{reply_text}"
             mock_interaction.followup.send.assert_called_once_with(
-                content=expected_content, suppress_embeds=True)
+                content="Short reply", files=[], suppress_embeds=True, ephemeral=False)
             mock_upload.assert_not_called()
 
         self.loop.run_until_complete(run_test())
@@ -253,27 +244,22 @@ class TestBotFunctions(unittest.TestCase):
         """Test message service send_interaction_followup with long message that needs pasting."""
 
         async def run_test():
-            from src.services.message_service import message_service
+            message_service = self._message_service
             mock_upload = AsyncMock(return_value="https://paste.rs/xyz789.md")
             self._set_mock_paste_service(mock_upload)
 
-            # Mock interaction
             mock_interaction = MagicMock()
             mock_interaction.followup = AsyncMock()
 
-            # Test parameters
-            base_content = "> Test prompt"
-            reply_text = "C" * 2500  # Long reply that would exceed 2000 chars with base_content
+            reply_text = "C" * 2500
+            await message_service.send_interaction_followup(mock_interaction, reply_text, ephemeral=True)
 
-            await message_service.send_interaction_followup(mock_interaction, base_content, reply_text)
-
-            # Verify upload was called
             mock_upload.assert_called_once_with(reply_text)
-
-            # Verify followup was called with paste URL
-            expected_content = f"{base_content}\n\nMy detailed response was too long, so I've uploaded it here: https://paste.rs/xyz789.md"
+            expected_content = (
+                "My response was too long to post here, so I've uploaded it to: https://paste.rs/xyz789.md"
+            )
             mock_interaction.followup.send.assert_called_once_with(
-                content=expected_content, suppress_embeds=True)
+                content=expected_content, files=[], suppress_embeds=True, ephemeral=True)
 
         self.loop.run_until_complete(run_test())
 
@@ -306,7 +292,7 @@ class TestBotFunctions(unittest.TestCase):
 
     def test_attachment_url_formatting(self):
         """Test attachment URL formatting in messages."""
-        from src.services.message_service import message_service
+        message_service = self._message_service
 
         # Mock attachment
         mock_attachment = MagicMock()

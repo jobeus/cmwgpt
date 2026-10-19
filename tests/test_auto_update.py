@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.announcement_service import AnnouncementService
 from src.services.auto_update_service import AutoUpdateService
-from src.services.restart_handler import RestartHandler
+from src.services.restart_handler import RESTART_EXIT_CODE, RestartHandler
 
 
 class TestAutoUpdateService(unittest.IsolatedAsyncioTestCase):
@@ -180,57 +180,84 @@ class TestAutoUpdateService(unittest.IsolatedAsyncioTestCase):
 
 
 class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
-    async def test_restart_status_accessors_default_false(self):
+    async def test_restart_status_defaults(self):
         handler = RestartHandler(state_service=MagicMock(), git_pull=MagicMock())
 
         self.assertFalse(handler.is_restart_in_progress())
-        self.assertFalse(handler.should_skip_cleanup())
+        self.assertIsNone(handler.exit_code)
+        self.assertFalse(hasattr(handler, "should_skip_cleanup"))
 
     async def test_perform_graceful_shutdown_uses_injected_state_service(self):
         state_service = MagicMock()
         state_service.save_state_to_temp_file.return_value = "/tmp/state.json"
         handler = RestartHandler(state_service=state_service, git_pull=lambda: True)
+        handler.set_shutdown_callback(AsyncMock())
 
         await handler.perform_graceful_shutdown()
 
         state_service.save_state_to_temp_file.assert_called_once_with(
             {"manual_restart": False, "graceful_shutdown": True}
         )
+        # A plain shutdown only saves state: no exit code, no shutdown callback.
+        self.assertIsNone(handler.exit_code)
+        handler._shutdown.assert_not_called()
 
-    async def test_perform_graceful_shutdown_while_restart_in_progress_and_on_failure(self):
+    async def test_perform_graceful_shutdown_on_save_failure(self):
         state_service = MagicMock()
         state_service.save_state_to_temp_file.return_value = None
         handler = RestartHandler(state_service=state_service, git_pull=lambda: True)
-        handler._restart_in_progress = True
 
-        with patch("src.services.restart_handler.asyncio.sleep", new=AsyncMock()):
+        with patch("builtins.print") as mock_print:
             await handler.perform_graceful_shutdown()
-
-        self.assertTrue(handler.should_skip_cleanup())
+        mock_print.assert_called_with("⚠️  Failed to save state")
 
         state_service = MagicMock()
         state_service.save_state_to_temp_file.side_effect = RuntimeError("disk full")
         handler = RestartHandler(state_service=state_service, git_pull=lambda: True)
 
-        with patch("src.services.restart_handler.asyncio.sleep", new=AsyncMock()):
-            with self.assertRaises(RuntimeError):
-                await handler.perform_graceful_shutdown()
+        with self.assertRaises(RuntimeError):
+            await handler.perform_graceful_shutdown()
 
-    async def test_perform_restart_exits_with_restart_code(self):
+    async def test_perform_restart_sets_exit_code_and_schedules_shutdown(self):
         state_service = MagicMock()
         state_service.save_state_to_temp_file.return_value = "/tmp/state.json"
         git_pull = MagicMock(return_value=True)
         handler = RestartHandler(state_service=state_service, git_pull=git_pull)
+        shutdown = AsyncMock()
+        handler.set_shutdown_callback(shutdown)
 
-        with patch("src.services.restart_handler.asyncio.sleep", new=AsyncMock()):
-            with self.assertRaises(SystemExit) as ctx:
-                await handler.perform_restart(manual=True)
+        await handler.perform_restart(manual=True)
 
-        self.assertEqual(ctx.exception.code, 42)
+        self.assertEqual(handler.exit_code, RESTART_EXIT_CODE)
+        self.assertEqual(RESTART_EXIT_CODE, 42)
         state_service.save_state_to_temp_file.assert_called_once_with({"manual_restart": True})
         git_pull.assert_called_once_with()
         self.assertTrue(handler.is_restart_in_progress())
-        self.assertTrue(handler.should_skip_cleanup())
+        # Shutdown runs as its own task, not inline in perform_restart.
+        shutdown.assert_not_awaited()
+        await handler._shutdown_task
+        shutdown.assert_awaited_once_with()
+
+    async def test_perform_restart_runs_git_pull_off_the_event_loop(self):
+        handler = RestartHandler(state_service=MagicMock(), git_pull=MagicMock(return_value=True))
+        handler.set_shutdown_callback(AsyncMock())
+
+        with patch(
+            "src.services.restart_handler.asyncio.to_thread", new=AsyncMock(return_value=True)
+        ) as mock_to_thread:
+            await handler.perform_restart()
+
+        mock_to_thread.assert_awaited_once_with(handler._git_pull)
+        await handler._shutdown_task
+
+    async def test_perform_restart_without_shutdown_callback_still_sets_exit_code(self):
+        handler = RestartHandler(state_service=MagicMock(), git_pull=MagicMock(return_value=True))
+
+        with self.assertLogs("src.services.restart_handler", level="ERROR"):
+            await handler.perform_restart()
+
+        self.assertEqual(handler.exit_code, RESTART_EXIT_CODE)
+        self.assertIsNone(handler._shutdown_task)
 
     async def test_duplicate_restart_request_is_ignored(self):
         state_service = MagicMock()
@@ -240,20 +267,23 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
         await handler.perform_restart(manual=False)
 
         state_service.save_state_to_temp_file.assert_not_called()
+        self.assertIsNone(handler.exit_code)
 
     async def test_perform_restart_continues_when_save_and_git_pull_fail(self):
         state_service = MagicMock()
         state_service.save_state_to_temp_file.return_value = None
-        git_pull = MagicMock(return_value=False)
+        git_pull = MagicMock(side_effect=RuntimeError("git exploded"))
         handler = RestartHandler(state_service=state_service, git_pull=git_pull)
+        shutdown = AsyncMock()
+        handler.set_shutdown_callback(shutdown)
 
-        with patch("src.services.restart_handler.asyncio.sleep", new=AsyncMock()):
-            with self.assertRaises(SystemExit) as ctx:
-                await handler.perform_restart(manual=False)
+        await handler.perform_restart(manual=False)
+        await handler._shutdown_task
 
-        self.assertEqual(ctx.exception.code, 42)
+        self.assertEqual(handler.exit_code, RESTART_EXIT_CODE)
         state_service.save_state_to_temp_file.assert_called_once_with({"manual_restart": False})
         git_pull.assert_called_once_with()
+        shutdown.assert_awaited_once_with()
 
 
 class TestAnnouncementService(unittest.IsolatedAsyncioTestCase):

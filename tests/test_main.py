@@ -11,23 +11,12 @@ import main
 
 
 def make_bot_client():
-    services = SimpleNamespace(
-        restart_handler=MagicMock(),
-        auto_update_service=MagicMock(),
-        death_service=MagicMock(),
-        queue_service=MagicMock(),
-        openai_service=MagicMock(),
-    )
+    services = SimpleNamespace(restart_handler=MagicMock())
     services.restart_handler.perform_graceful_shutdown = AsyncMock()
-    services.auto_update_service.stop = MagicMock()
-    services.death_service.stop = MagicMock()
-    services.queue_service.stop = AsyncMock()
-    services.openai_service.close = AsyncMock()
+    services.restart_handler.exit_code = None
     bot = MagicMock()
-    bot.is_closed.return_value = False
-    bot.close = AsyncMock()
     bot.setup_hook = AsyncMock()
-    return SimpleNamespace(services=services, bot=bot)
+    return SimpleNamespace(services=services, bot=bot, shutdown=AsyncMock(), run=MagicMock())
 
 
 def run_scheduled_shutdown(loop):
@@ -65,8 +54,11 @@ class TestMainSignalHandlers(unittest.TestCase):
         self.assertEqual(loop.add_signal_handler.call_count, 2)
         original_setup_hook.assert_awaited_once_with()
 
-    def test_signal_handler_schedules_full_shutdown(self):
+    def test_signal_handler_saves_state_then_shuts_down_client(self):
         bot_client = make_bot_client()
+        order = MagicMock()
+        order.attach_mock(bot_client.services.restart_handler.perform_graceful_shutdown, "save")
+        order.attach_mock(bot_client.shutdown, "shutdown")
         _, handle_signal, _ = main.setup_signal_handlers(bot_client)
 
         loop = MagicMock()
@@ -74,11 +66,8 @@ class TestMainSignalHandlers(unittest.TestCase):
         run_scheduled_shutdown(loop)
 
         bot_client.services.restart_handler.perform_graceful_shutdown.assert_awaited_once_with()
-        bot_client.services.auto_update_service.stop.assert_called_once_with()
-        bot_client.services.death_service.stop.assert_called_once_with()
-        bot_client.services.queue_service.stop.assert_awaited_once_with()
-        bot_client.services.openai_service.close.assert_awaited_once_with()
-        bot_client.bot.close.assert_awaited_once_with()
+        bot_client.shutdown.assert_awaited_once_with()
+        self.assertEqual([c[0] for c in order.mock_calls], ["save", "shutdown"])
 
     def test_second_signal_does_not_spawn_duplicate_shutdown_task(self):
         bot_client = make_bot_client()
@@ -97,26 +86,9 @@ class TestMainSignalHandlers(unittest.TestCase):
         # Clean up the single scheduled coroutine
         loop.create_task.call_args.args[0].close()
 
-    def test_shutdown_continues_when_a_service_stop_raises(self):
+    def test_client_shutdown_error_is_reported(self):
         bot_client = make_bot_client()
-        bot_client.services.auto_update_service.stop.side_effect = RuntimeError("boom")
-        _, handle_signal, _ = main.setup_signal_handlers(bot_client)
-
-        loop = MagicMock()
-        handle_signal(signal.SIGTERM, loop)
-        run_scheduled_shutdown(loop)
-
-        bot_client.services.death_service.stop.assert_called_once_with()
-        bot_client.services.queue_service.stop.assert_awaited_once_with()
-        bot_client.services.openai_service.close.assert_awaited_once_with()
-        bot_client.bot.close.assert_awaited_once_with()
-
-    def test_shutdown_logs_and_continues_when_remaining_services_raise(self):
-        bot_client = make_bot_client()
-        bot_client.services.death_service.stop.side_effect = RuntimeError("death boom")
-        bot_client.services.queue_service.stop.side_effect = RuntimeError("queue boom")
-        bot_client.services.openai_service.close.side_effect = RuntimeError("openai boom")
-        bot_client.bot.close.side_effect = RuntimeError("discord boom")
+        bot_client.shutdown.side_effect = RuntimeError("discord boom")
         _, handle_signal, _ = main.setup_signal_handlers(bot_client)
 
         loop = MagicMock()
@@ -124,23 +96,8 @@ class TestMainSignalHandlers(unittest.TestCase):
             handle_signal(signal.SIGTERM, loop)
             run_scheduled_shutdown(loop)
 
-        bot_client.services.death_service.stop.assert_called_once_with()
-        bot_client.services.queue_service.stop.assert_awaited_once_with()
-        bot_client.services.openai_service.close.assert_awaited_once_with()
-        bot_client.bot.close.assert_awaited_once_with()
-        self.assertTrue(any("Error closing Discord bot" in call.args[0] for call in mock_print.call_args_list))
-
-    def test_shutdown_handles_cancelled_error_cleanly(self):
-        bot_client = make_bot_client()
-        bot_client.services.restart_handler.perform_graceful_shutdown = AsyncMock(side_effect=asyncio.CancelledError())
-        _, handle_signal, _ = main.setup_signal_handlers(bot_client)
-
-        loop = MagicMock()
-        handle_signal(signal.SIGINT, loop)
-        run_scheduled_shutdown(loop)
-
-        bot_client.services.auto_update_service.stop.assert_not_called()
-        bot_client.bot.close.assert_not_awaited()
+        bot_client.shutdown.assert_awaited_once_with()
+        self.assertTrue(any("Error during shutdown" in call.args[0] for call in mock_print.call_args_list))
 
     def test_shutdown_reports_top_level_shutdown_errors(self):
         bot_client = make_bot_client()
@@ -153,9 +110,11 @@ class TestMainSignalHandlers(unittest.TestCase):
             run_scheduled_shutdown(loop)
 
         self.assertTrue(any("Error during shutdown" in call.args[0] for call in mock_print.call_args_list))
+        bot_client.shutdown.assert_not_awaited()
 
     def test_main_module_script_entrypoint_creates_client_registers_signals_and_runs(self):
         bot_client = MagicMock()
+        bot_client.services.restart_handler.exit_code = None
 
         with patch("src.startup.create_bot_client", return_value=bot_client):
             runpy.run_module("main", run_name="__main__")
@@ -164,3 +123,32 @@ class TestMainSignalHandlers(unittest.TestCase):
         # setup_signal_handlers must have replaced the bot's setup_hook with
         # the signal-registering wrapper.
         self.assertEqual(bot_client.bot.setup_hook.__name__, "setup_hook_with_signals")
+
+
+class TestMainEntrypoint(unittest.TestCase):
+    def test_main_returns_normally_when_no_exit_code_set(self):
+        bot_client = make_bot_client()
+        with patch("main.create_bot_client", return_value=bot_client), patch("main.sys.exit") as mock_exit:
+            main.main()
+
+        bot_client.run.assert_called_once_with()
+        mock_exit.assert_not_called()
+
+    def test_main_exits_with_restart_code_after_bot_stops(self):
+        bot_client = make_bot_client()
+
+        def run():
+            # A restart sets the exit code while the bot is running.
+            bot_client.services.restart_handler.exit_code = 42
+
+        bot_client.run.side_effect = run
+        with patch("main.create_bot_client", return_value=bot_client):
+            with self.assertRaises(SystemExit) as ctx:
+                main.main()
+
+        self.assertEqual(ctx.exception.code, 42)
+        bot_client.run.assert_called_once_with()
+
+
+if __name__ == "__main__":
+    unittest.main()

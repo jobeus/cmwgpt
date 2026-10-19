@@ -1,12 +1,18 @@
 """Tests for GeminiService content conversion, cost estimation, and response handling."""
 
+import asyncio
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
+from google.genai import errors as genai_errors
 
 from src.services.gemini_service import (
+    REQUEST_TIMEOUT_SECONDS,
     GeminiService,
     GeminiServiceError,
+    _is_retryable,
     is_gemini_model,
     get_thinking_level,
     PRICE_INPUT_PER_M,
@@ -29,6 +35,38 @@ class TestGeminiModelHelpers(unittest.TestCase):
         self.assertEqual(get_thinking_level("google-high"), "high")
         self.assertIsNone(get_thinking_level("google"))
         self.assertIsNone(get_thinking_level("gpt-4"))
+
+
+def _api_error(code):
+    return genai_errors.APIError(code, {"error": {"message": f"err {code}", "status": "X"}})
+
+
+def _ok_interaction(text="ok"):
+    return SimpleNamespace(
+        outputs=[SimpleNamespace(type="text", text=text)],
+        usage=SimpleNamespace(total_input_tokens=1, total_output_tokens=1, total_thought_tokens=0, total_cached_tokens=0),
+        id="interaction-ok",
+    )
+
+
+class TestIsRetryable(unittest.TestCase):
+    def test_api_errors_retry_only_on_429_and_5xx(self):
+        self.assertTrue(_is_retryable(_api_error(429)))
+        self.assertTrue(_is_retryable(_api_error(500)))
+        self.assertTrue(_is_retryable(_api_error(503)))
+        self.assertFalse(_is_retryable(_api_error(400)))
+        self.assertFalse(_is_retryable(_api_error(403)))
+
+    def test_transport_timeouts_and_connection_errors_are_retryable(self):
+        request = httpx.Request("POST", "https://example.test")
+        self.assertTrue(_is_retryable(httpx.ConnectError("down", request=request)))
+        self.assertTrue(_is_retryable(httpx.ReadTimeout("slow", request=request)))
+        self.assertTrue(_is_retryable(asyncio.TimeoutError()))
+        self.assertTrue(_is_retryable(ConnectionResetError()))
+
+    def test_other_errors_are_not_retryable_even_if_message_looks_transient(self):
+        self.assertFalse(_is_retryable(RuntimeError("503 Service Unavailable")))
+        self.assertFalse(_is_retryable(ValueError("429 rate limit")))
 
 
 class TestGeminiService(unittest.IsolatedAsyncioTestCase):
@@ -396,6 +434,98 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("The answer is 42", result)
         # Should NOT include google_search_result in text
         self.assertNotIn("google_search_result", result)
+
+    # ── Retries ──
+
+    def _service_with_create(self, create):
+        service = self.make_service()
+        mock_client = MagicMock()
+        mock_client.aio.interactions.create = create
+        service._client = mock_client
+        return service
+
+    async def test_retryable_error_is_retried_then_succeeds(self):
+        create = AsyncMock(side_effect=[_api_error(503), _ok_interaction("recovered")])
+        service = self._service_with_create(create)
+
+        with patch("src.services.gemini_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+            result, _ = await service.get_chat_completion(
+                model="google", messages=[{"role": "user", "content": "Hi"}])
+
+        self.assertEqual(result, "recovered")
+        self.assertEqual(create.await_count, 2)
+        mock_sleep.assert_awaited_once_with(1.0)
+
+    async def test_retryable_error_exhausts_attempts(self):
+        create = AsyncMock(side_effect=_api_error(429))
+        service = self._service_with_create(create)
+
+        with patch("src.services.gemini_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+            with self.assertRaises(GeminiServiceError) as ctx:
+                await service.get_chat_completion(
+                    model="google", messages=[{"role": "user", "content": "Hi"}])
+
+        self.assertIn("after 3 attempts", str(ctx.exception))
+        self.assertEqual(create.await_count, 3)
+        self.assertEqual(mock_sleep.await_count, 2)
+
+    async def test_non_retryable_error_raises_immediately(self):
+        create = AsyncMock(side_effect=_api_error(400))
+        service = self._service_with_create(create)
+
+        with patch("src.services.gemini_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+            with self.assertRaises(GeminiServiceError):
+                await service.get_chat_completion(
+                    model="google", messages=[{"role": "user", "content": "Hi"}])
+
+        create.assert_awaited_once()
+        mock_sleep.assert_not_awaited()
+
+    async def test_strips_bot_mention_via_bot_id_loader(self):
+        create = AsyncMock(return_value=_ok_interaction("<@42> hello"))
+        service = self._service_with_create(create)
+        service.set_bot_id_loader(lambda: 42)
+
+        result, _ = await service.get_chat_completion(
+            model="google", messages=[{"role": "user", "content": "Hi"}])
+
+        self.assertNotIn("<@42>", result)
+        self.assertIn("hello", result)
+
+    # ── Client lifecycle ──
+
+    def test_get_client_sets_http_timeout_in_ms(self):
+        service = self.make_service()
+        with patch("google.genai.Client") as mock_client_cls:
+            client = service._get_client()
+            self.assertIs(service._get_client(), client)
+
+        mock_client_cls.assert_called_once()
+        kwargs = mock_client_cls.call_args.kwargs
+        self.assertEqual(kwargs["api_key"], "test-key")
+        self.assertEqual(kwargs["http_options"].timeout, int(REQUEST_TIMEOUT_SECONDS * 1000))
+
+    async def test_close_awaits_async_aclose_and_resets_client(self):
+        service = self.make_service()
+        client = MagicMock()
+        client.aio.aclose = AsyncMock()
+        service._client = client
+
+        await service.close()
+
+        client.aio.aclose.assert_awaited_once_with()
+        self.assertIsNone(service._client)
+        await service.close()  # no client: no-op
+
+    async def test_close_swallows_errors(self):
+        service = self.make_service()
+        client = MagicMock()
+        client.aio.aclose = AsyncMock(side_effect=RuntimeError("boom"))
+        service._client = client
+
+        await service.close()
+
+        self.assertIsNone(service._client)
 
 
 if __name__ == "__main__":

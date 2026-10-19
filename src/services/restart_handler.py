@@ -1,21 +1,21 @@
 """
 Restart handler for the Discord bot.
 
-This module provides the restart functionality that:
-- Saves current state before restarting
-- Performs git pull to update code
-- Gracefully shuts down the bot
-- Exits with a specific code to signal restart
+A restart saves state, pulls the latest code, then runs the normal shutdown
+sequence (so replies in progress finish and clients close). Once the bot's
+event loop has exited, ``main`` exits the process with :data:`RESTART_EXIT_CODE`
+and the process manager (systemd, pm2, start.sh) starts it again.
 """
 
 import asyncio
 import logging
-import sys
-from typing import Callable
+from typing import Awaitable, Callable, Optional
 
 from src.utils.git_utils import perform_git_pull as default_perform_git_pull
 
 logger = logging.getLogger(__name__)
+
+RESTART_EXIT_CODE = 42
 
 
 class RestartHandler:
@@ -27,115 +27,55 @@ class RestartHandler:
         state_service,
         git_pull: Callable[[], bool] = default_perform_git_pull,
     ):
-        """Initialize the restart handler."""
         self._state_service = state_service
         self._git_pull = git_pull
         self._restart_in_progress = False
-        self._skip_cleanup = False  # Flag to prevent cleanup during restart
+        self._shutdown: Optional[Callable[[], Awaitable[None]]] = None
+        self._shutdown_task: Optional[asyncio.Task] = None
+        # Set when the process should exit with a specific code after the loop ends.
+        self.exit_code: Optional[int] = None
+
+    def set_shutdown_callback(self, shutdown: Callable[[], Awaitable[None]]) -> None:
+        """The coroutine that shuts the bot down (services, then the Discord connection)."""
+        self._shutdown = shutdown
 
     async def perform_restart(self, manual: bool = False) -> None:
-        """
-        Perform a complete restart of the bot.
-
-        Args:
-            manual: Whether this is a manual restart
-
-        This includes:
-        1. Saving current state
-        2. Performing git pull
-        3. Gracefully shutting down
-        4. Exiting with restart code
-        """
+        """Save state, pull code, and start the shutdown that ends in a restart."""
         if self._restart_in_progress:
-            logger.warning(
-                "Restart already in progress, ignoring duplicate request")
+            logger.warning("Restart already in progress, ignoring duplicate request")
             return
-
         self._restart_in_progress = True
-        self._skip_cleanup = True  # Prevent cleanup during restart
-
         print("🔄 Restarting bot...")
 
+        if self._state_service.save_state_to_temp_file({"manual_restart": manual}):
+            print("✅ State saved")
+        else:
+            print("⚠️  Failed to save state, continuing anyway")
+
+        # git pull is synchronous; keep it off the loop so heartbeats continue.
+        print("📥 Updating code...")
         try:
-            # Step 1: Save current state with restart info (don't update git SHA yet)
-            # The announcement service will handle git SHA comparison and
-            # update
-            print("💾 Saving bot state...")
-            restart_info = {"manual_restart": manual}
-            temp_file = self._state_service.save_state_to_temp_file(restart_info)
-            if temp_file:
-                print("✅ State saved")
-            else:
-                print("⚠️  Failed to save state, continuing anyway")
+            pulled = await asyncio.to_thread(self._git_pull)
+        except Exception as e:
+            logger.error(f"git pull raised: {e}")
+            pulled = False
+        print("✅ Code updated" if pulled else "⚠️  Git pull failed, continuing anyway")
 
-            # Step 2: Perform git pull (synchronous, so run it in a thread to
-            # avoid blocking the event loop / Discord heartbeats)
-            print("📥 Updating code...")
-            if await asyncio.to_thread(self._git_pull):
-                print("✅ Code updated")
-            else:
-                print("⚠️  Git pull failed, continuing anyway")
-
-            # Step 3: Give a moment for any final operations
-            await asyncio.sleep(0.5)
-
-            # Step 4: Exit with restart code
-            print("🚀 Restarting...")
-            # Use exit code 42 to signal that this is an intentional restart
-            # The process manager (systemd, pm2, etc.) should restart the bot
-            sys.exit(42)
-
-        except (OSError, RuntimeError, asyncio.TimeoutError) as e:
-            logger.error(f"Error during restart process: {e}")
-            self._restart_in_progress = False
-            raise
+        self.exit_code = RESTART_EXIT_CODE
+        if self._shutdown is None:
+            logger.error("No shutdown callback configured; cannot restart cleanly")
+            return
+        # This usually runs inside a queue worker, which shutdown waits on, so
+        # run the shutdown as its own task instead of awaiting it here.
+        print("🚀 Restarting...")
+        self._shutdown_task = asyncio.get_running_loop().create_task(self._shutdown())
 
     def is_restart_in_progress(self) -> bool:
-        """Check if a restart is currently in progress."""
         return self._restart_in_progress
 
-    def should_skip_cleanup(self) -> bool:
-        """Check if cleanup should be skipped (during restart)."""
-        return self._skip_cleanup
-
     async def perform_graceful_shutdown(self) -> None:
-        """
-        Perform a graceful shutdown without restarting.
-
-        This saves the current state to disk just like a restart,
-        but doesn't perform git pull or exit with restart code.
-        Used when the bot is killed with Ctrl-C or kill signal.
-        """
-        if self._restart_in_progress:
-            logger.warning(
-                "Restart already in progress, graceful shutdown will proceed anyway")
-
-        # Set skip cleanup flag to prevent temp file cleanup and duplicate
-        # service shutdown
-        self._skip_cleanup = True
-
-        print("💾 Performing graceful shutdown...")
-
-        try:
-            # Step 1: Save current state with shutdown info (don't update git SHA)
-            # The announcement service will handle git SHA comparison on next
-            # startup
-            print("💾 Saving bot state...")
-            shutdown_info = {
-                "manual_restart": False,
-                "graceful_shutdown": True}
-            temp_file = self._state_service.save_state_to_temp_file(shutdown_info)
-            if temp_file:
-                print("✅ State saved")
-            else:
-                print("⚠️  Failed to save state")
-
-            # Step 2: Give a moment for any final operations
-            await asyncio.sleep(0.5)
-
-            print("✅ Graceful shutdown preparation complete")
-
-        except (OSError, RuntimeError, asyncio.TimeoutError) as e:
-            logger.error(f"Error during graceful shutdown: {e}")
-            print(f"⚠️  Error during graceful shutdown: {e}")
-            raise
+        """Save state before a non-restart shutdown (Ctrl-C, SIGTERM)."""
+        if self._state_service.save_state_to_temp_file({"manual_restart": False, "graceful_shutdown": True}):
+            print("✅ State saved")
+        else:
+            print("⚠️  Failed to save state")

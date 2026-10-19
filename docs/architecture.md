@@ -5,7 +5,7 @@ This page is meant to answer four questions quickly:
 1. **What are the main moving parts?**
 2. **How does a mention turn into a reply?**
 3. **Which services are wired together at startup?**
-4. **How do the bot, database, and log viewer fit together in development?**
+4. **How do the bot and database fit together in development?**
 
 ## Read this page like a map
 
@@ -23,8 +23,8 @@ This page is meant to answer four questions quickly:
 What it shows:
 
 - the Python bot as the center of Discord interaction
-- OpenRouter/Runpod/downloader work feeding MariaDB logging
-- the separate log-viewer backend/frontend path
+- OpenRouter/Gemini/Claude API, Runpod, and downloader work around the mention path
+- MariaDB as storage for per-user memory only
 
 ```mermaid
 flowchart LR
@@ -32,7 +32,6 @@ flowchart LR
     classDef bot fill:#2563eb,color:#eff6ff,stroke:#1d4ed8,stroke-width:1.5px;
     classDef service fill:#0f766e,color:#ecfeff,stroke:#115e59,stroke-width:1.5px;
     classDef data fill:#7c3aed,color:#f5f3ff,stroke:#6d28d9,stroke-width:1.5px;
-    classDef viewer fill:#ea580c,color:#fff7ed,stroke:#c2410c,stroke-width:1.5px;
 
     User((Discord users)):::edge --> Discord[Discord API / Gateway]:::edge
 
@@ -45,6 +44,8 @@ flowchart LR
         Dispatch[completion_dispatch<br/>model routing]:::service
         OpenAI[OpenAIService<br/>OpenRouter text]:::service
         Gemini[GeminiService<br/>native Gemini]:::service
+        Anthropic[AnthropicService<br/>Claude API]:::service
+        Memory[MemoryService<br/>nightly profiles]:::service
         Runpod[RunpodService<br/>image draw/edit]:::service
         Downloader[Downloader pipeline]:::service
         MsgSvc[MessageService]:::service
@@ -58,6 +59,8 @@ flowchart LR
     Mention --> Dispatch
     Dispatch --> OpenAI
     Dispatch --> Gemini
+    Dispatch --> Anthropic
+    Mention --> Memory
     Mention --> Downloader
     Mention --> State
     Mention --> MsgSvc
@@ -66,22 +69,12 @@ flowchart LR
     Commands --> MsgSvc
     Client --> Restart
 
-    DB[(MariaDB<br/>request + pipeline logs)]:::data
-    OpenAI --> DB
-    Gemini --> DB
-    Downloader --> DB
-    Runpod --> DB
-    Client --> DB
+    Commands --> Memory
 
-    subgraph Viewer[Log viewer]
-        Backend[Node/TS backend<br/>API + Socket.IO]:::viewer
-        Frontend[React/Vite frontend]:::viewer
-        Browser((Browser)):::edge
-    end
-
-    Browser --> Frontend
-    Frontend --> Backend
-    Backend --> DB
+    DB[(MariaDB<br/>per-user memory)]:::data
+    Memory --> DB
+    Cache[(.cache/<br/>persistent URL caches)]:::data
+    Downloader --> Cache
 ```
 
 ## Diagram: service wiring at startup
@@ -105,6 +98,7 @@ flowchart TB
     Factory --> Queue[QueueService]:::svc
     Factory --> OpenAI[OpenAIService]:::svc
     Factory --> Gemini[GeminiService]:::svc
+    Factory --> Anthropic[AnthropicService]:::svc
     Factory --> Paste[PasteService]:::svc
     Factory --> Message[MessageService]:::svc
     Factory --> Runpod[RunpodService]:::svc
@@ -113,7 +107,12 @@ flowchart TB
     Factory --> Announce[AnnouncementService]:::aux
 
     Factory --> Death[DeathService]:::aux
+    Factory --> MemStore[MemoryStore]:::aux
+    Factory --> Memory[MemoryService]:::aux
     Factory --> Mention[MentionHandler]:::svc
+
+    MemStore --> Memory
+    Memory -->|user notes| Mention
 
 
     State --> Death
@@ -123,6 +122,8 @@ flowchart TB
     OpenAI --> Mention
 
     Gemini --> Mention
+
+    Anthropic --> Mention
 
     Message --> Mention
 
@@ -152,7 +153,7 @@ sequenceDiagram
     participant G as GeminiService
     participant A as AnthropicService
     participant MS as MessageService
-    participant DB as MariaDB logger
+    participant MEM as MemoryService
 
     U->>C: Mention bot in channel
     C->>S: get_model(channel)
@@ -160,23 +161,21 @@ sequenceDiagram
     Q->>M: handle_mention(...)
     M->>S: mark_channel_active(channel)
     M->>M: build_chat_context (history, replies, embeds, attachments)
-    M->>S: get_system_prompt(channel)
-    M->>D: fetch_all_url_content(message text)
+    M->>D: fetch_all_url_content(text) per message, concurrently
     D->>D: discover YouTube / TikTok / Twitter / Facebook / articles
-    D->>DB: log pipeline steps and API calls
-    D-->>M: aggregated enrichment block
+    D-->>M: enrichment (newest 10 messages fetch; older ones use cache only)
+    M->>S: get_system_prompt(channel)
+    M->>MEM: get_notes_block(asker, mentioned users, recent speakers)
+    MEM-->>M: profiles appended to the mention
     M->>DP: dispatch_completion(messages, model, system_prompt)
     alt model is google / google-high
         DP->>G: get_chat_completion(...)
-        G->>DB: log request / response metadata
         G-->>DP: reply content
     else model is sonnet-5.5-direct
         DP->>A: get_chat_completion(...)
-        A->>DB: log request / response metadata
         A-->>DP: reply content
     else other models
         DP->>O: get_chat_completion(...)
-        O->>DB: log request / response metadata
         O-->>DP: reply content
     end
     DP-->>M: reply content
@@ -189,8 +188,9 @@ sequenceDiagram
 - Mentions are **queued**, not processed in parallel ad hoc.
 - Prompt context is more than just the latest message: it includes recent history, reply metadata, embeds, and attachments. The multimodal context array is built by `src/utils/chat_context.py` (`build_chat_context`).
 - Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `sonnet-5.5-direct` goes to `AnthropicService` (Claude API), and everything else goes to `OpenAIService`.
-- URL enrichment happens **before** the LLM call and can materially change the prompt content.
-- Logging is first-class: downloader and model activity both emit records consumed later by the log viewer.
+- URL enrichment happens **before** the LLM call and can materially change the prompt content. Only the newest 10 history messages fetch links; older messages use cached results only, and the fetches run concurrently.
+- Per-user memory profiles are appended to the end of the mention, so the cached system prompt and history stay unchanged.
+- There is no request/pipeline log table: the SDK clients use their default HTTP clients, and diagnostics go to the normal Python log (stdout and `logs/`).
 
 ## Diagram: downloader enrichment flow
 
@@ -214,14 +214,7 @@ flowchart LR
     FB --> Cache
     AR --> Cache
 
-    YT --> Logs[Pipeline/API logging]:::cache
-    TT --> Logs
-    TW --> Logs
-    FB --> Logs
-    AR --> Logs
-
     Cache --> Aggregate[Aggregated injected text block]:::out
-    Logs --> Aggregate
     Aggregate --> Prompt[Prompt sent to model]:::out
 ```
 
@@ -233,8 +226,13 @@ flowchart LR
 | TikTok | `src/utils/tiktok_utils.py` | Thin wrapper over `src/utils/media_transcribe.py` (yt-dlp download -> Groq transcription) |
 | Twitter/X | `src/utils/twitter_utils.py` | Tweet/context lookup, with optional video transcription path |
 | Facebook | `src/utils/facebook_utils.py` | Thin wrapper over `src/utils/media_transcribe.py` (yt-dlp download -> Groq transcription) |
-| Generic articles | `src/utils/url_utils.py` | `httpx` fetch plus content extraction/fallbacks |
+| Generic articles | `src/utils/url_utils.py` | `fetch_public` fetch, then `trafilatura` extraction (retried with `favor_recall` if the first pass finds nothing) |
 | Shared media pipeline | `src/utils/media_transcribe.py` | yt-dlp audio download + proxy fallback + Groq Whisper transcription, used by TikTok/Facebook |
+
+### Fetching and caching
+
+- Outbound fetches of user-supplied URLs go through `fetch_public` / `download_public` in `src/utils/http_client.py`. The SSRF guard (`src/utils/ssrf_guard.py`, which blocks every non-global address) is re-checked on each redirect hop, response bodies are size-capped, and each fetch has an overall timeout.
+- Results are kept in persistent LRU caches under `.cache/`. Changes are saved in batches in the background, and the caches are flushed on shutdown. Tweet and Instagram caches still store images as base64.
 
 ## Diagram: docker/runtime layout
 
@@ -245,14 +243,10 @@ flowchart LR
     classDef db fill:#7c3aed,color:#f5f3ff,stroke:#6d28d9,stroke-width:1.4px;
 
     Discord[Discord API]:::ext --> Bot[bot container<br/>python main.py]:::ctr
-    Browser[Browser]:::ext --> Frontend[frontend container<br/>Vite dev server :5173]:::ctr
-    Frontend --> Backend[backend container<br/>Node API + Socket.IO :3001]:::ctr
-    Bot --> Maria[(db container<br/>MariaDB 11.7 :3306)]:::db
-    Backend --> Maria
+    Bot --> Maria[(db container<br/>MariaDB 11.7 :3306<br/>user memory)]:::db
 
     Env[.env.development]:::ext --> Bot
-    Env --> Backend
-    Env --> Frontend
+    Env --> Maria
     SQL[init_db.sql]:::ext --> Maria
 ```
 
@@ -273,10 +267,11 @@ flowchart LR
 | `src/services/runpod_service.py` | Image integration | Understand draw/edit requests |
 | `src/services/state_service.py` | Per-channel persistence | See where model/system-prompt/service settings live |
 | `src/services/queue_service.py` | FIFO work queue | Understand serialized mention processing |
-| `src/db/logger.py` | Request/pipeline logging | Understand what reaches MariaDB |
+| `src/services/memory_service.py` | Per-user memory | Understand the nightly job, `/memory` edits, and the notes added to mentions |
+| `src/db/memory_store.py` | Memory tables | Understand what reaches MariaDB |
 | `src/db/connection.py` | DB pool wiring | Debug MariaDB connectivity |
-| `log-viewer/backend/` | Log API service | Debug auth, socket streaming, DB reads |
-| `log-viewer/frontend/` | Log UI | Debug frontend behavior and envs |
+| `src/utils/http_client.py` | Guarded outbound fetches | Debug redirects, size caps, and fetch timeouts |
+| `src/utils/cache_utils.py` | Persistent caches | Understand `.cache/` contents and save timing |
 
 ## End-to-end narrative
 
@@ -291,20 +286,24 @@ flowchart LR
 1. A user mentions the bot.
 2. `DiscordBotClient` chooses the active model for the channel and queues the work.
 3. `MentionHandler` gathers recent message history and reply context (via `build_chat_context`).
-4. The handler enriches user text with downloader output for supported URLs.
+4. The handler enriches user text with downloader output for supported URLs and appends the memory profiles of the people involved.
 5. `dispatch_completion` routes the assembled context to `OpenAIService` (OpenRouter), `GeminiService` (native Gemini), or `AnthropicService` (Claude API), based on the channel's model.
 6. `MessageService` sends the final reply back to Discord.
-7. Request and pipeline details are written to MariaDB.
 
-### Observability
+### Memory
 
-1. The log-viewer backend reads MariaDB logs and serves them over HTTP.
-2. It also emits realtime updates over Socket.IO.
-3. The React frontend authenticates, fetches recent logs, and subscribes to updates.
+1. Every night, `MemoryService` reads the chat since its last run and updates each person's profile in `user_memory`.
+2. Every change also writes a row to `user_memory_history`; `user_memory_job_state` tracks how far each server has been processed.
+3. `/memory` and `/fillmemory` read and change the same tables (see `docs/commands.md`).
+
+### Shutdown and restart
+
+1. `startup.shutdown_services` stops background jobs, drains the queue (up to 90 seconds), closes the model/HTTP clients, flushes caches, and closes the DB pool.
+2. `/restart` (and auto-update) save state and `git pull` first, then run the same shutdown; `main.py` exits with code `42` so `start.sh` or the process manager starts the bot again.
 
 ## Key architectural traits
 
 - **Mention-first UX:** the primary conversational surface is normal Discord chat, not a slash command.
 - **Service composition over globals:** `src/startup.py` explicitly wires the main collaborators.
-- **Logging as a product feature:** MariaDB logging is not incidental; it powers a dedicated inspection UI.
-- **Hybrid stack:** Python handles bot/runtime behavior, while Node/React handle log inspection.
+- **Small storage footprint:** MariaDB only holds per-user memory; URL results live in `.cache/` and channel settings in state files.
+- **Python only:** the whole runtime is the Python bot; there is no separate web UI.

@@ -1,50 +1,12 @@
 """Tests for TikTok transcript helpers."""
 
 import unittest
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import AsyncMock, patch
 
 from src.utils import tiktok_utils
-from tests.config_helpers import cfg
 
 
-class FakeYoutubeDL:
-    def __init__(self, opts, *, should_fail=False, filename="/tmp/tiktok_1.webm"):
-        self.opts = opts
-        self.should_fail = should_fail
-        self.filename = filename
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-    def extract_info(self, url, download=True):
-        if self.should_fail:
-            raise RuntimeError("download failed")
-        return {"id": "1"}
-
-    def prepare_filename(self, info):
-        return self.filename
-
-
-class FakeHttpxClientContext:
-    def __init__(self, client):
-        self._client = client
-        self._transport = MagicMock()
-        self._transport.pending_logs = []
-
-    def __enter__(self):
-        return self._client
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-    def post(self, *args, **kwargs):
-        return self._client.post(*args, **kwargs)
-
-
-class TestTikTokUtils(unittest.TestCase):
+class TestTikTokUrlExtraction(unittest.TestCase):
     def test_extract_tiktok_urls_deduplicates(self):
         text = "https://vt.tiktok.com/abc123/ https://www.tiktok.com/@user/video/123 https://vt.tiktok.com/abc123/"
 
@@ -73,86 +35,60 @@ class TestTikTokUtils(unittest.TestCase):
 
         self.assertEqual(urls, ["https://tiktok.com/@some.user_1/video/7300000000000000000"])
 
-    def test_get_tiktok_transcript_returns_cached_values_and_retries_legacy_failure_sentinels(self):
-        legacy_cache = {"u1": "cached", "u2": None}
-        fake_response = MagicMock()
-        fake_response.raise_for_status.return_value = None
-        fake_response.text = "transcribed text"
-        fake_client = MagicMock()
-        fake_client.post.return_value = fake_response
 
-        with patch("src.utils.tiktok_utils._tiktok_cache", legacy_cache), patch(
-            "src.config._cached_config", cfg(groq_api_key="groq-key")
-        ), patch("src.utils.media_transcribe.yt_dlp.YoutubeDL", side_effect=lambda opts: FakeYoutubeDL(opts)), patch(
-            "src.utils.media_transcribe.os.path.exists", return_value=True
-        ), patch("builtins.open", mock_open(read_data=b"audio-bytes")), patch(
-            "src.utils.media_transcribe.create_sync_client", return_value=FakeHttpxClientContext(fake_client)
-        ), patch(
-            "src.utils.media_transcribe.tempfile.mkdtemp", return_value="/tmp/fake_tiktok_dir"
-        ), patch("src.utils.media_transcribe.shutil.rmtree"):
-            self.assertEqual(tiktok_utils.get_tiktok_transcript("u1")["transcript_text"], "cached")
-            self.assertEqual(tiktok_utils.get_tiktok_transcript("u2")["transcript_text"], "transcribed text")
+class TestTikTokTranscript(unittest.IsolatedAsyncioTestCase):
+    URL = "https://vt.tiktok.com/abc123/"
 
-        self.assertEqual(legacy_cache["u2"], "transcribed text")
+    def setUp(self):
+        # Keep the shared fetch-failure store out of these tests.
+        patcher = patch("src.utils.cache_utils._failure_store", return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
-    def test_get_tiktok_transcript_requires_api_key(self):
-        with patch("src.config._cached_config", cfg(groq_api_key="")):
-            self.assertIsNone(tiktok_utils.get_tiktok_transcript("https://vt.tiktok.com/abc123/"))
+    async def test_delegates_to_shared_downloader_with_platform_cache(self):
+        with patch(
+            "src.utils.tiktok_utils.download_and_transcribe_video",
+            new_callable=AsyncMock, return_value="transcribed text",
+        ) as mock_dl:
+            result = await tiktok_utils.get_tiktok_transcript(self.URL)
 
-    def test_get_tiktok_transcript_downloads_and_transcribes(self):
-        fake_cache = {}
-        fake_response = MagicMock()
-        fake_response.raise_for_status.return_value = None
-        fake_response.text = "transcribed text"
-        fake_client = MagicMock()
-        fake_client.post.return_value = fake_response
+        self.assertEqual(result, "transcribed text")
+        mock_dl.assert_awaited_once_with(
+            self.URL, tiktok_utils._tiktok_cache,
+            label="TikTok", file_prefix="tiktok", cache_only=False,
+        )
 
-        with patch("src.utils.tiktok_utils._tiktok_cache", fake_cache), patch(
-            "src.config._cached_config", cfg(groq_api_key="groq-key")
-        ), patch("src.utils.media_transcribe.yt_dlp.YoutubeDL", side_effect=lambda opts: FakeYoutubeDL(opts)), patch(
-            "src.utils.media_transcribe.os.path.exists", return_value=True
-        ), patch("builtins.open", mock_open(read_data=b"audio-bytes")), patch(
-            "src.utils.media_transcribe.create_sync_client", return_value=FakeHttpxClientContext(fake_client)
-        ), patch(
-            "src.utils.media_transcribe.tempfile.mkdtemp", return_value="/tmp/fake_tiktok_dir"
-        ), patch("src.utils.media_transcribe.shutil.rmtree") as mock_rmtree:
-            result = tiktok_utils.get_tiktok_transcript("https://vt.tiktok.com/abc123/")
-
-        self.assertEqual(result["transcript_text"], "transcribed text")
-        self.assertIs(result["groq_response"], fake_response)
-        self.assertEqual(result["audio_artifact"]["media_type"], "audio/mpeg")
-        self.assertEqual(fake_cache["https://vt.tiktok.com/abc123/"], "transcribed text")
-        mock_rmtree.assert_called_once_with("/tmp/fake_tiktok_dir")
-
-    def test_get_tiktok_transcript_returns_none_when_download_fails_without_proxy(self):
-        with patch("src.config._cached_config", cfg(groq_api_key="groq-key", transcript_proxy="")), patch(
-            "src.utils.media_transcribe.yt_dlp.YoutubeDL", side_effect=lambda opts: FakeYoutubeDL(opts, should_fail=True)):
-            self.assertIsNone(tiktok_utils.get_tiktok_transcript("https://vt.tiktok.com/abc123/"))
-
-    def test_get_tiktok_transcript_retries_with_proxy_and_handles_empty_transcript(self):
-        created = []
-
-        def fake_ydl(opts):
-            inst = FakeYoutubeDL(opts, should_fail=(len(created) == 0), filename="/tmp/tiktok_2.webm")
-            created.append(inst)
-            return inst
-
-        empty_response = MagicMock()
-        empty_response.raise_for_status.return_value = None
-        empty_response.text = "   "
-        fake_client = MagicMock()
-        fake_client.post.return_value = empty_response
-
-        with patch("src.utils.tiktok_utils._tiktok_cache", {}), patch(
-            "src.config._cached_config", cfg(groq_api_key="groq-key", transcript_proxy="http://proxy")
-        ), patch(
-            "src.utils.media_transcribe.yt_dlp.YoutubeDL", side_effect=fake_ydl
-        ), patch("src.utils.media_transcribe.os.path.exists", return_value=True), patch(
-            "builtins.open", mock_open(read_data=b"audio-bytes")
-        ), patch(
-            "src.utils.media_transcribe.create_sync_client", return_value=FakeHttpxClientContext(fake_client)
-        ):
-            result = tiktok_utils.get_tiktok_transcript("https://vt.tiktok.com/xyz987/")
+    async def test_cache_only_is_forwarded(self):
+        with patch(
+            "src.utils.tiktok_utils.download_and_transcribe_video",
+            new_callable=AsyncMock, return_value=None,
+        ) as mock_dl:
+            result = await tiktok_utils.get_tiktok_transcript(self.URL, cache_only=True)
 
         self.assertIsNone(result)
-        self.assertEqual(created[1].opts["proxy"], "http://proxy")
+        self.assertTrue(mock_dl.await_args.kwargs["cache_only"])
+
+    async def test_returns_cached_transcript_without_download(self):
+        with patch("src.utils.tiktok_utils._tiktok_cache", {self.URL: "cached"}), patch(
+            "src.utils.media_transcribe.yt_dlp.YoutubeDL"
+        ) as mock_ydl:
+            self.assertEqual(await tiktok_utils.get_tiktok_transcript(self.URL), "cached")
+        mock_ydl.assert_not_called()
+
+    async def test_failure_is_remembered_by_skip_recent_failures(self):
+        recorded = []
+        with patch("src.utils.cache_utils._failure_store", return_value=None), patch(
+            "src.utils.cache_utils._record_result", side_effect=lambda k, r: recorded.append((k, r))
+        ), patch(
+            "src.utils.tiktok_utils.download_and_transcribe_video",
+            new_callable=AsyncMock, return_value=None,
+        ):
+            await tiktok_utils.get_tiktok_transcript(self.URL)
+            await tiktok_utils.get_tiktok_transcript(self.URL, cache_only=True)
+
+        # Only the real fetch is recorded; the cache_only lookup is not.
+        self.assertEqual(recorded, [("tiktok:" + self.URL, None)])
+
+
+if __name__ == "__main__":
+    unittest.main()
