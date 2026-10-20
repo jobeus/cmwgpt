@@ -275,6 +275,7 @@ class DiscordBotClient:
                 self.bot,
                 memory_service=self.services.memory_service,
                 memory_store=self.services.memory_store,
+                paste_service=self.services.paste_service,
             )
             memory_commands.setup_commands()
 

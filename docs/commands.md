@@ -40,14 +40,15 @@ Every night at 02:00 America/Denver, `MemoryService` reads the chat since the la
 from every text channel it can see (message text, reply targets, embed titles and
 descriptions, and attachment names; no URL fetching or transcription). For each day it
 makes one `MEMORY_MODEL` call to pull out new facts about each speaker, then one small call
-per speaker to merge those facts into their profile, capped at 1200 characters. When the
-bot replies to a mention, it adds the profiles of the asker, anyone they @mentioned and the
+per speaker to merge those facts into their profile. There's no length cap: the model is told
+to keep every useful fact first and be succinct second. When the bot replies to a mention,
+it adds the profiles of the asker, anyone they @mentioned and the
 recent speakers (up to 8 people) to the end of the mention. The cached system prompt and
 history stay unchanged.
 
 Every `/memory` command replies only to you. `correct` sends your correction and the current
 profile to `MEMORY_MODEL`, which changes, removes or adds only what the correction covers, and
-then shows you the updated profile. Corrections live in the same profile the nightly job
+then shows you the updated profile (as a paste.rs link if it's over 2000 characters). Corrections live in the same profile the nightly job
 maintains, so later chat can refine them; `/fillmemory` rebuilds profiles from scratch and
 drops them. Administrators can pass the optional `user` argument to `show` and `correct` to
 act on someone else. Every change also writes a row to

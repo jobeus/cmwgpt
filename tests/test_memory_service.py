@@ -6,10 +6,9 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.bot.commands.memory import format_memory, resolve_target
+from src.bot.commands.memory import MemoryCommands, format_memory, resolve_target
 from src.bot.handlers.mention import MentionHandler
 from src.services.memory_service import (
-    PROFILE_MAX_CHARS,
     MemoryService,
     build_transcript_chunks,
     clean_profile,
@@ -112,12 +111,11 @@ class TestHelpers(unittest.TestCase):
             {"profile": "Stable: a\nCurrent: b"},
         )
 
-    def test_clean_profile_caps_length_and_handles_none(self):
+    def test_clean_profile_keeps_length_and_handles_none(self):
         self.assertEqual(clean_profile("(none)"), "")
         long = "\n".join(f"Stable: fact number {i} " + "x" * 50 for i in range(40))
-        cleaned = clean_profile(long)
-        self.assertLessEqual(len(cleaned), PROFILE_MAX_CHARS)
-        self.assertTrue(cleaned.endswith("x"))
+        self.assertEqual(clean_profile(f"```\n{long}\n```"), long)
+
 
     def test_format_memory(self):
         self.assertIn("don't remember anything", format_memory(1, ""))
@@ -258,6 +256,37 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
     def test_unavailable_without_api_key(self):
         service = MemoryService(store=FakeStore(), config=cfg(anthropic_api_key=""), openai_service=MagicMock())
         self.assertFalse(service.available)
+
+
+class TestSendMemory(unittest.IsolatedAsyncioTestCase):
+    def make(self, paste):
+        commands = MemoryCommands(MagicMock(), memory_service=MagicMock(), memory_store=MagicMock(), paste_service=paste)
+        interaction = SimpleNamespace(followup=SimpleNamespace(send=AsyncMock()))
+        return commands, interaction
+
+    async def test_short_reply_is_sent_directly(self):
+        paste = SimpleNamespace(upload_markdown=AsyncMock())
+        commands, interaction = self.make(paste)
+        await commands._send_memory(interaction, "short")
+        self.assertEqual(interaction.followup.send.await_args.args[0], "short")
+        self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
+        paste.upload_markdown.assert_not_awaited()
+
+    async def test_long_reply_goes_to_paste(self):
+        paste = SimpleNamespace(upload_markdown=AsyncMock(return_value="https://paste.rs/abc.md"))
+        commands, interaction = self.make(paste)
+        await commands._send_memory(interaction, "x" * 2500, updated=True)
+        paste.upload_markdown.assert_awaited_once_with("x" * 2500)
+        sent = interaction.followup.send.await_args.args[0]
+        self.assertIn("https://paste.rs/abc.md", sent)
+        self.assertTrue(sent.startswith("Updated"))
+
+    async def test_paste_failure_says_sorry(self):
+        paste = SimpleNamespace(upload_markdown=AsyncMock(side_effect=Exception("paste.rs error: 503")))
+        commands, interaction = self.make(paste)
+        await commands._send_memory(interaction, "x" * 2500, updated=True)
+        self.assertIn("isn't cooperating", interaction.followup.send.await_args.args[0])
+        self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
 
 
 class TestResolveTarget(unittest.IsolatedAsyncioTestCase):
