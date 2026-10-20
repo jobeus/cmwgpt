@@ -11,7 +11,7 @@ service call) so the decision lives in exactly one place.
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from src.services.anthropic_service import is_direct_anthropic_model
 from src.services.gemini_service import is_gemini_model, get_thinking_level
@@ -31,6 +31,7 @@ async def dispatch_completion(
     identity: Dict[str, Any],
     anthropic_service: Any = None,
     search: bool = True,
+    on_text: Optional[Callable[[str], None]] = None,
 ) -> Tuple[ReplyContent, float]:
     """Route ``messages`` to the right model(s) and return ``(reply, cost)``.
 
@@ -42,6 +43,8 @@ async def dispatch_completion(
         identity: Kwargs (``channel_id``/``bot_id``/``discord_user_id``) splatted
             into every service call. Each caller supplies its own set.
         search: Whether the OpenRouter and Claude API routes may use web search.
+        on_text: Called with the reply so far while it streams in. The OpenRouter and
+            Claude API routes stream; Gemini returns the whole reply at once.
     """
     reply_content: ReplyContent = None
     cost = 0.0
@@ -60,6 +63,7 @@ async def dispatch_completion(
             messages=messages,
             system_prompt=system_prompt,
             search=search,
+            on_text=on_text,
             **identity,
         )
     else:
@@ -68,6 +72,7 @@ async def dispatch_completion(
             messages=messages,
             system_prompt=system_prompt,
             search=search,
+            on_text=on_text,
             **identity,
         )
 

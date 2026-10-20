@@ -233,9 +233,14 @@ class AnthropicService:
         bot_id: Optional[int] = None,
         discord_user_id: Optional[int] = None,  # noqa: ARG002 - identity kwarg shared by all services
         search: bool = True,
+        on_text: Optional[Callable[[str], None]] = None,
     ) -> Tuple[str, float]:
-        """Get a chat completion from the Claude API. Returns ``(text, cost)``."""
+        """Get a chat completion from the Claude API. Returns ``(text, cost)``.
+
+        With ``on_text``, the reply is streamed and ``on_text`` gets the cleaned text so far.
+        """
         client = self.get_client()
+        resolved_bot_id = resolve_bot_id(bot_id, state_service, self._bot_id_loader)
         direct_model = DIRECT_MODELS.get(model) or DIRECT_MODELS["sonnet-5.5-direct"]
         api_model = direct_model.api_id
         api_messages = build_anthropic_messages(messages)
@@ -268,14 +273,24 @@ class AnthropicService:
 
         total_cost = 0.0
         previous_message_id = self._last_message_ids.get(channel_id) if channel_id else None
+        streamed = ""
         try:
             response = None
             for _ in range(MAX_CONTINUATIONS + 1):
-                response = await client.beta.messages.create(
-                    messages=api_messages,
-                    diagnostics={"previous_message_id": previous_message_id},
+                request = {
+                    "messages": api_messages,
+                    "diagnostics": {"previous_message_id": previous_message_id},
                     **kwargs,
-                )
+                }
+                if on_text:
+                    async with client.beta.messages.stream(**request) as stream:
+                        async for event in stream:
+                            if event.type == "text":
+                                streamed += event.text
+                                on_text(clean_openai_response(streamed, bot_id=resolved_bot_id))
+                        response = await stream.get_final_message()
+                else:
+                    response = await client.beta.messages.create(**request)
                 # A safety fallback can serve the turn on another model; price it at that model's rates.
                 served_by = _MODELS_BY_API_ID.get(getattr(response, "model", None), direct_model)
                 total_cost += _usage_cost(getattr(response, "usage", None), served_by)
@@ -327,5 +342,5 @@ class AnthropicService:
         if not response_text:
             raise AnthropicServiceError("The Claude API returned an empty response.")
 
-        cleaned = clean_openai_response(response_text, bot_id=resolve_bot_id(bot_id, state_service, self._bot_id_loader))
+        cleaned = clean_openai_response(response_text, bot_id=resolved_bot_id)
         return cleaned, total_cost

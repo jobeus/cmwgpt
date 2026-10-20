@@ -178,8 +178,9 @@ sequenceDiagram
         DP->>O: get_chat_completion(...)
         O-->>DP: reply content
     end
+    Note over A,O: streamed: on_text(text so far) posts, then edits, a preview
     DP-->>M: reply content
-    M->>MS: send_channel_reply(...)
+    M->>MS: StreamingReply.finish: edit preview into final reply (or send it)
     MS-->>U: Discord reply
 ```
 
@@ -190,6 +191,7 @@ sequenceDiagram
 - Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `sonnet-5.5-direct`/`opus-5.5-direct` go to `AnthropicService` (Claude API), and everything else goes to `OpenAIService`.
 - URL enrichment happens **before** the LLM call and can materially change the prompt content. Only the newest 10 history messages fetch links; older messages use cached results only, and the fetches run concurrently.
 - Per-user memory profiles are appended to the end of the mention, so the cached system prompt and history stay unchanged.
+- Claude API and OpenRouter replies stream: `StreamingReply` (`src/services/streaming_reply.py`) posts the reply as it arrives and edits it at most every 1.5 seconds, then edits in the final text with the cost. If the request fails, the partial message is deleted before the error reply. Gemini replies arrive whole.
 - There is no request/pipeline log table: the SDK clients use their default HTTP clients, and diagnostics go to the normal Python log (stdout and `logs/`).
 
 ## Diagram: downloader enrichment flow
@@ -288,7 +290,7 @@ flowchart LR
 3. `MentionHandler` gathers recent message history and reply context (via `build_chat_context`).
 4. The handler enriches user text with downloader output for supported URLs and appends the memory profiles of the people involved.
 5. `dispatch_completion` routes the assembled context to `OpenAIService` (OpenRouter), `GeminiService` (native Gemini), or `AnthropicService` (Claude API), based on the channel's model.
-6. `MessageService` sends the final reply back to Discord.
+6. For Claude API and OpenRouter models the reply streams into a Discord message as it's written (`StreamingReply`); the final text, with its cost, is edited in at the end. Gemini replies are sent whole by `MessageService`.
 
 ### Memory
 

@@ -1,5 +1,6 @@
 """Tests for MentionHandler context building and queue delegation."""
 
+import asyncio
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -384,6 +385,56 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         state_service.mark_channel_active.assert_called_once_with(1)
         message_service.send_channel_reply.assert_awaited_once_with(channel, "hello there")
+
+    def make_streaming_channel(self):
+        preview = MagicMock()
+        preview.edit = AsyncMock()
+        preview.delete = AsyncMock()
+        channel = MagicMock()
+        channel.id = 1
+        channel.typing.return_value = AsyncTyping()
+        channel.send = AsyncMock(return_value=preview)
+        return channel, preview
+
+    async def test_handle_mention_streams_then_edits_in_final_reply(self):
+        handler, _, _, openai_service, message_service = self.make_handler()
+        message_service.DISCORD_MESSAGE_LIMIT = 2000
+        message_service.fit_to_discord = AsyncMock(side_effect=lambda text: text)
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
+
+        async def streamed_completion(**kwargs):
+            kwargs["on_text"]("hello")
+            await asyncio.sleep(0)
+            return "hello there", 0.01
+
+        openai_service.get_chat_completion = streamed_completion
+        channel, preview = self.make_streaming_channel()
+        message = SimpleNamespace(author=SimpleNamespace(id=123), channel=channel)
+
+        await handler.handle_mention(message, SimpleNamespace(id=999), "gpt-test")
+
+        channel.send.assert_awaited_once()
+        preview.edit.assert_awaited_once_with(content="[$0.010] hello there", suppress=True)
+        message_service.send_channel_reply.assert_not_awaited()
+
+    async def test_handle_mention_deletes_partial_reply_when_stream_fails(self):
+        handler, _, _, openai_service, message_service = self.make_handler()
+        message_service.DISCORD_MESSAGE_LIMIT = 2000
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
+
+        async def failing_completion(**kwargs):
+            kwargs["on_text"]("half an ans")
+            await asyncio.sleep(0)
+            raise OpenAIServiceError("stream broke")
+
+        openai_service.get_chat_completion = failing_completion
+        channel, preview = self.make_streaming_channel()
+        message = SimpleNamespace(author=SimpleNamespace(id=123), channel=channel)
+
+        await handler.handle_mention(message, SimpleNamespace(id=999), "gpt-test")
+
+        preview.delete.assert_awaited_once()
+        self.assertIn("stream broke", message_service.send_channel_reply.await_args.args[1])
 
     async def test_handle_mention_sends_files_when_response_contains_them(self):
         handler, _, _, openai_service, message_service = self.make_handler()

@@ -494,5 +494,59 @@ class TestOpenAIServiceBranches(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("plugins", self.client.chat.completions.create.call_args.kwargs["extra_body"])
 
 
+def make_chunk(text=None, *, error=None, cost=None):
+    return SimpleNamespace(
+        choices=[] if text is None else [SimpleNamespace(delta=SimpleNamespace(content=text))],
+        error=error,
+        usage=None if cost is None else SimpleNamespace(
+            model_extra={"cost_details": {"upstream_inference_cost": cost}}),
+    )
+
+
+def make_stream(*chunks):
+    async def stream():
+        for chunk in chunks:
+            yield chunk
+    return stream()
+
+
+class TestOpenAIStreaming(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.service = OpenAIService()
+        self.client = MagicMock()
+        self.client.default_headers = {}
+        self.client.chat.completions.create = AsyncMock()
+        self.service.set_client(self.client)
+
+    async def test_streams_text_so_far_and_reads_cost_from_last_chunk(self):
+        self.client.chat.completions.create.return_value = make_stream(
+            make_chunk("Hel"), make_chunk("lo"), make_chunk(None, cost=0.002))
+        seen = []
+
+        text, cost = await self.service.get_chat_completion(
+            model="gpt-test", messages=[{"role": "user", "content": "hi"}], on_text=seen.append)
+
+        self.assertEqual(seen, ["Hel", "Hello"])
+        self.assertEqual((text, cost), ("Hello", 0.002))
+        kwargs = self.client.chat.completions.create.call_args.kwargs
+        self.assertTrue(kwargs["stream"])
+        self.assertEqual(kwargs["stream_options"], {"include_usage": True})
+
+    async def test_retries_mid_stream_upstream_error(self):
+        self.client.chat.completions.create.side_effect = [
+            make_stream(make_chunk("partial"), make_chunk(None, error={"code": 503, "message": "down"})),
+            make_stream(make_chunk("recovered")),
+        ]
+        seen = []
+
+        with patch("src.services.openai_service.asyncio.sleep", new=AsyncMock()), \
+                patch.object(self.service, "_dump_bad_request"):
+            text, _ = await self.service.get_chat_completion(
+                model="gpt-test", messages=[{"role": "user", "content": "hi"}], on_text=seen.append)
+
+        self.assertEqual(text, "recovered")
+        self.assertEqual(seen, ["partial", "recovered"])
+
+
 if __name__ == "__main__":
     unittest.main()

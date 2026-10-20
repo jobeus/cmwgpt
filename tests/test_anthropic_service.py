@@ -254,6 +254,51 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
                 service.get_client()
 
 
+class FakeMessageStream:
+    """Stands in for ``client.beta.messages.stream(...)``: yields text events, then the final message."""
+
+    def __init__(self, chunks, final):
+        self._chunks = chunks
+        self._final = final
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def __aiter__(self):
+        yield SimpleNamespace(type="message_start")
+        for chunk in self._chunks:
+            yield SimpleNamespace(type="text", text=chunk)
+
+    async def get_final_message(self):
+        return self._final
+
+
+class TestAnthropicStreaming(unittest.IsolatedAsyncioTestCase):
+    async def test_streams_cleaned_text_so_far_and_returns_final(self):
+        service = AnthropicService(api_key="test-key")
+        client = MagicMock()
+        client.beta.messages.stream = MagicMock(
+            return_value=FakeMessageStream(['"Hello', ', world"'], _response('"Hello, world"')))
+        client.beta.messages.create = AsyncMock()
+        service.set_client(client)
+        seen = []
+
+        text, cost = await service.get_chat_completion(
+            model="sonnet-5.5-direct",
+            messages=[{"role": "user", "content": [{"type": "text", "text": "hello"}]}],
+            on_text=seen.append,
+        )
+
+        self.assertEqual(seen, ['"Hello', "Hello, world"])
+        self.assertEqual(text, "Hello, world")
+        self.assertGreater(cost, 0)
+        client.beta.messages.create.assert_not_awaited()
+        self.assertIn("diagnostics", client.beta.messages.stream.call_args.kwargs)
+
+
 class TestDispatchRoutesDirect(unittest.IsolatedAsyncioTestCase):
     async def test_direct_model_uses_anthropic_service(self):
         openai_service = MagicMock()

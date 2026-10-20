@@ -14,6 +14,7 @@ from src.services.openai_service import OpenAIServiceError
 from src.services.anthropic_service import AnthropicServiceError, is_direct_anthropic_model
 from src.services.gemini_service import GeminiServiceError, is_gemini_model
 from src.services.completion_dispatch import dispatch_completion
+from src.services.streaming_reply import StreamingReply
 from src.utils.chat_context import build_chat_context
 from src.utils.downloader_utils import fetch_all_url_content
 
@@ -126,17 +127,25 @@ class MentionHandler:
                 # Identity threaded into every model call for this mention.
                 identity = {"channel_id": channel_id, "discord_user_id": message.author.id}
 
-                reply_content, cost = await dispatch_completion(
-                    model=model,
-                    messages=recent_messages,
-                    system_prompt=system_prompt,
-                    openai_service=self._openai_service,
-                    gemini_service=self._gemini_service,
-                    anthropic_service=self._anthropic_service,
-                    identity=identity,
-                )
+                # Posts the reply as it streams in, then edits in the final version below.
+                streaming_reply = StreamingReply(message.channel, self._message_service)
+                try:
+                    reply_content, cost = await dispatch_completion(
+                        model=model,
+                        messages=recent_messages,
+                        system_prompt=system_prompt,
+                        openai_service=self._openai_service,
+                        gemini_service=self._gemini_service,
+                        anthropic_service=self._anthropic_service,
+                        identity=identity,
+                        on_text=streaming_reply.push,
+                    )
+                except BaseException:
+                    await streaming_reply.discard()
+                    raise
 
                 if reply_content is None:
+                    await streaming_reply.discard()
                     logger.error(f"❌ Received None from get_chat_completion for model {model}.")
                     await self._message_service.send_channel_reply(
                         message.channel,
@@ -158,10 +167,7 @@ class MentionHandler:
                 if cost > 0:
                     reply_text = f"[${cost:.3f}] {reply_text}"
 
-                if files_to_upload:
-                    await self._message_service.send_channel_reply_with_files(message.channel, reply_text, files_to_upload)
-                else:
-                    await self._message_service.send_channel_reply(message.channel, reply_text)
+                await streaming_reply.finish(reply_text, files_to_upload)
 
             except (OpenAIServiceError, GeminiServiceError, AnthropicServiceError) as e:
                 logger.error(f"❌ API error in mention handler:\\n{e}")

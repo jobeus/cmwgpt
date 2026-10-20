@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import tempfile
+from types import SimpleNamespace
 from typing import List, Dict, Any, Optional, Callable
 
 from openai import (
@@ -125,15 +126,18 @@ class OpenAIService:
         bot_id: int = None,
         discord_user_id: Optional[int] = None,
         search: bool = True,
+        on_text: Optional[Callable[[str], None]] = None,
     ) -> tuple[str, float]:
         """
         Gets a chat completion from OpenRouter's Chat Completions API.
 
         Transport-level failures are retried by the SDK itself; this loop only
         retries what the SDK can't see: an upstream error returned inside an
-        HTTP 200, or an empty reply.
+        HTTP 200, or an empty reply. With ``on_text``, the reply is streamed and
+        ``on_text`` gets the cleaned text so far.
         """
         client = self.get_client()
+        resolved_bot_id = resolve_bot_id(bot_id, state_service, self._bot_id_loader)
 
         api_input: List[Dict[str, Any]] = []
         if system_prompt:
@@ -159,7 +163,10 @@ class OpenAIService:
 
         for attempt in range(1, SOFT_RETRY_ATTEMPTS + 1):
             try:
-                response = await client.chat.completions.create(**kwargs)
+                if on_text:
+                    response = await _stream_completion(client, kwargs, on_text, resolved_bot_id)
+                else:
+                    response = await client.chat.completions.create(**kwargs)
             except AuthenticationError as e:
                 logger.error(f"Authentication error: {e}")
                 raise OpenAIServiceError("Authentication failed. Please check API key configuration.") from e
@@ -204,11 +211,44 @@ class OpenAIService:
 
             snippet = response_text.strip().replace("\n", " ")
             logger.info(f"[{model}] response snippet: {snippet[:150]}{'...' if len(snippet) > 150 else ''}")
-            cleaned = clean_openai_response(
-                response_text, bot_id=resolve_bot_id(bot_id, state_service, self._bot_id_loader))
+            cleaned = clean_openai_response(response_text, bot_id=resolved_bot_id)
             return cleaned, _response_cost(response)
 
         raise OpenAIServiceError("Failed to get chat completion after all retry attempts")
+
+
+async def _stream_completion(
+    client: AsyncOpenAI,
+    kwargs: Dict[str, Any],
+    on_text: Callable[[str], None],
+    bot_id: Optional[int],
+) -> SimpleNamespace:
+    """Stream a completion, calling ``on_text`` as it grows.
+
+    Returns an object shaped like a non-streamed response (``error``, ``choices``,
+    ``usage``) so the caller handles both the same way. OpenRouter reports upstream
+    failures mid-stream as a chunk with an ``error`` field, and usage in the last chunk.
+    """
+    stream = await client.chat.completions.create(
+        **kwargs, stream=True, stream_options={"include_usage": True})
+    text = ""
+    got_choices = False
+    error = None
+    usage = None
+    async for chunk in stream:
+        chunk_error = getattr(chunk, "error", None)
+        if isinstance(chunk_error, dict):
+            error = chunk_error
+        if getattr(chunk, "usage", None) is not None:
+            usage = chunk.usage
+        for choice in getattr(chunk, "choices", None) or []:
+            got_choices = True
+            delta = getattr(getattr(choice, "delta", None), "content", None)
+            if delta:
+                text += delta
+                on_text(clean_openai_response(text, bot_id=bot_id))
+    choices = [SimpleNamespace(message=SimpleNamespace(content=text))] if got_choices else []
+    return SimpleNamespace(error=error, choices=choices, usage=usage)
 
 
 def _prompt_snippet(api_input: List[Dict[str, Any]]) -> str:

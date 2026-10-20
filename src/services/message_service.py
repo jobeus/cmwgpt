@@ -39,7 +39,7 @@ class MessageService:
             raise RuntimeError("Paste service is disabled")
         return await self._paste_service.upload_markdown(reply_text)
 
-    async def _fit_to_discord(self, text: str) -> str:
+    async def fit_to_discord(self, text: str) -> str:
         """``text`` as-is if it fits in one message, else a link to it on the paste service."""
         if len(text) <= self.DISCORD_MESSAGE_LIMIT:
             return text
@@ -97,7 +97,7 @@ class MessageService:
 
     async def send_channel_reply(self, channel: discord.TextChannel, reply_text: str) -> None:
         """Send a reply to a channel, via the paste service if it's too long."""
-        await self._send_with_retry(channel.send, await self._fit_to_discord(reply_text))
+        await self._send_with_retry(channel.send, await self.fit_to_discord(reply_text))
 
     async def send_channel_reply_with_files(
             self,
@@ -105,7 +105,7 @@ class MessageService:
             reply_text: str,
             files: Optional[List[discord.File]] = None) -> None:
         """Send a reply with optional file attachments, via the paste service if it's too long."""
-        await self._send_with_retry(channel.send, await self._fit_to_discord(reply_text), files=files)
+        await self._send_with_retry(channel.send, await self.fit_to_discord(reply_text), files=files)
 
     async def send_interaction_followup(
             self,
@@ -115,7 +115,7 @@ class MessageService:
             ephemeral: bool = False) -> None:
         """Send an interaction followup, via the paste service if it's too long."""
         await self._send_with_retry(
-            interaction.followup.send, await self._fit_to_discord(text), ephemeral=ephemeral)
+            interaction.followup.send, await self.fit_to_discord(text), ephemeral=ephemeral)
 
     # Delegate to utility functions for message formatting
     def format_attachment_message(
