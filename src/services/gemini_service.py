@@ -280,7 +280,7 @@ class GeminiService:
             input_tokens = getattr(usage_metadata, 'prompt_token_count', 0) or 0
             output_tokens = getattr(usage_metadata, 'candidates_token_count', 0) or 0
 
-            # Default rates for gemini-3.1-flash-image
+            # Default rates for gemini-nano-banana-2.1
             price_input = 0.25
             price_output = 30.0
 

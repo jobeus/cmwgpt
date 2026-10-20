@@ -18,6 +18,10 @@ from src.utils.discord_error_utils import best_effort_typing, safe_defer
 
 logger = logging.getLogger(__name__)
 
+GEMINI_IMAGE_MODELS = ("gemini-3-pro-image", "gemini-nano-banana-2.1")
+# Old model IDs that channels may still have saved as their default.
+LEGACY_MODEL_IDS = {"gemini-3.1-flash-image": "gemini-nano-banana-2.1"}
+
 
 class ImageCommands:
     """Handles image-related Discord commands."""
@@ -55,7 +59,7 @@ class ImageCommands:
 
         model_choices = [
             Choice(name="banana-pro", value="gemini-3-pro-image"),
-            Choice(name="banana-2", value="gemini-3.1-flash-image"),
+            Choice(name="banana-2.1", value="gemini-nano-banana-2.1"),
             Choice(name="seedream", value="seedream"),
         ]
 
@@ -120,6 +124,7 @@ class ImageCommands:
         # Use provided model, or channel default, or global default
         active_model = model or self._state_service.get_draw_model(
             channel_id) or self._default_draw_model
+        active_model = LEGACY_MODEL_IDS.get(active_model, active_model)
 
         logger.info(
             f"[/draw] Channel {channel_id} Prompt: {prompt} Model: {active_model}")
@@ -129,7 +134,7 @@ class ImageCommands:
             try:
                 cost = None
                 # Generate the image
-                if active_model in ["gemini-3-pro-image", "gemini-3.1-flash-image"]:
+                if active_model in GEMINI_IMAGE_MODELS:
                     images_b64 = []
                     for img in [image1, image2, image3, image4]:
                         if img:
@@ -231,7 +236,7 @@ class ImageCommands:
 
         model_choices = [
             Choice(name="banana-pro", value="gemini-3-pro-image"),
-            Choice(name="banana-2", value="gemini-3.1-flash-image"),
+            Choice(name="banana-2.1", value="gemini-nano-banana-2.1"),
             Choice(name="seedream", value="seedream"),
         ]
 
@@ -281,7 +286,7 @@ class ImageCommands:
 
         edit_model_choices = [
             Choice(name="banana-pro", value="gemini-3-pro-image"),
-            Choice(name="banana-2", value="gemini-3.1-flash-image"),
+            Choice(name="banana-2.1", value="gemini-nano-banana-2.1"),
             Choice(name="seedream", value="seedream"),
         ]
 
@@ -336,6 +341,7 @@ class ImageCommands:
 
         active_model = model or self._state_service.get_edit_model(
             channel_id) or self._default_edit_model
+        active_model = LEGACY_MODEL_IDS.get(active_model, active_model)
 
         logger.info(
             f"[/edit] Channel {channel_id} Prompt: {prompt} Model: {active_model} Edit? True")
@@ -346,7 +352,7 @@ class ImageCommands:
                     f"[/edit] Channel {channel_id}: editing image {edit_image.filename}")
 
                 cost = None
-                if active_model in ["gemini-3-pro-image", "gemini-3.1-flash-image"]:
+                if active_model in GEMINI_IMAGE_MODELS:
                     # Gather base64 images (just edit_image for edit command as per instructions)
                     images_b64 = []
                     img_bytes = await edit_image.read()
@@ -442,7 +448,7 @@ class ImageCommands:
 
         edit_model_choices = [
             Choice(name="banana-pro", value="gemini-3-pro-image"),
-            Choice(name="banana-2", value="gemini-3.1-flash-image"),
+            Choice(name="banana-2.1", value="gemini-nano-banana-2.1"),
             Choice(name="seedream", value="seedream"),
         ]
 

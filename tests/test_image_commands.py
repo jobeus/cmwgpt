@@ -46,8 +46,8 @@ class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
             for choice in with_runpod_commands._create_editmodel_command().parameters[0].choices
         ]
 
-        self.assertEqual(no_runpod_choices, ["gemini-3-pro-image", "gemini-3.1-flash-image", "seedream"])
-        self.assertEqual(with_runpod_choices, ["gemini-3-pro-image", "gemini-3.1-flash-image", "seedream", "qwen", "pruna"])
+        self.assertEqual(no_runpod_choices, ["gemini-3-pro-image", "gemini-nano-banana-2.1", "seedream"])
+        self.assertEqual(with_runpod_choices, ["gemini-3-pro-image", "gemini-nano-banana-2.1", "seedream", "qwen", "pruna"])
 
     async def test_handle_draw_command_uses_injected_services(self):
         state_service = MagicMock()
