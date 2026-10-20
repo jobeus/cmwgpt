@@ -31,7 +31,7 @@ Relevant code:
 flowchart LR
     Trigger[Manual restart or auto-update trigger] --> Save[Save state to temp file]
     Save --> Pull[git pull]
-    Pull --> Shutdown[shutdown_services<br/>stop jobs, drain queue, close clients, close Redis, close DB pool]
+    Pull --> Shutdown[shutdown_services<br/>stop jobs, drain queue, close clients, close Redis]
     Shutdown --> Exit[Exit with code 42]
     Exit --> Supervisor[Process supervisor restarts bot]
     Supervisor --> Boot[Bot boots again]
@@ -45,7 +45,7 @@ The restart path is intentional and stateful:
 1. the bot marks restart as in progress
 2. it saves state to a temp file
 3. it performs `git pull`
-4. it runs the normal shutdown sequence (`startup.shutdown_services`): stop background jobs, drain the queue for up to 90 seconds so in-flight replies finish, close the model/HTTP clients, close Redis, and close the DB pool
+4. it runs the normal shutdown sequence (`startup.shutdown_services`): stop background jobs, drain the queue for up to 90 seconds so in-flight replies finish, close the model/HTTP clients, and close Redis
 5. `main.py` exits with code `42`
 
 That exit code is a signal to the **outer supervisor**, not an error to be ignored.

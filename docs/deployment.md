@@ -55,7 +55,7 @@ python3 -m venv .venv
 
 ## Why a process supervisor is not optional
 
-The restart flow saves state, runs `git pull`, then runs the normal shutdown sequence (stop background jobs, drain the queue for up to 90 seconds, close clients, close Redis, close the DB pool) and intentionally exits with code `42`.
+The restart flow saves state, runs `git pull`, then runs the normal shutdown sequence (stop background jobs, drain the queue for up to 90 seconds, close clients, close Redis) and intentionally exits with code `42`.
 
 That means the bot expects an outer process manager to bring it back up after:
 

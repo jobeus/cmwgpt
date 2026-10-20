@@ -101,6 +101,24 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         )
         client.bot.process_commands.assert_awaited_once_with(message)
 
+    async def test_handle_message_tells_channel_when_queue_is_full(self):
+        client, bot_user = self.make_client()
+        client.mention_handler.queue_mention = AsyncMock(return_value=False)
+        client.services.message_service.send_channel_reply = AsyncMock()
+        channel = FakeTextChannel()
+        message = SimpleNamespace(
+            author=SimpleNamespace(bot=False),
+            channel=channel,
+            mentions=[bot_user],
+        )
+
+        with patch("src.bot.client.discord.TextChannel", FakeTextChannel):
+            await client._handle_message(message)
+
+        client.services.message_service.send_channel_reply.assert_awaited_once()
+        self.assertIs(client.services.message_service.send_channel_reply.await_args.args[0], channel)
+        client.bot.process_commands.assert_awaited_once_with(message)
+
     async def test_handle_message_uses_default_model_fallback(self):
         client, bot_user = self.make_client(default_model="fallback-model")
         client.services.state_service.get_model.return_value = None

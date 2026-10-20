@@ -308,6 +308,13 @@ class DiscordBotClient:
                 logger.warning(
                     f"Failed to queue mention from {message.author} in #{message.channel} - queue may be full"
                 )
+                try:
+                    await self.services.message_service.send_channel_reply(
+                        message.channel,
+                        "I'm too backed up in this channel to take that right now. Mention me again in a bit."
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Couldn't tell #{message.channel} the queue is full: {e}")
 
         # Ensure other commands are still processed
         await self.bot.process_commands(message)

@@ -25,7 +25,6 @@ These are loaded by `src/config.py`.
 | `MEMORY_MODEL` | `sonnet-5.5-direct` | No | Model the nightly user-memory job uses; the job is off when this model's API key is missing |
 | `DEFAULT_DRAW_MODEL` | `seedream` | No | Default draw model key |
 | `DEFAULT_EDIT_MODEL` | `seedream` | No | Default edit model key |
-| `INCLUDE_USERNAMES` | `true` | No | Include usernames in prompt context |
 | `REPLY_TO_MENTIONS` | `true` | No | Enable mention replies |
 | `INCLUDE_NUM_CHATLINES` | `10` | No | Recent-history lines included in context |
 | `DISCORD_GUILD_ID` | empty | No | Guild-scoped sync/behavior |

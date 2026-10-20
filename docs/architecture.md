@@ -302,7 +302,7 @@ flowchart LR
 
 ### Shutdown and restart
 
-1. `startup.shutdown_services` stops background jobs, drains the queue (up to 90 seconds), closes the model/HTTP clients, closes the Redis clients, and closes the DB pool.
+1. `startup.shutdown_services` stops background jobs, drains the queue (up to 90 seconds), closes the model/HTTP clients, and closes the Redis clients.
 2. `/restart` (and auto-update) save state and `git pull` first, then run the same shutdown; `main.py` exits with code `42` so `start.sh` or the process manager starts the bot again.
 
 ## Key architectural traits

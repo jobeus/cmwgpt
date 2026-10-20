@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore", message="Interactions usage is experimental")
 warnings.filterwarnings("ignore", message="Async interactions client cannot use aiohttp")
 
-# Gemini 3.5 Flash pricing (paid tier, per 1M tokens)
+# Gemini 3.8 Flash pricing (paid tier, per 1M tokens)
 PRICE_INPUT_PER_M = 1.50   # text / image / video
 PRICE_OUTPUT_PER_M = 9.00  # output including thinking tokens
 PRICE_CACHED_PER_M = 0.15  # cached tokens
