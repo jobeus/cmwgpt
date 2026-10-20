@@ -41,10 +41,6 @@ PRICE_WEB_SEARCH = 0.01
 
 MAX_TOKENS = 16000
 WEB_SEARCH_MAX_USES = 10
-# Web fetch only reads URLs already in the conversation (including search results).
-# It costs only the tokens it reads, so cap how much one page can add.
-WEB_FETCH_MAX_USES = 10
-WEB_FETCH_MAX_CONTENT_TOKENS = 30000
 # A server-tool turn can come back as ``pause_turn``; resume it this many times.
 MAX_CONTINUATIONS = 5
 
@@ -260,21 +256,11 @@ class AnthropicService:
         previous_index = self._history_breakpoints.get(channel_id) if channel_id else None
         history_index = apply_history_breakpoints(api_messages, previous_index)
         if search:
-            # Both tools filter results with code execution server-side, so
-            # code_execution itself isn't declared.
-            kwargs["tools"] = [
-                {
-                    "type": "web_search_20260209",
-                    "name": "web_search",
-                    "max_uses": WEB_SEARCH_MAX_USES,
-                },
-                {
-                    "type": "web_fetch_20260209",
-                    "name": "web_fetch",
-                    "max_uses": WEB_FETCH_MAX_USES,
-                    "max_content_tokens": WEB_FETCH_MAX_CONTENT_TOKENS,
-                },
-            ]
+            kwargs["tools"] = [{
+                "type": "web_search_20260209",
+                "name": "web_search",
+                "max_uses": WEB_SEARCH_MAX_USES,
+            }]
 
         last_text = api_messages[-1]["content"][0].get("text", "") if api_messages else ""
         snippet = last_text.replace("\n", " ")

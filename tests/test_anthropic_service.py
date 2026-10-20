@@ -137,7 +137,7 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["model"], "claude-sonnet-5-5")
         self.assertEqual(kwargs["system"][0]["text"], "be nice")
         self.assertIn("cache_control", kwargs["system"][0])
-        self.assertEqual([t["type"] for t in kwargs["tools"]], ["web_search_20260209", "web_fetch_20260209"])
+        self.assertEqual(kwargs["tools"][0]["type"], "web_search_20260209")
         self.assertEqual(kwargs["fallbacks"], "default")
 
     async def test_opus_uses_its_model_effort_and_price(self):
