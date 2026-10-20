@@ -1,59 +1,83 @@
 """Tests for injected auto-update, restart, and announcement services."""
 
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.announcement_service import AnnouncementService
-from src.services.auto_update_service import AutoUpdateService
+from aiohttp.test_utils import TestClient, TestServer
+
+from src.services.auto_update_service import AutoUpdateService, sign_deploy_request
 from src.services.restart_handler import RESTART_EXIT_CODE, RestartHandler
 
 
 class TestAutoUpdateService(unittest.IsolatedAsyncioTestCase):
+    SECRET = "s3cret"
+    NOW = 1_700_000_000
+
     def setUp(self):
         self.queue_service = MagicMock()
         self.queue_service.queue_restart = AsyncMock(return_value=True)
         self.service = AutoUpdateService(
-            check_interval=1,
-            enabled=True,
             queue_service=self.queue_service,
-            is_git_repository_fn=lambda: True,
-            get_current_commit_hash_fn=lambda: "abc123",
-            fetch_updates_fn=lambda: True,
-            check_for_new_commits_fn=lambda: True,
+            secret=self.SECRET,
+            get_current_commit_hash_fn=lambda: "old111",
+            clock=lambda: self.NOW,
         )
+        self.service.set_restart_callback(AsyncMock())
 
-    def tearDown(self):
-        self.service.stop()
+    async def post(self, payload, *, secret=None, timestamp=None, signature=None):
+        body = json.dumps(payload).encode()
+        ts = str(self.NOW if timestamp is None else timestamp)
+        headers = {
+            "X-Deploy-Timestamp": ts,
+            "X-Deploy-Signature": signature or sign_deploy_request(secret or self.SECRET, ts, body),
+        }
+        async with TestClient(TestServer(self.service.build_app())) as client:
+            resp = await client.post("/deploy", data=body, headers=headers)
+            return resp.status, await resp.json()
 
-    def test_start_uses_injected_git_dependencies(self):
-        with patch("src.services.auto_update_service.threading.Thread.start") as mock_start:
-            self.service.start()
+    async def test_valid_webhook_for_new_commit_queues_restart(self):
+        status, data = await self.post({"sha": "new222"})
 
-        self.assertTrue(self.service._is_running)
-        self.assertEqual(self.service._last_known_commit, "abc123")
-        mock_start.assert_called_once()
+        self.assertEqual(status, 202)
+        self.assertEqual(data["status"], "restarting")
+        self.queue_service.queue_restart.assert_awaited_once()
 
-    def test_start_uses_event_loop_fallback_and_ignores_duplicate_start(self):
-        service = AutoUpdateService(
-            check_interval=1,
-            enabled=True,
-            queue_service=self.queue_service,
-            is_git_repository_fn=lambda: True,
-            get_current_commit_hash_fn=lambda: None,
-        )
+    async def test_webhook_for_running_commit_is_a_noop(self):
+        status, data = await self.post({"sha": "old111"})
 
-        with patch("src.services.auto_update_service.asyncio.get_running_loop", side_effect=RuntimeError()), patch(
-            "src.services.auto_update_service.asyncio.get_event_loop", return_value="loop"
-        ) as mock_get_loop, patch("src.services.auto_update_service.threading.Thread.start"):
-            service.start()
+        self.assertEqual(status, 200)
+        self.assertEqual(data["status"], "up-to-date")
+        self.queue_service.queue_restart.assert_not_awaited()
 
-        self.assertEqual(service._loop, "loop")
-        mock_get_loop.assert_called_once_with()
+    async def test_bad_signature_is_rejected(self):
+        status, _ = await self.post({"sha": "new222"}, secret="wrong")
 
-        with patch("src.services.auto_update_service.threading.Thread.start") as mock_start:
-            service.start()
-        mock_start.assert_not_called()
+        self.assertEqual(status, 401)
+        self.queue_service.queue_restart.assert_not_awaited()
+
+    async def test_stale_or_garbage_timestamp_is_rejected(self):
+        status, _ = await self.post({"sha": "new222"}, timestamp=self.NOW - 3600)
+        self.assertEqual(status, 401)
+
+        status, _ = await self.post({"sha": "new222"}, timestamp="soon", signature="sha256=00")
+        self.assertEqual(status, 401)
+        self.queue_service.queue_restart.assert_not_awaited()
+
+    async def test_invalid_body_is_rejected(self):
+        status, _ = await self.post(["not", "an", "object"])
+
+        self.assertEqual(status, 400)
+        self.queue_service.queue_restart.assert_not_awaited()
+
+    async def test_restart_queue_failure_returns_503(self):
+        self.queue_service.queue_restart.return_value = False
+
+        status, _ = await self.post({"sha": "new222"})
+
+        self.assertEqual(status, 503)
 
     async def test_trigger_restart_queues_injected_callback(self):
         callback = AsyncMock()
@@ -68,115 +92,38 @@ class TestAutoUpdateService(unittest.IsolatedAsyncioTestCase):
         callback.assert_awaited_once_with(manual=True)
 
     async def test_trigger_restart_without_callback_returns_false(self):
-        service = AutoUpdateService(enabled=True, queue_service=self.queue_service)
+        service = AutoUpdateService(queue_service=self.queue_service)
 
         result = await service.trigger_restart(manual=False)
 
         self.assertFalse(result)
         self.queue_service.queue_restart.assert_not_awaited()
 
-    def test_disabled_service_does_not_start(self):
-        service = AutoUpdateService(enabled=False, queue_service=self.queue_service)
-        service.start()
-        self.assertFalse(service._is_running)
+    async def test_service_without_secret_does_not_listen(self):
+        service = AutoUpdateService(queue_service=self.queue_service)
 
-    def test_service_does_not_start_outside_git_repository(self):
-        service = AutoUpdateService(
-            enabled=True,
-            queue_service=self.queue_service,
-            is_git_repository_fn=lambda: False,
-        )
+        await service.start()
 
-        service.start()
+        self.assertFalse(service.get_status()["running"])
+        self.assertFalse(service.get_status()["enabled"])
 
-        self.assertFalse(service._is_running)
+    async def test_start_and_stop_listener(self):
+        service = AutoUpdateService(queue_service=self.queue_service, secret="x", host="127.0.0.1", port=0)
 
-    def test_monitor_git_updates_schedules_restart_when_new_commits_found(self):
-        self.service._loop = object()
+        await service.start()
+        self.assertTrue(service.get_status()["running"])
+        await service.start()  # duplicate start is ignored
+        await service.stop()
+        self.assertFalse(service.get_status()["running"])
+        await service.stop()  # stopping twice is harmless
 
-        with patch("src.services.auto_update_service.asyncio.run_coroutine_threadsafe") as mock_schedule:
-            def close_coro(coro, loop):
-                coro.close()
-                return MagicMock()
+    async def test_start_survives_bind_failure(self):
+        service = AutoUpdateService(queue_service=self.queue_service, secret="x", host="127.0.0.1", port=0)
 
-            mock_schedule.side_effect = close_coro
-            self.service._monitor_git_updates()
+        with patch("src.services.auto_update_service.web.TCPSite.start", side_effect=OSError("in use")):
+            await service.start()
 
-        mock_schedule.assert_called_once()
-        scheduled_loop = mock_schedule.call_args.args[1]
-        self.assertIs(scheduled_loop, self.service._loop)
-
-    def test_monitor_git_updates_stops_after_repeated_fetch_failures(self):
-        service = AutoUpdateService(
-            check_interval=1,
-            enabled=True,
-            queue_service=self.queue_service,
-            is_git_repository_fn=lambda: True,
-            get_current_commit_hash_fn=lambda: "abc123",
-            fetch_updates_fn=lambda: False,
-            check_for_new_commits_fn=lambda: False,
-        )
-
-        with patch.object(service._stop_monitoring, "wait", return_value=False):
-            service._monitor_git_updates()
-
-        self.assertEqual(service._consecutive_failures, service._max_consecutive_failures)
-
-    def test_monitor_git_updates_resets_failures_and_handles_exceptions(self):
-        service = AutoUpdateService(
-            check_interval=1,
-            enabled=True,
-            queue_service=self.queue_service,
-            is_git_repository_fn=lambda: True,
-            fetch_updates_fn=lambda: True,
-            check_for_new_commits_fn=lambda: False,
-        )
-        service._consecutive_failures = 2
-
-        with patch.object(service._stop_monitoring, "wait", side_effect=[True]):
-            service._monitor_git_updates()
-
-        self.assertEqual(service._consecutive_failures, 0)
-
-        exploding = AutoUpdateService(
-            check_interval=1,
-            enabled=True,
-            queue_service=self.queue_service,
-            is_git_repository_fn=lambda: True,
-            fetch_updates_fn=lambda: (_ for _ in ()).throw(RuntimeError("boom")),
-            check_for_new_commits_fn=lambda: False,
-        )
-
-        with patch.object(exploding._stop_monitoring, "wait", return_value=False):
-            exploding._monitor_git_updates()
-
-        self.assertEqual(exploding._consecutive_failures, exploding._max_consecutive_failures)
-
-    def test_stop_handles_stuck_thread(self):
-        service = AutoUpdateService(enabled=True, queue_service=self.queue_service)
-        service._is_running = True
-        stuck_thread = MagicMock()
-        stuck_thread.is_alive.side_effect = [True, True]
-        service._monitoring_thread = stuck_thread
-
-        service.stop()
-
-        stuck_thread.join.assert_called_once_with(timeout=10.0)
-        self.assertFalse(service._is_running)
-
-    def test_get_status_reports_runtime_fields(self):
-        self.service._is_running = True
-        self.service._consecutive_failures = 2
-        self.service._last_known_commit = "abc123"
-
-        status = self.service.get_status()
-
-        self.assertTrue(status["enabled"])
-        self.assertTrue(status["running"])
-        self.assertEqual(status["check_interval"], 1)
-        self.assertEqual(status["consecutive_failures"], 2)
-        self.assertEqual(status["last_known_commit"], "abc123")
-        self.assertTrue(status["is_git_repo"])
+        self.assertFalse(service.get_status()["running"])
 
 
 class TestRestartHandler(unittest.IsolatedAsyncioTestCase):

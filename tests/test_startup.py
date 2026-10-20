@@ -39,7 +39,8 @@ class TestStartupIntegration(unittest.TestCase):
         config = load_config(
             env={
                 "DEFAULT_MODEL": "integration-model",
-                "KEEP_UP_TO_DATE_WITH_GIT": "false",
+                "DEPLOY_WEBHOOK_SECRET": "hook-secret",
+                "DEPLOY_WEBHOOK_PORT": "9999",
                 "QUIET_UPDATES": "true",
                 "DEATH_CHANNEL_ID": "999",
                 "INCLUDE_NUM_CHATLINES": "7",
@@ -51,6 +52,8 @@ class TestStartupIntegration(unittest.TestCase):
 
         self.assertIs(services.message_service._paste_service, services.paste_service)
         self.assertIs(services.auto_update_service._queue_service, services.queue_service)
+        self.assertEqual(services.auto_update_service._secret, "hook-secret")
+        self.assertEqual(services.auto_update_service._port, 9999)
         self.assertIs(services.announcement_service._state_service, services.state_service)
         self.assertIs(services.death_service._state_service, services.state_service)
         self.assertIs(services.death_service._openai_service, services.openai_service)

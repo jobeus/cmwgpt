@@ -38,10 +38,10 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         )
         client.services.queue_service.start = AsyncMock()
         client.services.queue_service.stop = AsyncMock()
-        client.services.auto_update_service.start = MagicMock()
-        client.services.auto_update_service.stop = MagicMock()
+        client.services.auto_update_service.start = AsyncMock()
+        client.services.auto_update_service.stop = AsyncMock()
         client.services.auto_update_service.get_status = MagicMock(
-            return_value={"enabled": False, "check_interval": 60}
+            return_value={"enabled": False, "running": False, "port": 8787}
         )
         client.services.death_service.start = MagicMock()
         client.services.death_service.stop = MagicMock()
@@ -190,7 +190,7 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(guild_arg.id, 777)
         client.bot.tree.sync.assert_awaited_once_with(guild=guild_arg)
         client.services.queue_service.start.assert_awaited_once_with()
-        client.services.auto_update_service.start.assert_called_once_with()
+        client.services.auto_update_service.start.assert_awaited_once_with()
         client.services.death_service.start.assert_called_once_with()
         client._send_update_announcement_if_needed.assert_awaited_once_with()
 
@@ -206,7 +206,7 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
 
         client.bot.tree.sync.assert_awaited_once_with()
         client.services.queue_service.start.assert_awaited_once_with()
-        client.services.auto_update_service.start.assert_called_once_with()
+        client.services.auto_update_service.start.assert_awaited_once_with()
         client.services.death_service.start.assert_called_once_with()
         client._send_update_announcement_if_needed.assert_awaited_once_with()
 

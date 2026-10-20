@@ -70,7 +70,7 @@ Recommended supervisors include:
 - `pm2`
 - any equivalent service manager that reliably restarts on exit
 
-`start.sh` (used by `make run`) is a minimal wrapper: it reruns `main.py` after exit `42`, reinstalling requirements first.
+`start.sh` (used by `make run`) is a minimal wrapper: it reruns `main.py` after exit `42`, reinstalling requirements first. It does not survive a crash, a reboot, or closing the terminal it runs in, so on a host run it under systemd with `deploy/cmwgpt.service` (instructions are in the file's header). systemd restarts `start.sh` on anything else and starts it on boot; logs go to `journalctl -u cmwgpt -f`.
 
 ### Supervisor behavior you want
 
@@ -102,7 +102,7 @@ docker compose --env-file .env.development up --build
 | --- | --- |
 | `3306` | MariaDB (host port set by `DB_EXPOSE_PORT`) |
 
-The bot does not listen on any port.
+The bot only listens on a port when `DEPLOY_WEBHOOK_SECRET` is set (the deploy webhook, `DEPLOY_WEBHOOK_PORT`, default `8787`).
 
 ## Production-minded checklist
 
@@ -113,11 +113,11 @@ Even if you are not doing “real production,” these are the minimum responsib
 | Secrets | Real DB credentials, real API keys, a non-default `MARIADB_ROOT_PASSWORD` |
 | Database | `init_db.sql` applied before memory features are used |
 | Restart behavior | Supervisor restarts the bot after exit `42` |
-| Git-based updates | Only enable `KEEP_UP_TO_DATE_WITH_GIT` where `git pull` is safe and expected |
+| Git-based updates | Only set `DEPLOY_WEBHOOK_SECRET` where `git pull` is safe and expected |
 
 ## Auto-update and git-based restart considerations
 
-If you enable `KEEP_UP_TO_DATE_WITH_GIT`, the deployment must satisfy all of these:
+If you enable the deploy webhook (`DEPLOY_WEBHOOK_SECRET`), the deployment must satisfy all of these:
 
 | Requirement | Why |
 | --- | --- |
@@ -126,7 +126,7 @@ If you enable `KEEP_UP_TO_DATE_WITH_GIT`, the deployment must satisfy all of the
 | Writable working tree | Pulls will fail in read-only or locked environments |
 | Process supervisor | Bot exits after restart preparation |
 
-If those assumptions are not true, keep `KEEP_UP_TO_DATE_WITH_GIT=false`.
+If those assumptions are not true, leave `DEPLOY_WEBHOOK_SECRET` empty.
 
 ## Recommended mental model
 

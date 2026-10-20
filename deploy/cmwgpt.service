@@ -1,0 +1,27 @@
+# systemd unit for the bot. Install on the host with:
+#   sudo cp deploy/cmwgpt.service /etc/systemd/system/
+#   sudo sed -i 's|/path/to/cmwgpt|'"$PWD"'|; s|^User=.*|User='"$USER"'|' /etc/systemd/system/cmwgpt.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now cmwgpt
+# Logs: journalctl -u cmwgpt -f
+
+[Unit]
+Description=cmwgpt Discord bot
+Wants=network-online.target
+After=network-online.target mariadb.service
+
+[Service]
+Type=simple
+User=CHANGE_ME
+WorkingDirectory=/path/to/cmwgpt
+# start.sh reinstalls requirements and relaunches on exit 42 (deploy / /restart);
+# systemd covers everything else: crashes, reboots, logout.
+ExecStart=/path/to/cmwgpt/start.sh
+Restart=always
+RestartSec=5
+# Ctrl-C equivalent; the bot drains in-flight replies for up to 90s.
+KillSignal=SIGINT
+TimeoutStopSec=120
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

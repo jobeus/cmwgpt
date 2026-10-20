@@ -30,7 +30,9 @@ These are loaded by `src/config.py`.
 | `INCLUDE_NUM_CHATLINES` | `10` | No | Recent-history lines included in context |
 | `DISCORD_GUILD_ID` | empty | No | Guild-scoped sync/behavior |
 | `DEATH_CHANNEL_ID` | empty | No | Target channel for deathwatch posts |
-| `KEEP_UP_TO_DATE_WITH_GIT` | `false` | No | Enables periodic git polling/restart behavior |
+| `DEPLOY_WEBHOOK_SECRET` | empty | No | Shared secret for the signed deploy webhook; the listener is off when empty (see `docs/auto-update.md`) |
+| `DEPLOY_WEBHOOK_HOST` | `0.0.0.0` | No | Interface the deploy webhook binds to |
+| `DEPLOY_WEBHOOK_PORT` | `8787` | No | Port the deploy webhook listens on (`POST /deploy`) |
 | `QUIET_UPDATES` | `false` | No | Suppresses restart/update announcements |
 | `MAX_CACHE_SIZE` | `200` | No | Entry limit for each persistent LRU cache in `.cache/` |
 | `TRANSCRIPT_PROXY` | empty | No | Optional helper for transcript/media/article retrieval |

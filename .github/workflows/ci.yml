@@ -41,3 +41,32 @@ jobs:
         make lint
         make typecheck
         make test
+
+  deploy:
+    # Tell the running bot about the new commit once tests pass on main.
+    needs: python
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy
+      cancel-in-progress: true
+    steps:
+    - name: Notify bot
+      env:
+        DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+        DEPLOY_WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+      run: |
+        if [ -z "$DEPLOY_WEBHOOK_URL" ] || [ -z "$DEPLOY_WEBHOOK_SECRET" ]; then
+          echo "DEPLOY_WEBHOOK_URL / DEPLOY_WEBHOOK_SECRET not set; skipping deploy notification"
+          exit 0
+        fi
+        body=$(printf '{"sha":"%s","ref":"%s"}' "$GITHUB_SHA" "$GITHUB_REF")
+        ts=$(date +%s)
+        sig=$(printf '%s.%s' "$ts" "$body" | openssl dgst -sha256 -hmac "$DEPLOY_WEBHOOK_SECRET" -r | cut -d' ' -f1)
+        # Retries cover the bot being mid-restart from a previous push.
+        curl -fsS --retry 6 --retry-delay 15 --retry-all-errors --max-time 20 \
+          -X POST "$DEPLOY_WEBHOOK_URL" \
+          -H "Content-Type: application/json" \
+          -H "X-Deploy-Timestamp: $ts" \
+          -H "X-Deploy-Signature: sha256=$sig" \
+          --data "$body"

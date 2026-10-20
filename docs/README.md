@@ -22,7 +22,7 @@ This folder is organized so you can go from **orientation** -> **configuration**
 | `deployment.md` | Hosting/runtime expectations and restart/update behavior |
 | `mariadb_setup.md` | Creating/initializing the MariaDB schema used by per-user memory |
 | `troubleshooting.md` | Solving the most common runtime, DB, proxy, and downloader problems |
-| `auto-update.md` | Understanding `KEEP_UP_TO_DATE_WITH_GIT`, restart flow, and announcements |
+| `auto-update.md` | Deploy webhook, restart flow, and announcements |
 
 ## If you're in a hurry
 

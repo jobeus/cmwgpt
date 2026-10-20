@@ -6,7 +6,7 @@ This page explains the bot's **git-aware restart model** so it feels predictable
 
 | Component | Responsibility |
 | --- | --- |
-| `AutoUpdateService` | Periodically checks for remote git updates when enabled |
+| `AutoUpdateService` | Listens for a signed deploy webhook from GitHub Actions and triggers a restart |
 | `RestartHandler` | Saves state, pulls code, runs the normal shutdown, and exits with restart code `42` |
 | `AnnouncementService` | Announces relevant updates after the bot comes back up |
 
@@ -16,12 +16,12 @@ Relevant code:
 - `src/services/restart_handler.py`
 - `src/services/announcement_service.py`
 
-## The two config switches that matter most
+## The config switches that matter most
 
 | Variable | Meaning |
 | --- | --- |
-| `KEEP_UP_TO_DATE_WITH_GIT=true` | Enable periodic git polling and restart when updates are detected |
-| `KEEP_UP_TO_DATE_WITH_GIT=false` | Disable automatic update polling |
+| `DEPLOY_WEBHOOK_SECRET` | Shared HMAC secret; when set, the bot listens for deploy webhooks. Empty disables it |
+| `DEPLOY_WEBHOOK_HOST` / `DEPLOY_WEBHOOK_PORT` | Where the listener binds (default `0.0.0.0:8787`) |
 | `QUIET_UPDATES=true` | Suppress update announcements after restart |
 | `QUIET_UPDATES=false` | Allow update announcements when appropriate |
 
@@ -63,9 +63,36 @@ That means `/restart` is effectively:
 
 If you expected “just restart the process,” that is not what this command does.
 
-## Automatic updates
+## Automatic updates (deploy webhook)
 
-When enabled, `AutoUpdateService` monitors the git repository on an interval and can trigger the same restart flow after update detection.
+There is no polling. The `deploy` job in `.github/workflows/ci.yml` runs after the test job passes on a push to `main` and POSTs to the bot:
+
+```
+POST /deploy
+X-Deploy-Timestamp: <unix seconds>
+X-Deploy-Signature: sha256=<hex HMAC-SHA256 of "<timestamp>.<body>">
+{"sha": "<commit>", "ref": "refs/heads/main"}
+```
+
+The bot rejects bad signatures and timestamps more than 5 minutes off (401). If the sha is the one already running it answers `up-to-date`; otherwise it queues the normal restart (`202`), which `git pull`s the new code.
+
+### Setup
+
+1. Generate a secret: `openssl rand -hex 32`.
+2. On the bot host, put it in `.env` as `DEPLOY_WEBHOOK_SECRET` (and set `DEPLOY_WEBHOOK_PORT` if `8787` is taken), then restart the bot. Open that port in the host firewall.
+3. In the GitHub repo, under Settings → Secrets and variables → Actions, add:
+   - `DEPLOY_WEBHOOK_SECRET`: the same value
+   - `DEPLOY_WEBHOOK_URL`: e.g. `http://polar.jobe.wtf:8787/deploy` (or an `https://` URL if a reverse proxy fronts it)
+
+Without both Actions secrets, the deploy job skips itself. The curl retries for about 90 seconds so a push that lands while the bot is still restarting from the previous one still gets through.
+
+Test it by hand from any machine with the secret:
+
+```bash
+body='{"sha":"manual","ref":"refs/heads/main"}'; ts=$(date +%s)
+sig=$(printf '%s.%s' "$ts" "$body" | openssl dgst -sha256 -hmac "$DEPLOY_WEBHOOK_SECRET" -r | cut -d' ' -f1)
+curl -X POST http://polar.jobe.wtf:8787/deploy -H "X-Deploy-Timestamp: $ts" -H "X-Deploy-Signature: sha256=$sig" --data "$body"
+```
 
 ### Good environments for auto-update
 
@@ -105,7 +132,7 @@ If no relevant changelog is found, the service can intentionally skip the announ
 
 | Environment | Recommendation |
 | --- | --- |
-| Local development | Prefer `KEEP_UP_TO_DATE_WITH_GIT=false` and use `make run-direct` |
+| Local development | Leave `DEPLOY_WEBHOOK_SECRET` empty and use `make run-direct` |
 | Long-running self-hosted bot | Auto-update can be reasonable if git and supervision are set up well |
 | Production-like managed environment | Enable only if git-pull-based updates are truly part of the deployment model |
 

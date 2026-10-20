@@ -197,8 +197,8 @@ class DiscordBotClient:
             # Start the message queue service
             await self.services.queue_service.start()
 
-            # Start the auto-update service
-            self.services.auto_update_service.start()
+            # Start the deploy webhook listener
+            await self.services.auto_update_service.start()
 
             # Start the death service
             self.services.death_service.start()
@@ -210,11 +210,10 @@ class DiscordBotClient:
 
             # Log auto-update status
             status = self.services.auto_update_service.get_status()
-            if status["enabled"]:
-                print(
-                    f"🔄 Auto-update enabled (checking every {status['check_interval']}s)")
+            if status["running"]:
+                print(f"🔄 Auto-update webhook listening on port {status['port']}")
             else:
-                print("🔄 Auto-update disabled")
+                print("🔄 Auto-update webhook disabled")
 
             # Send update announcement if this was a restart
             await self._send_update_announcement_if_needed()

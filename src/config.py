@@ -70,7 +70,6 @@ class AppConfig:
     default_edit_model: str
     include_usernames: bool
     reply_to_mentions: bool
-    keep_up_to_date_with_git: bool
     quiet_updates: bool
     include_num_chatlines: int
     max_cache_size: int
@@ -78,6 +77,10 @@ class AppConfig:
     system_prompt_path: str = "system_prompt.txt"
     # Model the nightly user-memory job uses to read chat and update profiles.
     memory_model: str = "sonnet-5.5-direct"
+    # Signed deploy webhook (GitHub Actions -> bot); disabled when the secret is empty.
+    deploy_webhook_secret: str = ""
+    deploy_webhook_host: str = "0.0.0.0"
+    deploy_webhook_port: int = 8787
 
 
 def load_config(
@@ -111,13 +114,15 @@ def load_config(
         default_edit_model=source.get("DEFAULT_EDIT_MODEL", "seedream"),
         include_usernames=_read_bool(source.get("INCLUDE_USERNAMES"), True),
         reply_to_mentions=_read_bool(source.get("REPLY_TO_MENTIONS"), True),
-        keep_up_to_date_with_git=_read_bool(source.get("KEEP_UP_TO_DATE_WITH_GIT"), False),
         quiet_updates=_read_bool(source.get("QUIET_UPDATES"), False),
         include_num_chatlines=_read_int(source.get("INCLUDE_NUM_CHATLINES"), 10),
         max_cache_size=_read_int(source.get("MAX_CACHE_SIZE"), 200),
         is_testing=source.get("CI") == "true" or source.get("TESTING") == "true",
         system_prompt_path=system_prompt_path,
         memory_model=source.get("MEMORY_MODEL", "sonnet-5.5-direct"),
+        deploy_webhook_secret=source.get("DEPLOY_WEBHOOK_SECRET", ""),
+        deploy_webhook_host=source.get("DEPLOY_WEBHOOK_HOST", "0.0.0.0"),
+        deploy_webhook_port=_read_int(source.get("DEPLOY_WEBHOOK_PORT"), 8787),
     )
 
 

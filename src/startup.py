@@ -1,6 +1,5 @@
 """Application startup, service composition, and shutdown."""
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -62,7 +61,9 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     restart_handler = RestartHandler(state_service=state_service)
     auto_update_service = AutoUpdateService(
         queue_service=queue_service,
-        enabled=app_config.keep_up_to_date_with_git,
+        secret=app_config.deploy_webhook_secret,
+        host=app_config.deploy_webhook_host,
+        port=app_config.deploy_webhook_port,
     )
     announcement_service = AnnouncementService(
         state_service=state_service,
@@ -130,8 +131,7 @@ async def shutdown_services(services: AppServices) -> None:
         except Exception as e:
             logger.error(f"Shutdown: {name} failed: {e}")
 
-    # stop() joins the git-monitor thread, which may be mid-fetch; keep that off the loop.
-    await step("auto-update stop", lambda: asyncio.to_thread(services.auto_update_service.stop))
+    await step("deploy webhook stop", services.auto_update_service.stop)
     if services.memory_service is not None:
         await step("memory job stop", services.memory_service.stop)
     await step("death service close", services.death_service.close)

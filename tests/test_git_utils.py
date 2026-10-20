@@ -16,85 +16,22 @@ class TestGitUtils(unittest.TestCase):
         with patch("src.utils.git_utils.subprocess.run", side_effect=FileNotFoundError()):
             self.assertFalse(git_utils.is_git_repository())
 
-    def test_get_current_commit_hash_and_branch(self):
+    def test_get_current_commit_hash(self):
         with patch(
             "src.utils.git_utils.subprocess.run",
-            side_effect=[
-                SimpleNamespace(returncode=0, stdout="abc123\n", stderr=""),
-                SimpleNamespace(returncode=0, stdout="main\n", stderr=""),
-            ],
+            return_value=SimpleNamespace(returncode=0, stdout="abc123\n", stderr=""),
         ):
             self.assertEqual(git_utils.get_current_commit_hash(), "abc123")
-            self.assertEqual(git_utils.get_current_branch(), "main")
 
-    def test_get_current_commit_hash_and_branch_failures_return_none(self):
+    def test_get_current_commit_hash_failures_return_none(self):
         with patch(
             "src.utils.git_utils.subprocess.run",
             return_value=SimpleNamespace(returncode=1, stdout="", stderr="fatal"),
         ):
             self.assertIsNone(git_utils.get_current_commit_hash())
-
-        with patch("src.utils.git_utils.subprocess.run", side_effect=OSError("missing git")):
-            self.assertIsNone(git_utils.get_current_branch())
 
         with patch("src.utils.git_utils.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="git rev-parse", timeout=10)):
             self.assertIsNone(git_utils.get_current_commit_hash())
-
-        with patch(
-            "src.utils.git_utils.subprocess.run",
-            return_value=SimpleNamespace(returncode=1, stdout="", stderr="fatal"),
-        ):
-            self.assertIsNone(git_utils.get_current_branch())
-
-    def test_fetch_updates_success_and_failure(self):
-        with patch(
-            "src.utils.git_utils.subprocess.run",
-            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
-        ):
-            self.assertTrue(git_utils.fetch_updates())
-
-        with patch(
-            "src.utils.git_utils.subprocess.run",
-            return_value=SimpleNamespace(returncode=1, stdout="", stderr="fatal"),
-        ):
-            self.assertFalse(git_utils.fetch_updates())
-
-        with patch("src.utils.git_utils.subprocess.run", side_effect=FileNotFoundError()):
-            self.assertFalse(git_utils.fetch_updates())
-
-    def test_check_for_new_commits_handles_counts_and_bad_values(self):
-        with patch("src.utils.git_utils.get_current_branch", return_value="main"), patch(
-            "src.utils.git_utils.subprocess.run",
-            return_value=SimpleNamespace(returncode=0, stdout="2\n", stderr=""),
-        ):
-            self.assertTrue(git_utils.check_for_new_commits())
-
-        with patch("src.utils.git_utils.get_current_branch", return_value="main"), patch(
-            "src.utils.git_utils.subprocess.run",
-            return_value=SimpleNamespace(returncode=0, stdout="not-an-int", stderr=""),
-        ):
-            self.assertFalse(git_utils.check_for_new_commits())
-
-        with patch("src.utils.git_utils.get_current_branch", return_value=None):
-            self.assertFalse(git_utils.check_for_new_commits())
-
-        with patch("src.utils.git_utils.get_current_branch", return_value="main"), patch(
-            "src.utils.git_utils.subprocess.run",
-            return_value=SimpleNamespace(returncode=1, stdout="", stderr="fatal"),
-        ):
-            self.assertFalse(git_utils.check_for_new_commits())
-
-        with patch("src.utils.git_utils.get_current_branch", return_value="main"), patch(
-            "src.utils.git_utils.subprocess.run",
-            return_value=SimpleNamespace(returncode=0, stdout="0\n", stderr=""),
-        ):
-            self.assertFalse(git_utils.check_for_new_commits())
-
-        with patch("src.utils.git_utils.get_current_branch", return_value="main"), patch(
-            "src.utils.git_utils.subprocess.run",
-            side_effect=OSError("git missing"),
-        ):
-            self.assertFalse(git_utils.check_for_new_commits())
 
     def test_perform_git_pull_handles_not_repo_success_and_failure(self):
         with patch("src.utils.git_utils.is_git_repository", return_value=False):

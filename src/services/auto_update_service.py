@@ -1,122 +1,100 @@
 """
 Auto-update service for the Discord bot.
 
-Provides automatic git-based updates with background monitoring,
-automatic restarts, and state persistence.
+Listens for a signed "deploy" webhook (sent by GitHub Actions once CI passes on
+main) and triggers the normal restart flow, which pulls the new code.
+
+Request format (POST /deploy):
+    X-Deploy-Timestamp: <unix seconds>
+    X-Deploy-Signature: sha256=<hex HMAC-SHA256 of "<timestamp>.<raw body>" keyed by the secret>
+    body: {"sha": "<commit sha>", "ref": "refs/heads/main"}
 """
 
-import asyncio
+import hashlib
+import hmac
+import json
 import logging
-import threading
-from typing import Optional, Callable, Awaitable
+import time
+from typing import Awaitable, Callable, Optional
 
-from src.config import get_config
-from src.utils.git_utils import (
-    check_for_new_commits as default_check_for_new_commits,
-    fetch_updates as default_fetch_updates,
-    get_current_commit_hash as default_get_current_commit_hash,
-    is_git_repository as default_is_git_repository,
-)
+from aiohttp import web
+
+from src.utils.git_utils import get_current_commit_hash as default_get_current_commit_hash
 
 logger = logging.getLogger(__name__)
 
+# Requests whose timestamp is further than this from now are rejected (replay guard).
+MAX_CLOCK_SKEW_SECONDS = 300
+
+
+def sign_deploy_request(secret: str, timestamp: str, body: bytes) -> str:
+    """The X-Deploy-Signature value for a request body sent at ``timestamp``."""
+    digest = hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+    return f"sha256={digest}"
+
 
 class AutoUpdateService:
-    """Service for automatic git-based updates and restarts."""
+    """Webhook listener that restarts the bot onto newly deployed commits."""
 
     def __init__(
         self,
-        check_interval: int = 60,
         *,
-        enabled: Optional[bool] = None,
         queue_service,
-        is_git_repository_fn: Callable[[], bool] = default_is_git_repository,
+        secret: str = "",
+        host: str = "0.0.0.0",
+        port: int = 8787,
         get_current_commit_hash_fn: Callable[[], Optional[str]] = default_get_current_commit_hash,
-        fetch_updates_fn: Callable[[], bool] = default_fetch_updates,
-        check_for_new_commits_fn: Callable[[], bool] = default_check_for_new_commits,
+        clock: Callable[[], float] = time.time,
     ):
-        """Initialize the auto-update service."""
-        self.check_interval = check_interval
-        self._enabled = get_config().keep_up_to_date_with_git if enabled is None else enabled
         self._queue_service = queue_service
-        self._is_git_repository = is_git_repository_fn
+        self._secret = secret
+        self._host = host
+        self._port = port
         self._get_current_commit_hash = get_current_commit_hash_fn
-        self._fetch_updates = fetch_updates_fn
-        self._check_for_new_commits = check_for_new_commits_fn
-        self._monitoring_thread: Optional[threading.Thread] = None
-        self._stop_monitoring = threading.Event()
-        self._is_running = False
+        self._clock = clock
         self._restart_callback: Optional[Callable[..., Awaitable[None]]] = None
-        self._consecutive_failures = 0
-        self._max_consecutive_failures = 5
-        self._last_known_commit: Optional[str] = None
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._runner: Optional[web.AppRunner] = None
 
-        logger.info(
-            f"AutoUpdateService initialized with {check_interval}s check interval")
+    @property
+    def enabled(self) -> bool:
+        return bool(self._secret)
 
-    def set_restart_callback(
-        self,
-        callback: Callable[[],
-                           Awaitable[None]]) -> None:
+    def set_restart_callback(self, callback: Callable[..., Awaitable[None]]) -> None:
         """Set the callback function to call when a restart is needed."""
         self._restart_callback = callback
 
-    def start(self) -> None:
-        """Start the auto-update monitoring if enabled."""
-        if not self._enabled:
-            logger.info("Auto-update disabled by configuration")
+    def build_app(self) -> web.Application:
+        app = web.Application(client_max_size=64 * 1024)
+        app.router.add_post("/deploy", self._handle_deploy)
+        return app
+
+    async def start(self) -> None:
+        """Start the webhook listener if a secret is configured."""
+        if not self.enabled:
+            logger.info("Deploy webhook disabled (DEPLOY_WEBHOOK_SECRET not set)")
+            return
+        if self._runner is not None:
+            logger.warning("Deploy webhook already running")
             return
 
-        if not self._is_git_repository():
-            logger.warning("Not in a git repository, auto-update disabled")
-            return
-
-        if self._is_running:
-            logger.warning("AutoUpdateService is already running")
-            return
-
-        self._is_running = True
-        self._stop_monitoring.clear()
-
-        # Capture the main event loop so the background thread can schedule
-        # coroutines on it (asyncio.run() from a thread creates a throwaway
-        # loop that tears down before sys.exit can fire).
+        runner = web.AppRunner(self.build_app(), access_log=None)
+        await runner.setup()
         try:
-            self._loop = asyncio.get_running_loop()
-        except RuntimeError:
-            self._loop = asyncio.get_event_loop()
-
-        # Get initial commit hash
-        self._last_known_commit = self._get_current_commit_hash()
-        if self._last_known_commit:
-            logger.info(
-                f"Starting auto-update monitoring from commit: {self._last_known_commit[:7]}")
-        else:
-            logger.warning("Could not determine current commit hash")
-
-        # Start monitoring thread
-        self._monitoring_thread = threading.Thread(
-            target=self._monitor_git_updates, daemon=True)
-        self._monitoring_thread.start()
-
-        logger.info("AutoUpdateService started")
-
-    def stop(self) -> None:
-        """Stop the auto-update monitoring."""
-        if not self._is_running:
+            await web.TCPSite(runner, self._host, self._port).start()
+        except OSError as e:
+            logger.error(f"Deploy webhook could not bind {self._host}:{self._port}: {e}")
+            await runner.cleanup()
             return
+        self._runner = runner
+        logger.info(f"Deploy webhook listening on {self._host}:{self._port}/deploy")
 
-        logger.info("Stopping AutoUpdateService...")
-        self._stop_monitoring.set()
-
-        if self._monitoring_thread and self._monitoring_thread.is_alive():
-            self._monitoring_thread.join(timeout=10.0)
-            if self._monitoring_thread.is_alive():
-                logger.warning("Monitoring thread did not stop within timeout")
-
-        self._is_running = False
-        logger.info("AutoUpdateService stopped")
+    async def stop(self) -> None:
+        """Stop the webhook listener."""
+        if self._runner is None:
+            return
+        runner, self._runner = self._runner, None
+        await runner.cleanup()
+        logger.info("Deploy webhook stopped")
 
     async def trigger_restart(self, manual: bool = False) -> bool:
         """Trigger a restart of the bot."""
@@ -134,58 +112,44 @@ class AutoUpdateService:
         # Queue the restart through the queue service
         return await self._queue_service.queue_restart(restart_wrapper)
 
-    def _monitor_git_updates(self) -> None:
-        """Main monitoring loop running in background thread."""
-        logger.info("Git update monitoring started")
+    def _verify(self, request_timestamp: str, signature: str, body: bytes) -> bool:
+        try:
+            sent_at = int(request_timestamp)
+        except ValueError:
+            return False
+        if abs(self._clock() - sent_at) > MAX_CLOCK_SKEW_SECONDS:
+            return False
+        expected = sign_deploy_request(self._secret, request_timestamp, body)
+        return hmac.compare_digest(expected, signature)
 
-        while not self._stop_monitoring.is_set():
-            try:
-                # Fetch updates from origin
-                if self._fetch_updates():
-                    # Check for new commits
-                    if self._check_for_new_commits():
-                        logger.info("New commits detected, triggering restart")
-                        # Schedule restart on the main event loop
-                        asyncio.run_coroutine_threadsafe(
-                            self.trigger_restart(manual=False), self._loop)
-                        # Exit monitoring loop after triggering restart
-                        break
+    async def _handle_deploy(self, request: web.Request) -> web.Response:
+        body = await request.read()
+        timestamp = request.headers.get("X-Deploy-Timestamp", "")
+        signature = request.headers.get("X-Deploy-Signature", "")
+        if not self._verify(timestamp, signature, body):
+            logger.warning(f"Rejected deploy webhook from {request.remote}: bad signature or timestamp")
+            return web.json_response({"error": "unauthorized"}, status=401)
 
-                    # Reset failure counter on success
-                    self._consecutive_failures = 0
-                else:
-                    self._consecutive_failures += 1
-                    logger.warning(
-                        f"Git fetch failed ({self._consecutive_failures}/{self._max_consecutive_failures})")
+        try:
+            sha = str(json.loads(body).get("sha", ""))
+        except (ValueError, AttributeError):
+            return web.json_response({"error": "invalid body"}, status=400)
 
-                    if self._consecutive_failures >= self._max_consecutive_failures:
-                        logger.error(
-                            "Too many consecutive git failures, disabling auto-update")
-                        break
+        current = self._get_current_commit_hash()
+        if sha and current and sha == current:
+            logger.info(f"Deploy webhook for {sha[:7]}: already running it")
+            return web.json_response({"status": "up-to-date", "sha": current})
 
-            except (OSError, RuntimeError, asyncio.TimeoutError) as e:
-                self._consecutive_failures += 1
-                logger.error(f"Error in git monitoring loop: {e}")
-
-                if self._consecutive_failures >= self._max_consecutive_failures:
-                    logger.error(
-                        "Too many consecutive errors, disabling auto-update")
-                    break
-
-            # Wait for next check or stop signal
-            if self._stop_monitoring.wait(timeout=self.check_interval):
-                break
-
-        logger.info("Git update monitoring stopped")
+        logger.info(f"Deploy webhook for {sha[:7] or '?'} (running {current[:7] if current else '?'}), restarting")
+        if not await self.trigger_restart(manual=False):
+            return web.json_response({"error": "restart could not be queued"}, status=503)
+        return web.json_response({"status": "restarting", "sha": sha}, status=202)
 
     def get_status(self) -> dict:
         """Get the current status of the auto-update service."""
         return {
-            "enabled": self._enabled,
-            "running": self._is_running,
-            "check_interval": self.check_interval,
-            "consecutive_failures": self._consecutive_failures,
-            "max_failures": self._max_consecutive_failures,
-            "last_known_commit": self._last_known_commit,
-            "is_git_repo": self._is_git_repository(),
+            "enabled": self.enabled,
+            "running": self._runner is not None,
+            "host": self._host,
+            "port": self._port,
         }

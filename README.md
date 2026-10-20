@@ -127,7 +127,8 @@ More detail: `tests/README.md`.
 ## Important operational notes
 
 - Prefer `make run-direct` for local bot development.
-- `make run` uses `start.sh`, which uses `.venv/` (or a legacy `venv/`) and reruns the bot whenever it exits with code `42`.
+- `make run` uses `start.sh`, which uses `.venv/` (or a legacy `venv/`) and reruns the bot whenever it exits with code `42`. On a server, run `start.sh` under systemd (`deploy/cmwgpt.service`) so crashes and reboots are covered too.
+- Pushes to `main` that pass CI notify the bot through a signed webhook, and it pulls and restarts (`docs/auto-update.md`).
 - `/restart` triggers the restart handler, which saves state, performs a `git pull`, runs the normal shutdown sequence (stop jobs, drain the queue, close clients, flush caches, close the DB pool), and exits with code `42` so `start.sh` or your process manager starts it again.
 
 ## Documentation map
