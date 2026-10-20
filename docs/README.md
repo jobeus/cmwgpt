@@ -8,7 +8,7 @@ This folder is organized so you can go from **orientation** -> **configuration**
 2. `commands.md` - confirm the current user-facing surface
 3. `configuration.md` - fill in env vars correctly
 4. `development.md` - choose your local workflow
-5. `mariadb_setup.md` - set up the memory tables
+5. `redis_setup.md` - set up Redis (memory and caches)
 6. `troubleshooting.md` - debug common issues quickly
 
 ## Doc map
@@ -20,7 +20,8 @@ This folder is organized so you can go from **orientation** -> **configuration**
 | `configuration.md` | Filling in env vars and understanding defaults and production requirements |
 | `development.md` | Running the bot locally, using Docker, and executing tests/checks |
 | `deployment.md` | Hosting/runtime expectations and restart/update behavior |
-| `mariadb_setup.md` | Creating/initializing the MariaDB schema used by per-user memory |
+| `redis_setup.md` | Installing Redis, which holds per-user memory and the content caches |
+| `mariadb_setup.md` | The old MariaDB memory tables, now only read once to import into Redis |
 | `troubleshooting.md` | Solving the most common runtime, DB, proxy, and downloader problems |
 | `auto-update.md` | Deploy webhook, restart flow, and announcements |
 
@@ -31,4 +32,4 @@ This folder is organized so you can go from **orientation** -> **configuration**
 | Get the bot running locally | `configuration.md` -> `development.md` |
 | Understand mention flow | `architecture.md` -> “mention pipeline” |
 | Debug downloader behavior | `architecture.md` + `troubleshooting.md` |
-| Bring up the whole stack | `development.md` + `mariadb_setup.md` |
+| Bring up the whole stack | `development.md` + `redis_setup.md` |

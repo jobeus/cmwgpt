@@ -7,7 +7,7 @@ from src.utils.media_transcribe import download_and_transcribe_video
 
 logger = logging.getLogger(__name__)
 
-# Bounded persistent cache for Facebook transcripts: url -> transcript text
+# Redis cache for Facebook transcripts: url -> transcript text
 _facebook_cache = PersistentCache('facebook_transcripts')
 
 
@@ -37,7 +37,7 @@ def extract_facebook_urls(text: str) -> List[str]:
 async def get_facebook_transcript(url: str, *, cache_only: bool = False) -> Optional[str]:
     """Transcribe a Facebook video (downloaded with yt-dlp, transcribed by Groq).
 
-    Results are cached to persistent disk. Returns ``None`` on failure (e.g.
+    Results are cached in Redis. Returns ``None`` on failure (e.g.
     the URL is not a video), or on a cache miss when ``cache_only`` is set.
     """
     return await download_and_transcribe_video(

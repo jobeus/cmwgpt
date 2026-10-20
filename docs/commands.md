@@ -51,8 +51,8 @@ profile to `MEMORY_MODEL`, which changes, removes or adds only what the correcti
 then shows you the updated profile (as a paste.rs link if it's over 2000 characters). Corrections live in the same profile the nightly job
 maintains, so later chat can refine them; `/fillmemory` rebuilds profiles from scratch and
 drops them. Administrators can pass the optional `user` argument to `show` and `correct` to
-act on someone else. Every change also writes a row to
-`user_memory_history`, so you can see how a profile changed and restore an earlier version.
+act on someone else. Only the current profile is kept (one Redis key per person, up to 100 KB);
+there is no history of earlier versions.
 
 ### `/fillmemory`
 

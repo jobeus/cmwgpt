@@ -11,7 +11,7 @@ from src.utils.media_transcribe import transcribe_video_url
 
 logger = logging.getLogger(__name__)
 
-# Bounded persistent cache for Instagram: url -> (context text, image base64 data URL or None)
+# Redis cache for Instagram: url -> (context text, image base64 data URL or None)
 _instagram_cache = PersistentCache('instagram_transcripts')
 
 RAPIDAPI_HOST = "instagram-downloader-download-instagram-videos-stories1.p.rapidapi.com"
@@ -50,7 +50,7 @@ async def get_instagram_context(url: str, *, cache_only: bool = False) -> Option
     """
     Fetch the content of an Instagram/Threads URL using RapidAPI.
 
-    Returns ``(context, image_data_url)``, cached to persistent disk.
+    Returns ``(context, image_data_url)``, cached in Redis.
     """
     cached = _instagram_cache.get(url)
     if cached is not None:

@@ -10,7 +10,7 @@ from typing import Optional
 import discord
 from PIL import Image
 
-from src.utils.cache_utils import LRUCache
+from src.utils.cache_utils import PersistentCache
 from src.utils.http_client import fetch_public
 from src.utils.media_transcribe import GROQ_MAX_UPLOAD_BYTES, transcribe_audio, transcribe_audio_file
 
@@ -23,11 +23,12 @@ Image.MAX_IMAGE_PIXELS = 40_000_000
 
 MAX_IMAGE_DOWNLOAD_BYTES = 20 * 1024 * 1024
 
-# In-memory caches; sized for a full 100-message history window with images.
-MAX_CACHE_SIZE = 300
-_url_base64_cache: LRUCache[str] = LRUCache(MAX_CACHE_SIZE)
-_attachment_base64_cache: LRUCache[str] = LRUCache(MAX_CACHE_SIZE)
-_audio_transcript_cache: LRUCache[str] = LRUCache(MAX_CACHE_SIZE)
+# Redis caches, so a restart doesn't re-download every image in the history window
+# or pay Groq again for voice notes. Images only matter while they're in recent chat.
+IMAGE_CACHE_TTL_SECONDS = 7 * 24 * 3600
+_url_base64_cache = PersistentCache("image_urls", ttl_seconds=IMAGE_CACHE_TTL_SECONDS)
+_attachment_base64_cache = PersistentCache("attachments", ttl_seconds=IMAGE_CACHE_TTL_SECONDS)
+_audio_transcript_cache = PersistentCache("audio_transcripts")
 
 _IMAGE_FETCH_HEADERS = {
     # Strict servers like Wikimedia 403 requests without a descriptive UA.
@@ -123,7 +124,7 @@ def _audio_content_type(attachment: discord.Attachment) -> Optional[str]:
 async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
     """
     Convert a Discord attachment to a base64 data URL (images are compressed to JPEG).
-    Results are cached in memory to avoid repetitive downloads.
+    Results are cached in Redis to avoid repetitive downloads.
 
     Raises:
         Exception: If download or encoding fails
@@ -156,7 +157,7 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
 async def url_to_base64_data_url(url: str) -> str:
     """
     Download an image URL and convert it to a compressed JPEG data URL.
-    Results are cached in memory to avoid repetitive downloads.
+    Results are cached in Redis to avoid repetitive downloads.
 
     Raises:
         Exception: If the URL is non-public, too large, or the download fails
@@ -202,7 +203,7 @@ async def get_mention_legend(
 async def transcribe_audio_attachment(attachment: discord.Attachment) -> Optional[str]:
     """
     Transcribe a Discord audio attachment using Groq Whisper.
-    Results are cached in memory to avoid repetitive API calls.
+    Results are cached in Redis to avoid repetitive API calls.
     """
     cached = _audio_transcript_cache.get(attachment.id)
     if cached is not None:

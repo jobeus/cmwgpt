@@ -24,7 +24,7 @@ What it shows:
 
 - the Python bot as the center of Discord interaction
 - OpenRouter/Gemini/Claude API, Runpod, and downloader work around the mention path
-- MariaDB as storage for per-user memory only
+- Redis for per-user memory and content caches (MariaDB is only read once, to import older memory)
 
 ```mermaid
 flowchart LR
@@ -74,9 +74,9 @@ flowchart LR
 
     Commands --> Memory
 
-    DB[(MariaDB<br/>per-user memory)]:::data
+    DB[(MariaDB<br/>one-time memory import)]:::data
     Memory --> DB
-    Cache[(.cache/<br/>persistent URL caches)]:::data
+    Cache[(Redis<br/>memory + URL caches)]:::data
     Downloader --> Cache
 ```
 
@@ -239,7 +239,7 @@ flowchart LR
 ### Fetching and caching
 
 - Outbound fetches of user-supplied URLs go through `fetch_public` / `download_public` in `src/utils/http_client.py`. The SSRF guard (`src/utils/ssrf_guard.py`, which blocks every non-global address) is re-checked on each redirect hop, response bodies are size-capped, and each fetch has an overall timeout.
-- Results are kept in persistent LRU caches under `.cache/`. Changes are saved in batches in the background, and the caches are flushed on shutdown. Tweet and Instagram caches still store images as base64.
+- Results are kept in Redis (`cmwgpt:cache:<name>:<key>`), each entry expiring 30 days after it was last used; image data URLs expire after 7 days. Tweet and Instagram caches still store images as base64. If Redis is down they fall back to memory.
 
 ## Diagram: docker/runtime layout
 
@@ -250,7 +250,8 @@ flowchart LR
     classDef db fill:#7c3aed,color:#f5f3ff,stroke:#6d28d9,stroke-width:1.4px;
 
     Discord[Discord API]:::ext --> Bot[bot container<br/>python main.py]:::ctr
-    Bot --> Maria[(db container<br/>MariaDB 11.7 :3306<br/>user memory)]:::db
+    Bot --> Redis[(redis container<br/>Redis 7.4 :6379<br/>user memory + caches)]:::db
+    Bot --> Maria[(db container<br/>MariaDB 11.7 :3306<br/>one-time memory import)]:::db
 
     Env[.env.development]:::ext --> Bot
     Env --> Maria
@@ -275,10 +276,11 @@ flowchart LR
 | `src/services/state_service.py` | Per-channel persistence | See where model/system-prompt/service settings live |
 | `src/services/queue_service.py` | FIFO work queue | Understand serialized mention processing |
 | `src/services/memory_service.py` | Per-user memory | Understand the nightly job, `/memory` edits, and the notes added to mentions |
-| `src/db/memory_store.py` | Memory tables | Understand what reaches MariaDB |
+| `src/db/memory_store.py` | Memory in Redis | Understand the memory keys, the 100 KB cap and the MariaDB import |
+| `src/db/redis_client.py` | Redis clients | Debug Redis connectivity |
 | `src/db/connection.py` | DB pool wiring | Debug MariaDB connectivity |
 | `src/utils/http_client.py` | Guarded outbound fetches | Debug redirects, size caps, and fetch timeouts |
-| `src/utils/cache_utils.py` | Persistent caches | Understand `.cache/` contents and save timing |
+| `src/utils/cache_utils.py` | Redis-backed caches | Understand cache keys, TTLs and the in-memory fallback |
 
 ## End-to-end narrative
 
@@ -299,18 +301,18 @@ flowchart LR
 
 ### Memory
 
-1. Every night, `MemoryService` reads the chat since its last run and updates each person's profile in `user_memory`.
-2. Every change also writes a row to `user_memory_history`; `user_memory_job_state` tracks how far each server has been processed.
-3. `/memory` and `/fillmemory` read and change the same tables (see `docs/commands.md`).
+1. Every night, `MemoryService` reads the chat since its last run and replaces each person's profile at `cmwgpt:memory:<guild>:<user>` in Redis (one key per user, no history, max 100 KB).
+2. `cmwgpt:memory_job:<guild>` tracks how far each server has been processed.
+3. `/memory` and `/fillmemory` read and change the same keys (see `docs/commands.md`).
 
 ### Shutdown and restart
 
-1. `startup.shutdown_services` stops background jobs, drains the queue (up to 90 seconds), closes the model/HTTP clients, flushes caches, and closes the DB pool.
+1. `startup.shutdown_services` stops background jobs, drains the queue (up to 90 seconds), closes the model/HTTP clients, closes the Redis clients, and closes the DB pool.
 2. `/restart` (and auto-update) save state and `git pull` first, then run the same shutdown; `main.py` exits with code `42` so `start.sh` or the process manager starts the bot again.
 
 ## Key architectural traits
 
 - **Mention-first UX:** the primary conversational surface is normal Discord chat, not a slash command.
 - **Service composition over globals:** `src/startup.py` explicitly wires the main collaborators.
-- **Small storage footprint:** MariaDB only holds per-user memory; URL results live in `.cache/` and channel settings in state files.
+- **Small storage footprint:** Redis holds per-user memory (one key per user) and URL results; channel settings live in state files.
 - **Python only:** the whole runtime is the Python bot; there is no separate web UI.

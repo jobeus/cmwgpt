@@ -8,7 +8,7 @@ from src.utils.cache_utils import PersistentCache, skip_recent_failures
 
 logger = logging.getLogger(__name__)
 
-# Bounded persistent cache for transcripts: video_id -> transcript text
+# Redis cache for transcripts: video_id -> transcript text
 _transcript_cache = PersistentCache('youtube_transcripts')
 
 
@@ -38,7 +38,7 @@ def extract_video_ids(text: str) -> List[str]:
 async def get_transcript(video_id: str, *, cache_only: bool = False) -> Optional[str]:
     """
     Fetch the transcript for a YouTube video as a single string.
-    Results are cached to persistent disk. Returns ``None`` on failure, or on a
+    Results are cached in Redis. Returns ``None`` on failure, or on a
     cache miss when ``cache_only`` is set.
     """
     cached = _transcript_cache.get(video_id)

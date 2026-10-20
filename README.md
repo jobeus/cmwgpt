@@ -103,7 +103,9 @@ Chat itself remains mention-based.
 | `DB_PASSWORD` | empty | MariaDB password |
 | `DB_NAME` | `cmwgpt` | Database name |
 
-The database is only used for per-user memory (`user_memory` tables); see `docs/mariadb_setup.md`.
+| `REDIS_URL` | `redis://127.0.0.1:6379/0` | Redis for per-user memory and content caches |
+
+Redis holds per-user memory and the content caches; see `docs/redis_setup.md`. MariaDB is only read once, to import memory from before the switch.
 
 For the full reference, see `docs/configuration.md`.
 
@@ -129,7 +131,7 @@ More detail: `tests/README.md`.
 - Prefer `make run-direct` for local bot development.
 - `make run` uses `start.sh`, which uses `.venv/` (or a legacy `venv/`) and reruns the bot whenever it exits with code `42`. On a server, run `start.sh` under systemd (`deploy/cmwgpt.service`) so crashes and reboots are covered too.
 - Pushes to `main` that pass CI notify the bot through a signed webhook, and it pulls and restarts (`docs/auto-update.md`).
-- `/restart` triggers the restart handler, which saves state, performs a `git pull`, runs the normal shutdown sequence (stop jobs, drain the queue, close clients, flush caches, close the DB pool), and exits with code `42` so `start.sh` or your process manager starts it again.
+- `/restart` triggers the restart handler, which saves state, performs a `git pull`, runs the normal shutdown sequence (stop jobs, drain the queue, close clients, close Redis, close the DB pool), and exits with code `42` so `start.sh` or your process manager starts it again.
 
 ## Documentation map
 
@@ -141,5 +143,6 @@ The docs are meant to be read as a small system, not as isolated files:
 - `docs/configuration.md` - env vars and defaults
 - `docs/development.md` - local and Docker workflows
 - `docs/deployment.md` - runtime/deployment notes
-- `docs/mariadb_setup.md` - memory schema and DB setup
+- `docs/redis_setup.md` - Redis setup for memory and caches
+- `docs/mariadb_setup.md` - the old memory tables (one-time import)
 - `docs/troubleshooting.md` - common failure modes

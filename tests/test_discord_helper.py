@@ -11,7 +11,7 @@ import httpx
 from PIL import Image
 
 from src.utils import discord_helper
-from src.utils.cache_utils import LRUCache
+from src.utils.cache_utils import LRUCache, PersistentCache
 
 
 def ok_response(content=b"image-bytes", status=200, url="https://example.com/image.png"):
@@ -80,35 +80,14 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(legacy_cache[2], result)
         attachment.read.assert_awaited_once()
 
-    async def test_attachment_to_base64_data_url_evicts_least_recently_used_entry(self):
-        attachment = MagicMock()
-        attachment.id = 999
-        attachment.filename = "fresh.png"
-        attachment.read = AsyncMock(return_value=b"image-bytes")
-        full_cache = LRUCache(discord_helper.MAX_CACHE_SIZE)
-        for i in range(discord_helper.MAX_CACHE_SIZE):
-            full_cache[i] = f"cached-{i}"
-        full_cache.get(0)  # touch the oldest so 1 becomes least recently used
-
-        with patch("src.utils.discord_helper._attachment_base64_cache", full_cache), patch(
-            "src.utils.discord_helper.compress_image", return_value=b"jpeg"
-        ):
-            await discord_helper.attachment_to_base64_data_url(attachment)
-
-        self.assertIn(0, full_cache)
-        self.assertNotIn(1, full_cache)
-        self.assertIn(999, full_cache)
-        self.assertEqual(len(full_cache), discord_helper.MAX_CACHE_SIZE)
-
-    def test_caches_are_bounded_lru_caches(self):
-        self.assertEqual(discord_helper.MAX_CACHE_SIZE, 300)
+    def test_caches_are_redis_caches(self):
         for cache in (
             discord_helper._url_base64_cache,
             discord_helper._attachment_base64_cache,
             discord_helper._audio_transcript_cache,
         ):
-            self.assertIsInstance(cache, LRUCache)
-            self.assertEqual(cache.max_size, 300)
+            self.assertIsInstance(cache, PersistentCache)
+        self.assertEqual(discord_helper._url_base64_cache.ttl_seconds, discord_helper.IMAGE_CACHE_TTL_SECONDS)
 
     async def test_image_compression_runs_in_a_thread(self):
         attachment = MagicMock()

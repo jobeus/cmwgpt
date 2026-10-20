@@ -344,7 +344,7 @@ class MemoryService:
         totals = {"days": 0, "messages": 0, "users_updated": set(), "cost": 0.0}
         for index, (start, end) in enumerate(windows, 1):
             try:
-                stats = await self.process_window(guild, start, end, source=source)
+                stats = await self.process_window(guild, start, end)
             except Exception as e:
                 logger.exception(f"Memory window {start:%Y-%m-%d %H:%M} failed for guild {guild.id}")
                 await self._store.set_job_state(guild.id, _to_naive_utc(start), f"failed: {e}")
@@ -370,9 +370,7 @@ class MemoryService:
         )
         return totals
 
-    async def process_window(
-        self, guild: discord.Guild, start: datetime, end: datetime, *, source: str
-    ) -> Dict[str, Any]:
+    async def process_window(self, guild: discord.Guild, start: datetime, end: datetime) -> Dict[str, Any]:
         """Read ``[start, end)`` from every readable text channel and update profiles."""
         bot_id = self._bot.user.id if self._bot and self._bot.user else None
         channel_messages = await self._fetch_messages(guild, start, end)
@@ -404,15 +402,7 @@ class MemoryService:
                 new_profile, cost = await self._merge(
                     speakers.get(user_id, str(user_id)), user_id, existing.get(user_id, ""), facts, today
                 )
-                await self._store.save_profile(
-                    guild.id,
-                    user_id,
-                    new_profile,
-                    source=source,
-                    observations="\n".join(f"- {fact}" for fact in facts),
-                    window_start=_to_naive_utc(start),
-                    window_end=_to_naive_utc(end),
-                )
+                await self._store.save_profile(guild.id, user_id, new_profile)
                 return cost
 
         costs = await asyncio.gather(*(merge_one(uid, facts) for uid, facts in observations.items()))
@@ -511,7 +501,7 @@ class MemoryService:
         if not isinstance(parsed.get("profile"), str):
             raise ValueError("The model didn't return a usable memory.")
         new_profile = clean_profile(parsed["profile"])
-        await self._store.save_profile(guild_id, user_id, new_profile, source="correct", observations=correction)
+        await self._store.save_profile(guild_id, user_id, new_profile)
         return new_profile, cost
 
     # -- reply-time notes ---------------------------------------------------

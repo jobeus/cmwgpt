@@ -9,7 +9,7 @@ Use this page like a triage board: start with the symptom, then work from the sh
 | Bot does not answer mentions | token, permissions, `REPLY_TO_MENTIONS`, whether the bot was actually mentioned |
 | Slash commands are missing/stale | `DISCORD_GUILD_ID`, guild membership, whether the bot restarted |
 | URL enrichment is missing | source-specific keys like `RAPIDAPI_KEY` / `GROQ_API_KEY` / `TRANSCRIPT_PROXY` |
-| `/memory` fails or mentions carry no user notes | DB connectivity, schema application, `MEMORY_MODEL` API key |
+| `/memory` fails or mentions carry no user notes | Redis connectivity, `REDIS_URL`, `MEMORY_MODEL` API key |
 | Restart behavior is confusing | `/restart` semantics, exit code `42`, wrapper vs direct run |
 | Tests fail unexpectedly | dependency install state and targeted reruns |
 
@@ -78,9 +78,9 @@ The cause is logged at warning level in the normal bot log.
 | Wrong schema/database | `DB_NAME` and whether `init_db.sql` was applied |
 | Profiles never update | `MEMORY_MODEL` has its API key; the nightly job is off without it |
 
-MariaDB is only used for per-user memory, so the bot keeps replying when it is down. If `/memory` fails or mentions never include user notes, verify MariaDB first.
+Per-user memory lives in Redis, so the bot keeps replying when it is down (content caches fall back to memory). If `/memory` fails or mentions never include user notes, check `redis-cli ping` first. MariaDB only matters for the one-time import of old memory.
 
-Reference: `docs/mariadb_setup.md`
+Reference: `docs/redis_setup.md`
 
 ## Restart/update behavior is confusing
 

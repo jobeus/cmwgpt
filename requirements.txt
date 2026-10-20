@@ -11,3 +11,4 @@ yt-dlp>=2026.8.19
 google-genai>=2.31.0
 aiomysql>=0.3.2
 cryptography>=50.0.2
+redis>=5.2.1

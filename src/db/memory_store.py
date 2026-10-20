@@ -1,123 +1,156 @@
-"""MariaDB storage for per-user memory (``user_memory`` and friends in ``init_db.sql``).
+"""Redis storage for per-user memory.
 
-All datetimes passed in and returned are naive UTC.
+One key per user holds their current profile and nothing else (no history):
+
+- ``cmwgpt:memory:<guild_id>:<user_id>`` - the profile text, at most ``MAX_PROFILE_BYTES``
+- ``cmwgpt:memory_job:<guild_id>`` - hash with the nightly job's ``processed_through``,
+  ``last_run_at`` and ``last_status``
+- ``cmwgpt:memory_migrated`` - set once the old MariaDB tables were copied in
+
+None of these keys expire. All datetimes passed in and returned are naive UTC.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Awaitable, Callable, Dict, Iterable, Optional
 
 import aiomysql
+import redis.asyncio as aioredis
 
+from src.config import get_config
 from src.db.connection import get_db_pool
+from src.db.redis_client import KEY_PREFIX, get_async_redis
 
 logger = logging.getLogger(__name__)
 
+# One user's profile may not grow past this; the merge prompts keep them far smaller.
+MAX_PROFILE_BYTES = 100 * 1024
+
+MIGRATED_KEY = f"{KEY_PREFIX}memory_migrated"
+
+
+def _profile_key(guild_id: int, user_id: int) -> str:
+    return f"{KEY_PREFIX}memory:{guild_id}:{user_id}"
+
+
+def _job_key(guild_id: int) -> str:
+    return f"{KEY_PREFIX}memory_job:{guild_id}"
+
+
+def cap_profile(profile: str) -> str:
+    """Trim a profile to ``MAX_PROFILE_BYTES`` of UTF-8 without splitting a character."""
+    encoded = profile.encode("utf-8")
+    if len(encoded) <= MAX_PROFILE_BYTES:
+        return profile
+    return encoded[:MAX_PROFILE_BYTES].decode("utf-8", errors="ignore")
+
 
 class MemoryStore:
-    """Reads and writes user memory rows. Every write also records a history row."""
+    """Reads and writes user memory in Redis."""
 
-    def __init__(self, pool_getter: Callable[[], Awaitable[aiomysql.Pool]] = get_db_pool):
-        self._pool_getter = pool_getter
+    def __init__(
+        self,
+        redis_getter: Callable[[], aioredis.Redis] = get_async_redis,
+        mariadb_pool_getter: Callable[[], Awaitable[aiomysql.Pool]] = get_db_pool,
+    ):
+        self._redis_getter = redis_getter
+        self._mariadb_pool_getter = mariadb_pool_getter
 
     async def get(self, guild_id: int, user_id: int) -> str:
         """Return one user's profile, or an empty string if none."""
-        rows = await self.get_many(guild_id, [user_id])
-        return rows.get(user_id, "")
+        return await self._redis_getter().get(_profile_key(guild_id, user_id)) or ""
 
     async def get_many(self, guild_id: int, user_ids: Iterable[int]) -> Dict[int, str]:
-        """Return ``{user_id: profile}`` for the users that have a row."""
+        """Return ``{user_id: profile}`` for the users that have one."""
         ids = list(dict.fromkeys(user_ids))
         if not ids:
             return {}
-        placeholders = ", ".join(["%s"] * len(ids))
-        pool = await self._pool_getter()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    f"SELECT user_id, profile FROM user_memory "
-                    f"WHERE guild_id = %s AND user_id IN ({placeholders})",
-                    (guild_id, *ids),
-                )
-                rows = await cur.fetchall()
-        return {int(user_id): profile or "" for user_id, profile in rows}
+        values = await self._redis_getter().mget([_profile_key(guild_id, uid) for uid in ids])
+        return {uid: value for uid, value in zip(ids, values) if value}
 
-    async def save_profile(
-        self,
-        guild_id: int,
-        user_id: int,
-        profile: str,
-        *,
-        source: str,
-        observations: Optional[str] = None,
-        window_start: Optional[datetime] = None,
-        window_end: Optional[datetime] = None,
-    ) -> None:
-        """Replace a user's profile."""
-        await self._write(
-            "INSERT INTO user_memory (guild_id, user_id, profile) VALUES (%s, %s, %s) "
-            "ON DUPLICATE KEY UPDATE profile = VALUES(profile)",
-            (guild_id, user_id, profile),
-            guild_id, user_id, source, observations, window_start, window_end,
-        )
+    async def save_profile(self, guild_id: int, user_id: int, profile: str) -> None:
+        """Replace a user's profile (an empty one removes it)."""
+        if not profile:
+            await self.clear_user(guild_id, user_id)
+            return
+        capped = cap_profile(profile)
+        if capped != profile:
+            logger.warning(
+                f"Memory for user {user_id} in guild {guild_id} was over {MAX_PROFILE_BYTES} bytes; trimmed"
+            )
+        await self._redis_getter().set(_profile_key(guild_id, user_id), capped)
 
     async def clear_user(self, guild_id: int, user_id: int) -> None:
         """Wipe a user's profile."""
-        await self._write(
-            "UPDATE user_memory SET profile = '' WHERE guild_id = %s AND user_id = %s",
-            (guild_id, user_id),
-            guild_id, user_id, "clear",
-        )
+        await self._redis_getter().delete(_profile_key(guild_id, user_id))
 
     async def clear_learned_profiles(self, guild_id: int) -> None:
         """Wipe every profile in a server (used by /fillmemory)."""
-        pool = await self._pool_getter()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute("UPDATE user_memory SET profile = '' WHERE guild_id = %s", (guild_id,))
+        client = self._redis_getter()
+        keys = [key async for key in client.scan_iter(match=f"{KEY_PREFIX}memory:{guild_id}:*", count=500)]
+        if keys:
+            await client.delete(*keys)
 
     async def get_processed_through(self, guild_id: int) -> Optional[datetime]:
-        pool = await self._pool_getter()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    "SELECT processed_through FROM user_memory_job_state WHERE guild_id = %s", (guild_id,)
-                )
-                row = await cur.fetchone()
-        return row[0] if row else None
+        value = await self._redis_getter().hget(_job_key(guild_id), "processed_through")
+        return datetime.fromisoformat(value) if value else None
 
     async def set_job_state(self, guild_id: int, processed_through: datetime, status: str) -> None:
-        pool = await self._pool_getter()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    "INSERT INTO user_memory_job_state (guild_id, processed_through, last_run_at, last_status) "
-                    "VALUES (%s, %s, UTC_TIMESTAMP(), %s) "
-                    "ON DUPLICATE KEY UPDATE processed_through = VALUES(processed_through), "
-                    "last_run_at = VALUES(last_run_at), last_status = VALUES(last_status)",
-                    (guild_id, processed_through, status[:255]),
-                )
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        await self._redis_getter().hset(
+            _job_key(guild_id),
+            mapping={
+                "processed_through": processed_through.isoformat(),
+                "last_run_at": now.isoformat(),
+                "last_status": status[:255],
+            },
+        )
 
-    async def _write(
-        self,
-        query: str,
-        args: tuple,
-        guild_id: int,
-        user_id: int,
-        source: str,
-        observations: Optional[str] = None,
-        window_start: Optional[datetime] = None,
-        window_end: Optional[datetime] = None,
-    ) -> None:
-        """Run ``query`` then snapshot the user's row into ``user_memory_history``."""
-        pool = await self._pool_getter()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(query, args)
-                await cur.execute(
-                    "INSERT INTO user_memory_history "
-                    "(guild_id, user_id, source, profile, observations, window_start, window_end) "
-                    "SELECT guild_id, user_id, %s, profile, %s, %s, %s "
-                    "FROM user_memory WHERE guild_id = %s AND user_id = %s",
-                    (source, observations, window_start, window_end, guild_id, user_id),
-                )
+    async def migrate_from_mariadb(self) -> None:
+        """Copy profiles and job state out of the old MariaDB tables, once.
+
+        Runs at startup until it succeeds. Anything already in Redis wins, so a
+        nightly run that happened before the copy isn't overwritten. Never raises.
+        """
+        try:
+            client = self._redis_getter()
+            if await client.exists(MIGRATED_KEY):
+                return
+        except Exception as e:
+            logger.error(f"Redis is unavailable, so memory won't work until it is: {e}")
+            return
+        if not get_config().db_password:
+            # No MariaDB was ever set up here, so there's nothing to bring over.
+            await client.set(MIGRATED_KEY, "no mariadb configured")
+            return
+
+        try:
+            pool = await self._mariadb_pool_getter()
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SELECT guild_id, user_id, profile FROM user_memory WHERE profile <> ''")
+                    profiles = await cur.fetchall()
+                    await cur.execute(
+                        "SELECT guild_id, processed_through, last_run_at, last_status FROM user_memory_job_state"
+                    )
+                    job_states = await cur.fetchall()
+        except Exception as e:
+            logger.warning(f"Couldn't read memory from MariaDB to move it into Redis; will retry next start: {e}")
+            return
+
+        copied = 0
+        for guild_id, user_id, profile in profiles:
+            if await client.set(_profile_key(guild_id, user_id), cap_profile(profile), nx=True):
+                copied += 1
+        for guild_id, processed_through, last_run_at, last_status in job_states:
+            key = _job_key(guild_id)
+            if not await client.exists(key):
+                await client.hset(key, mapping={
+                    "processed_through": processed_through.isoformat(),
+                    "last_run_at": last_run_at.isoformat() if last_run_at else "",
+                    "last_status": last_status or "",
+                })
+        await client.set(MIGRATED_KEY, datetime.now(timezone.utc).isoformat())
+        logger.info(
+            f"Moved {copied} of {len(profiles)} user memories and {len(job_states)} job states from MariaDB to Redis"
+        )

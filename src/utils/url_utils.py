@@ -13,7 +13,7 @@ from src.utils.http_client import fetch_public
 
 logger = logging.getLogger(__name__)
 
-# Bounded persistent cache for articles: url -> extracted text
+# Redis cache for articles: url -> extracted text
 _article_cache = PersistentCache('articles')
 
 MAX_HTML_BYTES = 5 * 1024 * 1024
@@ -160,7 +160,7 @@ def _extract_text(html: str) -> Optional[str]:
 @skip_recent_failures("article")
 async def get_article_text(url: str, *, cache_only: bool = False) -> Optional[str]:
     """
-    Fetch the readable text of a web page. Results are cached to persistent disk.
+    Fetch the readable text of a web page. Results are cached in Redis.
     Returns ``None`` on failure, or on a cache miss when ``cache_only`` is set.
     """
     cached = _article_cache.get(url)

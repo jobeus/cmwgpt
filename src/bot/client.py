@@ -199,6 +199,9 @@ class DiscordBotClient:
             # Start the death service
             self.services.death_service.start()
 
+            if getattr(self.services, "memory_store", None) is not None:
+                # First run on Redis: bring over everyone's memory from MariaDB.
+                await self.services.memory_store.migrate_from_mariadb()
             if getattr(self.services, "memory_service", None) is not None:
                 self.services.memory_service.start()
 

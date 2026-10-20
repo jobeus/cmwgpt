@@ -11,7 +11,7 @@ from src.utils.media_transcribe import transcribe_video_url
 
 logger = logging.getLogger(__name__)
 
-# Bounded persistent cache for Tweets: url -> (context text, photo base64 data URLs)
+# Redis cache for Tweets: url -> (context text, photo base64 data URLs)
 _twitter_cache = PersistentCache('twitter_transcripts')
 
 RAPIDAPI_HOST = "x-com2.p.rapidapi.com"
@@ -91,7 +91,7 @@ async def get_tweet_context(tweet_url: str, *, cache_only: bool = False) -> Opti
     """
     Fetch a tweet's text, top replies, video transcript and photos via RapidAPI.
 
-    Returns ``(context, image_data_urls)``, cached to persistent disk.
+    Returns ``(context, image_data_urls)``, cached in Redis.
     """
     cached = _twitter_cache.get(tweet_url)
     if cached is not None:

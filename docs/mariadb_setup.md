@@ -1,5 +1,7 @@
 # MariaDB setup
 
+> **Memory now lives in Redis** (see `redis_setup.md`). On its first start with Redis the bot copies the `user_memory` profiles and job state below into Redis once; after that MariaDB isn't used and can be shut down. The rest of this page is kept for that import.
+
 MariaDB stores **per-user memory**: the short profiles the bot learns about each person, per server, and adds to mentions. It is not used for anything else. If the database is wrong, the bot still replies, but `/memory`, `/fillmemory` and the nightly memory job will not work.
 
 ## What MariaDB is used for

@@ -2,10 +2,12 @@
 
 import json
 import tempfile
-import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+import fakeredis
+import redis
 
 from src.utils import cache_utils
 from src.utils.cache_utils import LRUCache, PersistentCache
@@ -17,163 +19,96 @@ class TestPersistentCache(unittest.TestCase):
         self.tmpdir = self._tmp.name
         patcher = patch("src.utils.cache_utils.CACHE_DIR", self.tmpdir)
         patcher.start()
-        self.caches = []
+        self.redis = fakeredis.FakeRedis(decode_responses=True)
 
         def cleanup():
-            # Flush (and cancel) pending timers before the directory goes away.
-            for cache in self.caches:
-                cache.flush()
             patcher.stop()
             self._tmp.cleanup()
 
         self.addCleanup(cleanup)
 
     def make(self, name, **kwargs):
-        cache = PersistentCache(name, **kwargs)
-        self.caches.append(cache)
-        return cache
+        return PersistentCache(name, client_getter=lambda: self.redis, **kwargs)
 
-    def test_loads_existing_cache_file(self):
-        (Path(self.tmpdir) / "demo.json").write_text(json.dumps({"a": 1}), encoding="utf-8")
-
+    def test_values_round_trip_as_json_under_a_prefixed_key(self):
         cache = self.make("demo")
+        cache["https://x.com/a/status/1"] = ("text", ["data:image/jpeg;base64,AAA"])
 
-        self.assertEqual(cache.get("a"), 1)
+        self.assertEqual(cache.get("https://x.com/a/status/1"), ["text", ["data:image/jpeg;base64,AAA"]])
+        raw = self.redis.get("cmwgpt:cache:demo:https://x.com/a/status/1")
+        self.assertEqual(json.loads(raw), ["text", ["data:image/jpeg;base64,AAA"]])
 
-    def test_invalid_cache_file_resets_to_empty_and_stays_usable(self):
-        (Path(self.tmpdir) / "bad.json").write_text("{not-json", encoding="utf-8")
-
-        cache = self.make("bad")
-        self.assertEqual(len(cache), 0)
-
+    def test_entries_expire_and_reads_refresh_the_ttl(self):
+        cache = self.make("ttl", ttl_seconds=100)
         cache["k"] = "v"
+        self.redis.expire("cmwgpt:cache:ttl:k", 5)
+
         self.assertEqual(cache.get("k"), "v")
+        self.assertGreater(self.redis.ttl("cmwgpt:cache:ttl:k"), 50)
 
-    def test_setitem_evicts_least_recently_used_entry(self):
-        cache = self.make("evict", max_size=2)
-        cache["one"] = "1"
-        cache["two"] = "2"
-        cache["three"] = "3"
-
-        self.assertNotIn("one", cache)
-        self.assertEqual(cache["two"], "2")
-        self.assertEqual(cache["three"], "3")
-
-    def test_get_marks_entry_recently_used(self):
-        cache = self.make("lru_get", max_size=2)
-        cache["one"] = "1"
-        cache["two"] = "2"
-        self.assertEqual(cache.get("one"), "1")
-        cache["three"] = "3"
-
-        self.assertIn("one", cache)
-        self.assertNotIn("two", cache)
-
-    def test_getitem_marks_entry_recently_used(self):
-        cache = self.make("lru_getitem", max_size=2)
-        cache["one"] = "1"
-        cache["two"] = "2"
-        self.assertEqual(cache["one"], "1")
-        cache["three"] = "3"
-
-        self.assertIn("one", cache)
-        self.assertNotIn("two", cache)
-
-    def test_get_missing_returns_default(self):
+    def test_get_missing_returns_default_and_getitem_raises(self):
         cache = self.make("missing")
         self.assertIsNone(cache.get("nope"))
         self.assertEqual(cache.get("nope", "dflt"), "dflt")
+        with self.assertRaises(KeyError):
+            cache["nope"]
 
-    def test_saves_are_batched_until_timer_or_flush(self):
-        with patch("src.utils.cache_utils.SAVE_DELAY_SECONDS", 3600):
-            cache = self.make("batched")
-            cache["a"] = 1
-            cache["b"] = 2
-
-            path = Path(self.tmpdir) / "batched.json"
-            self.assertFalse(path.exists())
-            timer = cache._save_timer
-            self.assertIsNotNone(timer)
-
-            cache["c"] = 3
-            self.assertIs(cache._save_timer, timer)  # one timer for the burst
-
-            cache.flush()
-
-        self.assertIsNone(cache._save_timer)
-        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"a": 1, "b": 2, "c": 3})
-
-    def test_timer_writes_after_delay(self):
-        with patch("src.utils.cache_utils.SAVE_DELAY_SECONDS", 0.01):
-            cache = self.make("timed")
-            cache["a"] = 1
-            timer = cache._save_timer
-        timer.join(timeout=2)
-
-        path = Path(self.tmpdir) / "timed.json"
-        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"a": 1})
-        self.assertIsNone(cache._save_timer)
-
-    def test_flush_without_pending_changes_does_not_write(self):
-        cache = self.make("idle")
-        cache.flush()
-        self.assertFalse((Path(self.tmpdir) / "idle.json").exists())
-
-    def test_flush_all_caches_writes_every_live_cache(self):
-        with patch("src.utils.cache_utils.SAVE_DELAY_SECONDS", 3600):
-            first = self.make("all_one")
-            second = self.make("all_two")
-            first["x"] = 1
-            second["y"] = 2
-
-            cache_utils.flush_all_caches()
-
-        self.assertEqual(json.loads((Path(self.tmpdir) / "all_one.json").read_text()), {"x": 1})
-        self.assertEqual(json.loads((Path(self.tmpdir) / "all_two.json").read_text()), {"y": 2})
-
-    def test_concurrent_writes_keep_cache_file_valid(self):
-        cache = self.make("threads", max_size=500)
-
-        def writer(prefix):
-            for i in range(25):
-                cache[f"{prefix}-{i}"] = i
-
-        threads = [threading.Thread(target=writer, args=(n,)) for n in range(4)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
-        cache.flush()
-
-        # The persisted file must be valid JSON containing every write.
-        reloaded = self.make("threads", max_size=500)
-        leftover_tmp = [p for p in Path(self.tmpdir).iterdir() if p.suffix == ".tmp"]
-
-        self.assertEqual(len(cache), 100)
-        self.assertEqual(len(reloaded), 100)
-        self.assertEqual(leftover_tmp, [])
-
-    def test_delete_removes_key_and_persists(self):
+    def test_contains_and_delete(self):
         cache = self.make("delete")
         cache["key"] = "value"
+        self.assertIn("key", cache)
         cache.delete("key")
-        cache.flush()
-        reloaded = self.make("delete")
+        self.assertNotIn("key", cache)
 
-        self.assertNotIn("key", reloaded)
+    def test_non_string_keys_work(self):
+        cache = self.make("ids")
+        cache[1234] = "transcript"
+        self.assertEqual(cache.get(1234), "transcript")
 
-    def test_reload_preserves_lru_order(self):
-        cache = self.make("order", max_size=2)
-        cache["one"] = 1
-        cache["two"] = 2
-        cache.get("one")  # "two" is now least recently used
-        cache.flush()
+    def test_oversized_values_are_not_stored(self):
+        with patch("src.utils.cache_utils.MAX_VALUE_BYTES", 10):
+            cache = self.make("big")
+            cache["k"] = "x" * 50
+        self.assertIsNone(cache.get("k"))
 
-        reloaded = self.make("order", max_size=2)
-        reloaded["three"] = 3
+    def test_imports_legacy_json_file_once_then_renames_it(self):
+        path = Path(self.tmpdir) / "legacy.json"
+        path.write_text(json.dumps({"a": "old", "b": "old"}), encoding="utf-8")
+        self.redis.set("cmwgpt:cache:legacy:b", json.dumps("newer"))
 
-        self.assertIn("one", reloaded)
-        self.assertNotIn("two", reloaded)
+        cache = self.make("legacy")
+
+        self.assertEqual(cache.get("a"), "old")
+        self.assertEqual(cache.get("b"), "newer")  # what's already in Redis wins
+        self.assertFalse(path.exists())
+        self.assertTrue((Path(self.tmpdir) / "legacy.json.migrated").exists())
+
+    def test_without_redis_it_works_from_memory(self):
+        def unavailable():
+            raise RuntimeError("Real Redis client requested during IS_TESTING=True")
+
+        cache = PersistentCache("offline", client_getter=unavailable)
+        cache["k"] = "v"
+        self.assertEqual(cache.get("k"), "v")
+        self.assertIn("k", cache)
+        cache.delete("k")
+        self.assertNotIn("k", cache)
+
+    def test_redis_errors_fall_back_to_memory_then_retry_later(self):
+        broken = MagicMock()
+        broken.set.side_effect = redis.ConnectionError("down")
+        broken.getex.side_effect = redis.ConnectionError("down")
+        cache = PersistentCache("flaky", client_getter=lambda: broken)
+
+        with self.assertLogs("src.utils.cache_utils", level="WARNING"):
+            cache["k"] = "v"
+        self.assertEqual(cache.get("k"), "v")  # served from memory without touching Redis
+        broken.getex.assert_not_called()
+
+        with patch("src.utils.cache_utils.time.monotonic", return_value=cache._down_until + 1):
+            broken.getex.side_effect = None
+            broken.getex.return_value = json.dumps("from redis")
+            self.assertEqual(cache.get("k"), "from redis")
 
 
 class TestLRUCache(unittest.TestCase):
@@ -210,20 +145,13 @@ class TestLRUCache(unittest.TestCase):
 
 class TestSkipRecentFailures(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        patcher = patch("src.utils.cache_utils.CACHE_DIR", self._tmp.name)
-        patcher.start()
-        self.store = PersistentCache("fetch_failures")
+        fake = fakeredis.FakeRedis(decode_responses=True)
+        self.store = PersistentCache(
+            "fetch_failures", ttl_seconds=cache_utils.FETCH_FAILURE_TTL_SECONDS, client_getter=lambda: fake
+        )
         store_patcher = patch("src.utils.cache_utils._fetch_failures", self.store)
         store_patcher.start()
-
-        def cleanup():
-            store_patcher.stop()
-            self.store.flush()
-            patcher.stop()
-            self._tmp.cleanup()
-
-        self.addCleanup(cleanup)
+        self.addCleanup(store_patcher.stop)
 
     async def test_failure_is_remembered_then_expires(self):
         calls = []

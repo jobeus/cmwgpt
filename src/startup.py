@@ -8,6 +8,7 @@ from src.bot.handlers.mention import MentionHandler
 from src.config import AppConfig, get_system_prompt, load_config
 from src.db.connection import close_db_pool
 from src.db.memory_store import MemoryStore
+from src.db.redis_client import close_redis
 from src.services.announcement_service import AnnouncementService
 from src.services.auto_update_service import AutoUpdateService
 from src.services.death_service import DeathService
@@ -22,7 +23,6 @@ from src.services.queue_service import QueueService
 from src.services.restart_handler import RestartHandler
 from src.services.runpod_service import RunpodService
 from src.services.state_service import StateService
-from src.utils.cache_utils import flush_all_caches
 from src.utils.url_utils import inject_article_cache
 
 logger = logging.getLogger(__name__)
@@ -149,7 +149,7 @@ async def shutdown_services(services: AppServices) -> None:
     if services.anthropic_service is not None:
         await step("anthropic close", services.anthropic_service.close)
     await step("runpod close", services.runpod_service.close)
-    await step("cache flush", flush_all_caches)
+    await step("redis close", close_redis)
     await step("db pool close", close_db_pool)
 
 

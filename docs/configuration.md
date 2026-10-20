@@ -34,7 +34,6 @@ These are loaded by `src/config.py`.
 | `DEPLOY_WEBHOOK_HOST` | `0.0.0.0` | No | Interface the deploy webhook binds to |
 | `DEPLOY_WEBHOOK_PORT` | `8787` | No | Port the deploy webhook listens on (`POST /deploy`) |
 | `QUIET_UPDATES` | `false` | No | Suppresses restart/update announcements |
-| `MAX_CACHE_SIZE` | `200` | No | Entry limit for each persistent LRU cache in `.cache/` |
 | `TRANSCRIPT_PROXY` | empty | No | Optional helper for transcript/media/article retrieval |
 
 ## Downloader/provider variables
@@ -44,9 +43,15 @@ These are loaded by `src/config.py`.
 | `RAPIDAPI_KEY` | Using Twitter/X enrichment | Required for tweet/context fetches |
 | `GROQ_API_KEY` | Using TikTok/Facebook/Twitter-video transcription | Used for audio transcription |
 
+## Redis
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `REDIS_URL` | `redis://127.0.0.1:6379/0` | Per-user memory and content caches; use `redis://redis:6379/0` in the Docker dev stack. See `docs/redis_setup.md` |
+
 ## MariaDB variables
 
-These are used only by the per-user memory feature (`src/db/memory_store.py`, `MemoryService`, `/memory` commands). Nothing else reads or writes the database.
+Memory used to live in MariaDB. Now the bot only reads it once, on the first start with Redis, to copy everyone's memory over (`MemoryStore.migrate_from_mariadb`). Leave `DB_PASSWORD` empty on a fresh install to skip that.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
@@ -72,7 +77,7 @@ Add these as needed:
 - `RUNPOD_IO_API_KEY` for image commands
 - `GROQ_API_KEY` for transcription-heavy sources
 - `RAPIDAPI_KEY` for Twitter/X enrichment
-- `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` for per-user memory (the bot runs without a database, but `/memory` and the nightly job will not work)
+- `REDIS_URL` for per-user memory and persistent caches (the bot runs without Redis, but `/memory` and the nightly job will not work and caches only last until restart)
 
 ### Full Docker dev stack
 
@@ -85,4 +90,4 @@ Use `.env.development.example` as the baseline. It already includes:
 
 - `DISCORD_CHANNEL_ID` still appears in sample env files, but it is not part of the core current runtime configuration described here.
 - `make run` and restart-wrapper workflows can behave differently from `make run-direct`; see `docs/development.md`.
-- If `/memory` fails or mentions never include profiles, verify DB config and that `init_db.sql` was applied (see `docs/mariadb_setup.md`).
+- If `/memory` fails or mentions never include profiles, check `redis-cli ping` and `REDIS_URL` (see `docs/redis_setup.md`).

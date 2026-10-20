@@ -49,9 +49,9 @@ class FakeStore:
     async def get_many(self, guild_id, user_ids):
         return {uid: self.rows[uid] for uid in user_ids if uid in self.rows}
 
-    async def save_profile(self, guild_id, user_id, profile, **kwargs):
+    async def save_profile(self, guild_id, user_id, profile):
         self.rows[user_id] = profile
-        self.saved.append((user_id, profile, kwargs))
+        self.saved.append((user_id, profile))
 
     async def clear_learned_profiles(self, guild_id):
         self.cleared_guilds.append(guild_id)
@@ -165,7 +165,7 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
             return "Stable: has two dogs\nCurrent: truck shopping, Tacoma (2026-10-15)", 0.002
 
         with patch("src.services.memory_service.dispatch_completion", side_effect=fake_dispatch):
-            stats = await service.process_window(guild, now - timedelta(days=1), now, source="nightly")
+            stats = await service.process_window(guild, now - timedelta(days=1), now)
 
         self.assertEqual(stats["messages"], 3)
         self.assertEqual(stats["users_updated"], [1])
@@ -174,18 +174,16 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Today: 2026-10-15", merge_prompt)
         self.assertIn("- lives in Denver", merge_prompt)
         self.assertIn("Stable: has two dogs", merge_prompt)
-        user_id, profile, kwargs = store.saved[0]
+        user_id, profile = store.saved[0]
         self.assertEqual(user_id, 1)
         self.assertIn("Tacoma", profile)
-        self.assertEqual(kwargs["source"], "nightly")
-        self.assertIsNone(kwargs["window_end"].tzinfo)
 
     async def test_process_window_with_no_messages_makes_no_calls(self):
         store = FakeStore()
         now = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
         service, _ = self.make_service(store, now)
         with patch("src.services.memory_service.dispatch_completion", new=AsyncMock()) as dispatch:
-            stats = await service.process_window(self.make_guild([]), now - timedelta(days=1), now, source="nightly")
+            stats = await service.process_window(self.make_guild([]), now - timedelta(days=1), now)
         dispatch.assert_not_awaited()
         self.assertEqual(stats["users_updated"], [])
 
@@ -241,7 +239,6 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Correction:\nsold the Tacoma, drive a Ranger now", prompt)
         self.assertEqual(store.rows[1], "Stable: drives a Ranger")
         self.assertEqual(profile, "Stable: drives a Ranger")
-        self.assertEqual(store.saved[0][2]["source"], "correct")
         self.assertEqual(cost, 0.003)
 
     async def test_correct_leaves_memory_alone_on_bad_reply(self):

@@ -1,32 +1,40 @@
 """
-Cache Utilities - Persistent cross-restart caching
+Cache Utilities - content caches kept in Redis so they survive restarts
 """
 
-import atexit
 import functools
 import inspect
-import os
 import json
 import logging
-import tempfile
-import threading
+import os
 import time
-import weakref
 from collections import OrderedDict
 from typing import Any, Callable, Generic, Hashable, Optional, TypeVar, cast
 
+import redis
+
+from src.db.redis_client import KEY_PREFIX, get_sync_redis
+
 logger = logging.getLogger(__name__)
 
+# Where the old JSON-file caches lived; each is imported into Redis once, then renamed.
 CACHE_DIR = ".cache"
 
-# Writes are batched: a change schedules one save this many seconds later, so a
-# burst of inserts costs one file rewrite, off the event loop.
-SAVE_DELAY_SECONDS = 2.0
+# Entries expire this long after they were last read or written, so a link that's
+# still being talked about stays cached while dead ones age out on their own.
+DEFAULT_TTL_SECONDS = 30 * 24 * 3600
+
+# Values bigger than this aren't worth holding in Redis (a long voice note as base64).
+MAX_VALUE_BYTES = 8 * 1024 * 1024
+
+# Without Redis (tests, or while it's down) each cache is an in-memory LRU this big.
+FALLBACK_MAX_SIZE = 200
+
+# After a Redis error, use the in-memory fallback for this long before trying again.
+REDIS_RETRY_SECONDS = 30.0
 
 F = TypeVar("F", bound=Callable[..., Any])
 V = TypeVar("V")
-
-_live_caches: "weakref.WeakSet[PersistentCache]" = weakref.WeakSet()
 
 
 class LRUCache(Generic[V]):
@@ -54,118 +62,124 @@ class LRUCache(Generic[V]):
     def __len__(self) -> int:
         return len(self._data)
 
+    def pop(self, key: Hashable) -> None:
+        self._data.pop(key, None)
+
     def clear(self) -> None:
         self._data.clear()
 
 
 class PersistentCache:
-    """A dictionary-like LRU cache that saves to disk shortly after each change."""
+    """A dictionary-like cache stored in Redis as JSON, one key per entry.
 
-    def __init__(self, cache_name: str, max_size: int = 200):
+    Keys are ``cmwgpt:cache:<name>:<key>`` and expire ``ttl_seconds`` after their last
+    use. If Redis can't be reached the cache quietly works from memory instead, so a
+    Redis outage costs refetches, never a failed reply.
+    """
+
+    def __init__(
+        self,
+        cache_name: str,
+        ttl_seconds: int = DEFAULT_TTL_SECONDS,
+        client_getter: Callable[[], redis.Redis] = get_sync_redis,
+    ):
         self.cache_name = cache_name
-        self.max_size = max_size
-        self.filepath = os.path.join(CACHE_DIR, f"{cache_name}.json")
-        self._cache: "OrderedDict[str, Any]" = OrderedDict()
-        # Mutations + saves happen from both the event loop and to_thread
-        # workers, so serialize them behind a lock.
-        self._lock = threading.Lock()
-        self._save_timer: Optional[threading.Timer] = None
-        _live_caches.add(self)
+        self.ttl_seconds = ttl_seconds
+        self._prefix = f"{KEY_PREFIX}cache:{cache_name}:"
+        self._client_getter = client_getter
+        self._client: Optional[redis.Redis] = None
+        self._down_until = 0.0
+        self._fallback: LRUCache[Any] = LRUCache(FALLBACK_MAX_SIZE)
 
-        # Ensure directory exists
-        if not os.path.exists(CACHE_DIR):
-            os.makedirs(CACHE_DIR, exist_ok=True)
+    def _key(self, key: Hashable) -> str:
+        return f"{self._prefix}{key}"
 
-        self._load()
-
-    def _load(self):
-        """Load the cache from disk if it exists."""
-        if os.path.exists(self.filepath):
+    def _redis(self) -> Optional[redis.Redis]:
+        """The client, or ``None`` while Redis is unavailable."""
+        if time.monotonic() < self._down_until:
+            return None
+        if self._client is None:
             try:
-                with open(self.filepath, 'r', encoding='utf-8') as f:
-                    self._cache = OrderedDict(json.load(f))
-                logger.debug(f"Loaded {len(self._cache)} items into {self.cache_name} cache from disk.")
+                self._client = self._client_getter()
             except Exception as e:
-                logger.error(f"Failed to load cache {self.cache_name}: {e}")
-                self._cache = OrderedDict()
+                # Under tests there's no Redis at all: stay in memory for good.
+                logger.debug(f"Cache {self.cache_name} running in memory: {e}")
+                self._down_until = float("inf")
+                return None
+            self._import_legacy_file()
+        return self._client
 
-    def _save(self):
-        """Save the cache to disk. Callers must hold ``self._lock``."""
+    def _redis_failed(self, e: Exception) -> None:
+        logger.warning(f"Redis error in cache {self.cache_name}, using memory for now: {e}")
+        self._down_until = time.monotonic() + REDIS_RETRY_SECONDS
+
+    def _import_legacy_file(self) -> None:
+        """Copy an old ``.cache/<name>.json`` into Redis once, then rename it out of the way."""
+        path = os.path.join(CACHE_DIR, f"{self.cache_name}.json")
+        if not os.path.exists(path) or self._client is None:
+            return
         try:
-            # We write to a uniquely-named temp file in the same directory and
-            # atomically rename it into place, so concurrent saves from
-            # different threads can never corrupt or clobber each other.
-            fd, temp_filepath = tempfile.mkstemp(
-                dir=os.path.dirname(self.filepath) or ".",
-                prefix=f"{self.cache_name}.",
-                suffix=".tmp",
-            )
-            try:
-                with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                    json.dump(self._cache, f)
-                os.replace(temp_filepath, self.filepath)
-            except Exception:
-                try:
-                    os.remove(temp_filepath)
-                except OSError:
-                    pass
-                raise
+            with open(path, "r", encoding="utf-8") as f:
+                entries = json.load(f)
+            pipe = self._client.pipeline(transaction=False)
+            for key, value in entries.items():
+                pipe.set(self._key(key), json.dumps(value), ex=self.ttl_seconds, nx=True)
+            pipe.execute()
+            os.replace(path, path + ".migrated")
+            logger.info(f"Imported {len(entries)} entries from {path} into Redis")
         except Exception as e:
-            logger.error(f"Failed to save cache {self.cache_name} to disk: {e}")
+            logger.warning(f"Couldn't import {path} into Redis: {e}")
 
-    def _schedule_save(self) -> None:
-        """Arrange one save soon. Callers must hold ``self._lock``."""
-        if self._save_timer is None:
-            self._save_timer = threading.Timer(SAVE_DELAY_SECONDS, self.flush)
-            self._save_timer.daemon = True
-            self._save_timer.start()
+    def get(self, key: Hashable, default: Any = None) -> Any:
+        client = self._redis()
+        if client is not None:
+            try:
+                raw = client.getex(self._key(key), ex=self.ttl_seconds)
+            except redis.RedisError as e:
+                self._redis_failed(e)
+            else:
+                return default if raw is None else json.loads(raw)
+        value = self._fallback.get(key)
+        return default if value is None else value
 
-    def flush(self) -> None:
-        """Write any pending changes to disk now."""
-        with self._lock:
-            timer, self._save_timer = self._save_timer, None
-            if timer is not None:
-                timer.cancel()
-                self._save()
+    def __contains__(self, key: Hashable) -> bool:
+        client = self._redis()
+        if client is not None:
+            try:
+                return bool(client.exists(self._key(key)))
+            except redis.RedisError as e:
+                self._redis_failed(e)
+        return key in self._fallback
 
-    def get(self, key: str, default: Any = None) -> Any:
-        with self._lock:
-            if key not in self._cache:
-                return default
-            self._cache.move_to_end(key)
-            return self._cache[key]
+    def __getitem__(self, key: Hashable) -> Any:
+        missing = object()
+        value = self.get(key, missing)
+        if value is missing:
+            raise KeyError(key)
+        return value
 
-    def __contains__(self, key: str) -> bool:
-        return key in self._cache
+    def __setitem__(self, key: Hashable, value: Any) -> None:
+        raw = json.dumps(value)
+        if len(raw) > MAX_VALUE_BYTES:
+            logger.debug(f"Not caching {self.cache_name}:{key}: {len(raw)} bytes is too big")
+            return
+        client = self._redis()
+        if client is not None:
+            try:
+                client.set(self._key(key), raw, ex=self.ttl_seconds)
+                return
+            except redis.RedisError as e:
+                self._redis_failed(e)
+        self._fallback[key] = value
 
-    def __getitem__(self, key: str) -> Any:
-        with self._lock:
-            self._cache.move_to_end(key)
-            return self._cache[key]
-
-    def __setitem__(self, key: str, value: Any):
-        with self._lock:
-            self._cache[key] = value
-            self._cache.move_to_end(key)
-            while len(self._cache) > self.max_size:
-                self._cache.popitem(last=False)
-            self._schedule_save()
-
-    def __len__(self) -> int:
-        return len(self._cache)
-
-    def delete(self, key: str):
-        with self._lock:
-            if key in self._cache:
-                del self._cache[key]
-                self._schedule_save()
-
-
-@atexit.register
-def flush_all_caches() -> None:
-    """Write every cache's pending changes (also called on shutdown)."""
-    for cache in list(_live_caches):
-        cache.flush()
+    def delete(self, key: Hashable) -> None:
+        self._fallback.pop(key)
+        client = self._redis()
+        if client is not None:
+            try:
+                client.delete(self._key(key))
+            except redis.RedisError as e:
+                self._redis_failed(e)
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +201,7 @@ def _failure_store() -> Optional[PersistentCache]:
         from src.config import get_config
         if get_config().is_testing:
             return None
-        _fetch_failures = PersistentCache("fetch_failures", max_size=1000)
+        _fetch_failures = PersistentCache("fetch_failures", ttl_seconds=FETCH_FAILURE_TTL_SECONDS)
     return _fetch_failures
 
 

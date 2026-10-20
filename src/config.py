@@ -65,6 +65,7 @@ class AppConfig:
     db_user: str
     db_password: str
     db_name: str
+    redis_url: str
     default_model: str
     default_draw_model: str
     default_edit_model: str
@@ -109,6 +110,7 @@ def load_config(
         db_user=source.get("DB_USER", "cmwgpt_user"),
         db_password=source.get("DB_PASSWORD", ""),
         db_name=source.get("DB_NAME", "cmwgpt"),
+        redis_url=source.get("REDIS_URL", "redis://127.0.0.1:6379/0"),
         default_model=source.get("DEFAULT_MODEL", "anthropic/claude-sonnet-5.5"),
         default_draw_model=source.get("DEFAULT_DRAW_MODEL", "seedream"),
         default_edit_model=source.get("DEFAULT_EDIT_MODEL", "seedream"),

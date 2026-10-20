@@ -65,7 +65,8 @@ This starts:
 
 | Service | Purpose |
 | --- | --- |
-| `db` | MariaDB storage for per-user memory |
+| `redis` | Redis for per-user memory and content caches |
+| `db` | MariaDB, only read once to import memory from before Redis |
 | `bot` | Python Discord bot (`python:3.13-slim` image) |
 
 CI runs only the Python job, on Python 3.13.
@@ -111,7 +112,7 @@ Examples:
 | Bot does not answer mentions | `REPLY_TO_MENTIONS`, Discord permissions, correct mention path |
 | Commands look stale | `DISCORD_GUILD_ID`, command sync behavior, whether the bot restarted |
 | URL enrichment missing | `RAPIDAPI_KEY`, `GROQ_API_KEY`, `TRANSCRIPT_PROXY` |
-| `/memory` errors or no profiles in mentions | MariaDB connectivity, `DB_*` values, and whether `init_db.sql` was applied |
+| `/memory` errors or no profiles in mentions | Redis connectivity (`redis-cli ping`) and `REDIS_URL` |
 | Restart flow weirdness | whether you used `make run` vs `make run-direct` |
 
 ## Suggested file-entry points for contributors

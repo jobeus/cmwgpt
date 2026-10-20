@@ -6,6 +6,7 @@ pytest>=9.1.1
 pytest-asyncio>=1.4.0
 pytest-cov>=7.1.0
 coverage>=7.16.2
+fakeredis>=2.26.0
 
 # Code quality and linting tools
 flake8>=7.4.1
