@@ -32,17 +32,21 @@ class DirectModel:
 DIRECT_MODELS: Dict[str, DirectModel] = {
     # Sonnet 5.5 recommends ``low`` for chat and search; it still thinks when a message needs it.
     "sonnet-5.5-direct": DirectModel("claude-sonnet-5-5", 2.00, 10.00, 2.50, 0.20, effort="low"),
-    # Opus 5.5 can't turn thinking off; ``medium`` is its default effort.
-    "opus-5.5-direct": DirectModel("claude-opus-5-5", 4.00, 20.00, 5.00, 0.20, effort="medium"),
+    # Opus 5.5 can't turn thinking off; its default ``medium`` overthinks chat, so run it at ``low``.
+    "opus-5.5-direct": DirectModel("claude-opus-5-5", 4.00, 20.00, 5.00, 0.20, effort="low"),
 }
 _MODELS_BY_API_ID: Dict[str, DirectModel] = {m.api_id: m for m in DIRECT_MODELS.values()}
 
 PRICE_WEB_SEARCH = 0.01
 
 MAX_TOKENS = 16000
-WEB_SEARCH_MAX_USES = 5
-# A web-search turn can come back as ``pause_turn``; resume it this many times.
-MAX_CONTINUATIONS = 3
+WEB_SEARCH_MAX_USES = 10
+# Web fetch only reads URLs already in the conversation (including search results).
+# It costs only the tokens it reads, so cap how much one page can add.
+WEB_FETCH_MAX_USES = 10
+WEB_FETCH_MAX_CONTENT_TOKENS = 30000
+# A server-tool turn can come back as ``pause_turn``; resume it this many times.
+MAX_CONTINUATIONS = 5
 
 # Cache diagnostics (beta): each request names the previous response in its
 # channel, and the API reports where the prompt-cache prefix diverged from it.
@@ -256,11 +260,21 @@ class AnthropicService:
         previous_index = self._history_breakpoints.get(channel_id) if channel_id else None
         history_index = apply_history_breakpoints(api_messages, previous_index)
         if search:
-            kwargs["tools"] = [{
-                "type": "web_search_20260209",
-                "name": "web_search",
-                "max_uses": WEB_SEARCH_MAX_USES,
-            }]
+            # Both tools filter results with code execution server-side, so
+            # code_execution itself isn't declared.
+            kwargs["tools"] = [
+                {
+                    "type": "web_search_20260209",
+                    "name": "web_search",
+                    "max_uses": WEB_SEARCH_MAX_USES,
+                },
+                {
+                    "type": "web_fetch_20260209",
+                    "name": "web_fetch",
+                    "max_uses": WEB_FETCH_MAX_USES,
+                    "max_content_tokens": WEB_FETCH_MAX_CONTENT_TOKENS,
+                },
+            ]
 
         last_text = api_messages[-1]["content"][0].get("text", "") if api_messages else ""
         snippet = last_text.replace("\n", " ")
