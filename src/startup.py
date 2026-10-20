@@ -16,6 +16,7 @@ from src.services.openai_service import OpenAIService
 from src.services.anthropic_service import AnthropicService
 from src.services.gemini_service import GeminiService
 from src.services.memory_service import MemoryService
+from src.services.day_summary_service import DaySummaryService
 from src.services.paste_service import PasteService
 from src.services.queue_service import QueueService
 from src.services.restart_handler import RestartHandler
@@ -86,6 +87,11 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         gemini_service=gemini_service,
         anthropic_service=anthropic_service,
     )
+    day_summary_service = DaySummaryService(
+        openai_service=openai_service,
+        gemini_service=gemini_service,
+        anthropic_service=anthropic_service,
+    )
     mention_handler = MentionHandler(
         state_service=state_service,
         openai_service=openai_service,
@@ -96,6 +102,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         system_prompt_loader=lambda: get_system_prompt(app_config.system_prompt_path),
         include_num_chatlines=app_config.include_num_chatlines,
         user_notes_provider=memory_service.get_notes_block,
+        day_summary_provider=day_summary_service.get_summary,
     )
 
     return AppServices(

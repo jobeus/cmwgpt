@@ -121,7 +121,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         channel.history = history
 
         with patch.dict("os.environ", {"TZ": "America/Denver"}, clear=False):
-            context, system_prompt = await handler._prepare_mention_context(mention_msg, bot_user)
+            context, system_prompt, _ = await handler._prepare_mention_context(mention_msg, bot_user)
 
         self.assertEqual(len(context), 4)
         self.assertEqual(context[1]["role"], "assistant")
@@ -163,7 +163,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         channel.history = history
 
-        context, _ = await handler._prepare_mention_context(mention_msg, bot_user)
+        context, _, _ = await handler._prepare_mention_context(mention_msg, bot_user)
 
         self.assertEqual(len(context), 1)
         self.assertEqual(context[0]["role"], "user")
@@ -203,7 +203,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         channel.history = history
 
-        context, _ = await handler._prepare_mention_context(mention_msg, bot_user)
+        context, _, _ = await handler._prepare_mention_context(mention_msg, bot_user)
 
         self.assertIn("[Embeds:", context[0]["content"][0]["text"])
         self.assertIn("[Attached file:", context[0]["content"][0]["text"])
@@ -256,9 +256,9 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         # Patch the mention module's reference to the time module (not
         # time.time globally, which logging handlers may also call).
         with patch("src.bot.handlers.mention.time", MagicMock(time=MagicMock(side_effect=[1000, 1005]))):
-            context, system_prompt = await handler._prepare_mention_context(mention_msg, bot_user)
+            context, system_prompt, _ = await handler._prepare_mention_context(mention_msg, bot_user)
             channel.history = second_history
-            cached_context, _ = await handler._prepare_mention_context(mention_msg, bot_user)
+            cached_context, _, _ = await handler._prepare_mention_context(mention_msg, bot_user)
 
         self.assertTrue(system_prompt.startswith("channel prompt\n\n## How this chat reaches you\nYou are <@"))
         self.assertEqual(context[-1]["content"][1]["type"], "image_url")
@@ -300,7 +300,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         channel.history = history
 
         with patch("src.bot.handlers.mention.transcribe_audio_attachment", AsyncMock(return_value="Mocked Groq Transcript")):
-            context, _ = await handler._prepare_mention_context(mention_msg, bot_user)
+            context, _, _ = await handler._prepare_mention_context(mention_msg, bot_user)
 
         self.assertEqual(len(context), 1)
         self.assertEqual(context[0]["role"], "user")
@@ -346,7 +346,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         channel.history = history
 
         with patch("src.utils.chat_context.logger.warning") as mock_warning:
-            context, _ = await handler._prepare_mention_context(empty_msg, bot_user)
+            context, _, _ = await handler._prepare_mention_context(empty_msg, bot_user)
 
         self.assertIn("[Embeds:", context[0]["content"][0]["text"])
         self.assertEqual(len(context[0]["content"]), 1)
@@ -368,12 +368,12 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         handler._history_cache = {}
         channel.history = empty_history
-        context, _ = await handler._prepare_mention_context(truly_empty, bot_user)
+        context, _, _ = await handler._prepare_mention_context(truly_empty, bot_user)
         self.assertIn("[Empty Message]", context[0]["content"][0]["text"])
 
     async def test_handle_mention_sends_plain_text_reply(self):
         handler, state_service, _, openai_service, message_service = self.make_handler()
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
         openai_service.get_chat_completion = AsyncMock(return_value=("hello there", 0.0))
         channel = MagicMock()
         channel.id = 1
@@ -400,7 +400,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         handler, _, _, openai_service, message_service = self.make_handler()
         message_service.DISCORD_MESSAGE_LIMIT = 2000
         message_service.fit_to_discord = AsyncMock(side_effect=lambda text: text)
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
 
         async def streamed_completion(**kwargs):
             kwargs["on_text"]("hello")
@@ -420,7 +420,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
     async def test_handle_mention_deletes_partial_reply_when_stream_fails(self):
         handler, _, _, openai_service, message_service = self.make_handler()
         message_service.DISCORD_MESSAGE_LIMIT = 2000
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
 
         async def failing_completion(**kwargs):
             kwargs["on_text"]("half an ans")
@@ -438,7 +438,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_mention_sends_files_when_response_contains_them(self):
         handler, _, _, openai_service, message_service = self.make_handler()
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
         openai_service.get_chat_completion = AsyncMock(
             return_value=({"text": "here you go", "files": ["file-a"]}, 0.0)
         )
@@ -453,7 +453,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_mention_sends_text_reply_when_response_dict_has_no_files(self):
         handler, _, _, openai_service, message_service = self.make_handler()
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
         openai_service.get_chat_completion = AsyncMock(return_value=({"text": "just text", "files": []}, 0.0))
         channel = MagicMock()
         channel.id = 6
@@ -466,7 +466,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_mention_handles_none_response(self):
         handler, _, _, openai_service, message_service = self.make_handler()
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
         openai_service.get_chat_completion = AsyncMock(return_value=(None, 0.0))
         channel = MagicMock()
         channel.id = 3
@@ -480,7 +480,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_mention_handles_openai_errors_with_fallback_send(self):
         handler, _, _, openai_service, message_service = self.make_handler()
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
         openai_service.get_chat_completion = AsyncMock(side_effect=OpenAIServiceError("bad upstream"))
         message_service.send_channel_reply = AsyncMock(side_effect=RuntimeError("discord fail"))
         channel = MagicMock()
@@ -496,7 +496,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_mention_logs_when_openai_fallback_send_also_fails(self):
         handler, _, _, openai_service, message_service = self.make_handler()
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
         openai_service.get_chat_completion = AsyncMock(side_effect=OpenAIServiceError("bad upstream"))
         message_service.send_channel_reply = AsyncMock(side_effect=RuntimeError("discord fail"))
         channel = MagicMock()
@@ -588,7 +588,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         channel.history = history
 
-        context, _ = await handler._prepare_mention_context(second_q, SimpleNamespace(id=999))
+        context, _, _ = await handler._prepare_mention_context(second_q, SimpleNamespace(id=999))
 
         self.assertEqual([c["role"] for c in context], ["user", "assistant", "user"])
         self.assertIn("a1", context[1]["content"][0]["text"])

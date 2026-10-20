@@ -103,7 +103,7 @@ class TestBotFunctions(unittest.TestCase):
                 mention_legend_provider=mock_mention_legend,
             )
 
-            result, system_prompt = await mention_handler._prepare_mention_context(
+            result, system_prompt, _ = await mention_handler._prepare_mention_context(
                 mock_message, mock_bot_user
             )
 

@@ -46,6 +46,7 @@ flowchart LR
         Gemini[GeminiService<br/>native Gemini]:::service
         Anthropic[AnthropicService<br/>Claude API]:::service
         Memory[MemoryService<br/>nightly profiles]:::service
+        DaySummary[DaySummaryService<br/>chat since 02:00]:::service
         Runpod[RunpodService<br/>image draw/edit]:::service
         Downloader[Downloader pipeline]:::service
         MsgSvc[MessageService]:::service
@@ -61,6 +62,8 @@ flowchart LR
     Dispatch --> Gemini
     Dispatch --> Anthropic
     Mention --> Memory
+    Mention --> DaySummary
+    DaySummary --> Dispatch
     Mention --> Downloader
     Mention --> State
     Mention --> MsgSvc
@@ -109,10 +112,12 @@ flowchart TB
     Factory --> Death[DeathService]:::aux
     Factory --> MemStore[MemoryStore]:::aux
     Factory --> Memory[MemoryService]:::aux
+    Factory --> DaySummary[DaySummaryService]:::aux
     Factory --> Mention[MentionHandler]:::svc
 
     MemStore --> Memory
     Memory -->|user notes| Mention
+    DaySummary -->|day summary| Mention
 
 
     State --> Death
