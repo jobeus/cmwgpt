@@ -18,6 +18,7 @@ class TestModelCatalog(unittest.TestCase):
         values = [m.value for m in available_models(self.config("o", "g", "a"))]
         self.assertIn("anthropic/claude-sonnet-5.5", values)
         self.assertIn("sonnet-5.5-direct", values)
+        self.assertIn("opus-5.5-direct", values)
         self.assertIn("google", values)
         self.assertNotIn("hybrid", values)
 

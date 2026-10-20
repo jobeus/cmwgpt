@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.anthropic_service import (
     CACHE_DIAGNOSIS_BETA,
+    DIRECT_MODELS,
     AnthropicService,
     AnthropicServiceError,
     build_anthropic_messages,
@@ -27,7 +28,7 @@ def _usage(input_tokens=1000, output_tokens=500, searches=0):
 
 
 def _response(text="hello", stop_reason="end_turn", usage=None, content=None, stop_details=None,
-              id="msg_1", diagnostics=None):
+              id="msg_1", diagnostics=None, model="claude-sonnet-5-5"):
     return SimpleNamespace(
         id=id,
         diagnostics=diagnostics,
@@ -35,13 +36,14 @@ def _response(text="hello", stop_reason="end_turn", usage=None, content=None, st
         stop_reason=stop_reason,
         stop_details=stop_details,
         usage=usage or _usage(),
-        model="claude-sonnet-5-5",
+        model=model,
     )
 
 
 class TestHelpers(unittest.TestCase):
     def test_is_direct_anthropic_model(self):
         self.assertTrue(is_direct_anthropic_model("sonnet-5.5-direct"))
+        self.assertTrue(is_direct_anthropic_model("opus-5.5-direct"))
         self.assertFalse(is_direct_anthropic_model("anthropic/claude-sonnet-5.5"))
         self.assertFalse(is_direct_anthropic_model("google"))
 
@@ -79,8 +81,9 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(result, [{"role": "user", "content": [{"type": "text", "text": raw}]}])
 
     def test_usage_cost(self):
-        cost = _usage_cost(_usage(input_tokens=1_000_000, output_tokens=100_000, searches=2))
-        self.assertAlmostEqual(cost, 2.00 + 1.00 + 0.02)
+        usage = _usage(input_tokens=1_000_000, output_tokens=100_000, searches=2)
+        self.assertAlmostEqual(_usage_cost(usage, DIRECT_MODELS["sonnet-5.5-direct"]), 2.00 + 1.00 + 0.02)
+        self.assertAlmostEqual(_usage_cost(usage, DIRECT_MODELS["opus-5.5-direct"]), 4.00 + 2.00 + 0.02)
 
 
 def _history(n):
@@ -136,6 +139,23 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("cache_control", kwargs["system"][0])
         self.assertEqual(kwargs["tools"][0]["type"], "web_search_20260209")
         self.assertEqual(kwargs["fallbacks"], "default")
+
+    async def test_opus_uses_its_model_effort_and_price(self):
+        usage = _usage(input_tokens=1_000_000, output_tokens=0)
+        service, client = self.make_service(_response("deep", usage=usage, model="claude-opus-5-5"))
+        _, cost = await service.get_chat_completion(
+            model="opus-5.5-direct", messages=[{"role": "user", "content": "q"}])
+        kwargs = client.beta.messages.create.call_args.kwargs
+        self.assertEqual(kwargs["model"], "claude-opus-5-5")
+        self.assertEqual(kwargs["output_config"], {"effort": "medium"})
+        self.assertAlmostEqual(cost, 4.00)
+
+    async def test_fallback_turn_is_priced_at_the_serving_model(self):
+        usage = _usage(input_tokens=1_000_000, output_tokens=0)
+        service, _ = self.make_service(_response("rescued", usage=usage, model="claude-sonnet-5-5"))
+        _, cost = await service.get_chat_completion(
+            model="opus-5.5-direct", messages=[{"role": "user", "content": "q"}])
+        self.assertAlmostEqual(cost, 2.00)
 
     async def test_remembers_history_breakpoint_per_channel(self):
         service, client = self.make_service(_response("one"), _response("two"))

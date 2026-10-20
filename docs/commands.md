@@ -78,10 +78,11 @@ a model whose key is missing falls back to `DEFAULT_MODEL`.
 | `qwen/qwen3.5-flash-02-23` | via OpenRouter |
 | `anthropic/claude-sonnet-5.5` | search / web aware (via OpenRouter) |
 | `sonnet-5.5-direct` | `claude-sonnet-5-5` straight from the Claude API (search / web aware, needs `ANTHROPIC_API_KEY`) |
+| `opus-5.5-direct` | `claude-opus-5-5` straight from the Claude API (search / web aware, needs `ANTHROPIC_API_KEY`; 2x Sonnet's price) |
 | `google` | native Gemini (`gemini-3.8-flash`, search) |
 | `google-high` | native Gemini (`gemini-3.8-flash`, search, thinking) |
 
-`google`/`google-high` route through `GeminiService`, `sonnet-5.5-direct` routes through
+`google`/`google-high` route through `GeminiService`, `sonnet-5.5-direct`/`opus-5.5-direct` route through
 `AnthropicService`, and the rest route through `OpenAIService` → OpenRouter. The
 routing itself lives in `src/services/completion_dispatch.py`.
 

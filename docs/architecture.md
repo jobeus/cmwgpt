@@ -171,7 +171,7 @@ sequenceDiagram
     alt model is google / google-high
         DP->>G: get_chat_completion(...)
         G-->>DP: reply content
-    else model is sonnet-5.5-direct
+    else model is sonnet/opus-5.5-direct
         DP->>A: get_chat_completion(...)
         A-->>DP: reply content
     else other models
@@ -187,7 +187,7 @@ sequenceDiagram
 
 - Mentions are **queued**, not processed in parallel ad hoc.
 - Prompt context is more than just the latest message: it includes recent history, reply metadata, embeds, and attachments. The multimodal context array is built by `src/utils/chat_context.py` (`build_chat_context`).
-- Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `sonnet-5.5-direct` goes to `AnthropicService` (Claude API), and everything else goes to `OpenAIService`.
+- Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `sonnet-5.5-direct`/`opus-5.5-direct` go to `AnthropicService` (Claude API), and everything else goes to `OpenAIService`.
 - URL enrichment happens **before** the LLM call and can materially change the prompt content. Only the newest 10 history messages fetch links; older messages use cached results only, and the fetches run concurrently.
 - Per-user memory profiles are appended to the end of the mention, so the cached system prompt and history stay unchanged.
 - There is no request/pipeline log table: the SDK clients use their default HTTP clients, and diagnostics go to the normal Python log (stdout and `logs/`).

@@ -29,6 +29,7 @@ MODEL_OPTIONS: List[ModelOption] = [
     ModelOption("qwen/qwen3.5-flash-02-23", "qwen/qwen3.5-flash-02-23", "openrouter"),
     ModelOption("anthropic/claude-sonnet-5.5", "anthropic/claude-sonnet-5.5 (search, web aware)", "openrouter"),
     ModelOption("sonnet-5.5-direct", "sonnet-5.5-direct (Claude API, search, web aware)", "anthropic"),
+    ModelOption("opus-5.5-direct", "opus-5.5-direct (Claude API, search, web aware)", "anthropic"),
     ModelOption("google", "google (gemini-3.8-flash, search)", "gemini"),
     ModelOption("google-high", "google-high (gemini-3.8-flash, search, thinking)", "gemini"),
 ]

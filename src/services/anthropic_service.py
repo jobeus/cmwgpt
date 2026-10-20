@@ -7,6 +7,7 @@ Accepts the same OpenAI-style message array the rest of the bot builds
 
 import logging
 import re
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import anthropic
@@ -16,21 +17,29 @@ from src.utils.message_utils import clean_openai_response, resolve_bot_id
 
 logger = logging.getLogger(__name__)
 
-# Bot-facing model alias -> Claude API model id.
-DIRECT_MODELS: Dict[str, str] = {
-    "sonnet-5.5-direct": "claude-sonnet-5-5",
-}
+@dataclass(frozen=True)
+class DirectModel:
+    """A Claude API model the bot can call directly, with its pricing (USD per 1M tokens)."""
+    api_id: str
+    price_input: float
+    price_output: float
+    price_cache_write: float
+    price_cache_read: float
+    effort: str
 
-# Claude Sonnet 5.5 pricing (USD per 1M tokens) and web search (per search).
-PRICE_INPUT_PER_M = 2.00
-PRICE_OUTPUT_PER_M = 10.00
-PRICE_CACHE_WRITE_PER_M = 2.50
-PRICE_CACHE_READ_PER_M = 0.20
+
+# Bot-facing model alias -> Claude API model.
+DIRECT_MODELS: Dict[str, DirectModel] = {
+    # Sonnet 5.5 recommends ``low`` for chat and search; it still thinks when a message needs it.
+    "sonnet-5.5-direct": DirectModel("claude-sonnet-5-5", 2.00, 10.00, 2.50, 0.20, effort="low"),
+    # Opus 5.5 can't turn thinking off; ``medium`` is its default effort.
+    "opus-5.5-direct": DirectModel("claude-opus-5-5", 4.00, 20.00, 5.00, 0.20, effort="medium"),
+}
+_MODELS_BY_API_ID: Dict[str, DirectModel] = {m.api_id: m for m in DIRECT_MODELS.values()}
+
 PRICE_WEB_SEARCH = 0.01
 
 MAX_TOKENS = 16000
-# Sonnet 5.5 recommends ``low`` for chat and search; it still thinks when a message needs it.
-EFFORT = "low"
 WEB_SEARCH_MAX_USES = 5
 # A web-search turn can come back as ``pause_turn``; resume it this many times.
 MAX_CONTINUATIONS = 3
@@ -131,15 +140,15 @@ def apply_history_breakpoints(
     return current_index
 
 
-def _usage_cost(usage: Any) -> float:
-    """Price a response's ``usage`` block in USD."""
+def _usage_cost(usage: Any, model: DirectModel) -> float:
+    """Price a response's ``usage`` block in USD at ``model``'s rates."""
     if usage is None:
         return 0.0
     cost = (
-        (getattr(usage, "input_tokens", 0) or 0) * PRICE_INPUT_PER_M
-        + (getattr(usage, "output_tokens", 0) or 0) * PRICE_OUTPUT_PER_M
-        + (getattr(usage, "cache_creation_input_tokens", 0) or 0) * PRICE_CACHE_WRITE_PER_M
-        + (getattr(usage, "cache_read_input_tokens", 0) or 0) * PRICE_CACHE_READ_PER_M
+        (getattr(usage, "input_tokens", 0) or 0) * model.price_input
+        + (getattr(usage, "output_tokens", 0) or 0) * model.price_output
+        + (getattr(usage, "cache_creation_input_tokens", 0) or 0) * model.price_cache_write
+        + (getattr(usage, "cache_read_input_tokens", 0) or 0) * model.price_cache_read
     ) / 1_000_000
     server_tool_use = getattr(usage, "server_tool_use", None)
     searches = (getattr(server_tool_use, "web_search_requests", 0) or 0) if server_tool_use else 0
@@ -227,7 +236,8 @@ class AnthropicService:
     ) -> Tuple[str, float]:
         """Get a chat completion from the Claude API. Returns ``(text, cost)``."""
         client = self.get_client()
-        api_model = DIRECT_MODELS.get(model, model)
+        direct_model = DIRECT_MODELS.get(model) or DIRECT_MODELS["sonnet-5.5-direct"]
+        api_model = direct_model.api_id
         api_messages = build_anthropic_messages(messages)
         if not api_messages:
             raise AnthropicServiceError("No usable messages to send to Claude.")
@@ -235,7 +245,7 @@ class AnthropicService:
         kwargs: Dict[str, Any] = {
             "model": api_model,
             "max_tokens": MAX_TOKENS,
-            "output_config": {"effort": EFFORT},
+            "output_config": {"effort": direct_model.effort},
             # On a safety decline, let the API re-run on its recommended fallback model.
             "betas": ["server-side-fallback-2026-07-01", CACHE_DIAGNOSIS_BETA],
             "fallbacks": "default",
@@ -266,7 +276,9 @@ class AnthropicService:
                     diagnostics={"previous_message_id": previous_message_id},
                     **kwargs,
                 )
-                total_cost += _usage_cost(getattr(response, "usage", None))
+                # A safety fallback can serve the turn on another model; price it at that model's rates.
+                served_by = _MODELS_BY_API_ID.get(getattr(response, "model", None), direct_model)
+                total_cost += _usage_cost(getattr(response, "usage", None), served_by)
                 _log_cache_diagnostics(api_model, channel_id, response)
                 previous_message_id = getattr(response, "id", None) or previous_message_id
                 if response.stop_reason != "pause_turn":
