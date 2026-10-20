@@ -1,8 +1,10 @@
-"""Redis storage for per-user memory.
+"""Redis storage for per-user memory and per-channel summaries.
 
 One key per user holds their current profile and nothing else (no history):
 
 - ``cmwgpt:memory:<guild_id>:<user_id>`` - the profile text, at most ``MAX_PROFILE_BYTES``
+- ``cmwgpt:channel_summary:<guild_id>:<channel_id>`` - what's been going on lately in a
+  channel, at most ``MAX_PROFILE_BYTES``
 - ``cmwgpt:memory_job:<guild_id>`` - hash with the nightly job's ``processed_through``,
   ``last_run_at`` and ``last_status``
 
@@ -25,6 +27,10 @@ MAX_PROFILE_BYTES = 100 * 1024
 
 def _profile_key(guild_id: int, user_id: int) -> str:
     return f"{KEY_PREFIX}memory:{guild_id}:{user_id}"
+
+
+def _channel_summary_key(guild_id: int, channel_id: int) -> str:
+    return f"{KEY_PREFIX}channel_summary:{guild_id}:{channel_id}"
 
 
 def _job_key(guild_id: int) -> str:
@@ -77,6 +83,26 @@ class MemoryStore:
         """Wipe every profile in a server (used by /fillmemory)."""
         client = self._redis_getter()
         keys = [key async for key in client.scan_iter(match=f"{KEY_PREFIX}memory:{guild_id}:*", count=500)]
+        if keys:
+            await client.delete(*keys)
+
+    async def get_channel_summary(self, guild_id: int, channel_id: int) -> str:
+        """Return a channel's summary, or an empty string if none."""
+        return await self._redis_getter().get(_channel_summary_key(guild_id, channel_id)) or ""
+
+    async def save_channel_summary(self, guild_id: int, channel_id: int, summary: str) -> None:
+        """Replace a channel's summary (an empty one removes it)."""
+        key = _channel_summary_key(guild_id, channel_id)
+        if not summary:
+            await self._redis_getter().delete(key)
+            return
+        await self._redis_getter().set(key, cap_profile(summary))
+
+    async def clear_channel_summaries(self, guild_id: int) -> None:
+        """Wipe every channel summary in a server (used by /fillmemory)."""
+        client = self._redis_getter()
+        match = f"{KEY_PREFIX}channel_summary:{guild_id}:*"
+        keys = [key async for key in client.scan_iter(match=match, count=500)]
         if keys:
             await client.delete(*keys)
 

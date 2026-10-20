@@ -82,6 +82,7 @@ class MentionHandler:
         url_converter: Callable[[str], Awaitable[str]] = url_to_base64_data_url,
         url_content_fetcher: Callable[[str], Awaitable[tuple[str, List[Dict[str, Any]]]]] = fetch_all_url_content,
         user_notes_provider: Optional[Callable[[int, Sequence[int]], Awaitable[str]]] = None,
+        channel_summary_provider: Optional[Callable[[int, int], Awaitable[str]]] = None,
         day_summary_provider: Optional[
             Callable[[Any, discord.Message, int, str], Awaitable[tuple[str, float]]]
         ] = None,
@@ -99,6 +100,7 @@ class MentionHandler:
         self._url_converter = url_converter
         self._url_content_fetcher = url_content_fetcher
         self._user_notes_provider = user_notes_provider
+        self._channel_summary_provider = channel_summary_provider
         self._day_summary_provider = day_summary_provider
         # Cache for history fetching optimization (bounded, LRU-ish eviction)
         # channel_id -> {"timestamp": float, "oldest_message": discord.Message}
@@ -337,6 +339,12 @@ class MentionHandler:
 
         history_msgs = _mention_last(history_msgs, message)
 
+        # What's been going on lately (rebuilt nightly), then today's chat from before
+        # the history window.
+        channel_summary = ""
+        if self._channel_summary_provider and message.guild:
+            channel_summary = await self._channel_summary_provider(message.guild.id, message.channel.id)
+
         # Summarize today's chat from before the history window. It only changes when
         # the window moves, which already rebuilds the cached prefix, so it can go in
         # the system prompt.
@@ -389,6 +397,8 @@ class MentionHandler:
         how_i_work = _load_how_i_work()
         if how_i_work:
             current_channel_system_prompt += f"{how_i_work}\n\n"
+        if channel_summary:
+            current_channel_system_prompt += f"{channel_summary}\n\n"
         if day_summary:
             current_channel_system_prompt += (
                 "## Earlier today in this channel\n"

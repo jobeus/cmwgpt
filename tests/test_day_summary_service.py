@@ -168,8 +168,9 @@ class TestDaySummaryService(unittest.IsolatedAsyncioTestCase):
 
 
 class TestMentionDaySummary(unittest.IsolatedAsyncioTestCase):
-    async def test_summary_goes_in_system_prompt_and_cost_is_returned(self):
+    async def test_summaries_go_in_system_prompt_lately_first_and_cost_is_returned(self):
         provider = AsyncMock(return_value=("talked about tacos", 0.02))
+        channel_provider = AsyncMock(return_value="## Lately in this channel\n<channel_summary>\ntrucks\n</channel_summary>")
         state_service = MagicMock()
         state_service.get_system_prompt.return_value = None
         handler = MentionHandler(
@@ -181,6 +182,7 @@ class TestMentionDaySummary(unittest.IsolatedAsyncioTestCase):
             include_num_chatlines=10,
             mention_legend_provider=AsyncMock(return_value="legend"),
             url_content_fetcher=AsyncMock(return_value=("", [])),
+            channel_summary_provider=channel_provider,
             day_summary_provider=provider,
         )
         history = [make_msg(i) for i in range(3)]
@@ -191,13 +193,16 @@ class TestMentionDaySummary(unittest.IsolatedAsyncioTestCase):
                 yield msg
 
         mention.channel = SimpleNamespace(id=5, name="general", history=channel_history)
+        mention.guild = SimpleNamespace(id=42)
 
         _, system_prompt, cost = await handler._prepare_mention_context(
             mention, SimpleNamespace(id=BOT_ID), model="model-x"
         )
 
         provider.assert_awaited_once_with(mention.channel, history[0], BOT_ID, "model-x")
+        channel_provider.assert_awaited_once_with(42, 5)
         self.assertIn("<day_summary>\ntalked about tacos\n</day_summary>", system_prompt)
+        self.assertLess(system_prompt.index("<channel_summary>"), system_prompt.index("<day_summary>"))
         self.assertEqual(cost, 0.02)
 
 

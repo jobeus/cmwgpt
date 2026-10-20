@@ -115,7 +115,7 @@ flowchart TB
     Factory --> Mention[MentionHandler]:::svc
 
     MemStore --> Memory
-    Memory -->|user notes| Mention
+    Memory -->|user notes, channel summary| Mention
     DaySummary -->|day summary| Mention
 
 

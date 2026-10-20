@@ -46,6 +46,17 @@ it adds the profiles of the asker, anyone they @mentioned and the
 recent speakers (up to 8 people) to the end of the mention. The cached system prompt and
 history stay unchanged.
 
+The same nightly run also keeps a summary of what's been going on lately in each channel
+(`cmwgpt:channel_summary:<guild>:<channel>`). It summarizes each channel's day, then folds
+that into the channel's running summary, which is organized by topic and drops items that
+haven't come up in 14 days. All memory calls, including `/memory correct`, use medium effort on Claude API models.
+
+A mention's prompt carries, in order: the channel's lately summary and a summary of the
+channel's chat since 02:00 from before the recent history (both in the system prompt), the
+last `INCLUDE_NUM_CHATLINES` messages, then the people's profiles on the mention. The
+since-02:00 summary uses the mention's model, is kept in memory, and only reads new messages
+as the history window moves forward.
+
 Every `/memory` command replies only to you. `correct` sends your correction and the current
 profile to `MEMORY_MODEL`, which changes, removes or adds only what the correction covers, and
 then shows you the updated profile (as a paste.rs link if it's over 2000 characters). Corrections live in the same profile the nightly job
@@ -57,7 +68,7 @@ there is no history of earlier versions.
 ### `/fillmemory`
 
 Requires the same administrator permission as `/restart`. It wipes every learned profile
-in the server and rebuilds them from the last 7 days, posting progress after each day. The
+and channel summary in the server and rebuilds them from the last 7 days, posting progress after each day. The
 nightly job then picks up from where the fill ended.
 
 ## Model and prompt commands

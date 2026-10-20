@@ -101,6 +101,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         system_prompt_loader=lambda: get_system_prompt(app_config.system_prompt_path),
         include_num_chatlines=app_config.include_num_chatlines,
         user_notes_provider=memory_service.get_notes_block,
+        channel_summary_provider=memory_service.get_channel_summary,
         day_summary_provider=day_summary_service.get_summary,
     )
 

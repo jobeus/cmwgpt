@@ -32,6 +32,7 @@ async def dispatch_completion(
     anthropic_service: Any = None,
     search: bool = True,
     on_text: Optional[Callable[[str], None]] = None,
+    effort: Optional[str] = None,
 ) -> Tuple[ReplyContent, float]:
     """Route ``messages`` to the right model(s) and return ``(reply, cost)``.
 
@@ -45,6 +46,8 @@ async def dispatch_completion(
         search: Whether the OpenRouter and Claude API routes may use web search.
         on_text: Called with the reply so far while it streams in. The OpenRouter and
             Claude API routes stream; Gemini returns the whole reply at once.
+        effort: Overrides the model's default effort level on the Claude API route;
+            the other routes ignore it.
     """
     reply_content: ReplyContent = None
     cost = 0.0
@@ -64,6 +67,7 @@ async def dispatch_completion(
             system_prompt=system_prompt,
             search=search,
             on_text=on_text,
+            effort=effort,
             **identity,
         )
     else:

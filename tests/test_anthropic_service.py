@@ -150,6 +150,13 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["output_config"], {"effort": "low"})
         self.assertAlmostEqual(cost, 4.00)
 
+    async def test_effort_override_replaces_model_effort(self):
+        service, client = self.make_service(_response("deep"))
+        await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}], effort="medium")
+        kwargs = client.beta.messages.create.call_args.kwargs
+        self.assertEqual(kwargs["output_config"], {"effort": "medium"})
+
     async def test_fallback_turn_is_priced_at_the_serving_model(self):
         usage = _usage(input_tokens=1_000_000, output_tokens=0)
         service, _ = self.make_service(_response("rescued", usage=usage, model="claude-sonnet-5-5"))

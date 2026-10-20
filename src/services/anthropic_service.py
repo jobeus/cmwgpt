@@ -234,10 +234,12 @@ class AnthropicService:
         discord_user_id: Optional[int] = None,  # noqa: ARG002 - identity kwarg shared by all services
         search: bool = True,
         on_text: Optional[Callable[[str], None]] = None,
+        effort: Optional[str] = None,
     ) -> Tuple[str, float]:
         """Get a chat completion from the Claude API. Returns ``(text, cost)``.
 
         With ``on_text``, the reply is streamed and ``on_text`` gets the cleaned text so far.
+        ``effort`` overrides the model's default effort level.
         """
         client = self.get_client()
         resolved_bot_id = resolve_bot_id(bot_id, state_service, self._bot_id_loader)
@@ -250,7 +252,7 @@ class AnthropicService:
         kwargs: Dict[str, Any] = {
             "model": api_model,
             "max_tokens": MAX_TOKENS,
-            "output_config": {"effort": direct_model.effort},
+            "output_config": {"effort": effort or direct_model.effort},
             # On a safety decline, let the API re-run on its recommended fallback model.
             "betas": ["server-side-fallback-2026-07-01", CACHE_DIAGNOSIS_BETA],
             "fallbacks": "default",

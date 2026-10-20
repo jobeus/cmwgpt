@@ -72,6 +72,24 @@ class TestMemoryStore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.store.get_processed_through(42), when)
         self.assertEqual(len(await self.redis.hget("cmwgpt:memory_job:42", "last_status")), 255)
 
+    async def test_channel_summaries_round_trip_and_clear_per_guild(self):
+        await self.store.save_channel_summary(42, 5, "tacos (2026-10-15)")
+        await self.store.save_channel_summary(43, 5, "other server")
+        await self.store.save_profile(42, 1, "profile")
+        self.assertEqual(await self.store.get_channel_summary(42, 5), "tacos (2026-10-15)")
+        self.assertEqual(await self.store.get_channel_summary(42, 6), "")
+
+        await self.store.clear_learned_profiles(42)
+        self.assertEqual(await self.store.get_channel_summary(42, 5), "tacos (2026-10-15)")
+
+        await self.store.clear_channel_summaries(42)
+        self.assertEqual(await self.store.get_channel_summary(42, 5), "")
+        self.assertEqual(await self.store.get_channel_summary(43, 5), "other server")
+        self.assertEqual(await self.store.get(42, 1), "")
+
+        await self.store.save_channel_summary(43, 5, "")
+        self.assertFalse(await self.redis.exists("cmwgpt:channel_summary:43:5"))
+
 
 class TestRedisClient(unittest.TestCase):
     def test_refuses_real_clients_under_tests(self):
@@ -81,6 +99,7 @@ class TestRedisClient(unittest.TestCase):
             redis_client.get_async_redis()
         with patch("src.config._cached_config", cfg(is_testing=True)), self.assertRaises(RuntimeError):
             redis_client.get_sync_redis()
+
 
 
 if __name__ == "__main__":
