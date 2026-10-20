@@ -18,10 +18,6 @@ from src.bot.commands.memory import MemoryCommands
 from src.bot.commands.wikicount import WikiCountCommands
 from src.services.model_catalog import is_model_unavailable
 
-from src.utils.logger import setup_logger
-
-# Configure logging
-root_logger = setup_logger()
 logger = logging.getLogger("discord_bot")
 
 

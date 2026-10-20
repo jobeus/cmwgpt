@@ -116,9 +116,11 @@ class TestMainSignalHandlers(unittest.TestCase):
         bot_client = MagicMock()
         bot_client.services.restart_handler.exit_code = None
 
-        with patch("src.startup.create_bot_client", return_value=bot_client):
+        with patch("src.startup.create_bot_client", return_value=bot_client), \
+                patch("src.utils.logger.setup_logger") as mock_setup_logger:
             runpy.run_module("main", run_name="__main__")
 
+        mock_setup_logger.assert_called_once_with()
         bot_client.run.assert_called_once_with()
         # setup_signal_handlers must have replaced the bot's setup_hook with
         # the signal-registering wrapper.

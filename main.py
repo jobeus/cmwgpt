@@ -6,6 +6,7 @@ import signal
 import sys
 
 from src.startup import create_bot_client
+from src.utils.logger import setup_logger
 
 logger = logging.getLogger(__name__)
 
@@ -68,4 +69,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Configured here rather than on import so tests never write to logs/.
+    setup_logger()
     main()
