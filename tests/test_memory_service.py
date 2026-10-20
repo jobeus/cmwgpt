@@ -275,6 +275,33 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(progress.await_count, 7)
         self.assertEqual(store.job_states[-1][0], now.replace(tzinfo=None))
 
+    async def test_fill_channel_summaries_leaves_profiles_and_job_state_alone(self):
+        store = FakeStore({1: "Stable: drives a Ranger"})
+        store.channel_summaries[5] = "stale"
+        now = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
+        service, _ = self.make_service(store, now)
+        guild = self.make_guild([make_msg(1, "bought the tacoma!", name="Jobe")])
+        progress = AsyncMock()
+
+        async def fake_dispatch(**kwargs):
+            self.assertIn(kwargs["system_prompt"], (DAY_SUMMARY_SYSTEM_PROMPT, CHANNEL_SUMMARY_SYSTEM_PROMPT))
+            if kwargs["system_prompt"] == DAY_SUMMARY_SYSTEM_PROMPT:
+                return "<@1> bought the Tacoma", 0.01
+            self.assertIn("Current summary:\n(none)", kwargs["messages"][0]["content"][0]["text"])
+            return "<@1> bought a Tacoma (2026-10-15)", 0.02
+
+        with patch("src.services.memory_service.dispatch_completion", side_effect=fake_dispatch):
+            totals = await service.fill_channel_summaries(guild, progress=progress)
+
+        self.assertEqual(store.cleared_channel_summaries, [42])
+        self.assertEqual(store.channel_summaries[5], "<@1> bought a Tacoma (2026-10-15)")
+        self.assertEqual(store.rows, {1: "Stable: drives a Ranger"})
+        self.assertEqual(store.cleared_guilds, [])
+        self.assertEqual(store.job_states, [])
+        self.assertEqual((totals["days"], totals["messages"], totals["channels"]), (7, 1, 1))
+        self.assertAlmostEqual(totals["cost"], 0.03)
+        self.assertEqual(progress.await_count, 7)
+
     async def test_nightly_resumes_from_stored_state_and_caps_catchup(self):
         store = FakeStore()
         now = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)

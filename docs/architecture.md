@@ -298,7 +298,7 @@ flowchart LR
 
 1. Every night, `MemoryService` reads the chat since its last run and replaces each person's profile at `cmwgpt:memory:<guild>:<user>` in Redis (one key per user, no history, max 100 KB).
 2. `cmwgpt:memory_job:<guild>` tracks how far each server has been processed.
-3. `/memory` and `/fillmemory` read and change the same keys (see `docs/commands.md`).
+3. `/memory`, `/fillmemory` and `/fillsummaries` read and change the same keys (see `docs/commands.md`).
 
 ### Shutdown and restart
 

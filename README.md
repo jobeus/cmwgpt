@@ -67,7 +67,7 @@ Redis isn't exposed on the host. The bot itself does not listen on any port.
 | General | `/help`, `/model`, `/restart`, `/wikicount` |
 | Prompting | `/systemprompt set`, `/systemprompt view`, `/systemprompt reset` |
 | Images | `/draw`, `/drawmodel`, `/edit`, `/editmodel` |
-| Memory | `/memory show`, `/memory correct`, `/memory clear`, `/fillmemory` |
+| Memory | `/memory show`, `/memory correct`, `/memory clear`, `/fillmemory`, `/fillsummaries` |
 | Deathwatch | `/death set`, `/death view`, `/death reset` |
 
 Chat itself remains mention-based.

@@ -14,7 +14,7 @@ chat in that channel is summarized, then folded into the channel's running summa
 dropping items that haven't come up in ``CHANNEL_SUMMARY_DAYS`` days.
 
 ``/fillmemory`` rebuilds every learned profile and channel summary from the last seven
-days the same way. At reply time, :meth:`MemoryService.get_notes_block` returns the
+days the same way; ``/fillsummaries`` rebuilds only the channel summaries. At reply time, :meth:`MemoryService.get_notes_block` returns the
 profiles of the people in the conversation and :meth:`MemoryService.get_channel_summary`
 the channel's summary, for the mention handler to add to the prompt.
 
@@ -169,6 +169,11 @@ def next_run_after(now: datetime) -> datetime:
     if candidate <= local_now:
         candidate = datetime.combine(local_now.date() + timedelta(days=1), JOB_TIME, tzinfo=JOB_TIMEZONE)
     return candidate
+
+
+def _window_date(start: datetime, end: datetime) -> date:
+    """The local date the chat in a window mostly happened on (a 02:00-to-02:00 window belongs to its first day)."""
+    return (start + (end - start) / 2).astimezone(JOB_TIMEZONE).date()
 
 
 def split_windows(start: datetime, end: datetime) -> List[Tuple[datetime, datetime]]:
@@ -387,6 +392,42 @@ class MemoryService:
                 guild, split_windows(now - timedelta(days=FILL_DAYS), now), source="fill", progress=progress
             )
 
+    async def fill_channel_summaries(
+        self, guild: discord.Guild, progress: Optional[ProgressCallback] = None
+    ) -> Dict[str, Any]:
+        """Wipe the server's channel summaries and rebuild them from the last week.
+
+        Profiles, corrections and the nightly job's progress are left alone. Raises
+        ``RuntimeError`` if a run is already going.
+        """
+        if self.busy:
+            raise RuntimeError("A memory run is already in progress.")
+        async with self._lock:
+            now = self._now()
+            bot_id = self._bot.user.id if self._bot and self._bot.user else None
+            await self._store.clear_channel_summaries(guild.id)
+            windows = split_windows(now - timedelta(days=FILL_DAYS), now)
+            totals: Dict[str, Any] = {"days": 0, "messages": 0, "channels": set(), "cost": 0.0}
+            for index, (start, end) in enumerate(windows, 1):
+                channel_messages = await self._fetch_messages(guild, start, end)
+                messages = sum(len(msgs) for _, msgs in channel_messages)
+                totals["cost"] += await self._update_channel_summaries(
+                    guild.id, channel_messages, bot_id, _window_date(start, end)
+                )
+                totals["days"] += 1
+                totals["messages"] += messages
+                totals["channels"].update(channel.id for channel, _ in channel_messages)
+                if progress:
+                    await progress(
+                        f"Day {index}/{len(windows)}: read {messages} messages in {len(channel_messages)} channels"
+                    )
+            totals["channels"] = len(totals["channels"])
+            logger.info(
+                f"Channel summary fill for guild {guild.id}: {totals['days']} days, {totals['messages']} messages, "
+                f"{totals['channels']} channels, ${totals['cost']:.4f}"
+            )
+            return totals
+
     async def _run_windows(
         self,
         guild: discord.Guild,
@@ -429,18 +470,9 @@ class MemoryService:
         bot_id = self._bot.user.id if self._bot and self._bot.user else None
         channel_messages = await self._fetch_messages(guild, start, end)
         message_count = sum(len(msgs) for _, msgs in channel_messages)
-        # The local date the chat mostly happened on (a 02:00-to-02:00 window belongs to its first day).
-        today = (start + (end - start) / 2).astimezone(JOB_TIMEZONE).date()
+        today = _window_date(start, end)
         stats: Dict[str, Any] = {"messages": message_count, "users_updated": [], "cost": 0.0}
-
-        semaphore = asyncio.Semaphore(MERGE_CONCURRENCY)
-
-        async def summarize_channel(channel: Any, messages: List[discord.Message]) -> float:
-            async with semaphore:
-                return await self._update_channel_summary(guild.id, channel, messages, bot_id, today)
-
-        channel_costs = await asyncio.gather(*(summarize_channel(c, m) for c, m in channel_messages))
-        stats["cost"] += sum(channel_costs)
+        stats["cost"] += await self._update_channel_summaries(guild.id, channel_messages, bot_id, today)
 
         chunks, speakers = build_transcript_chunks([(c.name, m) for c, m in channel_messages], bot_id)
         if not chunks or not speakers:
@@ -459,6 +491,7 @@ class MemoryService:
             return stats
 
         existing = await self._store.get_many(guild.id, observations.keys())
+        semaphore = asyncio.Semaphore(MERGE_CONCURRENCY)
 
         async def merge_one(user_id: int, facts: List[str]) -> float:
             async with semaphore:
@@ -472,6 +505,22 @@ class MemoryService:
         stats["cost"] += sum(costs)
         stats["users_updated"] = list(observations.keys())
         return stats
+
+    async def _update_channel_summaries(
+        self,
+        guild_id: int,
+        channel_messages: List[Tuple[Any, List[discord.Message]]],
+        bot_id: Optional[int],
+        today: date,
+    ) -> float:
+        """Fold one day into every channel's summary, a few channels at a time. Returns the cost."""
+        semaphore = asyncio.Semaphore(MERGE_CONCURRENCY)
+
+        async def summarize_channel(channel: Any, messages: List[discord.Message]) -> float:
+            async with semaphore:
+                return await self._update_channel_summary(guild_id, channel, messages, bot_id, today)
+
+        return sum(await asyncio.gather(*(summarize_channel(c, m) for c, m in channel_messages)))
 
     async def _update_channel_summary(
         self, guild_id: int, channel: Any, messages: List[discord.Message], bot_id: Optional[int], today: date

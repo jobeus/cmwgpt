@@ -33,7 +33,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 **Memory:**
 - At 02:00 Denver every night, a job runs on `sonnet-5.5-direct` over the previous day's chat in every channel you can see. It pulls out facts per person and merges them into one Redis profile per user per server, with Stable, Current and Style parts. Current items expire after 3 weeks. The same job also summarizes each channel's day and folds it into that channel's "lately" summary. Its calls, and `/memory correct`, use medium effort.
 - The profiles of up to 8 relevant people are appended to the mention as `<user_notes>`: the asker, anyone they @mentioned, and recent speakers.
-- `/memory show|correct|clear` lets people view or fix their own profile. `/fillmemory` (admin only) rebuilds every profile and channel summary from the last 7 days.
+- `/memory show|correct|clear` lets people view or fix their own profile. `/fillmemory` (admin only) rebuilds every profile and channel summary from the last 7 days. `/fillsummaries` (admin only) rebuilds just the channel summaries.
 
 **Models:** each channel picks one with `/model`. The default is `anthropic/claude-sonnet-5.5` via OpenRouter.
 - **Claude API direct**, `sonnet-5.5-direct` and `opus-5.5-direct`:

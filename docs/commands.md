@@ -30,6 +30,7 @@ The bot's main chat experience is **mention-based**:
 | `/memory correct` | Privately has the memory model fix or add to your memory | persisted per user, per server |
 | `/memory clear` | Privately forgets everything about you | persisted per user, per server |
 | `/fillmemory` | Rebuilds everyone's learned memory from the last 7 days (admin only) | rewrites `user_memory` |
+| `/fillsummaries` | Rebuilds every channel's "lately" summary from the last 7 days (admin only) | rewrites channel summaries |
 | `/wikicount` | Looks up a Wikipedia article's average monthly pageviews | runtime action |
 | `/restart` | Triggers restart flow and `git pull` | runtime action |
 
@@ -70,6 +71,12 @@ there is no history of earlier versions.
 Requires the same administrator permission as `/restart`. It wipes every learned profile
 and channel summary in the server and rebuilds them from the last 7 days, posting progress after each day. The
 nightly job then picks up from where the fill ended.
+
+### `/fillsummaries`
+
+Same permission as `/fillmemory`. It wipes and rebuilds only the channel "lately" summaries
+from the last 7 days, posting progress after each day. People's profiles, their corrections
+and the nightly job's progress are left alone.
 
 ## Model and prompt commands
 
