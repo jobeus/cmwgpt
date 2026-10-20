@@ -1,6 +1,6 @@
 # Configuration reference
 
-This page focuses on the env vars that matter in the **current** runtime: the Python bot and the MariaDB database that stores per-user memory.
+This page focuses on the env vars that matter in the **current** runtime: the Python bot and the Redis instance that stores per-user memory and content caches.
 
 ## Which env file should you edit?
 
@@ -49,18 +49,6 @@ These are loaded by `src/config.py`.
 | --- | --- | --- |
 | `REDIS_URL` | `redis://127.0.0.1:6379/0` | Per-user memory and content caches; use `redis://redis:6379/0` in the Docker dev stack. See `docs/redis_setup.md` |
 
-## MariaDB variables
-
-Memory used to live in MariaDB. Now the bot only reads it once, on the first start with Redis, to copy everyone's memory over (`MemoryStore.migrate_from_mariadb`). Leave `DB_PASSWORD` empty on a fresh install to skip that.
-
-| Variable | Default | Notes |
-| --- | --- | --- |
-| `DB_HOST` | `127.0.0.1` | Use `db` in Docker dev stack |
-| `DB_PORT` | `3306` | Standard MariaDB port |
-| `DB_USER` | `cmwgpt_user` | App DB user |
-| `DB_PASSWORD` | empty | Must be set for real deployments |
-| `DB_NAME` | `cmwgpt` | Database containing the `user_memory` tables |
-
 ## Recommended minimal setups
 
 ### Minimal bot-only local setup
@@ -84,7 +72,7 @@ Add these as needed:
 Use `.env.development.example` as the baseline. It already includes:
 
 - bot variables
-- MariaDB container values
+- the Redis container URL
 
 ## Reality checks and gotchas
 

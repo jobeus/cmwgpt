@@ -1,26 +1,4 @@
 services:
-  db:
-    image: mariadb:11.7
-    restart: unless-stopped
-    env_file:
-      - .env.development
-    environment:
-      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-change-me-root}
-    ports:
-      - "${DB_EXPOSE_PORT:-3306}:3306"
-    volumes:
-      - mariadb-data:/var/lib/mysql
-      - ./init_db.sql:/docker-entrypoint-initdb.d/01-init_db.sql:ro
-      - ./docker/mariadb/conf.d/zz-cmwgpt.cnf:/etc/mysql/conf.d/zz-cmwgpt.cnf:ro
-      - ./docker/mariadb/entrypoint.sh:/cmwgpt-entrypoint.sh:ro
-    entrypoint: ["/bin/sh", "/cmwgpt-entrypoint.sh"]
-    healthcheck:
-      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -u$${DB_USER:-cmwgpt_user} -p$${DB_PASSWORD:-change-me-db} --silent"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 20s
-
   redis:
     image: redis:7.4
     restart: unless-stopped
@@ -43,8 +21,6 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
@@ -52,5 +28,4 @@ services:
     command: python main.py
 
 volumes:
-  mariadb-data:
   redis-data:

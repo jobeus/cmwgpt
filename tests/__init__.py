@@ -8,5 +8,5 @@ import tempfile
 _settings_dir = tempfile.TemporaryDirectory(prefix="cmwgpt-test-")
 os.environ["CMWGPT_SETTINGS_FILE"] = os.path.join(_settings_dir.name, "cmwgpt_settings.json")
 
-# Same as CI: no real Redis or MariaDB clients, so tests never touch live data.
+# Same as CI: no real Redis clients, so tests never touch live data.
 os.environ.setdefault("TESTING", "true")

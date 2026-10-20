@@ -1,6 +1,6 @@
 # CMWGPT
 
-Mention-first Discord bot with URL-aware prompt enrichment, image generation/editing, and MariaDB-backed per-user memory.
+Mention-first Discord bot with URL-aware prompt enrichment, image generation/editing, and Redis-backed per-user memory.
 
 ## Start here
 
@@ -28,7 +28,7 @@ Mention-first Discord bot with URL-aware prompt enrichment, image generation/edi
 | Context building | Recent channel history, reply context, embeds, and attachments are folded into the prompt |
 | URL enrichment | The bot can inject transcripts/context from YouTube, TikTok, Twitter/X, Facebook, and generic articles |
 | Images | Slash commands support image generation and image editing through `RunpodService` |
-| Memory | A nightly job learns short per-user profiles (stored in MariaDB) and adds them to mentions; `/memory` shows and edits them |
+| Memory | A nightly job learns short per-user profiles (stored in Redis) and adds them to mentions; `/memory` shows and edits them |
 | Observability | Python logging goes to stdout and `logs/`; there is no request log table or log viewer |
 
 ## Choose a workflow
@@ -47,7 +47,7 @@ python3 -m venv .venv
 
 ### 2. Full-stack development with Docker
 
-Use this if you want bot + MariaDB together.
+Use this if you want bot + Redis together.
 
 ```bash
 cp .env.development.example .env.development
@@ -58,9 +58,7 @@ Default dev ports:
 
 | Service | Port |
 | --- | --- |
-| MariaDB | `3306` |
-
-The bot itself does not listen on any port.
+Redis isn't exposed on the host. The bot itself does not listen on any port.
 
 ## Current user-facing commands
 
@@ -93,25 +91,19 @@ Chat itself remains mention-based.
 | `GROQ_API_KEY` | Using TikTok/Facebook/Twitter-video transcription | Runs audio transcription |
 | `TRANSCRIPT_PROXY` | Optional | Helps when direct transcript/media fetches fail |
 
-### Database essentials
+### Storage
 
 | Variable | Default | Why |
 | --- | --- | --- |
-| `DB_HOST` | `127.0.0.1` | MariaDB host |
-| `DB_PORT` | `3306` | MariaDB port |
-| `DB_USER` | `cmwgpt_user` | MariaDB user |
-| `DB_PASSWORD` | empty | MariaDB password |
-| `DB_NAME` | `cmwgpt` | Database name |
-
 | `REDIS_URL` | `redis://127.0.0.1:6379/0` | Redis for per-user memory and content caches |
 
-Redis holds per-user memory and the content caches; see `docs/redis_setup.md`. MariaDB is only read once, to import memory from before the switch.
+Redis holds per-user memory and the content caches; see `docs/redis_setup.md`.
 
 For the full reference, see `docs/configuration.md`.
 
 ## Architecture in one paragraph
 
-`main.py` boots `src/startup.py`, which wires services like `StateService`, `QueueService`, `OpenAIService`, `GeminiService`, `RunpodService`, `DeathService`, `MemoryService`, and `MentionHandler` into `DiscordBotClient`. Mention replies are assembled by `src/bot/handlers/mention.py` (context built via `src/utils/chat_context.py`), enriched through `src/utils/downloader_utils.py`, then routed by `src/services/completion_dispatch.py` to OpenRouter, native Gemini, or the Claude API for text output. Outbound URL fetches go through `src/utils/http_client.py`, which re-checks the SSRF guard on every redirect and caps body size and total time. MariaDB holds only the per-user memory that `MemoryService` learns nightly and adds to mentions.
+`main.py` boots `src/startup.py`, which wires services like `StateService`, `QueueService`, `OpenAIService`, `GeminiService`, `RunpodService`, `DeathService`, `MemoryService`, and `MentionHandler` into `DiscordBotClient`. Mention replies are assembled by `src/bot/handlers/mention.py` (context built via `src/utils/chat_context.py`), enriched through `src/utils/downloader_utils.py`, then routed by `src/services/completion_dispatch.py` to OpenRouter, native Gemini, or the Claude API for text output. Outbound URL fetches go through `src/utils/http_client.py`, which re-checks the SSRF guard on every redirect and caps body size and total time. Redis holds the per-user memory that `MemoryService` learns nightly and adds to mentions, plus the URL content caches.
 
 For diagrams and a deeper walkthrough, see `docs/architecture.md`.
 
@@ -144,5 +136,4 @@ The docs are meant to be read as a small system, not as isolated files:
 - `docs/development.md` - local and Docker workflows
 - `docs/deployment.md` - runtime/deployment notes
 - `docs/redis_setup.md` - Redis setup for memory and caches
-- `docs/mariadb_setup.md` - the old memory tables (one-time import)
 - `docs/troubleshooting.md` - common failure modes

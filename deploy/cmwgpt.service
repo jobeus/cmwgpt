@@ -7,7 +7,7 @@
 [Unit]
 Description=cmwgpt Discord bot
 Wants=network-online.target
-After=network-online.target redis-server.service mariadb.service
+After=network-online.target redis-server.service
 
 [Service]
 Type=simple

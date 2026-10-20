@@ -1,9 +1,7 @@
 """Tests for persistent cache helpers."""
 
 import json
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import fakeredis
@@ -15,17 +13,7 @@ from src.utils.cache_utils import LRUCache, PersistentCache
 
 class TestPersistentCache(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.tmpdir = self._tmp.name
-        patcher = patch("src.utils.cache_utils.CACHE_DIR", self.tmpdir)
-        patcher.start()
         self.redis = fakeredis.FakeRedis(decode_responses=True)
-
-        def cleanup():
-            patcher.stop()
-            self._tmp.cleanup()
-
-        self.addCleanup(cleanup)
 
     def make(self, name, **kwargs):
         return PersistentCache(name, client_getter=lambda: self.redis, **kwargs)
@@ -70,18 +58,6 @@ class TestPersistentCache(unittest.TestCase):
             cache = self.make("big")
             cache["k"] = "x" * 50
         self.assertIsNone(cache.get("k"))
-
-    def test_imports_legacy_json_file_once_then_renames_it(self):
-        path = Path(self.tmpdir) / "legacy.json"
-        path.write_text(json.dumps({"a": "old", "b": "old"}), encoding="utf-8")
-        self.redis.set("cmwgpt:cache:legacy:b", json.dumps("newer"))
-
-        cache = self.make("legacy")
-
-        self.assertEqual(cache.get("a"), "old")
-        self.assertEqual(cache.get("b"), "newer")  # what's already in Redis wins
-        self.assertFalse(path.exists())
-        self.assertTrue((Path(self.tmpdir) / "legacy.json.migrated").exists())
 
     def test_without_redis_it_works_from_memory(self):
         def unavailable():

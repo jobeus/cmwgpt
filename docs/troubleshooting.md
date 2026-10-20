@@ -73,12 +73,11 @@ The cause is logged at warning level in the normal bot log.
 
 | Problem | Check |
 | --- | --- |
-| Connection refused / timeout | `DB_HOST`, `DB_PORT`, service/container health |
-| Access denied | `DB_USER`, `DB_PASSWORD`, grants |
-| Wrong schema/database | `DB_NAME` and whether `init_db.sql` was applied |
+| Connection refused / timeout | `REDIS_URL`, `systemctl status redis-server` or container health |
+| Profiles vanished | `maxmemory-policy` must be `volatile-lru` (other policies can evict memory keys) |
 | Profiles never update | `MEMORY_MODEL` has its API key; the nightly job is off without it |
 
-Per-user memory lives in Redis, so the bot keeps replying when it is down (content caches fall back to memory). If `/memory` fails or mentions never include user notes, check `redis-cli ping` first. MariaDB only matters for the one-time import of old memory.
+Per-user memory lives in Redis, so the bot keeps replying when it is down (content caches fall back to memory). If `/memory` fails or mentions never include user notes, check `redis-cli ping` first.
 
 Reference: `docs/redis_setup.md`
 

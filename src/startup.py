@@ -6,7 +6,6 @@ from typing import Any, Optional
 
 from src.bot.handlers.mention import MentionHandler
 from src.config import AppConfig, get_system_prompt, load_config
-from src.db.connection import close_db_pool
 from src.db.memory_store import MemoryStore
 from src.db.redis_client import close_redis
 from src.services.announcement_service import AnnouncementService
@@ -150,7 +149,6 @@ async def shutdown_services(services: AppServices) -> None:
         await step("anthropic close", services.anthropic_service.close)
     await step("runpod close", services.runpod_service.close)
     await step("redis close", close_redis)
-    await step("db pool close", close_db_pool)
 
 
 def create_bot_client(config: Optional[AppConfig] = None):

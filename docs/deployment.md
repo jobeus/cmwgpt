@@ -6,7 +6,7 @@ This page is about **how to run the system responsibly**, not just how to start 
 
 | Shape | Good for | What you run |
 | --- | --- | --- |
-| Bot-only runtime | Hosting the Python bot, with an existing/local MariaDB instance for per-user memory | `python main.py` under a supervisor |
+| Bot-only runtime | Hosting the Python bot, with a local Redis for per-user memory and caches | `python main.py` under a supervisor |
 | Full Docker stack | Development and local end-to-end testing | `docker compose --env-file .env.development up --build` |
 
 ## Important expectation-setting
@@ -16,14 +16,13 @@ The repository ships a **good development stack**, not a hardened production pla
 What it does provide well:
 
 - a runnable Python bot
-- MariaDB-backed per-user memory
-- a compose setup that brings the bot and database up together
+- Redis-backed per-user memory
+- a compose setup that brings the bot and Redis up together
 
 What it does **not** currently try to be:
 
 - a Kubernetes deployment
 - a full production IaC package
-- a migration-managed database platform
 - a security-hardened, production-ready compose bundle
 
 ## Bot-only deployment checklist
@@ -33,7 +32,7 @@ What it does **not** currently try to be:
 | Requirement | Why it matters |
 | --- | --- |
 | Python 3.13 | Runtime used by CI and the Docker image |
-| Reachable MariaDB instance | Per-user memory (`/memory`, nightly job) depends on it; the bot still replies without it |
+| Reachable Redis | Per-user memory (`/memory`, nightly job) depends on it; the bot still replies without it (see `docs/redis_setup.md`) |
 | `DISCORD_BOT_TOKEN` | Discord authentication |
 | `OPENROUTER_API_KEY` | Text completions |
 | `RUNPOD_IO_API_KEY` | Needed if image commands are used |
@@ -43,7 +42,7 @@ What it does **not** currently try to be:
 
 1. Create and populate the env file.
 2. Install Python dependencies.
-3. Apply `init_db.sql` to the target database (creates the memory tables).
+3. Install and configure Redis (`docs/redis_setup.md`).
 4. Start the bot under a real process supervisor.
 
 Typical install/run shape:
@@ -87,7 +86,7 @@ Recommended supervisors include:
 
 | Service | Purpose |
 | --- | --- |
-| `db` | MariaDB 11.7 |
+| `redis` | Redis 7.4 |
 | `bot` | Python Discord bot |
 
 Bring it up with:
@@ -100,8 +99,6 @@ docker compose --env-file .env.development up --build
 
 | Port | Service |
 | --- | --- |
-| `3306` | MariaDB (host port set by `DB_EXPOSE_PORT`) |
-
 The bot only listens on a port when `DEPLOY_WEBHOOK_SECRET` is set (the deploy webhook, `DEPLOY_WEBHOOK_PORT`, default `8787`).
 
 ## Production-minded checklist
@@ -110,8 +107,8 @@ Even if you are not doing “real production,” these are the minimum responsib
 
 | Area | What to verify |
 | --- | --- |
-| Secrets | Real DB credentials, real API keys, a non-default `MARIADB_ROOT_PASSWORD` |
-| Database | `init_db.sql` applied before memory features are used |
+| Secrets | Real API keys |
+| Redis | Listening on localhost only, `maxmemory-policy volatile-lru` so memories are never evicted |
 | Restart behavior | Supervisor restarts the bot after exit `42` |
 | Git-based updates | Only set `DEPLOY_WEBHOOK_SECRET` where `git pull` is safe and expected |
 
@@ -131,12 +128,12 @@ If those assumptions are not true, leave `DEPLOY_WEBHOOK_SECRET` empty.
 ## Recommended mental model
 
 - Use the included Docker stack as a **development baseline**.
-- Use a supervised Python process plus MariaDB for a **simple hosted runtime**.
+- Use a supervised Python process plus Redis for a **simple hosted runtime**.
 - Treat auto-update as an **operational choice**, not a default convenience.
 
 ## See also
 
 - `docs/development.md`
 - `docs/configuration.md`
-- `docs/mariadb_setup.md`
+- `docs/redis_setup.md`
 - `docs/auto-update.md`

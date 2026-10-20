@@ -66,7 +66,6 @@ This starts:
 | Service | Purpose |
 | --- | --- |
 | `redis` | Redis for per-user memory and content caches |
-| `db` | MariaDB, only read once to import memory from before Redis |
 | `bot` | Python Discord bot (`python:3.13-slim` image) |
 
 CI runs only the Python job, on Python 3.13.

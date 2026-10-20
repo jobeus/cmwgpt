@@ -35,7 +35,7 @@ The bot's main chat experience is **mention-based**:
 
 ## Memory commands
 
-The bot keeps a short profile of each person, per server, in MariaDB (`user_memory`).
+The bot keeps a short profile of each person, per server, in Redis (`cmwgpt:memory:<guild>:<user>`).
 Every night at 02:00 America/Denver, `MemoryService` reads the chat since the last run
 from every text channel it can see (message text, reply targets, embed titles and
 descriptions, and attachment names; no URL fetching or transcription). For each day it

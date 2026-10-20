@@ -5,28 +5,22 @@ One key per user holds their current profile and nothing else (no history):
 - ``cmwgpt:memory:<guild_id>:<user_id>`` - the profile text, at most ``MAX_PROFILE_BYTES``
 - ``cmwgpt:memory_job:<guild_id>`` - hash with the nightly job's ``processed_through``,
   ``last_run_at`` and ``last_status``
-- ``cmwgpt:memory_migrated`` - set once the old MariaDB tables were copied in
 
 None of these keys expire. All datetimes passed in and returned are naive UTC.
 """
 
 import logging
 from datetime import datetime, timezone
-from typing import Awaitable, Callable, Dict, Iterable, Optional
+from typing import Callable, Dict, Iterable, Optional
 
-import aiomysql
 import redis.asyncio as aioredis
 
-from src.config import get_config
-from src.db.connection import get_db_pool
 from src.db.redis_client import KEY_PREFIX, get_async_redis
 
 logger = logging.getLogger(__name__)
 
 # One user's profile may not grow past this; the merge prompts keep them far smaller.
 MAX_PROFILE_BYTES = 100 * 1024
-
-MIGRATED_KEY = f"{KEY_PREFIX}memory_migrated"
 
 
 def _profile_key(guild_id: int, user_id: int) -> str:
@@ -48,13 +42,8 @@ def cap_profile(profile: str) -> str:
 class MemoryStore:
     """Reads and writes user memory in Redis."""
 
-    def __init__(
-        self,
-        redis_getter: Callable[[], aioredis.Redis] = get_async_redis,
-        mariadb_pool_getter: Callable[[], Awaitable[aiomysql.Pool]] = get_db_pool,
-    ):
+    def __init__(self, redis_getter: Callable[[], aioredis.Redis] = get_async_redis):
         self._redis_getter = redis_getter
-        self._mariadb_pool_getter = mariadb_pool_getter
 
     async def get(self, guild_id: int, user_id: int) -> str:
         """Return one user's profile, or an empty string if none."""
@@ -104,53 +93,4 @@ class MemoryStore:
                 "last_run_at": now.isoformat(),
                 "last_status": status[:255],
             },
-        )
-
-    async def migrate_from_mariadb(self) -> None:
-        """Copy profiles and job state out of the old MariaDB tables, once.
-
-        Runs at startup until it succeeds. Anything already in Redis wins, so a
-        nightly run that happened before the copy isn't overwritten. Never raises.
-        """
-        try:
-            client = self._redis_getter()
-            if await client.exists(MIGRATED_KEY):
-                return
-        except Exception as e:
-            logger.error(f"Redis is unavailable, so memory won't work until it is: {e}")
-            return
-        if not get_config().db_password:
-            # No MariaDB was ever set up here, so there's nothing to bring over.
-            await client.set(MIGRATED_KEY, "no mariadb configured")
-            return
-
-        try:
-            pool = await self._mariadb_pool_getter()
-            async with pool.acquire() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute("SELECT guild_id, user_id, profile FROM user_memory WHERE profile <> ''")
-                    profiles = await cur.fetchall()
-                    await cur.execute(
-                        "SELECT guild_id, processed_through, last_run_at, last_status FROM user_memory_job_state"
-                    )
-                    job_states = await cur.fetchall()
-        except Exception as e:
-            logger.warning(f"Couldn't read memory from MariaDB to move it into Redis; will retry next start: {e}")
-            return
-
-        copied = 0
-        for guild_id, user_id, profile in profiles:
-            if await client.set(_profile_key(guild_id, user_id), cap_profile(profile), nx=True):
-                copied += 1
-        for guild_id, processed_through, last_run_at, last_status in job_states:
-            key = _job_key(guild_id)
-            if not await client.exists(key):
-                await client.hset(key, mapping={
-                    "processed_through": processed_through.isoformat(),
-                    "last_run_at": last_run_at.isoformat() if last_run_at else "",
-                    "last_status": last_status or "",
-                })
-        await client.set(MIGRATED_KEY, datetime.now(timezone.utc).isoformat())
-        logger.info(
-            f"Moved {copied} of {len(profiles)} user memories and {len(job_states)} job states from MariaDB to Redis"
         )

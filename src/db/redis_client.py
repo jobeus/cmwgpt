@@ -1,7 +1,7 @@
 """Redis connections: an async client for services, a sync one for the content caches.
 
-Both are created lazily from ``REDIS_URL`` and refuse to start under tests, like the
-MariaDB pool. Every key the bot writes starts with ``KEY_PREFIX``.
+Both are created lazily from ``REDIS_URL`` and refuse to start under tests.
+Every key the bot writes starts with ``KEY_PREFIX``.
 """
 
 import logging

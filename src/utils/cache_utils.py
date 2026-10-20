@@ -6,7 +6,6 @@ import functools
 import inspect
 import json
 import logging
-import os
 import time
 from collections import OrderedDict
 from typing import Any, Callable, Generic, Hashable, Optional, TypeVar, cast
@@ -16,9 +15,6 @@ import redis
 from src.db.redis_client import KEY_PREFIX, get_sync_redis
 
 logger = logging.getLogger(__name__)
-
-# Where the old JSON-file caches lived; each is imported into Redis once, then renamed.
-CACHE_DIR = ".cache"
 
 # Entries expire this long after they were last read or written, so a link that's
 # still being talked about stays cached while dead ones age out on their own.
@@ -106,29 +102,11 @@ class PersistentCache:
                 logger.debug(f"Cache {self.cache_name} running in memory: {e}")
                 self._down_until = float("inf")
                 return None
-            self._import_legacy_file()
         return self._client
 
     def _redis_failed(self, e: Exception) -> None:
         logger.warning(f"Redis error in cache {self.cache_name}, using memory for now: {e}")
         self._down_until = time.monotonic() + REDIS_RETRY_SECONDS
-
-    def _import_legacy_file(self) -> None:
-        """Copy an old ``.cache/<name>.json`` into Redis once, then rename it out of the way."""
-        path = os.path.join(CACHE_DIR, f"{self.cache_name}.json")
-        if not os.path.exists(path) or self._client is None:
-            return
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                entries = json.load(f)
-            pipe = self._client.pipeline(transaction=False)
-            for key, value in entries.items():
-                pipe.set(self._key(key), json.dumps(value), ex=self.ttl_seconds, nx=True)
-            pipe.execute()
-            os.replace(path, path + ".migrated")
-            logger.info(f"Imported {len(entries)} entries from {path} into Redis")
-        except Exception as e:
-            logger.warning(f"Couldn't import {path} into Redis: {e}")
 
     def get(self, key: Hashable, default: Any = None) -> Any:
         client = self._redis()

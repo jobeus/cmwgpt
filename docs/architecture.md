@@ -5,7 +5,7 @@ This page is meant to answer four questions quickly:
 1. **What are the main moving parts?**
 2. **How does a mention turn into a reply?**
 3. **Which services are wired together at startup?**
-4. **How do the bot and database fit together in development?**
+4. **How do the bot and Redis fit together in development?**
 
 ## Read this page like a map
 
@@ -24,7 +24,7 @@ What it shows:
 
 - the Python bot as the center of Discord interaction
 - OpenRouter/Gemini/Claude API, Runpod, and downloader work around the mention path
-- Redis for per-user memory and content caches (MariaDB is only read once, to import older memory)
+- Redis for per-user memory and content caches
 
 ```mermaid
 flowchart LR
@@ -74,9 +74,8 @@ flowchart LR
 
     Commands --> Memory
 
-    DB[(MariaDB<br/>one-time memory import)]:::data
-    Memory --> DB
     Cache[(Redis<br/>memory + URL caches)]:::data
+    Memory --> Cache
     Downloader --> Cache
 ```
 
@@ -251,11 +250,8 @@ flowchart LR
 
     Discord[Discord API]:::ext --> Bot[bot container<br/>python main.py]:::ctr
     Bot --> Redis[(redis container<br/>Redis 7.4 :6379<br/>user memory + caches)]:::db
-    Bot --> Maria[(db container<br/>MariaDB 11.7 :3306<br/>one-time memory import)]:::db
 
     Env[.env.development]:::ext --> Bot
-    Env --> Maria
-    SQL[init_db.sql]:::ext --> Maria
 ```
 
 ## Component map
@@ -276,9 +272,8 @@ flowchart LR
 | `src/services/state_service.py` | Per-channel persistence | See where model/system-prompt/service settings live |
 | `src/services/queue_service.py` | FIFO work queue | Understand serialized mention processing |
 | `src/services/memory_service.py` | Per-user memory | Understand the nightly job, `/memory` edits, and the notes added to mentions |
-| `src/db/memory_store.py` | Memory in Redis | Understand the memory keys, the 100 KB cap and the MariaDB import |
+| `src/db/memory_store.py` | Memory in Redis | Understand the memory keys and the 100 KB cap |
 | `src/db/redis_client.py` | Redis clients | Debug Redis connectivity |
-| `src/db/connection.py` | DB pool wiring | Debug MariaDB connectivity |
 | `src/utils/http_client.py` | Guarded outbound fetches | Debug redirects, size caps, and fetch timeouts |
 | `src/utils/cache_utils.py` | Redis-backed caches | Understand cache keys, TTLs and the in-memory fallback |
 

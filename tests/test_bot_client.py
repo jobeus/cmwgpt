@@ -35,9 +35,7 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
             auto_update_service=MagicMock(),
             announcement_service=MagicMock(),
             death_service=MagicMock(),
-            memory_store=MagicMock(),
         )
-        client.services.memory_store.migrate_from_mariadb = AsyncMock()
         client.services.queue_service.start = AsyncMock()
         client.services.queue_service.stop = AsyncMock()
         client.services.auto_update_service.start = AsyncMock()
@@ -194,7 +192,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         client.services.queue_service.start.assert_awaited_once_with()
         client.services.auto_update_service.start.assert_awaited_once_with()
         client.services.death_service.start.assert_called_once_with()
-        client.services.memory_store.migrate_from_mariadb.assert_awaited_once_with()
         client._send_update_announcement_if_needed.assert_awaited_once_with()
 
     async def test_on_ready_skips_one_time_setup_on_gateway_reconnect(self):

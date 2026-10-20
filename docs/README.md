@@ -15,13 +15,12 @@ This folder is organized so you can go from **orientation** -> **configuration**
 
 | File | Best for |
 | --- | --- |
-| `architecture.md` | Visual/system-level understanding of how the bot, services, and memory DB fit together |
+| `architecture.md` | Visual/system-level understanding of how the bot, services, and memory store fit together |
 | `commands.md` | Seeing exactly which slash commands currently exist and how they map to services/state |
 | `configuration.md` | Filling in env vars and understanding defaults and production requirements |
 | `development.md` | Running the bot locally, using Docker, and executing tests/checks |
 | `deployment.md` | Hosting/runtime expectations and restart/update behavior |
 | `redis_setup.md` | Installing Redis, which holds per-user memory and the content caches |
-| `mariadb_setup.md` | The old MariaDB memory tables, now only read once to import into Redis |
 | `troubleshooting.md` | Solving the most common runtime, DB, proxy, and downloader problems |
 | `auto-update.md` | Deploy webhook, restart flow, and announcements |
 

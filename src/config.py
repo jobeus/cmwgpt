@@ -60,11 +60,6 @@ class AppConfig:
     discord_guild_id: str
     death_channel_id: str
     transcript_proxy: str
-    db_host: str
-    db_port: int
-    db_user: str
-    db_password: str
-    db_name: str
     redis_url: str
     default_model: str
     default_draw_model: str
@@ -105,11 +100,6 @@ def load_config(
         discord_guild_id=source.get("DISCORD_GUILD_ID", ""),
         death_channel_id=source.get("DEATH_CHANNEL_ID", ""),
         transcript_proxy=source.get("TRANSCRIPT_PROXY", ""),
-        db_host=source.get("DB_HOST", "127.0.0.1"),
-        db_port=_read_int(source.get("DB_PORT"), 3306),
-        db_user=source.get("DB_USER", "cmwgpt_user"),
-        db_password=source.get("DB_PASSWORD", ""),
-        db_name=source.get("DB_NAME", "cmwgpt"),
         redis_url=source.get("REDIS_URL", "redis://127.0.0.1:6379/0"),
         default_model=source.get("DEFAULT_MODEL", "anthropic/claude-sonnet-5.5"),
         default_draw_model=source.get("DEFAULT_DRAW_MODEL", "seedream"),

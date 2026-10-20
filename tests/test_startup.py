@@ -87,14 +87,11 @@ class TestStartupIntegration(unittest.TestCase):
 
 
 class TestShutdownServices(unittest.TestCase):
-    def _run(self, services, close_redis=None, close_pool=None):
+    def _run(self, services, close_redis=None):
         close_redis = AsyncMock() if close_redis is None else close_redis
-        close_pool = AsyncMock() if close_pool is None else close_pool
-        with patch.object(startup, "close_redis", close_redis), patch.object(
-            startup, "close_db_pool", close_pool
-        ):
+        with patch.object(startup, "close_redis", close_redis):
             asyncio.run(shutdown_services(services))
-        return close_redis, close_pool
+        return close_redis
 
     def test_stops_and_closes_every_service_in_order(self):
         services = make_shutdown_services()
@@ -108,23 +105,20 @@ class TestShutdownServices(unittest.TestCase):
         order.attach_mock(services.anthropic_service.close, "anthropic_close")
         order.attach_mock(services.runpod_service.close, "runpod_close")
         close_redis = AsyncMock()
-        close_pool = AsyncMock()
         order.attach_mock(close_redis, "close_redis")
-        order.attach_mock(close_pool, "close_pool")
 
-        self._run(services, close_redis, close_pool)
+        self._run(services, close_redis)
 
         self.assertEqual(
             [c[0] for c in order.mock_calls],
             [
                 "auto_update_stop", "memory_stop", "death_close", "queue_stop",
                 "openai_close", "gemini_close", "anthropic_close", "runpod_close",
-                "close_redis", "close_pool",
+                "close_redis",
             ],
         )
         services.death_service.close.assert_awaited_once_with()
         services.queue_service.stop.assert_awaited_once_with()
-        close_pool.assert_awaited_once_with()
 
     def test_each_step_failure_is_logged_and_later_steps_still_run(self):
         services = make_shutdown_services()
@@ -137,23 +131,20 @@ class TestShutdownServices(unittest.TestCase):
         services.anthropic_service.close.side_effect = RuntimeError("g")
         services.runpod_service.close.side_effect = RuntimeError("h")
         close_redis = AsyncMock(side_effect=RuntimeError("i"))
-        close_pool = AsyncMock()
 
         with self.assertLogs("src.startup", level="ERROR") as logs:
-            self._run(services, close_redis, close_pool)
+            self._run(services, close_redis)
 
         self.assertEqual(len(logs.records), 9)
         self.assertTrue(any("queue drain failed" in r.getMessage() for r in logs.records))
         services.runpod_service.close.assert_awaited_once_with()
         close_redis.assert_awaited_once_with()
-        close_pool.assert_awaited_once_with()
 
     def test_optional_services_may_be_absent(self):
         services = make_shutdown_services(memory_service=None, anthropic_service=None)
-        close_redis, close_pool = self._run(services)
+        close_redis = self._run(services)
         services.queue_service.stop.assert_awaited_once_with()
         close_redis.assert_awaited_once_with()
-        close_pool.assert_awaited_once_with()
 
 
 if __name__ == "__main__":
