@@ -27,9 +27,8 @@ The bot's main chat experience is **mention-based**:
 | `/death view` | Shows deathwatch settings | reads persisted state |
 | `/death reset` | Restores default deathwatch settings | persisted reset |
 | `/memory show` | Shows you (only you) what the bot remembers about you | reads `user_memory` |
-| `/memory add` | Adds a note about yourself (750-character cap) | persisted per user, per server |
-| `/memory correct` | Has the memory model fix your memory based on what you say is wrong | persisted per user, per server |
-| `/memory clear` | Forgets everything, or only your own notes | persisted per user, per server |
+| `/memory correct` | Privately has the memory model fix or add to your memory | persisted per user, per server |
+| `/memory clear` | Privately forgets everything about you | persisted per user, per server |
 | `/fillmemory` | Rebuilds everyone's learned memory from the last 7 days (admin only) | rewrites `user_memory` |
 | `/wikicount` | Looks up a Wikipedia article's average monthly pageviews | runtime action |
 | `/restart` | Triggers restart flow and `git pull` | runtime action |
@@ -46,16 +45,12 @@ bot replies to a mention, it adds the profiles of the asker, anyone they @mentio
 recent speakers (up to 8 people) to the end of the mention. The cached system prompt and
 history stay unchanged.
 
-Each profile has two parts:
-
-- **Learned from chat**: rewritten by the nightly job.
-- **You told me**: added with `/memory add`. The job never rewrites it, and `/fillmemory` keeps it.
-
-`/memory show` replies only to you. `add` and `correct` post a short confirmation in the
-channel, and `correct` also shows you the updated memory privately. `correct` sends your
-correction and the current memory to `MEMORY_MODEL`, which edits only what the correction
-covers, in either part. Administrators can pass the optional `user` argument to `show`,
-`add` and `correct` to act on someone else. Every change also writes a row to
+Every `/memory` command replies only to you. `correct` sends your correction and the current
+profile to `MEMORY_MODEL`, which changes, removes or adds only what the correction covers, and
+then shows you the updated profile. Corrections live in the same profile the nightly job
+maintains, so later chat can refine them; `/fillmemory` rebuilds profiles from scratch and
+drops them. Administrators can pass the optional `user` argument to `show` and `correct` to
+act on someone else. Every change also writes a row to
 `user_memory_history`, so you can see how a profile changed and restore an earlier version.
 
 ### `/fillmemory`

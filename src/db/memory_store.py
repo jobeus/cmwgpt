@@ -5,7 +5,7 @@ All datetimes passed in and returned are naive UTC.
 
 import logging
 from datetime import datetime
-from typing import Awaitable, Callable, Dict, Iterable, Optional, Tuple
+from typing import Awaitable, Callable, Dict, Iterable, Optional
 
 import aiomysql
 
@@ -20,13 +20,13 @@ class MemoryStore:
     def __init__(self, pool_getter: Callable[[], Awaitable[aiomysql.Pool]] = get_db_pool):
         self._pool_getter = pool_getter
 
-    async def get(self, guild_id: int, user_id: int) -> Tuple[str, str]:
-        """Return ``(profile, self_notes)`` for one user, empty strings if none."""
+    async def get(self, guild_id: int, user_id: int) -> str:
+        """Return one user's profile, or an empty string if none."""
         rows = await self.get_many(guild_id, [user_id])
-        return rows.get(user_id, ("", ""))
+        return rows.get(user_id, "")
 
-    async def get_many(self, guild_id: int, user_ids: Iterable[int]) -> Dict[int, Tuple[str, str]]:
-        """Return ``{user_id: (profile, self_notes)}`` for the users that have a row."""
+    async def get_many(self, guild_id: int, user_ids: Iterable[int]) -> Dict[int, str]:
+        """Return ``{user_id: profile}`` for the users that have a row."""
         ids = list(dict.fromkeys(user_ids))
         if not ids:
             return {}
@@ -35,12 +35,12 @@ class MemoryStore:
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    f"SELECT user_id, profile, self_notes FROM user_memory "
+                    f"SELECT user_id, profile FROM user_memory "
                     f"WHERE guild_id = %s AND user_id IN ({placeholders})",
                     (guild_id, *ids),
                 )
                 rows = await cur.fetchall()
-        return {int(user_id): (profile or "", self_notes or "") for user_id, profile, self_notes in rows}
+        return {int(user_id): profile or "" for user_id, profile in rows}
 
     async def save_profile(
         self,
@@ -53,7 +53,7 @@ class MemoryStore:
         window_start: Optional[datetime] = None,
         window_end: Optional[datetime] = None,
     ) -> None:
-        """Replace a user's learned profile."""
+        """Replace a user's profile."""
         await self._write(
             "INSERT INTO user_memory (guild_id, user_id, profile) VALUES (%s, %s, %s) "
             "ON DUPLICATE KEY UPDATE profile = VALUES(profile)",
@@ -61,43 +61,16 @@ class MemoryStore:
             guild_id, user_id, source, observations, window_start, window_end,
         )
 
-    async def save_self_notes(self, guild_id: int, user_id: int, self_notes: str, *, source: str) -> None:
-        """Replace the notes a user wrote about themselves."""
-        await self._write(
-            "INSERT INTO user_memory (guild_id, user_id, self_notes) VALUES (%s, %s, %s) "
-            "ON DUPLICATE KEY UPDATE self_notes = VALUES(self_notes)",
-            (guild_id, user_id, self_notes),
-            guild_id, user_id, source,
-        )
-
-    async def save_memory(
-        self,
-        guild_id: int,
-        user_id: int,
-        profile: str,
-        self_notes: str,
-        *,
-        source: str,
-        observations: Optional[str] = None,
-    ) -> None:
-        """Replace both the learned profile and the user's own notes."""
-        await self._write(
-            "INSERT INTO user_memory (guild_id, user_id, profile, self_notes) VALUES (%s, %s, %s, %s) "
-            "ON DUPLICATE KEY UPDATE profile = VALUES(profile), self_notes = VALUES(self_notes)",
-            (guild_id, user_id, profile, self_notes),
-            guild_id, user_id, source, observations,
-        )
-
     async def clear_user(self, guild_id: int, user_id: int) -> None:
-        """Wipe both the learned profile and the user's own notes."""
+        """Wipe a user's profile."""
         await self._write(
-            "UPDATE user_memory SET profile = '', self_notes = '' WHERE guild_id = %s AND user_id = %s",
+            "UPDATE user_memory SET profile = '' WHERE guild_id = %s AND user_id = %s",
             (guild_id, user_id),
             guild_id, user_id, "clear",
         )
 
     async def clear_learned_profiles(self, guild_id: int) -> None:
-        """Wipe every learned profile in a server, keeping users' own notes (used by /fillmemory)."""
+        """Wipe every profile in a server (used by /fillmemory)."""
         pool = await self._pool_getter()
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
@@ -143,8 +116,8 @@ class MemoryStore:
                 await cur.execute(query, args)
                 await cur.execute(
                     "INSERT INTO user_memory_history "
-                    "(guild_id, user_id, source, profile, self_notes, observations, window_start, window_end) "
-                    "SELECT guild_id, user_id, %s, profile, self_notes, %s, %s, %s "
+                    "(guild_id, user_id, source, profile, observations, window_start, window_end) "
+                    "SELECT guild_id, user_id, %s, profile, %s, %s, %s "
                     "FROM user_memory WHERE guild_id = %s AND user_id = %s",
                     (source, observations, window_start, window_end, guild_id, user_id),
                 )

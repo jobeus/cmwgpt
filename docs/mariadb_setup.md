@@ -71,12 +71,12 @@ mariadb -u root -p cmwgpt < init_db.sql
 
 | Table | Holds |
 | --- | --- |
-| `user_memory` | One row per user per server: the learned profile and the user's own notes |
+| `user_memory` | One row per user per server: the profile |
 | `user_memory_history` | A row for every change, so earlier versions can be restored |
 | `user_memory_job_state` | How far the nightly job has processed each server |
 
-Every statement in `init_db.sql` is `IF NOT EXISTS`, so re-applying it to an existing
-database adds new tables without touching existing ones. With the docker-compose stack:
+Every statement in `init_db.sql` is `IF [NOT] EXISTS`, so re-applying it to an existing
+database adds new tables and drops retired columns without touching anything else. With the docker-compose stack:
 
 ```bash
 docker compose exec -T db sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"' < init_db.sql
@@ -124,7 +124,7 @@ After setup, validate the DB path before blaming higher layers.
 | --- | --- |
 | Can the app user connect? | Confirms credentials/grants |
 | Does the schema exist? | Confirms init ran successfully |
-| Does `/memory add` create a `user_memory` row? | Confirms the write path works |
+| Does `/memory correct` create a `user_memory` row? | Confirms the write path works |
 | Does `/memory show` return it? | Confirms the read path end-to-end |
 
 ## Troubleshooting shortcuts

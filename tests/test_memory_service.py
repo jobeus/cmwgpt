@@ -45,23 +45,18 @@ class FakeStore:
         self.processed_through = None
 
     async def get(self, guild_id, user_id):
-        return self.rows.get(user_id, ("", ""))
-
-    async def save_memory(self, guild_id, user_id, profile, self_notes, **kwargs):
-        self.rows[user_id] = (profile, self_notes)
-        self.saved.append((user_id, profile, kwargs))
+        return self.rows.get(user_id, "")
 
     async def get_many(self, guild_id, user_ids):
         return {uid: self.rows[uid] for uid in user_ids if uid in self.rows}
 
     async def save_profile(self, guild_id, user_id, profile, **kwargs):
-        _, notes = self.rows.get(user_id, ("", ""))
-        self.rows[user_id] = (profile, notes)
+        self.rows[user_id] = profile
         self.saved.append((user_id, profile, kwargs))
 
     async def clear_learned_profiles(self, guild_id):
         self.cleared_guilds.append(guild_id)
-        self.rows = {uid: ("", notes) for uid, (_, notes) in self.rows.items()}
+        self.rows = {uid: "" for uid in self.rows}
 
     async def get_processed_through(self, guild_id):
         return self.processed_through
@@ -112,6 +107,10 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(parse_json_object('```json\n{"1": ["x"]}\n```'), {"1": ["x"]})
         self.assertEqual(parse_json_object("no json here"), {})
         self.assertEqual(parse_json_object("[1, 2]"), {})
+        self.assertEqual(
+            parse_json_object("{\"profile\": \"Stable: a\nCurrent: b\"}"),
+            {"profile": "Stable: a\nCurrent: b"},
+        )
 
     def test_clean_profile_caps_length_and_handles_none(self):
         self.assertEqual(clean_profile("(none)"), "")
@@ -121,11 +120,8 @@ class TestHelpers(unittest.TestCase):
         self.assertTrue(cleaned.endswith("x"))
 
     def test_format_memory(self):
-        self.assertIn("don't remember anything", format_memory(1, "", ""))
-        text = format_memory(1, "Stable: has dogs", "- drives a Tacoma")
-        self.assertIn("Learned from chat", text)
-        self.assertIn("You told me", text)
-        self.assertIn("They told me", format_memory(1, "", "- x", own=False))
+        self.assertIn("don't remember anything", format_memory(1, ""))
+        self.assertIn("Stable: has dogs", format_memory(1, "Stable: has dogs"))
 
 
 class TestMemoryService(unittest.IsolatedAsyncioTestCase):
@@ -196,14 +192,14 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["users_updated"], [])
 
     async def test_fill_clears_profiles_and_records_seven_days(self):
-        store = FakeStore({1: ("old profile", "- my notes")})
+        store = FakeStore({1: "old profile"})
         now = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
         service, _ = self.make_service(store, now)
         progress = AsyncMock()
         with patch("src.services.memory_service.dispatch_completion", new=AsyncMock(return_value=("{}", 0.0))):
             totals = await service.fill(self.make_guild([]), progress=progress)
         self.assertEqual(store.cleared_guilds, [42])
-        self.assertEqual(store.rows[1], ("", "- my notes"))
+        self.assertEqual(store.rows[1], "")
         self.assertEqual(totals["days"], 7)
         self.assertEqual(progress.await_count, 7)
         self.assertEqual(store.job_states[-1][0], now.replace(tzinfo=None))
@@ -218,13 +214,13 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(store.job_states), 7)
 
     async def test_notes_block_orders_users_and_skips_empty(self):
-        store = FakeStore({1: ("Current: truck shopping", ""), 2: ("", "- likes short answers"), 3: ("", "")})
+        store = FakeStore({1: "Current: truck shopping", 2: "Style: likes short answers", 3: ""})
         service, _ = self.make_service(store, datetime.now(UTC))
         block = await service.get_notes_block(42, [2, 1, 3, 2])
         self.assertTrue(block.startswith("<user_notes>"))
         self.assertLess(block.index("<@2>"), block.index("<@1>"))
         self.assertNotIn("<@3>", block)
-        self.assertIn("They told the bot:\n- likes short answers", block)
+        self.assertIn("<@2>:\nStyle: likes short answers", block)
         self.assertEqual(await service.get_notes_block(42, [3]), "")
 
     async def test_notes_block_swallows_store_errors(self):
@@ -233,30 +229,30 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         service, _ = self.make_service(store, datetime.now(UTC))
         self.assertEqual(await service.get_notes_block(42, [1]), "")
 
-    async def test_correct_rewrites_both_parts_and_saves(self):
-        store = FakeStore({1: ("Current: truck shopping, Tacoma (2026-10-15)", "- drives a 2019 Tacoma")})
+    async def test_correct_rewrites_profile_and_saves(self):
+        store = FakeStore({1: "Stable: drives a 2019 Tacoma"})
         service, _ = self.make_service(store, datetime(2026, 10, 19, 18, 0, tzinfo=UTC))
-        reply = json.dumps({"profile": "Current: drives a Ranger now (2026-10-19)", "self_notes": "- drives a Ranger"})
+        reply = json.dumps({"profile": "Stable: drives a Ranger"})
         with patch(
             "src.services.memory_service.dispatch_completion", new=AsyncMock(return_value=(reply, 0.003))
         ) as dispatch:
-            profile, notes, cost = await service.correct(42, 1, "Jobe", "sold the Tacoma, drive a Ranger now")
+            profile, cost = await service.correct(42, 1, "Jobe", "sold the Tacoma, drive a Ranger now")
         prompt = dispatch.await_args.kwargs["messages"][0]["content"][0]["text"]
         self.assertIn("Today: 2026-10-19", prompt)
-        self.assertIn("- drives a 2019 Tacoma", prompt)
+        self.assertIn("Stable: drives a 2019 Tacoma", prompt)
         self.assertIn("Correction:\nsold the Tacoma, drive a Ranger now", prompt)
-        self.assertEqual(store.rows[1], (profile, notes))
-        self.assertEqual(notes, "- drives a Ranger")
+        self.assertEqual(store.rows[1], "Stable: drives a Ranger")
+        self.assertEqual(profile, "Stable: drives a Ranger")
         self.assertEqual(store.saved[0][2]["source"], "correct")
         self.assertEqual(cost, 0.003)
 
     async def test_correct_leaves_memory_alone_on_bad_reply(self):
-        store = FakeStore({1: ("keep me", "- and me")})
+        store = FakeStore({1: "keep me"})
         service, _ = self.make_service(store, datetime(2026, 10, 19, tzinfo=UTC))
         with patch("src.services.memory_service.dispatch_completion", new=AsyncMock(return_value=("sorry", 0.0))):
             with self.assertRaises(ValueError):
                 await service.correct(42, 1, "Jobe", "whatever")
-        self.assertEqual(store.rows[1], ("keep me", "- and me"))
+        self.assertEqual(store.rows[1], "keep me")
         self.assertEqual(store.saved, [])
 
     def test_unavailable_without_api_key(self):

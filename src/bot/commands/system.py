@@ -338,7 +338,6 @@ class SystemCommands:
             "`/systemprompt reset` - Return to the default personality\n\n"
             "**Memory:**\n"
             "`/memory show` - Privately see what the bot remembers about you\n"
-            "`/memory add [note]` - Tell the bot something to remember about you\n"
             "`/memory correct [correction]` - Fix something the bot remembers about you\n"
             "`/memory clear` - Make the bot forget about you\n"
             "`/fillmemory` - Rebuild everyone's memory from the last week (admin only)\n\n"
