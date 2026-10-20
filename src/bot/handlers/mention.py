@@ -4,6 +4,8 @@ Mention Handler - Handles bot mentions and context preparation
 
 import logging
 import time
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 import discord
@@ -31,6 +33,19 @@ MAX_HISTORY_GAP = 100
 # Maximum number of channels to keep in the per-channel history cache before
 # evicting the least-recently-used entry.
 HISTORY_CACHE_MAX_CHANNELS = 200
+
+# The bot's description of its own architecture, added to every mention's system
+# prompt (whatever the channel's prompt is) so it can explain how it works.
+HOW_I_WORK_PATH = Path(__file__).resolve().parents[2] / "prompts" / "how_i_work.txt"
+
+
+@lru_cache(maxsize=1)
+def _load_how_i_work() -> str:
+    try:
+        return HOW_I_WORK_PATH.read_text(encoding="utf-8").strip()
+    except OSError:
+        logger.warning(f"Architecture summary '{HOW_I_WORK_PATH}' not found; leaving it out.")
+        return ""
 
 
 def _mention_last(
@@ -371,6 +386,9 @@ class MentionHandler:
                 "unless someone asks what you remember.\n\n"
             )
         current_channel_system_prompt += f"{legend_section}\n\n"
+        how_i_work = _load_how_i_work()
+        if how_i_work:
+            current_channel_system_prompt += f"{how_i_work}\n\n"
         if day_summary:
             current_channel_system_prompt += (
                 "## Earlier today in this channel\n"

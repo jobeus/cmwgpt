@@ -261,6 +261,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             cached_context, _, _ = await handler._prepare_mention_context(mention_msg, bot_user)
 
         self.assertTrue(system_prompt.startswith("channel prompt\n\n## How this chat reaches you\nYou are <@"))
+        self.assertIn("## How you work (your own architecture)", system_prompt)
         self.assertEqual(context[-1]["content"][1]["type"], "image_url")
         self.assertEqual(history_calls[0], (10, None))
         self.assertEqual(history_calls[1], (100, older_msg))
