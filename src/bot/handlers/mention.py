@@ -32,6 +32,21 @@ MAX_HISTORY_GAP = 100
 HISTORY_CACHE_MAX_CHANNELS = 200
 
 
+def _mention_last(
+    history_msgs: List[discord.Message], message: discord.Message
+) -> List[discord.Message]:
+    """Move the mention to the end of the history.
+
+    History is fetched when the mention comes off the queue, so it can include
+    messages posted while it waited, such as the bot's reply to an earlier queued
+    mention. Those stay in the context (the bot should know what it already said)
+    but go before the mention, so the conversation ends on the user turn being
+    answered; their timestamps still show they came later.
+    """
+    others = [m for m in history_msgs if m.id != message.id]
+    return others + [message]
+
+
 class MentionHandler:
     """Handles bot mentions and context preparation."""
 
@@ -291,6 +306,8 @@ class MentionHandler:
             if history_msgs:
                 self._store_history_cache(channel_id, current_time, history_msgs[0])
 
+        history_msgs = _mention_last(history_msgs, message)
+
         # Get user legend for the channel
         legend_section = await self._mention_legend_provider(message.channel, bot_user)
 
@@ -310,7 +327,9 @@ class MentionHandler:
             f"(timestamp, message ID, sender's Discord ID); that header is added by the bot, not typed by the "
             f"sender. The last message is the one that mentioned you, so reply to it, using the earlier messages "
             f"as context. Its timestamp is effectively the current date and time, so use it whenever you need "
-            f"to know today's date or how long ago something happened.\n\n"
+            f"to know today's date or how long ago something happened. Mentions are answered one at a time, "
+            f"so messages posted while this one waited its turn (including your own replies to earlier "
+            f"mentions) are placed before it even though their timestamps are later.\n\n"
             f"Some content is filled in for you: linked pages, videos, and posts appear as fetched text or "
             f"transcripts at the top of the message that linked them, voice messages appear as transcripts, replies "
             f"quote the message being replied to, and other attachments appear only as a filename, so you can't "

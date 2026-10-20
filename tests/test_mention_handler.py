@@ -522,6 +522,27 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIn("see https://site.example", fetcher.await_args.args[0])
         self.assertEqual(fetcher.await_args.kwargs, {"cache_only": False})
 
+    async def test_prepare_context_puts_queued_mention_after_replies_posted_while_waiting(self):
+        handler, _, _, _, _ = self.make_handler()
+        channel = MagicMock()
+        channel.id = 43
+        channel.name = "queue"
+        first_q = self._simple_msg(1, channel, content="q1")
+        second_q = self._simple_msg(2, channel, content="q2", author_id=222)
+        first_a = self._simple_msg(3, channel, content="a1", author_id=999)
+
+        async def history(limit=None, after=None):
+            for msg in [first_a, second_q, first_q]:
+                yield msg
+
+        channel.history = history
+
+        context, _ = await handler._prepare_mention_context(second_q, SimpleNamespace(id=999))
+
+        self.assertEqual([c["role"] for c in context], ["user", "assistant", "user"])
+        self.assertIn("a1", context[1]["content"][0]["text"])
+        self.assertIn("q2", context[-1]["content"][0]["text"])
+
     async def test_history_window_reset_clears_gemini_and_anthropic_caches(self):
         gemini_service = MagicMock()
         anthropic_service = MagicMock()
