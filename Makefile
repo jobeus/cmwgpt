@@ -1,6 +1,6 @@
 # Makefile for Discord Bot project
 
-.PHONY: help venv install install-test install-hooks test test-verbose test-coverage test-specific lint typecheck autofix format security ci-test docker-build docker-run clean run run-direct dev-setup
+.PHONY: help venv install install-test install-hooks test test-verbose test-coverage test-specific lint typecheck autofix format security ci-test docker-build docker-run docker-down docker-logs clean run run-direct dev-setup
 
 VENV ?= .venv
 PYTHON := $(VENV)/bin/python
@@ -25,6 +25,8 @@ help:
 	@echo "  ci-test       - Run CI-style tests locally"
 	@echo "  docker-build  - Build the Docker development stack"
 	@echo "  docker-run    - Run the Docker development stack"
+	@echo "  docker-down   - Stop the Docker development stack (keeps Redis data)"
+	@echo "  docker-logs   - Follow the bot container's logs"
 	@echo "  clean         - Clean up generated files"
 	@echo "  run           - Run the Discord bot with auto-restart support"
 	@echo "  run-direct    - Run the Discord bot directly (no auto-restart)"
@@ -125,6 +127,14 @@ docker-build:
 docker-run:
 	@echo "Starting Docker development stack with .env.development..."
 	@docker compose --env-file .env.development up --build
+
+# Stop Docker containers (the redis-data volume is kept)
+docker-down:
+	@docker compose --env-file .env.development down
+
+# Follow the bot's logs
+docker-logs:
+	@docker compose --env-file .env.development logs -f bot
 
 # Run the Discord bot with auto-restart support
 run:

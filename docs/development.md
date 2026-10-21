@@ -11,7 +11,7 @@ This page is optimized for the three workflows people actually use in this repo:
 | Workflow | Best when | Main command path |
 | --- | --- | --- |
 | Local bot-only | You are changing Python bot logic and do not need the Docker stack | `.venv` + `python main.py` |
-| Full-stack Docker | You want bot + DB together | `docker compose --env-file .env.development up --build` |
+| Full-stack Docker | You want bot + Redis together | `docker compose --env-file .env.development up --build` |
 | Focused test/debug loop | You are iterating on a single area | `make test-specific`, direct `pytest` |
 
 ## Local Python setup
@@ -65,8 +65,14 @@ This starts:
 
 | Service | Purpose |
 | --- | --- |
-| `redis` | Redis for per-user memory and content caches |
+| `redis` | Redis 8 for per-user memory, channel summaries and content caches (data kept in the `redis-data` volume) |
 | `bot` | Python Discord bot (`python:3.13-slim` image) |
+
+The checkout is mounted at `/app`, so code changes only need a restart
+(`docker compose restart bot`), but requirement changes need `--build`. Compose always
+points the bot at the `redis` container and loads only `.env.development`, even if a
+`.env` or `.env.production` sits in the checkout. `make docker-logs` follows the bot's logs
+and `make docker-down` stops the stack. Leave `DEPLOY_WEBHOOK_SECRET` empty in development.
 
 CI runs only the Python job, on Python 3.13.
 

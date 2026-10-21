@@ -1,6 +1,6 @@
 services:
   redis:
-    image: redis:7.4
+    image: redis:8
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "volatile-lru"]
     volumes:
@@ -15,16 +15,26 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # Also restarts the bot after /restart (exit 42). Requirements changes need
+    # `docker compose up --build`, since start.sh's reinstall doesn't run here.
     restart: unless-stopped
     env_file:
       - .env.development
     environment:
       PYTHONUNBUFFERED: "1"
+      # The checkout is mounted at /app, so without this the bot would load a
+      # .env.production or .env from it on top of .env.development.
+      CMWGPT_ENV_FILE: .env.development
+      # Always the Redis container, whatever the env file says.
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       redis:
         condition: service_healthy
     volumes:
       - ./:/app
+    # Same as the systemd unit: SIGINT lets the bot finish in-flight replies.
+    stop_signal: SIGINT
+    stop_grace_period: 120s
     command: python main.py
 
 volumes:
