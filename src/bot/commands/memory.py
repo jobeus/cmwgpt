@@ -3,6 +3,7 @@ Memory Commands - /memory (view and edit your own memory), /fillmemory (rebuild 
 last week) and /fillsummaries (rebuild only the channel summaries).
 """
 
+import io
 import logging
 from typing import Any, Optional
 
@@ -55,12 +56,10 @@ class MemoryCommands:
         *,
         memory_service: MemoryService,
         memory_store,
-        paste_service: Any = None,
     ):
         self.bot = bot
         self._memory_service = memory_service
         self._store = memory_store
-        self._paste_service = paste_service
 
     def setup_commands(self) -> None:
         self.bot.tree.add_command(self._create_memory_group())
@@ -135,21 +134,21 @@ class MemoryCommands:
         return fillsummaries_command
 
     async def _send_memory(self, interaction: discord.Interaction, text: str, *, updated: bool = False) -> None:
-        """Privately send a memory reply, via paste.rs when it's too long for one Discord message."""
-        if len(text) > DISCORD_MESSAGE_LIMIT:
-            try:
-                if not self._paste_service:
-                    raise RuntimeError("paste service is disabled")
-                url = await self._paste_service.upload_markdown(text)
-                text = f"{'Updated 👍 ' if updated else ''}It's too long for Discord, so here it is: {url}"
-            except Exception as e:
-                logger.warning(f"Couldn't paste a long memory reply: {e}")
-                text = (
-                    "Updated 👍 but it's too long to show here and paste.rs isn't cooperating. Try `/memory show` later."
-                    if updated
-                    else "That memory is too long to show here and paste.rs isn't cooperating. Try again later."
-                )
-        await interaction.followup.send(text, ephemeral=True, allowed_mentions=NO_PINGS)
+        """Privately send a memory reply, as a .md attachment when it's too long for one Discord message.
+
+        Kept in Discord rather than on a pastebin, since the reply is meant to be private.
+        """
+        prefix = "Updated 👍 " if updated else ""
+        if len(text) <= DISCORD_MESSAGE_LIMIT:
+            await interaction.followup.send(text, ephemeral=True, allowed_mentions=NO_PINGS)
+            return
+        file = discord.File(io.BytesIO(text.encode("utf-8")), filename="memory.md")
+        await interaction.followup.send(
+            f"{prefix}It's too long for one Discord message, so here it is as a file.",
+            file=file,
+            ephemeral=True,
+            allowed_mentions=NO_PINGS,
+        )
 
     async def _handle_show(self, interaction: discord.Interaction, target: discord.abc.User) -> None:
         profile = await self._store.get(interaction.guild_id, target.id)

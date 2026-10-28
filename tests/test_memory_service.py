@@ -359,34 +359,26 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
 
 
 class TestSendMemory(unittest.IsolatedAsyncioTestCase):
-    def make(self, paste):
-        commands = MemoryCommands(MagicMock(), memory_service=MagicMock(), memory_store=MagicMock(), paste_service=paste)
+    def make(self):
+        commands = MemoryCommands(MagicMock(), memory_service=MagicMock(), memory_store=MagicMock())
         interaction = SimpleNamespace(followup=SimpleNamespace(send=AsyncMock()))
         return commands, interaction
 
     async def test_short_reply_is_sent_directly(self):
-        paste = SimpleNamespace(upload_markdown=AsyncMock())
-        commands, interaction = self.make(paste)
+        commands, interaction = self.make()
         await commands._send_memory(interaction, "short")
         self.assertEqual(interaction.followup.send.await_args.args[0], "short")
         self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
-        paste.upload_markdown.assert_not_awaited()
+        self.assertNotIn("file", interaction.followup.send.await_args.kwargs)
 
-    async def test_long_reply_goes_to_paste(self):
-        paste = SimpleNamespace(upload_markdown=AsyncMock(return_value="https://paste.rs/abc.md"))
-        commands, interaction = self.make(paste)
+    async def test_long_reply_is_attached_as_a_file(self):
+        commands, interaction = self.make()
         await commands._send_memory(interaction, "x" * 2500, updated=True)
-        paste.upload_markdown.assert_awaited_once_with("x" * 2500)
-        sent = interaction.followup.send.await_args.args[0]
-        self.assertIn("https://paste.rs/abc.md", sent)
-        self.assertTrue(sent.startswith("Updated"))
-
-    async def test_paste_failure_says_sorry(self):
-        paste = SimpleNamespace(upload_markdown=AsyncMock(side_effect=Exception("paste.rs error: 503")))
-        commands, interaction = self.make(paste)
-        await commands._send_memory(interaction, "x" * 2500, updated=True)
-        self.assertIn("isn't cooperating", interaction.followup.send.await_args.args[0])
-        self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
+        kwargs = interaction.followup.send.await_args.kwargs
+        self.assertTrue(interaction.followup.send.await_args.args[0].startswith("Updated"))
+        self.assertTrue(kwargs["ephemeral"])
+        self.assertEqual(kwargs["file"].filename, "memory.md")
+        self.assertEqual(kwargs["file"].fp.read(), b"x" * 2500)
 
 
 class TestResolveTarget(unittest.IsolatedAsyncioTestCase):
