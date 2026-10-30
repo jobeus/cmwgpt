@@ -40,6 +40,8 @@ READING_LINKS_STATUS = "reading links..."
 
 # How many of the IRC log's top speakers the tools section lists.
 IRC_ROSTER_SIZE = 60
+# How many of the server's custom emoji the tools section lists for ``react``.
+MAX_LISTED_EMOJI = 80
 
 # How many messages a channel's growing history window may gain before it resets
 # to the last INCLUDE_NUM_CHATLINES messages.
@@ -356,15 +358,20 @@ class MentionHandler:
         on_status: Optional[Callable[[str], None]] = None,
     ) -> tuple[List[Dict[str, Any]], str, float]:
         """
-        Prepares the message list and system prompt for OpenAI context in case of a mention.
+        Prepares the message list and system prompt for a mention.
+
+        Models with tools (the Claude API direct models) get a "Your tools" section and
+        look up memory, summaries, links and ``how_i_work`` themselves; the other models
+        get all of those filled in here.
 
         Args:
             message: The Discord message containing the mention
             bot_user: The bot user object
-            model: The model to use (helps determine history size)
+            model: The channel's model; decides which of the above it gets
+            on_status: Hears what's being done, for the reply preview
 
         Returns:
-            Tuple of (message list for OpenAI API, system prompt string, cost of
+            Tuple of (OpenAI-style message list, system prompt string, cost of
             updating the day summary)
         """
         logger.info(
@@ -459,6 +466,12 @@ class MentionHandler:
         else:
             current_channel_system_prompt = self._system_prompt_loader()
 
+        links_note = (
+            "links appear as plain URLs that you can read with `read_urls`"
+            if uses_tools else
+            "linked pages, videos, and posts appear as fetched text or transcripts at the top of the "
+            "message that linked them"
+        )
         current_channel_system_prompt += (
             f"\n\n## How this chat reaches you\n"
             f"You are <@{bot_user.id}> in this Discord channel.\n\n"
@@ -470,8 +483,7 @@ class MentionHandler:
             f"to know today's date or how long ago something happened. Mentions are answered one at a time, "
             f"so messages posted while this one waited its turn (including your own replies to earlier "
             f"mentions) are placed before it even though their timestamps are later.\n\n"
-            f"Some content is filled in for you: linked pages, videos, and posts appear as fetched text or "
-            f"transcripts at the top of the message that linked them, voice messages appear as transcripts, replies "
+            f"Some content is filled in for you: {links_note}, voice messages appear as transcripts, replies "
             f"quote the message being replied to, and other attachments appear only as a filename, so you can't "
             f"see their contents. Images in a user turn right after one of your own messages, under your ID, are "
             f"images your separate image tool generated; you can refer to them in your reply.\n\n"
@@ -604,100 +616,22 @@ class MentionHandler:
 
     def _tools_addon(self, message: discord.Message, ranges: str = "", memory_index: str = "") -> str:
         """The system prompt section that tells the model which tools it has and when to use them."""
-        names = {tool.definition["name"] for tool in self._build_tools(message)}
+        tools = self._build_tools(message)
+        names = {tool.definition["name"] for tool in tools}
         section = (
             "## Your tools\n"
             "Besides web search, you have tools the bot runs for you. Use them whenever they'd help, "
             "and answer directly when they wouldn't. Call them before writing your reply rather than "
             "announcing them, and don't name the tools in your reply.\n"
+            "- Code execution: a Python sandbox with no internet access (pandas, matplotlib and the "
+            "like). Use it for exact math, statistics, or charts, for example of IRC log counts by year. "
+            "Files your code saves, like a chart PNG, are attached to your reply.\n"
         )
-        if "recall_users" in names:
-            section += (
-                "- `recall_users(user_ids)`: your memory notes about people in this server, learned from "
-                "past chats. They aren't in your context unless you call it. Call it when a message refers "
-                "to someone's life, plans, preferences or an inside joke you don't recognize, when knowing "
-                "the asker would make the reply better, or when someone asks what you remember. Use the "
-                "notes quietly; don't recite them unless asked.\n"
-            )
-        if "recall_today" in names:
-            section += (
-                "- `recall_today()`: a summary of today's chat in this channel (since 02:00 Denver) from "
-                "before the messages you were sent. Call it when a message refers to something from "
-                "earlier today that you can't see. It can take a few seconds the first time.\n"
-            )
-        if "recall_channel" in names:
-            section += (
-                "- `recall_channel()`: a summary of the last couple of weeks in this channel. Call it when "
-                "a message refers to an ongoing topic, plan or running joke that the recent messages and "
-                "today's summary don't explain.\n"
-            )
-        if "remember" in names:
-            section += (
-                "- `remember(user_id, note)`: saves, fixes or forgets something in someone's memory now. "
-                "Only when someone explicitly asks you to remember, correct or forget something; people "
-                "can change their own memory, and only admins can change someone else's.\n"
-            )
-        if "search_messages" in names:
-            section += (
-                "- `search_messages(query?, author_ids?, all_channels?, has?, after?, before?, sort?, skip?)` "
-                "and `read_messages(message_id, channel_id?, count?)`: this server's Discord history beyond "
-                "what you were sent. Search when someone asks what was said earlier, when something came "
-                "up, or for a link or picture someone posted; then read around a hit when you need the "
-                "conversation. Searches cover only channels the asker can read. Say when things were "
-                "said, and quote rather than guess.\n"
-            )
-        if "search_irc_log" in names:
-            section += (
-                "- `search_irc_log(query, nick?, newest_first?, context?, skip?)` and "
-                "`read_irc_log_day(date, start_line?)`: this channel's old IRC log, from before it "
-                "moved to Discord. Search it when someone asks about the IRC days, what someone said "
-                "back then, or when something first came up; every hit comes with its date. Then read "
-                "the whole day around a promising hit when you need the conversation, not just one "
-                "line. Say when things were said, and quote the log rather than guessing. IRC nicks "
-                "may not match Discord names; nick filters and per-nick counts merge a person's known "
-                "aliases. For how many times something was said, who said it most, "
-                "or when it peaked, use `count_irc_log(query, nick?, group_by?, top?)`, which gives exact "
-                "counts in one call; never estimate counts from search pages.\n"
-            )
-        if "read_urls" in names:
-            section += (
-                "- `read_urls(urls)`: links in messages reach you as plain URLs, not fetched. Read them "
-                "(up to 5 at once) when their content matters to your reply: someone asks about a video, "
-                "post or article, reacts to one, or you need its details. You get YouTube and video "
-                "transcripts, Twitter/X and Instagram posts with images, and article text. Skip links "
-                "nobody is asking about.\n"
-            )
-        if "old_quotes" in names:
-            section += (
-                "- `old_quotes(query?, random_count?, skip?)`: the old IRC quote bot's ~5000 "
-                "one-liners. They aren't in time order, so don't date a quote or say which came first "
-                "unless its own text gives a date or year; for when something was said, use the IRC log. "
-                "They're jokes from the IRC days, out of context and sometimes very offensive, saved "
-                "because they were funny. Use them when someone asks for an old quote or what the "
-                "quote bot had about someone; search or pick random ones rather than paging through all. "
-                "Present them as quote-bot jokes, not as anyone's real views or facts about them.\n"
-            )
-        if "draw" in names:
-            section += (
-                "- `draw(prompt)`: makes an image with this channel's image model and attaches it to your "
-                "reply. You get the image back, so after drawing, write a short reply that comments on "
-                "what came out. Use it when someone asks you to draw or make a picture.\n"
-            )
-        if "edit_image" in names:
-            section += (
-                "- `edit_image(prompt, message_ids)`: edits an image from a message in this channel (use the "
-                "[message ID] from its header) with the channel's edit model and attaches the result. You "
-                "get it back to comment on. Use it when someone asks you to change or fix a picture.\n"
-            )
-        if "wiki_pageviews" in names:
-            section += (
-                "- `wiki_pageviews(title)`: a Wikipedia article's average monthly pageviews, the number "
-                "deathwatch uses. Use it when someone asks how famous someone is.\n"
-            )
-        section += (
-            "- `how_i_work()`: a description of your own architecture, features, commands and models. "
-            "Call it when someone asks how you work or what you can do, and answer from it.\n"
-        )
+        section += "".join(tool.guidance for tool in tools)
+        if "react" in names:
+            emoji = sorted(e.name for e in getattr(message.guild, "emojis", None) or ())[:MAX_LISTED_EMOJI]
+            if emoji:
+                section += f"  This server's custom emoji for `react`: {', '.join(emoji)}.\n"
         if ranges and ({"search_messages", "search_irc_log"} & names):
             section += ranges
         if memory_index and ({"recall_users", "recall_channel"} & names):

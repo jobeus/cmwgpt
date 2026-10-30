@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.anthropic_service import (
     CACHE_DIAGNOSIS_BETA,
+    CODE_EXECUTION_TOOL,
+    CODE_STATUS,
     DIRECT_MODELS,
     MAX_TOOL_ROUNDS,
     SEARCH_RESULTS_STATUS,
@@ -16,6 +18,7 @@ from src.services.anthropic_service import (
     AnthropicServiceError,
     build_anthropic_messages,
     is_direct_anthropic_model,
+    _block_status,
     _usage_cost,
     apply_history_breakpoints,
 )
@@ -601,3 +604,51 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
         result = final["messages"][-1]["content"][0]
         self.assertEqual(result["tool_use_id"], "toolu_2")
         self.assertTrue(result["is_error"])
+
+
+class TestCodeExecution(unittest.IsolatedAsyncioTestCase):
+    def make_service(self, *responses):
+        service = AnthropicService(api_key="test-key")
+        client = MagicMock()
+        client.beta.messages.create = AsyncMock(side_effect=list(responses))
+        client.files.retrieve_metadata = AsyncMock(
+            return_value=SimpleNamespace(filename="../chart.png", size_bytes=3))
+        client.files.download = AsyncMock(return_value=SimpleNamespace(read=AsyncMock(return_value=b"png")))
+        service.set_client(client)
+        return service, client
+
+    def tool(self):
+        definition = {"name": "recall_channel", "input_schema": {"type": "object", "properties": {}}}
+        return ChatTool(definition, AsyncMock(return_value=text_result("x")), "remembering...")
+
+    async def test_offered_only_with_client_tools(self):
+        service, client = self.make_service(_response("a"), _response("b"))
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER)
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[self.tool()])
+        without, with_tools = (c.kwargs["tools"] for c in client.beta.messages.create.call_args_list)
+        self.assertNotIn(CODE_EXECUTION_TOOL, without)
+        self.assertIn(CODE_EXECUTION_TOOL, with_tools)
+
+    async def test_saved_files_are_attached_and_the_container_is_reused(self):
+        output = SimpleNamespace(type="bash_code_execution_output", file_id="file_1")
+        result = SimpleNamespace(type="bash_code_execution_tool_result", content=SimpleNamespace(
+            type="bash_code_execution_result", content=[output], stdout="", stderr="", return_code=0))
+        call = SimpleNamespace(type="tool_use", id="toolu_1", name="recall_channel", input={})
+        first = _response(stop_reason="tool_use", content=[result, call])
+        first.container = SimpleNamespace(id="container_1")
+        service, client = self.make_service(first, _response("Here's the chart."))
+
+        reply, _ = await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=USER, tools=[self.tool()])
+
+        self.assertEqual(reply["text"], "Here's the chart.")
+        self.assertEqual([f.filename for f in reply["files"]], ["chart.png"])
+        client.files.download.assert_awaited_once_with("file_1")
+        second_call = client.beta.messages.create.call_args_list[1].kwargs
+        self.assertEqual(second_call["container"], "container_1")
+
+    def test_code_blocks_report_running_code(self):
+        block = SimpleNamespace(type="server_tool_use", name="bash_code_execution")
+        self.assertEqual(_block_status(block, {}), CODE_STATUS)
+        self.assertEqual(_block_status(SimpleNamespace(type="server_tool_use", name="web_search"), {}),
+                         WEB_SEARCH_STATUS)

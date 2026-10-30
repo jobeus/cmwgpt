@@ -21,7 +21,7 @@ This folder is organized so you can go from **orientation** -> **configuration**
 | `development.md` | Running the bot locally, using Docker, and executing tests/checks |
 | `deployment.md` | Hosting/runtime expectations and restart/update behavior |
 | `redis_setup.md` | Installing Redis, which holds per-user memory and the content caches |
-| `troubleshooting.md` | Solving the most common runtime, DB, proxy, and downloader problems |
+| `troubleshooting.md` | Solving the most common runtime, Redis, proxy, and downloader problems |
 | `auto-update.md` | Deploy webhook, restart flow, and announcements |
 
 ## If you're in a hurry

@@ -1,6 +1,6 @@
 # Test suite guide
 
-This repository has a Python-heavy test suite that covers bot startup, commands, services, downloader utilities, and DB/logging behavior.
+This repository has a Python-heavy test suite that covers bot startup, commands, services, downloader utilities, the chat tools, and Redis-backed memory and caches.
 
 ## Fastest useful commands
 

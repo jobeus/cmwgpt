@@ -14,6 +14,7 @@ This page is meant to answer four questions quickly:
 | System architecture | Orient yourself to the whole stack |
 | Service wiring at startup | See what `src/startup.py` actually constructs |
 | Mention pipeline | Understand the primary request path |
+| Claude API tools | See what the direct models can call, and how to add a tool |
 | Downloader enrichment flow | Understand where transcript/article data comes from |
 | Docker/runtime layout | Visualize the development stack |
 | Component map | Jump straight to the file you likely need |
@@ -45,6 +46,7 @@ flowchart LR
         OpenAI[OpenAIService<br/>OpenRouter text]:::service
         Gemini[GeminiService<br/>native Gemini]:::service
         Anthropic[AnthropicService<br/>Claude API]:::service
+        Tools[chat_tools<br/>per-mention client tools]:::service
         Memory[MemoryService<br/>nightly profiles]:::service
         DaySummary[DaySummaryService<br/>chat since 02:00]:::service
         Runpod[RunpodService<br/>image draw/edit]:::service
@@ -73,10 +75,18 @@ flowchart LR
     Client --> Restart
 
     Commands --> Memory
+    Anthropic --> Tools
+    Tools --> Memory
+    Tools --> DaySummary
+    Tools --> Downloader
+    Tools --> Runpod
 
     Cache[(Redis<br/>memory + URL caches)]:::data
+    Files[(IRC log, nicks,<br/>quote file)]:::data
     Memory --> Cache
     Downloader --> Cache
+    Tools --> Files
+    Tools --> Discord
 ```
 
 ## Diagram: service wiring at startup
@@ -113,6 +123,8 @@ flowchart TB
     Factory --> Memory[MemoryService]:::aux
     Factory --> DaySummary[DaySummaryService]:::aux
     Factory --> Mention[MentionHandler]:::svc
+    Factory --> IrcLog[load_irc_log / load_quote_file]:::aux
+    IrcLog -->|IRC log, quotes| Mention
 
     MemStore --> Memory
     Memory -->|user notes, channel summary| Mention
@@ -165,19 +177,26 @@ sequenceDiagram
     Q->>M: handle_mention(...)
     M->>S: mark_channel_active(channel)
     M->>M: build_chat_context (history, replies, embeds, attachments)
-    M->>D: fetch_all_url_content(text) per message, concurrently
-    D->>D: discover YouTube / TikTok / Twitter / Facebook / articles
-    D-->>M: enrichment (newest 10 messages fetch; older ones use cache only)
     M->>S: get_system_prompt(channel)
-    M->>MEM: get_notes_block(asker, mentioned users, recent speakers)
-    MEM-->>M: profiles appended to the mention
-    M->>DP: dispatch_completion(messages, model, system_prompt)
+    alt model has tools (sonnet/opus-5.5-direct)
+        M->>M: add "Your tools" section, build_mention_tools(message)
+    else other models
+        M->>D: fetch_all_url_content(text) per message, concurrently
+        D-->>M: enrichment (newest 10 messages fetch; older ones use cache only)
+        M->>MEM: get_notes_block(asker, mentioned users, recent speakers)
+        MEM-->>M: profiles appended to the mention
+        Note over M: channel summary, day summary and how_i_work go in the system prompt
+    end
+    M->>DP: dispatch_completion(messages, model, system_prompt, tools)
     alt model is google / google-high
         DP->>G: get_chat_completion(...)
         G-->>DP: reply content
     else model is sonnet/opus-5.5-direct
         DP->>A: get_chat_completion(...)
-        A-->>DP: reply content
+        loop up to 6 tool rounds
+            A->>A: run tool_use blocks (ChatTool.run), send tool_result back
+        end
+        A-->>DP: reply content (+ files from draw/edit_image)
     else other models
         DP->>O: get_chat_completion(...)
         O-->>DP: reply content
@@ -195,8 +214,39 @@ sequenceDiagram
 - Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `sonnet-5.5-direct`/`opus-5.5-direct` go to `AnthropicService` (Claude API), and everything else goes to `OpenAIService`.
 - URL enrichment happens **before** the LLM call and can materially change the prompt content. Only the newest 10 history messages fetch links; older messages use cached results only, and the fetches run concurrently.
 - Per-user memory profiles are appended to the end of the mention, so the cached system prompt and history stay unchanged.
+- The Claude API direct models get none of the on-demand context filled in (links, memory notes, channel and day summaries, `how_i_work`). They get a "Your tools" section in the system prompt instead and fetch what they need with tools; see [Claude API tools](#claude-api-tools).
 - Claude API and OpenRouter replies stream: `StreamingReply` (`src/services/streaming_reply.py`) posts the reply as it arrives and edits it at most every 1.5 seconds, then edits in the final text with the cost. If the request fails, the partial message is deleted before the error reply. Gemini replies arrive whole.
 - There is no request/pipeline log table: the SDK clients use their default HTTP clients, and diagnostics go to the normal Python log (stdout and `logs/`).
+
+## Claude API tools
+
+The direct models (`sonnet-5.5-direct`, `opus-5.5-direct`) are offered client tools on top of server-side web search. `MentionHandler._build_tools` calls `build_mention_tools` (`src/services/chat_tools.py`) once per mention; the handlers are closures over that mention's guild, channel and asker, so per-reply limits (like 2 images) and permission checks need no shared state. `AnthropicService.get_chat_completion` runs the tool loop: each `tool_use` block is run, its `ToolResult` goes back as a `tool_result`, costs are added to the reply's cost and files are attached to the reply. After 6 rounds `tool_choice` is set to `none` so the model has to answer.
+
+Requests with client tools also get Anthropic's server-side code execution (`code_execution_20260521`), besides web search. The reply reuses one container across its requests, and files the code saves (`bash_code_execution_output` blocks) are downloaded through the Files API and attached to the reply (`AnthropicService._download_code_files`).
+
+A tool is left out when its dependency isn't configured (no `IRC_LOG` means no IRC tools, no guild means no Discord search, and so on), so the tool list, and with it the cached tools prefix, is fixed for a given channel.
+
+| Tool | Runs | Needs |
+| --- | --- | --- |
+| `draw`, `edit_image` | `src/services/image_service.py` (Gemini or Runpod) | a draw/edit model, Gemini or Runpod |
+| `recall_users`, `recall_channel`, `remember` | `MemoryService` | Redis memory, a guild |
+| `recall_today` | `DaySummaryService` | — |
+| `search_messages`, `read_messages`, `view_images` | `src/services/discord_history.py` (Discord's message search) and message fetches | a guild |
+| `react` | `add_reaction` on a message in the mention's channel (5 per reply; the tools section lists the server's custom emoji) | a guild |
+| `search_irc_log`, `read_irc_log_day`, `count_irc_log` | `src/services/irc_log_service.py` (memory-mapped log) | `IRC_LOG` (`IRC_NICKS` optional) |
+| `old_quotes` | `src/services/quote_service.py` | `OLD_QUOTE_BOT` |
+| `read_urls` | `fetch_all_url_content` (same fetchers and cache as enrichment), for any URL, including web search results; used instead of the API's `web_fetch` so links go through the site-specific fetchers | — |
+| `wiki_pageviews` | `DeathService.get_avg_monthly_views` | — |
+| `how_i_work` | `src/prompts/how_i_work.txt` | — |
+| `think_harder` (opus only) | handled inside `AnthropicService`: discards the reply and re-asks at high effort | — |
+
+### Adding a tool
+
+1. In `src/services/chat_tools.py`, add the `*_TOOL` definition (strict JSON schema), a `*_GUIDANCE` bullet for the system prompt's "Your tools" section, and a handler inside `build_mention_tools`. Register it with `ChatTool(definition, handler, status, guidance)`; `status` is what the reply preview shows while it runs.
+2. Pass any new dependency through `MentionHandler.__init__` and `_build_tools`, and wire it in `src/startup.py`. Leave the tool out when the dependency is missing.
+3. Treat anything other people wrote (messages, pages, logs, quotes) as material, not instructions; if the tool returns such text, add its name to the set at the end of `MentionHandler._tools_addon` that adds the warning.
+4. Describe it in `src/prompts/how_i_work.txt` (see `.agents/rules/keep-how-i-work-current.md`) and in the table above.
+5. Test the handler in `tests/test_chat_tools.py`; `test_every_tool_is_named_in_the_prompt_guidance` fails if the tool has no guidance.
 
 ## Diagram: downloader enrichment flow
 
@@ -212,12 +262,14 @@ flowchart LR
     Discover --> TT[TikTok transcript]:::src
     Discover --> TW[Twitter/X context]:::src
     Discover --> FB[Facebook transcript]:::src
+    Discover --> IG[Instagram post/video]:::src
     Discover --> AR[Article extraction]:::src
 
     YT --> Cache[Persistent caches]:::cache
     TT --> Cache
     TW --> Cache
     FB --> Cache
+    IG --> Cache
     AR --> Cache
 
     Cache --> Aggregate[Aggregated injected text block]:::out
@@ -232,6 +284,7 @@ flowchart LR
 | TikTok | `src/utils/tiktok_utils.py` | Thin wrapper over `src/utils/media_transcribe.py` (yt-dlp download -> Groq transcription) |
 | Twitter/X | `src/utils/twitter_utils.py` | Tweet/context lookup, with optional video transcription path |
 | Facebook | `src/utils/facebook_utils.py` | Thin wrapper over `src/utils/media_transcribe.py` (yt-dlp download -> Groq transcription) |
+| Instagram | `src/utils/instagram_utils.py` | Post lookup through RapidAPI (with images), videos through `media_transcribe.py` |
 | Generic articles | `src/utils/url_utils.py` | `fetch_public` fetch, then `trafilatura` extraction (retried with `favor_recall` if the first pass finds nothing) |
 | Shared media pipeline | `src/utils/media_transcribe.py` | yt-dlp or direct video download (3-minute limit) + proxy fallback, audio encoded at 16 kHz mono 32 kbps (what Whisper uses anyway; ~1h50m per 25 MB upload), longer audio split into 30-minute chunks, Groq Whisper transcription (near-instant). No length limit. Used by TikTok/Facebook/Twitter/Instagram and big Discord audio attachments |
 
@@ -266,6 +319,15 @@ flowchart LR
 | `src/bot/commands/` | Slash commands | Inspect user-facing command behavior |
 | `src/utils/chat_context.py` | Multimodal context builder | Change how history/embeds/attachments become the model input |
 | `src/services/completion_dispatch.py` | Model routing | Understand Gemini/Claude API/OpenRouter selection |
+| `src/services/model_catalog.py` | `/model` options | Add a text model or see which key each one needs |
+| `src/services/anthropic_service.py` | Claude API integration | Debug prompt caching, the tool loop, `think_harder` or pricing |
+| `src/services/chat_tools.py` | Client tools for the direct models | Add or change a tool and its prompt guidance |
+| `src/services/discord_history.py` | Discord message search/read | Debug `search_messages` / `read_messages` |
+| `src/services/irc_log_service.py` | Old IRC log search/count | Debug the IRC tools or nick merging |
+| `src/services/quote_service.py` | Old quote bot file | Debug `old_quotes` |
+| `src/services/day_summary_service.py` | Today's chat summary | Understand the incremental day summary |
+| `src/services/image_service.py` | Image model routing | See which image models go to Gemini vs Runpod |
+| `src/services/streaming_reply.py` | Streamed reply preview | Debug status lines, edits and the final reply |
 | `src/services/openai_service.py` | Text-model integration | Understand OpenRouter calls |
 | `src/services/gemini_service.py` | Native Gemini integration | Understand `google`/`google-high` calls and the Gemini timeout |
 | `src/services/runpod_service.py` | Image integration | Understand draw/edit requests |
@@ -290,8 +352,8 @@ flowchart LR
 1. A user mentions the bot.
 2. `DiscordBotClient` chooses the active model for the channel and queues the work.
 3. `MentionHandler` gathers recent message history and reply context (via `build_chat_context`).
-4. The handler enriches user text with downloader output for supported URLs and appends the memory profiles of the people involved.
-5. `dispatch_completion` routes the assembled context to `OpenAIService` (OpenRouter), `GeminiService` (native Gemini), or `AnthropicService` (Claude API), based on the channel's model.
+4. For most models, the handler enriches user text with downloader output for supported URLs, appends the memory profiles of the people involved, and puts the channel and day summaries in the system prompt. The Claude API direct models get a tools section and the tools instead.
+5. `dispatch_completion` routes the assembled context to `OpenAIService` (OpenRouter), `GeminiService` (native Gemini), or `AnthropicService` (Claude API), based on the channel's model. `AnthropicService` runs any tool calls before the final answer.
 6. For Claude API and OpenRouter models the reply streams into a Discord message as it's written (`StreamingReply`); the final text, with its cost, is edited in at the end. Gemini replies are sent whole by `MessageService`.
 
 ### Memory

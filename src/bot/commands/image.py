@@ -5,7 +5,7 @@ Image Commands - Handles image generation Discord commands
 import base64
 import io
 import logging
-from typing import Optional
+from typing import List, Optional
 
 import discord
 from discord import app_commands
@@ -18,6 +18,19 @@ from src.utils.async_utils import safe_run
 from src.utils.discord_error_utils import best_effort_typing, safe_defer
 
 logger = logging.getLogger(__name__)
+
+# Model choices for the image commands: the Gemini ones and seedream always, the rest only
+# when the Runpod models are enabled.
+BASE_CHOICES = [
+    Choice(name="banana-pro", value="gemini-3-pro-image"),
+    Choice(name="banana-2.1", value="gemini-nano-banana-2.1"),
+    Choice(name="seedream", value="seedream"),
+]
+RUNPOD_DRAW_CHOICES = [
+    Choice(name=name, value=name) for name in ("z-image", "wan-2.6", "pruna", "qwen", "flux")
+]
+RUNPOD_EDIT_CHOICES = [Choice(name=name, value=name) for name in ("qwen", "pruna")]
+
 
 class ImageCommands:
     """Handles image-related Discord commands."""
@@ -43,6 +56,9 @@ class ImageCommands:
         self._default_edit_model = default_edit_model
         self._enable_runpod_models = enable_runpod_models
 
+    def _model_choices(self, runpod_choices: List[Choice[str]]) -> List[Choice[str]]:
+        return BASE_CHOICES + (runpod_choices if self._enable_runpod_models else [])
+
     def setup_commands(self) -> None:
         """Set up all image-related commands."""
         self.bot.tree.add_command(self._create_draw_command())
@@ -53,20 +69,7 @@ class ImageCommands:
     def _create_draw_command(self) -> app_commands.Command:
         """Create the /draw command."""
 
-        model_choices = [
-            Choice(name="banana-pro", value="gemini-3-pro-image"),
-            Choice(name="banana-2.1", value="gemini-nano-banana-2.1"),
-            Choice(name="seedream", value="seedream"),
-        ]
-
-        if self._enable_runpod_models:
-            model_choices.extend([
-                Choice(name="z-image", value="z-image"),
-                Choice(name="wan-2.6", value="wan-2.6"),
-                Choice(name="pruna", value="pruna"),
-                Choice(name="qwen", value="qwen"),
-                Choice(name="flux", value="flux"),
-            ])
+        model_choices = self._model_choices(RUNPOD_DRAW_CHOICES)
 
         @app_commands.command(name="draw",
                               description="Generate an image from a prompt")
@@ -218,20 +221,7 @@ class ImageCommands:
     def _create_drawmodel_command(self) -> app_commands.Command:
         """Create the /drawmodel command."""
 
-        model_choices = [
-            Choice(name="banana-pro", value="gemini-3-pro-image"),
-            Choice(name="banana-2.1", value="gemini-nano-banana-2.1"),
-            Choice(name="seedream", value="seedream"),
-        ]
-
-        if self._enable_runpod_models:
-            model_choices.extend([
-                Choice(name="z-image", value="z-image"),
-                Choice(name="wan-2.6", value="wan-2.6"),
-                Choice(name="pruna", value="pruna"),
-                Choice(name="qwen", value="qwen"),
-                Choice(name="flux", value="flux"),
-            ])
+        model_choices = self._model_choices(RUNPOD_DRAW_CHOICES)
 
         @app_commands.command(name="drawmodel",
                               description="View or set the default drawing model")
@@ -268,17 +258,7 @@ class ImageCommands:
     def _create_edit_command(self) -> app_commands.Command:
         """Create the /edit command."""
 
-        edit_model_choices = [
-            Choice(name="banana-pro", value="gemini-3-pro-image"),
-            Choice(name="banana-2.1", value="gemini-nano-banana-2.1"),
-            Choice(name="seedream", value="seedream"),
-        ]
-
-        if self._enable_runpod_models:
-            edit_model_choices.extend([
-                Choice(name="qwen", value="qwen"),
-                Choice(name="pruna", value="pruna"),
-            ])
+        edit_model_choices = self._model_choices(RUNPOD_EDIT_CHOICES)
 
         @app_commands.command(name="edit",
                               description="Edit an image with a prompt")
@@ -430,17 +410,7 @@ class ImageCommands:
     def _create_editmodel_command(self) -> app_commands.Command:
         """Create the /editmodel command."""
 
-        edit_model_choices = [
-            Choice(name="banana-pro", value="gemini-3-pro-image"),
-            Choice(name="banana-2.1", value="gemini-nano-banana-2.1"),
-            Choice(name="seedream", value="seedream"),
-        ]
-
-        if self._enable_runpod_models:
-            edit_model_choices.extend([
-                Choice(name="qwen", value="qwen"),
-                Choice(name="pruna", value="pruna"),
-            ])
+        edit_model_choices = self._model_choices(RUNPOD_EDIT_CHOICES)
 
         @app_commands.command(name="editmodel",
                               description="View or set the default drawing edit model")

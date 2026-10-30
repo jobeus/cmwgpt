@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 
-from src.services.chat_tools import MAX_DRAWS_PER_REPLY, build_mention_tools
+from src.services.chat_tools import (
+    MAX_DRAWS_PER_REPLY, MAX_REACTIONS_PER_REPLY, MAX_VIEW_IMAGES, UNKNOWN_EMOJI_CODE, build_mention_tools,
+)
 from src.services.discord_history import INDEX_NOT_READY_CODE
 from src.utils.url_utils import wiki_title_candidates
 
@@ -56,7 +58,7 @@ def _message(admin=False):
     guild.get_member.return_value = SimpleNamespace(display_name="Bob")
     guild._state.http.request = AsyncMock(return_value={"total_results": 0, "messages": []})
     author = SimpleNamespace(id=30, guild_permissions=SimpleNamespace(administrator=admin))
-    return SimpleNamespace(guild=guild, channel=here, author=author)
+    return SimpleNamespace(id=999999999, guild=guild, channel=here, author=author)
 
 
 def _full_tools(message=None, **overrides):
@@ -128,8 +130,17 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
         tools, _ = _full_tools()
         self.assertEqual(list(tools), [
             "draw", "edit_image", "recall_users", "recall_channel", "remember",
-            "search_messages", "read_messages", "wiki_pageviews", "how_i_work",
+            "search_messages", "read_messages", "view_images", "react", "wiki_pageviews", "how_i_work",
         ])
+
+    def test_every_tool_is_named_in_the_prompt_guidance(self):
+        tools, _ = _full_tools(
+            irc_log=MagicMock(), quote_file=MagicMock(), url_content_fetcher=AsyncMock(),
+            day_summary_loader=AsyncMock(),
+        )
+        guidance = "".join(tool.guidance for tool in tools.values())
+        for name in tools:
+            self.assertIn(f"`{name}(", guidance)
 
     @patch("src.services.chat_tools.compress_image", return_value=b"jpeg")
     async def test_edit_image_sends_the_message_images_to_the_edit_model(self, _compress):
@@ -288,3 +299,91 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _posted(message_id, *, attachments=(), embeds=()):
+    return SimpleNamespace(id=message_id, author=SimpleNamespace(id=7), attachments=list(attachments),
+                           embeds=list(embeds))
+
+
+class TestViewImages(unittest.IsolatedAsyncioTestCase):
+    @patch("src.services.chat_tools.url_to_base64_data_url", new_callable=AsyncMock,
+           return_value="data:image/png;base64,QkJC")
+    @patch("src.services.chat_tools.attachment_to_base64_data_url", new_callable=AsyncMock,
+           return_value="data:image/jpeg;base64,QUFB")
+    async def test_returns_attachment_and_embed_images(self, _attachment, _url):
+        message = _message()
+        photo = SimpleNamespace(content_type="image/png")
+        notes = SimpleNamespace(content_type="text/plain")
+        embed = SimpleNamespace(image=SimpleNamespace(url="https://x/y.gif"), thumbnail=None)
+        message.channel.fetch_message = AsyncMock(return_value=_posted(55555, attachments=[photo, notes],
+                                                                       embeds=[embed]))
+        tools, _ = _full_tools(message)
+
+        result = await tools["view_images"].run({"message_ids": ["55555"]})
+
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.content[0], {"type": "text", "text": "[55555] <@7>: 2 images"})
+        self.assertEqual([b["source"]["media_type"] for b in result.content[1:]], ["image/jpeg", "image/png"])
+
+    async def test_caps_the_images_and_refuses_unreadable_channels(self):
+        message = _message()
+        photos = [SimpleNamespace(content_type="image/png")] * (MAX_VIEW_IMAGES + 3)
+        message.channel.fetch_message = AsyncMock(return_value=_posted(55555, attachments=photos))
+        tools, _ = _full_tools(message)
+        with patch("src.services.chat_tools.attachment_to_base64_data_url", new_callable=AsyncMock,
+                   return_value="data:image/jpeg;base64,QUFB"):
+            result = await tools["view_images"].run({"message_ids": ["55555"]})
+        self.assertEqual(sum(b["type"] == "image" for b in result.content), MAX_VIEW_IMAGES)
+
+        denied = await tools["view_images"].run({"message_ids": ["55555"], "channel_id": "222222222"})
+        self.assertTrue(denied.is_error)
+
+    async def test_a_message_without_images_is_an_error(self):
+        message = _message()
+        message.channel.fetch_message = AsyncMock(return_value=_posted(55555))
+        tools, _ = _full_tools(message)
+        self.assertTrue((await tools["view_images"].run({"message_ids": ["55555"]})).is_error)
+
+
+class TestReact(unittest.IsolatedAsyncioTestCase):
+    async def test_reacts_to_the_mention_with_a_custom_emoji_by_name(self):
+        message = _message()
+        kekw = SimpleNamespace(name="KEKW")
+        message.guild.emojis = [kekw]
+        message.add_reaction = AsyncMock()
+        tools, _ = _full_tools(message)
+
+        result = await tools["react"].run({"message_id": "999999999", "emoji": ":kekw:"})
+
+        self.assertFalse(result.is_error)
+        message.add_reaction.assert_awaited_once_with(kekw)
+
+    async def test_reacts_to_other_messages_with_unicode_and_is_capped(self):
+        message = _message()
+        message.guild.emojis = []
+        partial = MagicMock()
+        partial.add_reaction = AsyncMock()
+        message.channel.get_partial_message.return_value = partial
+        tools, _ = _full_tools(message)
+
+        for _ in range(MAX_REACTIONS_PER_REPLY):
+            self.assertFalse((await tools["react"].run({"message_id": "55555", "emoji": "😂"})).is_error)
+        self.assertTrue((await tools["react"].run({"message_id": "55555", "emoji": "😂"})).is_error)
+        message.channel.get_partial_message.assert_called_with(55555)
+        partial.add_reaction.assert_awaited_with("😂")
+
+    async def test_unknown_emoji_is_an_error(self):
+        message = _message()
+        message.guild.emojis = []
+        partial = MagicMock()
+        response = SimpleNamespace(status=400, reason="Bad Request")
+        partial.add_reaction = AsyncMock(side_effect=discord.HTTPException(
+            response, {"code": UNKNOWN_EMOJI_CODE, "message": "Unknown Emoji"}))
+        message.channel.get_partial_message.return_value = partial
+        tools, _ = _full_tools(message)
+
+        result = await tools["react"].run({"message_id": "55555", "emoji": "notanemoji"})
+
+        self.assertTrue(result.is_error)
+        self.assertIn("doesn't know that emoji", result.content[0]["text"])

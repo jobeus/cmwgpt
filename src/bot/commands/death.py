@@ -90,9 +90,9 @@ class DeathCommands:
         @death_group.command(name="set",
                              description="Set death service configuration")
         @app_commands.describe(
-            poll_interval="Polling interval in seconds (default 15)",
-            min_views="Minimum average monthly views to announce (default 180000)",
-            pageview_months="How many months to average pageview data (default 12)")
+            poll_interval=f"Polling interval in seconds (default {POLL_INTERVAL_SECONDS})",
+            min_views=f"Minimum average monthly views to announce (default {MIN_AVG_MONTHLY_VIEWS})",
+            pageview_months=f"How many months to average pageview data (default {PAGEVIEW_MONTHS})")
         async def death_set(
                 interaction: discord.Interaction,
                 poll_interval: Optional[app_commands.Range[int, 5, 3600]] = None,

@@ -5,7 +5,9 @@ Accepts the same OpenAI-style message array the rest of the bot builds
 (``text`` / ``image_url`` parts) and converts it to Messages API content blocks.
 """
 
+import io
 import logging
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
@@ -43,6 +45,12 @@ PRICE_WEB_SEARCH = 0.01
 
 MAX_TOKENS = 16000
 WEB_SEARCH_MAX_USES = 10
+# Server-side Python sandbox, offered with client tools (mention replies). It's free alongside
+# web search. Files it saves come back as file IDs and are attached to the reply.
+CODE_EXECUTION_TOOL = {"type": "code_execution_20260521", "name": "code_execution"}
+# Most code execution files attached to one reply, and the largest one attached.
+MAX_CODE_FILES = 4
+MAX_CODE_FILE_BYTES = 8 * 1024 * 1024
 # A server-tool turn can come back as ``pause_turn``; resume it this many times.
 MAX_CONTINUATIONS = 5
 # Rounds of client tool calls (draw, recall, ...) per reply; the last request after them can't call tools.
@@ -79,6 +87,7 @@ THINKING_HARDER_STATUS = "thinking harder..."
 THINKING_STATUS = "thinking..."
 WEB_SEARCH_STATUS = "searching the web..."
 SEARCH_RESULTS_STATUS = "reading search results..."
+CODE_STATUS = "running code..."
 
 # Cache diagnostics (beta): each request names the previous response in its
 # channel, and the API reports where the prompt-cache prefix diverged from it.
@@ -237,12 +246,27 @@ def _block_status(block: Any, tool_statuses: Dict[str, str]) -> Optional[str]:
     if kind in ("thinking", "redacted_thinking"):
         return THINKING_STATUS
     if kind == "server_tool_use":
-        return WEB_SEARCH_STATUS
+        return WEB_SEARCH_STATUS if getattr(block, "name", "") == "web_search" else CODE_STATUS
     if kind == "web_search_tool_result":
         return SEARCH_RESULTS_STATUS
     if kind == "tool_use":
         return tool_statuses.get(getattr(block, "name", ""))
     return None
+
+
+def _code_file_ids(response: Any) -> List[str]:
+    """IDs of the files code execution saved in ``response``."""
+    ids = []
+    for block in getattr(response, "content", None) or ():
+        if getattr(block, "type", None) != "bash_code_execution_tool_result":
+            continue
+        result = getattr(block, "content", None)
+        if getattr(result, "type", None) != "bash_code_execution_result":
+            continue
+        for output in getattr(result, "content", None) or ():
+            if getattr(output, "type", None) == "bash_code_execution_output":
+                ids.append(output.file_id)
+    return ids
 
 
 def _usage_cost(usage: Any, model: DirectModel) -> float:
@@ -340,13 +364,15 @@ class AnthropicService:
         on_text: Optional[Callable[[str], None]],
         on_status: Optional[Callable[[str], None]] = None,
         tool_statuses: Optional[Dict[str, str]] = None,
+        code_file_ids: Optional[List[str]] = None,
     ) -> Tuple[Any, float, Optional[str], List[Dict[str, Any]]]:
         """Run one request, resuming ``pause_turn``s.
 
         Returns ``(response, cost, last message id, messages)``; ``messages`` ends with the
         paused assistant content when the turn was resumed. While streaming, ``on_status``
-        hears what the model started on: thinking, a web search, or a tool call (its
-        status from ``tool_statuses``).
+        hears what the model started on: thinking, a web search, code, or a tool call (its
+        status from ``tool_statuses``). IDs of files code execution saved are added to
+        ``code_file_ids``, and its container is reused by the requests after this one.
         """
         api_model = direct_model.api_id
         cost = 0.0
@@ -376,11 +402,33 @@ class AnthropicService:
             cost += _usage_cost(getattr(response, "usage", None), served_by)
             _log_cache_diagnostics(api_model, channel_id, response)
             previous_message_id = getattr(response, "id", None) or previous_message_id
+            if code_file_ids is not None:
+                code_file_ids += _code_file_ids(response)
+            container_id = getattr(getattr(response, "container", None), "id", None)
+            if container_id:
+                kwargs["container"] = container_id
             if response.stop_reason != "pause_turn":
                 break
             # Resume a paused server-tool turn by sending its content back.
             api_messages = _with_assistant_content(api_messages, response.content)
         return response, cost, previous_message_id, api_messages
+
+    async def _download_code_files(self, client: Any, file_ids: List[str]) -> List[discord.File]:
+        """Download the files code execution saved, as Discord attachments. Failures are skipped."""
+        files: List[discord.File] = []
+        for file_id in list(dict.fromkeys(file_ids))[:MAX_CODE_FILES]:
+            try:
+                metadata = await client.files.retrieve_metadata(file_id)
+                if (getattr(metadata, "size_bytes", 0) or 0) > MAX_CODE_FILE_BYTES:
+                    logger.info(f"[code_execution] Skipping {file_id}: too big to attach")
+                    continue
+                data = await (await client.files.download(file_id)).read()
+            except Exception as e:
+                logger.warning(f"[code_execution] Couldn't download {file_id}: {e}")
+                continue
+            name = os.path.basename(getattr(metadata, "filename", "") or "") or f"{file_id}.bin"
+            files.append(discord.File(io.BytesIO(data), filename=name))
+        return files
 
     async def _run_tool_calls(
         self, response: Any, client_tools: Dict[str, ChatTool], on_status: Callable[[str], None],
@@ -435,8 +483,10 @@ class AnthropicService:
         With ``on_text``, the reply is streamed and ``on_text`` gets the cleaned text so far.
         ``effort`` overrides the model's default effort level. ``tools`` are client tools the
         model may call; their costs are added in, and when they made files the reply is
-        ``{"text": ..., "files": [...]}`` instead of a string. ``on_status`` hears what the
-        model is doing while there's no new text: thinking, searching, or running a tool.
+        ``{"text": ..., "files": [...]}`` instead of a string. With ``tools``, the model also
+        gets code execution, and the files its code saves are attached the same way.
+        ``on_status`` hears what the model is doing while there's no new text: thinking,
+        searching, running code, or running a tool.
         """
         client = self.get_client()
         resolved_bot_id = resolve_bot_id(bot_id, state_service, self._bot_id_loader)
@@ -467,7 +517,9 @@ class AnthropicService:
             }]
         client_tools: Dict[str, ChatTool] = {t.definition["name"]: t for t in tools or ()}
         if client_tools:
-            kwargs["tools"] = kwargs.get("tools", []) + [t.definition for t in client_tools.values()]
+            kwargs["tools"] = kwargs.get("tools", []) + [CODE_EXECUTION_TOOL] + [
+                t.definition for t in client_tools.values()
+            ]
         # Only at the model's default effort: a caller that set its own effort gets exactly that.
         think_harder = model in THINK_HARDER_MODELS and effort is None
         if think_harder:
@@ -482,6 +534,7 @@ class AnthropicService:
         # Text the model wrote before each finished tool round, and the files its tools made.
         texts: List[str] = []
         files: List[discord.File] = []
+        code_file_ids: List[str] = []
 
         def show(text: str) -> None:
             if on_text:
@@ -501,7 +554,7 @@ class AnthropicService:
                 status(THINKING_STATUS)
                 response, cost, previous_message_id, sent_messages = await self._send(
                     client, api_messages, kwargs, direct_model, channel_id, previous_message_id,
-                    resolved_bot_id, show if on_text else None, status, tool_statuses,
+                    resolved_bot_id, show if on_text else None, status, tool_statuses, code_file_ids,
                 )
                 total_cost += cost
                 reason = _think_harder_reason(response) if think_harder and not escalated else None
@@ -572,6 +625,8 @@ class AnthropicService:
             f"response snippet: {response_text.replace(chr(10), ' ')[:150]}"
         )
         cleaned = "\n\n".join(texts + [clean_openai_response(response_text, bot_id=resolved_bot_id)]).strip()
+        if code_file_ids:
+            files += await self._download_code_files(client, code_file_ids)
         if files:
             return {"text": cleaned, "files": files}, total_cost
         if not cleaned:

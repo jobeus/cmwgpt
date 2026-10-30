@@ -8,6 +8,7 @@ The bot's main chat experience is **mention-based**:
 
 - mention the bot in a normal Discord message
 - the mention pipeline builds context from recent chat, attachments, embeds, and supported URLs
+- on the Claude API direct models, the model also calls tools on its own (drawing, memory, Discord/IRC log search, links); see `docs/architecture.md#claude-api-tools`
 - there is **no current `/chat` command**
 
 ## Command quick reference
@@ -26,10 +27,12 @@ The bot's main chat experience is **mention-based**:
 | `/death set` | Configures deathwatch behavior | persisted service state |
 | `/death view` | Shows deathwatch settings | reads persisted state |
 | `/death reset` | Restores default deathwatch settings | persisted reset |
-| `/memory show` | Shows you (only you) what the bot remembers about you | reads `user_memory` |
+| `/limerick` | Writes a limerick about a person (name or Wikipedia URL) | runtime action |
+| `/forcedeath` | Posts a death announcement for a Wikipedia article, for testing (admin only) | runtime action |
+| `/memory show` | Shows you (only you) what the bot remembers about you | reads `cmwgpt:memory:<guild>:<user>` in Redis |
 | `/memory correct` | Privately has the memory model fix or add to your memory | persisted per user, per server |
 | `/memory clear` | Privately forgets everything about you | persisted per user, per server |
-| `/fillmemory` | Rebuilds everyone's learned memory from the last 7 days (admin only) | rewrites `user_memory` |
+| `/fillmemory` | Rebuilds everyone's learned memory from the last 7 days (admin only) | rewrites every memory key |
 | `/fillsummaries` | Rebuilds every channel's "lately" summary from the last 7 days (admin only) | rewrites channel summaries |
 | `/wikicount` | Looks up a Wikipedia article's average monthly pageviews | runtime action |
 | `/restart` | Triggers restart flow and `git pull` | runtime action |
@@ -125,18 +128,19 @@ These commands use `RunpodService` and channel-level state for model selection.
 | `/edit` | Edit an uploaded image using a prompt |
 | `/editmodel` | Set the model used by `/edit` |
 
-Current image model keys exposed by the bot (the non-`seedream` keys appear only
-when Runpod models are enabled):
+Current image model keys exposed by the bot (the `banana-*` keys use Gemini; the Runpod keys
+other than `seedream` appear only when Runpod models are enabled). The chat model's `draw` and
+`edit_image` tools use the channel's `/drawmodel` and `/editmodel`:
 
 | Command | Model keys |
 | --- | --- |
-| `/draw`, `/drawmodel` | `seedream`, `z-image`, `wan-2.6`, `pruna`, `qwen`, `flux` |
-| `/edit`, `/editmodel` | `seedream`, `qwen`, `pruna` |
+| `/draw`, `/drawmodel` | `banana-pro`, `banana-2.1`, `seedream`, `z-image`, `wan-2.6`, `pruna`, `qwen`, `flux` |
+| `/edit`, `/editmodel` | `banana-pro`, `banana-2.1`, `seedream`, `qwen`, `pruna` |
 
 
 ## Death commands
 
-The deathwatch feature periodically checks guild members against external death-signal heuristics and can post notices into `DEATH_CHANNEL_ID`.
+The deathwatch feature polls Wikipedia's "Deaths in <year>" page and posts an RIP notice, with a limerick, into `DEATH_CHANNEL_ID` for anyone famous enough by average monthly pageviews.
 
 ### `/death set`
 
@@ -145,8 +149,8 @@ Current parameters:
 | Parameter | Meaning |
 | --- | --- |
 | `poll_interval` | Polling interval in seconds (default 15) |
-| `min_views` | Minimum average monthly views to announce (default 180000) |
-| `pageview_months` | How many months to average pageview data (default 12) |
+| `min_views` | Minimum average monthly views to announce (default 40000) |
+| `pageview_months` | How many months to average pageview data (default 3) |
 
 ### Other death subcommands
 
