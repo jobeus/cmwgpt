@@ -29,6 +29,9 @@ class TestIrcLog(unittest.TestCase):
     def tearDown(self):
         os.unlink(self.path)
 
+    def test_first_day(self):
+        self.assertEqual(self.log.first_day(), date(2020, 5, 19))
+
     def test_hits_are_dated_by_the_last_day_marker(self):
         out = self.log.search("podcast")
         self.assertIn("2 matching lines", out)

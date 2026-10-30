@@ -185,6 +185,11 @@ class IrcLog:
             header += f" Use start_line={end_line} for the rest."
         return header + "\n" + "\n".join(shown)
 
+    def first_day(self) -> Optional[date]:
+        """The first dated day in the log."""
+        self._load()
+        return next((d for d in self._marker_days if d), None)
+
     def coverage(self) -> str:
         """The first and last dates in the log, e.g. ``2014-01-03 (Fri) to 2026-10-25 (Sun)``."""
         self._load()

@@ -2,6 +2,7 @@
 Mention Handler - Handles bot mentions and context preparation
 """
 
+import asyncio
 import logging
 import time
 from functools import lru_cache
@@ -117,6 +118,10 @@ class MentionHandler:
         self._default_edit_model = default_edit_model
         self._memory_corrector = memory_corrector
         self._wiki_views = wiki_views
+        # Found once and kept, so the system prompt stays the same between requests.
+        self._irc_start: Optional[str] = None
+        # channel_id -> day of the channel's first Discord message
+        self._discord_starts: Dict[int, str] = {}
         # Cache for history fetching optimization (bounded, LRU-ish eviction)
         # channel_id -> {"timestamp": float, "oldest_message": discord.Message}
         self._history_cache = {}
@@ -449,7 +454,7 @@ class MentionHandler:
                 "since the re-run costs more and takes longer.\n\n"
             )
         if uses_tools:
-            current_channel_system_prompt += self._tools_addon(message)
+            current_channel_system_prompt += self._tools_addon(message, await self._history_ranges(message.channel))
         current_channel_system_prompt += f"{legend_section}\n\n"
         how_i_work = "" if uses_tools else _load_how_i_work()
         if how_i_work:
@@ -480,7 +485,41 @@ class MentionHandler:
 
         return chat_context, current_channel_system_prompt, summary_cost
 
-    def _tools_addon(self, message: discord.Message) -> str:
+    async def _history_ranges(self, channel: Any) -> str:
+        """Which dates the Discord history and the IRC log cover, so the model knows which to search."""
+        start = self._discord_starts.get(channel.id)
+        if start is None:
+            first = None
+            try:
+                async for first in channel.history(limit=1, oldest_first=True):
+                    break
+            except Exception as e:
+                logger.warning(f"Couldn't fetch #{channel}'s first message: {concise_error(e)}")
+            when = getattr(first, "created_at", None) or getattr(channel, "created_at", None)
+            start = when.date().isoformat() if when else ""
+            self._discord_starts[channel.id] = start
+        if self._irc_log and self._irc_start is None:
+            try:
+                first_day = await asyncio.to_thread(self._irc_log.first_day)
+            except Exception as e:
+                logger.warning(f"Couldn't read the IRC log's dates: {e}")
+                first_day = None
+            self._irc_start = first_day.isoformat() if first_day else ""
+
+        # The log still gets day markers since the move, but nothing was said there after Discord started.
+        ranges = []
+        if self._irc_start:
+            ranges.append(f"the IRC log covers {self._irc_start} to {start or 'when the channel moved to Discord'}")
+        if start:
+            ranges.append(f"this channel's Discord history starts {start}")
+        if not ranges:
+            return ""
+        note = "Dates covered: " + "; ".join(ranges) + "."
+        if start and self._irc_start:
+            note += f" For anything before {start}, search the IRC log; from then on, search Discord."
+        return note + "\n"
+
+    def _tools_addon(self, message: discord.Message, ranges: str = "") -> str:
         """The system prompt section that tells the model which tools it has and when to use them."""
         names = {tool.definition["name"] for tool in self._build_tools(message)}
         section = (
@@ -547,9 +586,11 @@ class MentionHandler:
             )
         section += (
             "- `how_i_work()`: a description of your own architecture, features, commands and models. "
-            "Call it when someone asks how you work or what you can do, and answer from it.\n\n"
+            "Call it when someone asks how you work or what you can do, and answer from it.\n"
         )
-        return section
+        if ranges and ({"search_messages", "search_irc_log"} & names):
+            section += ranges
+        return section + "\n"
 
     async def _append_user_notes(
         self,

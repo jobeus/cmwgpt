@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import discord
+
 from src.services.openai_service import OpenAIServiceError
 from src.bot.handlers.mention import MentionHandler
 
@@ -628,6 +630,38 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             self.assertIn("## How you work", system_prompt)
             self.assertIn("## Lately in this channel", system_prompt)
             self.assertIn("<user_notes>n</user_notes>", str(context))
+
+    async def test_history_ranges_end_the_irc_log_where_discord_starts(self):
+        handler, _, _, _, _ = self.make_handler()
+        handler._irc_log = MagicMock()
+        handler._irc_log.first_day.return_value = datetime(2014, 1, 3).date()
+        first = SimpleNamespace(created_at=datetime(2023, 6, 19, 21, 22, tzinfo=timezone.utc))
+        calls = []
+
+        async def history(limit=None, oldest_first=None):
+            calls.append((limit, oldest_first))
+            yield first
+
+        channel = SimpleNamespace(id=46, history=history)
+        note = await handler._history_ranges(channel)
+        self.assertIn("the IRC log covers 2014-01-03 to 2023-06-19", note)
+        self.assertIn("Discord history starts 2023-06-19", note)
+        self.assertIn("before 2023-06-19, search the IRC log", note)
+        # Found once per channel, so the system prompt stays cacheable.
+        self.assertEqual(await handler._history_ranges(channel), note)
+        self.assertEqual(calls, [(1, True)])
+        handler._irc_log.first_day.assert_called_once()
+
+    async def test_history_ranges_fall_back_to_channel_creation(self):
+        handler, _, _, _, _ = self.make_handler()
+
+        async def history(limit=None, oldest_first=None):
+            raise discord.HTTPException(MagicMock(status=500), "boom")
+            yield
+
+        channel = SimpleNamespace(id=47, history=history, created_at=datetime(2023, 6, 1, tzinfo=timezone.utc))
+        self.assertEqual(await handler._history_ranges(channel),
+                         "Dates covered: this channel's Discord history starts 2023-06-01.\n")
 
     async def test_handle_mention_passes_tools_only_to_direct_models(self):
         anthropic_service = MagicMock()

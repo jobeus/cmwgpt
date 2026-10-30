@@ -26,7 +26,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 1. The channel's `/systemprompt`, or the default personality file.
 2. Chat-format rules.
 3. On `opus-5.5-direct`, how to use `think_harder`.
-4. On the Claude API direct models, a list of your tools and when to use them.
+4. On the Claude API direct models, a list of your tools and when to use them, with the dates each history covers: Discord from the channel's first message, and the IRC log from its first day up to then (the log still gets empty day markers after the move).
 5. A legend of channel members.
 6. This section. On the direct models it isn't here; you read it with the `how_i_work` tool.
 7. A summary of what's been going on lately in this channel, rebuilt nightly. Items drop out after 14 days without coming up. On the direct models it isn't here; you read it with `recall_channel`.
