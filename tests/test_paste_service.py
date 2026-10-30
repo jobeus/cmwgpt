@@ -32,7 +32,7 @@ class TestPasteService(unittest.IsolatedAsyncioTestCase):
             async def post(self, url, content):
                 self.last_url = url
                 self.last_content = content
-                return FakeResponse(201, "https://paste.rs/abc123")
+                return FakeResponse(201, "https://paste.jobe.wtf/abc123")
 
         fake_client = FakeClient()
         service = PasteService(
@@ -42,10 +42,10 @@ class TestPasteService(unittest.IsolatedAsyncioTestCase):
 
         result = await service.upload_text("hello world")
 
-        self.assertEqual(result, "https://paste.rs/abc123.md")
-        self.assertEqual(fake_client.last_url, "https://paste.rs")
+        self.assertEqual(result, "https://paste.jobe.wtf/abc123.md")
+        self.assertEqual(fake_client.last_url, "https://paste.jobe.wtf")
         self.assertEqual(fake_client.last_content, b"hello world")
-        self.assertEqual(injected, [("https://paste.rs/abc123.md", "hello world")])
+        self.assertEqual(injected, [("https://paste.jobe.wtf/abc123.md", "hello world")])
 
     async def test_upload_text_raises_on_non_201_status(self):
         class FakeClient:
@@ -57,10 +57,10 @@ class TestPasteService(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(Exception) as ctx:
             await service.upload_text("bad")
 
-        self.assertIn("paste.rs error: 500 - nope", str(ctx.exception))
+        self.assertIn("Paste service error: 500 - nope", str(ctx.exception))
 
     async def test_upload_text_wraps_request_errors(self):
-        request = httpx.Request("POST", "https://paste.rs")
+        request = httpx.Request("POST", "https://paste.jobe.wtf")
 
         class FakeClient:
             async def post(self, url, content):
@@ -76,13 +76,13 @@ class TestPasteService(unittest.IsolatedAsyncioTestCase):
     async def test_upload_markdown_delegates_to_upload_text(self):
         class FakeClient:
             async def post(self, url, content):
-                return FakeResponse(201, "https://paste.rs/xyz789")
+                return FakeResponse(201, "https://paste.jobe.wtf/xyz789")
 
         service = PasteService(client_factory=lambda timeout: FakeClientContext(FakeClient()))
 
         result = await service.upload_markdown("# title")
 
-        self.assertEqual(result, "https://paste.rs/xyz789.md")
+        self.assertEqual(result, "https://paste.jobe.wtf/xyz789.md")
 
     async def test_default_client_factory_is_httpx_async_client(self):
         service = PasteService()
@@ -93,12 +93,12 @@ class TestPasteService(unittest.IsolatedAsyncioTestCase):
         def handler(request):
             seen["url"] = str(request.url)
             seen["body"] = request.content
-            return httpx.Response(201, text="https://paste.rs/real\n")
+            return httpx.Response(201, text="https://paste.jobe.wtf/real\n")
 
         transport = httpx.MockTransport(handler)
         service = PasteService(
             client_factory=lambda timeout: httpx.AsyncClient(timeout=timeout, transport=transport)
         )
 
-        self.assertEqual(await service.upload_text("hi"), "https://paste.rs/real.md")
-        self.assertEqual(seen, {"url": "https://paste.rs", "body": b"hi"})
+        self.assertEqual(await service.upload_text("hi"), "https://paste.jobe.wtf/real.md")
+        self.assertEqual(seen, {"url": "https://paste.jobe.wtf", "body": b"hi"})

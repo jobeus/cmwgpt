@@ -14,7 +14,7 @@ class PasteService:
 
     def __init__(
         self,
-        base_url: str = "https://paste.rs",
+        base_url: str = "https://paste.jobe.wtf",
         *,
         cache_injector: Optional[Callable[[str, str], None]] = None,
         client_factory=httpx.AsyncClient,
@@ -48,7 +48,7 @@ class PasteService:
                     return paste_url
                 else:
                     raise Exception(
-                        f"paste.rs error: {response.status_code} - {response.text}")
+                        f"Paste service error: {response.status_code} - {response.text}")
         except httpx.RequestError as e:
             logger.error(f"Network error uploading to paste service: {e}")
             raise Exception(f"Failed to upload to paste service: {e}")

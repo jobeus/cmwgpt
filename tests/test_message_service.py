@@ -40,7 +40,7 @@ class TestMessageService(unittest.IsolatedAsyncioTestCase):
 
     async def test_long_reply_uses_injected_paste_service(self):
         paste_service = MagicMock()
-        paste_service.upload_markdown = AsyncMock(return_value="https://paste.rs/long.md")
+        paste_service.upload_markdown = AsyncMock(return_value="https://paste.jobe.wtf/long.md")
         channel = MagicMock()
         channel.send = AsyncMock()
         service = MessageService(paste_service_instance=paste_service)
@@ -51,7 +51,7 @@ class TestMessageService(unittest.IsolatedAsyncioTestCase):
         channel.send.assert_awaited_once()
         sent_message = channel.send.await_args.kwargs["content"]
         self.assertIn("too long", sent_message)
-        self.assertIn("https://paste.rs/long.md", sent_message)
+        self.assertIn("https://paste.jobe.wtf/long.md", sent_message)
 
     async def test_long_reply_without_paste_service_falls_back_cleanly(self):
         channel = MagicMock()
@@ -66,7 +66,7 @@ class TestMessageService(unittest.IsolatedAsyncioTestCase):
 
     async def test_paste_upload_happens_once_even_when_send_is_retried(self):
         paste_service = MagicMock()
-        paste_service.upload_markdown = AsyncMock(return_value="https://paste.rs/x.md")
+        paste_service.upload_markdown = AsyncMock(return_value="https://paste.jobe.wtf/x.md")
         channel = MagicMock()
         channel.send = AsyncMock(side_effect=[FakeHTTPException(503), None])
         service = MessageService(paste_service_instance=paste_service)
@@ -200,7 +200,7 @@ class TestMessageService(unittest.IsolatedAsyncioTestCase):
 
     async def test_with_files_uses_paste_service_for_long_messages(self):
         paste_service = MagicMock()
-        paste_service.upload_markdown = AsyncMock(return_value="https://paste.rs/files.md")
+        paste_service.upload_markdown = AsyncMock(return_value="https://paste.jobe.wtf/files.md")
         channel = MagicMock()
         channel.send = AsyncMock()
         service = MessageService(paste_service_instance=paste_service)
@@ -208,7 +208,7 @@ class TestMessageService(unittest.IsolatedAsyncioTestCase):
         await service.send_channel_reply_with_files(channel, "x" * 2500, files=[_fake_file()])
 
         paste_service.upload_markdown.assert_awaited_once()
-        self.assertIn("https://paste.rs/files.md", channel.send.await_args.kwargs["content"])
+        self.assertIn("https://paste.jobe.wtf/files.md", channel.send.await_args.kwargs["content"])
 
     async def test_with_files_handles_paste_failure(self):
         paste_service = MagicMock()
@@ -238,7 +238,7 @@ class TestMessageService(unittest.IsolatedAsyncioTestCase):
 
     async def test_interaction_followup_uses_paste_and_retries(self):
         paste_service = MagicMock()
-        paste_service.upload_markdown = AsyncMock(return_value="https://paste.rs/followup.md")
+        paste_service.upload_markdown = AsyncMock(return_value="https://paste.jobe.wtf/followup.md")
         interaction = MagicMock()
         interaction.followup.send = AsyncMock(side_effect=[FakeHTTPException(500), None])
         service = MessageService(paste_service_instance=paste_service)
@@ -248,7 +248,7 @@ class TestMessageService(unittest.IsolatedAsyncioTestCase):
 
         paste_service.upload_markdown.assert_awaited_once()
         self.assertEqual(interaction.followup.send.await_count, 2)
-        self.assertIn("https://paste.rs/followup.md", interaction.followup.send.await_args.kwargs["content"])
+        self.assertIn("https://paste.jobe.wtf/followup.md", interaction.followup.send.await_args.kwargs["content"])
 
     async def test_set_paste_service_and_format_prompt_message_delegate(self):
         service = MessageService()

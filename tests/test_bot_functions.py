@@ -169,7 +169,7 @@ class TestBotFunctions(unittest.TestCase):
 
         async def run_test():
             message_service = self._message_service
-            mock_upload = AsyncMock(return_value="https://paste.rs/abc123.md")
+            mock_upload = AsyncMock(return_value="https://paste.jobe.wtf/abc123.md")
             self._set_mock_paste_service(mock_upload)
 
             # Mock channel
@@ -185,7 +185,7 @@ class TestBotFunctions(unittest.TestCase):
 
             # Verify channel send was called with paste URL
             expected_message = (
-                "My response was too long to post here, so I've uploaded it to: https://paste.rs/abc123.md"
+                "My response was too long to post here, so I've uploaded it to: https://paste.jobe.wtf/abc123.md"
             )
             mock_channel.send.assert_called_once_with(
                 content=expected_message, files=[], suppress_embeds=True)
@@ -245,7 +245,7 @@ class TestBotFunctions(unittest.TestCase):
 
         async def run_test():
             message_service = self._message_service
-            mock_upload = AsyncMock(return_value="https://paste.rs/xyz789.md")
+            mock_upload = AsyncMock(return_value="https://paste.jobe.wtf/xyz789.md")
             self._set_mock_paste_service(mock_upload)
 
             mock_interaction = MagicMock()
@@ -256,7 +256,7 @@ class TestBotFunctions(unittest.TestCase):
 
             mock_upload.assert_called_once_with(reply_text)
             expected_content = (
-                "My response was too long to post here, so I've uploaded it to: https://paste.rs/xyz789.md"
+                "My response was too long to post here, so I've uploaded it to: https://paste.jobe.wtf/xyz789.md"
             )
             mock_interaction.followup.send.assert_called_once_with(
                 content=expected_content, files=[], suppress_embeds=True, ephemeral=True)

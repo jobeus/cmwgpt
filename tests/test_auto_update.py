@@ -295,7 +295,7 @@ class TestAnnouncementService(unittest.IsolatedAsyncioTestCase):
         bot.get_channel.return_value = channel
 
         paste_service = MagicMock()
-        paste_service.upload_markdown = AsyncMock(return_value="https://paste.rs/changelog.md")
+        paste_service.upload_markdown = AsyncMock(return_value="https://paste.jobe.wtf/changelog.md")
 
         service = AnnouncementService(
             state_service=state_service,

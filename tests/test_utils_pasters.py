@@ -18,11 +18,11 @@ class StubUploader:
 
 class TestPasters(unittest.IsolatedAsyncioTestCase):
     async def test_upload_to_pasters_uses_injected_uploader(self):
-        uploader = StubUploader("https://paste.rs/abc123.md")
+        uploader = StubUploader("https://paste.jobe.wtf/abc123.md")
 
         result = await upload_to_pasters("hello world", uploader=uploader)
 
-        self.assertEqual(result, "https://paste.rs/abc123.md")
+        self.assertEqual(result, "https://paste.jobe.wtf/abc123.md")
         self.assertEqual(uploader.calls, ["hello world"])
 
     async def test_upload_to_pasters_can_swap_uploaders_without_patching_globals(self):

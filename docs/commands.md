@@ -60,7 +60,7 @@ as the history window moves forward.
 
 Every `/memory` command replies only to you. `correct` sends your correction and the current
 profile to `MEMORY_MODEL`, which changes, removes or adds only what the correction covers, and
-then shows you the updated profile (as a paste.rs link if it's over 2000 characters). Corrections live in the same profile the nightly job
+then shows you the updated profile (as a private file if it's over 2000 characters). Corrections live in the same profile the nightly job
 maintains, so later chat can refine them; `/fillmemory` rebuilds profiles from scratch and
 drops them. Administrators can pass the optional `user` argument to `show` and `correct` to
 act on someone else. Only the current profile is kept (one Redis key per person, up to 100 KB);

@@ -52,7 +52,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 **Output:**
 - Streamed replies post right away and are edited at most every 1.5s.
 - Every reply is prefixed with its cost, `[$0.012]`, which includes the day summary.
-- Anything over 2000 characters goes to paste.rs as a link.
+- Anything over 2000 characters goes to paste.jobe.wtf as a link.
 
 **Other features:**
 - `/draw` and `/edit` make images through Runpod (seedream (default), z-image, wan-2.6, pruna, qwen, flux) or Gemini (banana-pro, banana-2.1).
