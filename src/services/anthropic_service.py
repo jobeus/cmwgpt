@@ -180,17 +180,19 @@ def _think_harder_reason(response: Any) -> Optional[str]:
 
 
 def _with_think_harder_note(api_messages: List[Dict[str, Any]], reason: str) -> List[Dict[str, Any]]:
-    """Copy ``api_messages`` with the escalation reason appended to the mention."""
-    note = {
-        "type": "text",
-        "text": (
-            f"<think_harder>You asked to think harder about this message. Your reason: {reason}\n"
-            f"You're now at high effort. Answer the message directly; think_harder is no longer available."
-            f"</think_harder>"
-        ),
-    }
-    last = api_messages[-1]
-    return api_messages[:-1] + [{**last, "content": list(last["content"]) + [note]}]
+    """Copy ``api_messages`` with the escalation reason after the mention, as an operator message.
+
+    A system message rather than text on the mention, so it doesn't read as the user asking
+    to see the working; the model otherwise tends to write its reasoning into the reply.
+    """
+    note = (
+        f"You called think_harder on the message above. Your reason: {reason}\n"
+        "You're now at high effort and think_harder is no longer available. Do all of the working in "
+        "your private thinking. Your visible reply is posted to the channel as-is, so it must contain "
+        "only the final answer, written the way you'd normally reply: no scratch work, drafts, "
+        "step-by-step derivation, or narration of your reasoning unless the user asked for it."
+    )
+    return api_messages + [{"role": "system", "content": note}]
 
 
 def _usage_cost(usage: Any, model: DirectModel) -> float:

@@ -190,12 +190,13 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second_call["tool_choice"], {"type": "none"})
         # Same tools, so the cached tools/system prefix still reads.
         self.assertEqual(second_call["tools"], first_call["tools"])
-        # The question is resent, not the discarded tool call, with the reason appended.
-        self.assertEqual(len(second_call["messages"]), 1)
-        blocks = second_call["messages"][0]["content"]
-        self.assertEqual(blocks[0]["text"], "prove it")
-        self.assertIn("multi-step proof", blocks[-1]["text"])
-        self.assertEqual(len(first_call["messages"][0]["content"]), 1)
+        # The question is resent, not the discarded tool call, followed by an operator note with the reason.
+        mention, note = second_call["messages"]
+        self.assertEqual(mention, first_call["messages"][0])
+        self.assertEqual(note["role"], "system")
+        self.assertIn("multi-step proof", note["content"])
+        self.assertIn("only the final answer", note["content"])
+        self.assertEqual(len(first_call["messages"]), 1)
         self.assertEqual(second_call["diagnostics"], {"previous_message_id": "msg_1"})
 
     async def test_fallback_turn_is_priced_at_the_serving_model(self):

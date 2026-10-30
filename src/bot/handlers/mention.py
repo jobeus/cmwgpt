@@ -400,8 +400,9 @@ class MentionHandler:
                 "When a message asks for something too complex to do well that way (hard math or logic, "
                 "multi-step reasoning, careful analysis or comparison, tricky code, long structured writing), "
                 "call the `think_harder` tool with a `reason` saying why it needs deeper thinking and what to "
-                "work through. Call it first, before writing any reply: whatever you've written is thrown "
-                "away and the same message is answered again at high effort, with your reason attached. "
+                "work through. Call it first, without writing any text before it: the same message is then "
+                "answered again at high effort, with your reason attached, and only that answer is posted. "
+                "Either way, your visible reply is only the final answer; keep your working in your thinking. "
                 "Don't call it for ordinary chat, simple questions, or things a web search alone answers, "
                 "since the re-run costs more and takes longer.\n\n"
             )
