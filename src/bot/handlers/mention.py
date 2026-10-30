@@ -13,7 +13,7 @@ import discord
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url, transcribe_audio_attachment
 from src.utils.discord_error_utils import best_effort_typing, concise_error
 from src.services.openai_service import OpenAIServiceError
-from src.services.anthropic_service import AnthropicServiceError, is_direct_anthropic_model
+from src.services.anthropic_service import AnthropicServiceError, THINK_HARDER_MODELS, is_direct_anthropic_model
 from src.services.gemini_service import GeminiServiceError, is_gemini_model
 from src.services.completion_dispatch import dispatch_completion
 from src.services.streaming_reply import StreamingReply
@@ -392,6 +392,18 @@ class MentionHandler:
                 "about people in the conversation. The bot adds it, not the sender. Use it quietly to "
                 "understand references and tailor your reply; don't recite it or mention having notes "
                 "unless someone asks what you remember.\n\n"
+            )
+        if model in THINK_HARDER_MODELS:
+            current_channel_system_prompt += (
+                "## Thinking harder\n"
+                "You run at low effort, so you think briefly before answering. That's right for most chat. "
+                "When a message asks for something too complex to do well that way (hard math or logic, "
+                "multi-step reasoning, careful analysis or comparison, tricky code, long structured writing), "
+                "call the `think_harder` tool with a `reason` saying why it needs deeper thinking and what to "
+                "work through. Call it first, before writing any reply: whatever you've written is thrown "
+                "away and the same message is answered again at high effort, with your reason attached. "
+                "Don't call it for ordinary chat, simple questions, or things a web search alone answers, "
+                "since the re-run costs more and takes longer.\n\n"
             )
         current_channel_system_prompt += f"{legend_section}\n\n"
         how_i_work = _load_how_i_work()

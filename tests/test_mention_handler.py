@@ -574,6 +574,25 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIn("see https://site.example", fetcher.await_args.args[0])
         self.assertEqual(fetcher.await_args.kwargs, {"cache_only": False})
 
+    async def test_think_harder_addon_only_on_opus_direct(self):
+        handler, _, _, _, _ = self.make_handler()
+        channel = MagicMock()
+        channel.id = 44
+        channel.name = "think"
+        mention_msg = self._simple_msg(1, channel)
+
+        async def history(limit=None, after=None):
+            yield mention_msg
+
+        channel.history = history
+
+        for model, expected in (("opus-5.5-direct", True), ("sonnet-5.5-direct", False), (None, False)):
+            _, system_prompt, _ = await handler._prepare_mention_context(
+                mention_msg, SimpleNamespace(id=999), model=model)
+            self.assertEqual("## Thinking harder" in system_prompt, expected, model)
+            if expected:
+                self.assertIn("`think_harder`", system_prompt)
+
     async def test_prepare_context_puts_queued_mention_after_replies_posted_while_waiting(self):
         handler, _, _, _, _ = self.make_handler()
         channel = MagicMock()

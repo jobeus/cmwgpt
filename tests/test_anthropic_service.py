@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from src.services.anthropic_service import (
     CACHE_DIAGNOSIS_BETA,
     DIRECT_MODELS,
+    THINKING_HARDER_PREVIEW,
     AnthropicService,
     AnthropicServiceError,
     build_anthropic_messages,
@@ -157,6 +158,46 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         kwargs = client.beta.messages.create.call_args.kwargs
         self.assertEqual(kwargs["output_config"], {"effort": "medium"})
 
+    async def test_opus_offers_think_harder_and_sonnet_does_not(self):
+        service, client = self.make_service(_response("a"), _response("b"), _response("c"))
+        for model, effort, offered in (
+            ("opus-5.5-direct", None, True),
+            ("opus-5.5-direct", "medium", False),
+            ("sonnet-5.5-direct", None, False),
+        ):
+            await service.get_chat_completion(
+                model=model, messages=[{"role": "user", "content": "q"}], effort=effort)
+            names = [t.get("name") for t in client.beta.messages.create.call_args.kwargs["tools"]]
+            self.assertEqual("think_harder" in names, offered, (model, effort))
+
+    async def test_think_harder_reruns_the_question_at_high_effort(self):
+        call = SimpleNamespace(type="tool_use", id="toolu_1", name="think_harder",
+                               input={"reason": "multi-step proof"})
+        first = _response(stop_reason="tool_use", content=[SimpleNamespace(type="text", text="hmm"), call],
+                          id="msg_1", model="claude-opus-5-5")
+        second = _response("the careful answer", id="msg_2", model="claude-opus-5-5")
+        service, client = self.make_service(first, second)
+
+        text, cost = await service.get_chat_completion(
+            model="opus-5.5-direct", messages=[{"role": "user", "content": "prove it"}], channel_id=7)
+
+        self.assertEqual(text, "the careful answer")
+        self.assertAlmostEqual(cost, 2 * _usage_cost(_usage(), DIRECT_MODELS["opus-5.5-direct"]))
+        first_call, second_call = (c.kwargs for c in client.beta.messages.create.call_args_list)
+        self.assertEqual(first_call["output_config"], {"effort": "low"})
+        self.assertNotIn("tool_choice", first_call)
+        self.assertEqual(second_call["output_config"], {"effort": "high"})
+        self.assertEqual(second_call["tool_choice"], {"type": "none"})
+        # Same tools, so the cached tools/system prefix still reads.
+        self.assertEqual(second_call["tools"], first_call["tools"])
+        # The question is resent, not the discarded tool call, with the reason appended.
+        self.assertEqual(len(second_call["messages"]), 1)
+        blocks = second_call["messages"][0]["content"]
+        self.assertEqual(blocks[0]["text"], "prove it")
+        self.assertIn("multi-step proof", blocks[-1]["text"])
+        self.assertEqual(len(first_call["messages"][0]["content"]), 1)
+        self.assertEqual(second_call["diagnostics"], {"previous_message_id": "msg_1"})
+
     async def test_fallback_turn_is_priced_at_the_serving_model(self):
         usage = _usage(input_tokens=1_000_000, output_tokens=0)
         service, _ = self.make_service(_response("rescued", usage=usage, model="claude-sonnet-5-5"))
@@ -304,6 +345,25 @@ class TestAnthropicStreaming(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(cost, 0)
         client.beta.messages.create.assert_not_awaited()
         self.assertIn("diagnostics", client.beta.messages.stream.call_args.kwargs)
+
+
+class TestThinkHarderStreaming(unittest.IsolatedAsyncioTestCase):
+    async def test_preview_shows_thinking_harder_then_the_new_answer(self):
+        call = SimpleNamespace(type="tool_use", id="toolu_1", name="think_harder", input={"reason": "hard"})
+        first = _response(stop_reason="tool_use", content=[call], model="claude-opus-5-5")
+        second = _response("answer", model="claude-opus-5-5")
+        service = AnthropicService(api_key="test-key")
+        client = MagicMock()
+        client.beta.messages.stream = MagicMock(
+            side_effect=[FakeMessageStream([], first), FakeMessageStream(["answer"], second)])
+        service.set_client(client)
+        seen = []
+
+        text, _ = await service.get_chat_completion(
+            model="opus-5.5-direct", messages=[{"role": "user", "content": "q"}], on_text=seen.append)
+
+        self.assertEqual(text, "answer")
+        self.assertEqual(seen, [THINKING_HARDER_PREVIEW, "answer"])
 
 
 class TestDispatchRoutesDirect(unittest.IsolatedAsyncioTestCase):

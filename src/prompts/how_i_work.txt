@@ -25,10 +25,11 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 **System prompt, in order:**
 1. The channel's `/systemprompt`, or the default personality file.
 2. Chat-format rules.
-3. A legend of channel members.
-4. This section.
-5. A summary of what's been going on lately in this channel, rebuilt nightly. Items drop out after 14 days without coming up.
-6. A summary of today's chat from before your history window. "Today" starts at 02:00 Denver time. The summary is written incrementally by the channel's current model.
+3. On `opus-5.5-direct`, how to use `think_harder`.
+4. A legend of channel members.
+5. This section.
+6. A summary of what's been going on lately in this channel, rebuilt nightly. Items drop out after 14 days without coming up.
+7. A summary of today's chat from before your history window. "Today" starts at 02:00 Denver time. The summary is written incrementally by the channel's current model.
 
 **Memory:**
 - At 02:00 Denver every night, a job runs on `sonnet-5.5-direct` over the previous day's chat in every channel you can see. It pulls out facts per person and merges them into one Redis profile per user per server, with Stable, Current and Style parts. Current items expire after 3 weeks. The same job also summarizes each channel's day and folds it into that channel's "lately" summary. Its calls, and `/memory correct`, use medium effort.
@@ -38,6 +39,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 **Models:** each channel picks one with `/model`. The default is `anthropic/claude-sonnet-5.5` via OpenRouter.
 - **Claude API direct**, `sonnet-5.5-direct` and `opus-5.5-direct`:
   - effort low, 16k max tokens
+  - `opus-5.5-direct` also has a `think_harder(reason)` tool: calling it throws away the reply and re-asks the same message at high effort with the reason attached. The cost prefix covers both runs.
   - web search (up to 10 per reply)
   - prompt caching on the system prompt and history
   - streamed

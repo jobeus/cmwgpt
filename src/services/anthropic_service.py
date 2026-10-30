@@ -44,6 +44,34 @@ WEB_SEARCH_MAX_USES = 10
 # A server-tool turn can come back as ``pause_turn``; resume it this many times.
 MAX_CONTINUATIONS = 5
 
+# Models that run at ``low`` effort but may ask, through the ``think_harder`` tool,
+# for the message to be answered again at ``high``.
+THINK_HARDER_MODELS = {"opus-5.5-direct"}
+THINK_HARDER_EFFORT = "high"
+THINK_HARDER_TOOL = {
+    "name": "think_harder",
+    "description": (
+        "Re-answer the current message with much deeper thinking (high effort). Call this instead of "
+        "answering when the request is too complex to do well with quick thinking: hard math or logic, "
+        "multi-step reasoning, careful analysis, tricky code, or long structured writing. Your reply so "
+        "far is discarded and the same message is answered again at high effort. Don't call it for "
+        "ordinary chat, simple questions, or things a web search alone answers."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "reason": {
+                "type": "string",
+                "description": "Why this needs deeper thinking, and what to work through. Passed to the re-run.",
+            },
+        },
+        "required": ["reason"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+THINKING_HARDER_PREVIEW = "-# thinking harder..."
+
 # Cache diagnostics (beta): each request names the previous response in its
 # channel, and the API reports where the prompt-cache prefix diverged from it.
 # Fingerprints are only kept for requests that carry this beta, so it's sent
@@ -140,6 +168,31 @@ def apply_history_breakpoints(
     return current_index
 
 
+def _think_harder_reason(response: Any) -> Optional[str]:
+    """Return the ``reason`` if ``response`` stopped to call ``think_harder``, else None."""
+    if getattr(response, "stop_reason", None) != "tool_use":
+        return None
+    for block in response.content:
+        if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == "think_harder":
+            reason = (getattr(block, "input", None) or {}).get("reason")
+            return str(reason or "").strip() or "no reason given"
+    return None
+
+
+def _with_think_harder_note(api_messages: List[Dict[str, Any]], reason: str) -> List[Dict[str, Any]]:
+    """Copy ``api_messages`` with the escalation reason appended to the mention."""
+    note = {
+        "type": "text",
+        "text": (
+            f"<think_harder>You asked to think harder about this message. Your reason: {reason}\n"
+            f"You're now at high effort. Answer the message directly; think_harder is no longer available."
+            f"</think_harder>"
+        ),
+    }
+    last = api_messages[-1]
+    return api_messages[:-1] + [{**last, "content": list(last["content"]) + [note]}]
+
+
 def _usage_cost(usage: Any, model: DirectModel) -> float:
     """Price a response's ``usage`` block in USD at ``model``'s rates."""
     if usage is None:
@@ -223,6 +276,48 @@ class AnthropicService:
             finally:
                 self._client = None
 
+    async def _send(
+        self,
+        client: Any,
+        api_messages: List[Dict[str, Any]],
+        kwargs: Dict[str, Any],
+        direct_model: DirectModel,
+        channel_id: Optional[int],
+        previous_message_id: Optional[str],
+        resolved_bot_id: Optional[int],
+        on_text: Optional[Callable[[str], None]],
+    ) -> Tuple[Any, float, Optional[str]]:
+        """Run one request, resuming ``pause_turn``s. Returns ``(response, cost, last message id)``."""
+        api_model = direct_model.api_id
+        cost = 0.0
+        streamed = ""
+        response = None
+        for _ in range(MAX_CONTINUATIONS + 1):
+            request = {
+                "messages": api_messages,
+                "diagnostics": {"previous_message_id": previous_message_id},
+                **kwargs,
+            }
+            if on_text:
+                async with client.beta.messages.stream(**request) as stream:
+                    async for event in stream:
+                        if event.type == "text":
+                            streamed += event.text
+                            on_text(clean_openai_response(streamed, bot_id=resolved_bot_id))
+                    response = await stream.get_final_message()
+            else:
+                response = await client.beta.messages.create(**request)
+            # A safety fallback can serve the turn on another model; price it at that model's rates.
+            served_by = _MODELS_BY_API_ID.get(getattr(response, "model", None), direct_model)
+            cost += _usage_cost(getattr(response, "usage", None), served_by)
+            _log_cache_diagnostics(api_model, channel_id, response)
+            previous_message_id = getattr(response, "id", None) or previous_message_id
+            if response.stop_reason != "pause_turn":
+                break
+            # Resume a paused server-tool turn by sending its content back.
+            api_messages = api_messages + [{"role": "assistant", "content": response.content}]
+        return response, cost, previous_message_id
+
     async def get_chat_completion(
         self,
         model: str,
@@ -268,6 +363,10 @@ class AnthropicService:
                 "name": "web_search",
                 "max_uses": WEB_SEARCH_MAX_USES,
             }]
+        # Only at the model's default effort: a caller that set its own effort gets exactly that.
+        think_harder = model in THINK_HARDER_MODELS and effort is None
+        if think_harder:
+            kwargs["tools"] = kwargs.get("tools", []) + [THINK_HARDER_TOOL]
 
         last_text = api_messages[-1]["content"][0].get("text", "") if api_messages else ""
         snippet = last_text.replace("\n", " ")
@@ -275,33 +374,25 @@ class AnthropicService:
 
         total_cost = 0.0
         previous_message_id = self._last_message_ids.get(channel_id) if channel_id else None
-        streamed = ""
         try:
-            response = None
-            for _ in range(MAX_CONTINUATIONS + 1):
-                request = {
-                    "messages": api_messages,
-                    "diagnostics": {"previous_message_id": previous_message_id},
-                    **kwargs,
-                }
+            response, cost, previous_message_id = await self._send(
+                client, api_messages, kwargs, direct_model, channel_id, previous_message_id,
+                resolved_bot_id, on_text,
+            )
+            total_cost += cost
+            reason = _think_harder_reason(response) if think_harder else None
+            if reason is not None:
+                logger.info(f"[{api_model}] think_harder requested: {reason[:300]}")
                 if on_text:
-                    async with client.beta.messages.stream(**request) as stream:
-                        async for event in stream:
-                            if event.type == "text":
-                                streamed += event.text
-                                on_text(clean_openai_response(streamed, bot_id=resolved_bot_id))
-                        response = await stream.get_final_message()
-                else:
-                    response = await client.beta.messages.create(**request)
-                # A safety fallback can serve the turn on another model; price it at that model's rates.
-                served_by = _MODELS_BY_API_ID.get(getattr(response, "model", None), direct_model)
-                total_cost += _usage_cost(getattr(response, "usage", None), served_by)
-                _log_cache_diagnostics(api_model, channel_id, response)
-                previous_message_id = getattr(response, "id", None) or previous_message_id
-                if response.stop_reason != "pause_turn":
-                    break
-                # Resume a paused server-tool turn by sending its content back.
-                api_messages = api_messages + [{"role": "assistant", "content": response.content}]
+                    on_text(THINKING_HARDER_PREVIEW)
+                # Same tools so the tools/system cache still reads; ``none`` stops a second call.
+                kwargs["output_config"] = {"effort": THINK_HARDER_EFFORT}
+                kwargs["tool_choice"] = {"type": "none"}
+                response, cost, previous_message_id = await self._send(
+                    client, _with_think_harder_note(api_messages, reason), kwargs, direct_model,
+                    channel_id, previous_message_id, resolved_bot_id, on_text,
+                )
+                total_cost += cost
         except anthropic.AuthenticationError as e:
             logger.error(f"Anthropic authentication error: {e}")
             raise AnthropicServiceError("Authentication failed. Please check ANTHROPIC_API_KEY.") from e
