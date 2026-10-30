@@ -13,7 +13,7 @@ None of these keys expire. All datetimes passed in and returned are naive UTC.
 
 import logging
 from datetime import datetime, timezone
-from typing import Callable, Dict, Iterable, Optional
+from typing import Callable, Dict, Iterable, List, Optional
 
 import redis.asyncio as aioredis
 
@@ -62,6 +62,17 @@ class MemoryStore:
             return {}
         values = await self._redis_getter().mget([_profile_key(guild_id, uid) for uid in ids])
         return {uid: value for uid, value in zip(ids, values) if value}
+
+    async def list_user_ids(self, guild_id: int) -> List[int]:
+        """The IDs of every user in a server who has a profile, sorted."""
+        prefix = f"{KEY_PREFIX}memory:{guild_id}:"
+        client = self._redis_getter()
+        ids = []
+        async for key in client.scan_iter(match=f"{prefix}*", count=500):
+            key = key.decode() if isinstance(key, bytes) else key
+            if key[len(prefix):].isdigit():
+                ids.append(int(key[len(prefix):]))
+        return sorted(ids)
 
     async def save_profile(self, guild_id: int, user_id: int, profile: str) -> None:
         """Replace a user's profile (an empty one removes it)."""

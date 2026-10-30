@@ -243,6 +243,35 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
         quote_file.get.assert_called_once_with(query="rogan", random_count=3, skip=0)
         self.assertEqual(result.content[0]["text"], "quotes")
 
+    async def test_read_urls_fetches_the_links_and_returns_images(self):
+        fetcher = AsyncMock(return_value=("------\nYouTube transcript\n\nhello", [
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,QUJD"}},
+            {"type": "image_url", "image_url": {"url": "https://cdn.example/p.png"}},
+            {"type": "image_url", "image_url": {"url": "data:application/pdf;base64,QUJD"}},
+        ]))
+        tools, _ = _tools(url_content_fetcher=fetcher)
+        urls = [f"https://example.com/{i}" for i in range(7)]
+
+        result = await tools["read_urls"].run({"urls": urls + [urls[0]]})
+
+        fetcher.assert_awaited_once_with("\n".join(urls[:5]), cache_only=False)
+        self.assertIn("hello", result.content[0]["text"])
+        self.assertEqual([b["source"]["type"] for b in result.content[1:]], ["base64", "url"])
+
+    async def test_read_urls_reports_unreadable_links(self):
+        tools, _ = _tools(url_content_fetcher=AsyncMock(return_value=("", [])))
+        self.assertTrue((await tools["read_urls"].run({"urls": ["https://nope.example"]})).is_error)
+        self.assertTrue((await tools["read_urls"].run({"urls": []})).is_error)
+
+    async def test_recall_today_returns_the_summary_and_its_cost(self):
+        loader = AsyncMock(return_value=("they argued about trucks", 0.04))
+        tools, _ = _tools(day_summary_loader=loader)
+        result = await tools["recall_today"].run({})
+        self.assertIn("<day_summary>\nthey argued about trucks\n</day_summary>", result.content[0]["text"])
+        self.assertAlmostEqual(result.cost, 0.04)
+        loader.return_value = ("", 0.0)
+        self.assertIn("Nothing was said", (await tools["recall_today"].run({})).content[0]["text"])
+
     def test_wiki_title_candidates(self):
         self.assertEqual(wiki_title_candidates("https://en.wikipedia.org/wiki/Las_Vegas"), ["Las_Vegas"])
         self.assertEqual(wiki_title_candidates("las vegas"), ["Las_vegas", "Las_Vegas"])

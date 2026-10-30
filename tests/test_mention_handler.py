@@ -599,6 +599,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         handler, _, _, _, _ = self.make_handler(anthropic_service=MagicMock())
         handler._user_notes_provider = AsyncMock(return_value="<user_notes>n</user_notes>")
         handler._channel_summary_provider = AsyncMock(return_value="## Lately in this channel")
+        handler._memory_index_provider = AsyncMock(return_value="People you have memory notes on: <@111>.")
         channel = MagicMock()
         channel.id = 45
         channel.name = "tools"
@@ -618,6 +619,8 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             self.assertIn("## Your tools", system_prompt)
             self.assertIn("`recall_users(user_ids)`", system_prompt)
             self.assertIn("`how_i_work()`", system_prompt)
+            self.assertIn("People you have memory notes on: <@111>.", system_prompt)
+            handler._memory_index_provider.assert_awaited_once_with(5, 45)
             self.assertNotIn("## How you work", system_prompt)
             self.assertNotIn("## Lately in this channel", system_prompt)
             self.assertNotIn("user_notes", str(context))
@@ -630,6 +633,63 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             self.assertIn("## How you work", system_prompt)
             self.assertIn("## Lately in this channel", system_prompt)
             self.assertIn("<user_notes>n</user_notes>", str(context))
+
+    async def test_direct_models_get_raw_links_instead_of_fetched_content(self):
+        fetcher = AsyncMock(return_value=("FETCHED", []))
+        handler, _, _, _, _ = self.make_handler(url_content_fetcher=fetcher, anthropic_service=MagicMock())
+        channel = MagicMock()
+        channel.id = 48
+        channel.name = "links"
+        mention_msg = self._simple_msg(1, channel, content="see https://youtu.be/abc")
+        mention_msg.guild = None
+
+        async def history(limit=None, after=None):
+            yield mention_msg
+
+        channel.history = history
+
+        context, system_prompt, _ = await handler._prepare_mention_context(
+            mention_msg, SimpleNamespace(id=999), model="sonnet-5.5-direct")
+        fetcher.assert_not_awaited()
+        self.assertIn("https://youtu.be/abc", str(context))
+        self.assertNotIn("FETCHED", str(context))
+        self.assertIn("`read_urls(urls)`", system_prompt)
+
+        context, _, _ = await handler._prepare_mention_context(mention_msg, SimpleNamespace(id=999), model="gpt-test")
+        fetcher.assert_awaited()
+        self.assertIn("FETCHED", str(context))
+
+    async def test_direct_models_get_the_day_summary_only_through_recall_today(self):
+        handler, _, _, _, _ = self.make_handler(anthropic_service=MagicMock())
+        provider = AsyncMock(return_value=("earlier: trucks", 0.05))
+        handler._day_summary_provider = provider
+        channel = MagicMock()
+        channel.id = 49
+        channel.name = "today"
+        mention_msg = self._simple_msg(1, channel)
+        mention_msg.guild = None
+
+        async def history(limit=None, after=None):
+            yield mention_msg
+
+        channel.history = history
+
+        _, system_prompt, cost = await handler._prepare_mention_context(
+            mention_msg, SimpleNamespace(id=999), model="sonnet-5.5-direct")
+        provider.assert_not_awaited()
+        self.assertEqual(cost, 0.0)
+        self.assertNotIn("<day_summary>", system_prompt)
+        self.assertIn("`recall_today()`", system_prompt)
+
+        tool = next(t for t in handler._build_tools(mention_msg) if t.definition["name"] == "recall_today")
+        result = await tool.run({})
+        provider.assert_awaited_once_with(channel, mention_msg, 999, "sonnet-5.5-direct")
+        self.assertAlmostEqual(result.cost, 0.05)
+
+        _, system_prompt, cost = await handler._prepare_mention_context(
+            mention_msg, SimpleNamespace(id=999), model="gpt-test")
+        self.assertIn("<day_summary>\nearlier: trucks", system_prompt)
+        self.assertAlmostEqual(cost, 0.05)
 
     async def test_history_ranges_end_the_irc_log_where_discord_starts(self):
         handler, _, _, _, _ = self.make_handler()
@@ -676,7 +736,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         await handler.handle_mention(message, SimpleNamespace(id=999), "gpt-test")
 
         tools = anthropic_service.get_chat_completion.await_args.kwargs["tools"]
-        self.assertEqual([t.definition["name"] for t in tools], ["how_i_work"])
+        self.assertEqual([t.definition["name"] for t in tools], ["read_urls", "how_i_work"])
         self.assertNotIn("tools", openai_service.get_chat_completion.await_args.kwargs)
 
     async def test_prepare_context_puts_queued_mention_after_replies_posted_while_waiting(self):

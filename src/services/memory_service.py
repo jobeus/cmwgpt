@@ -669,6 +669,39 @@ class MemoryService:
             return ""
         return f"{CHANNEL_SUMMARY_PREAMBLE}\n\n<channel_summary>\n{summary}\n</channel_summary>"
 
+    async def get_memory_index(self, guild_id: int, channel_id: int) -> str:
+        """What memory exists for a server and channel, so the model knows what it can recall.
+
+        Never raises: memory is a nice-to-have and must not break a reply.
+        """
+        try:
+            user_ids = await self._store.list_user_ids(guild_id)
+            has_summary = bool(await self._store.get_channel_summary(guild_id, channel_id))
+            processed_through = await self._store.get_processed_through(guild_id)
+        except Exception as e:
+            logger.warning(f"Couldn't load the memory index: {e}")
+            return ""
+        lines = []
+        if user_ids:
+            lines.append("People you have memory notes on: " + ", ".join(f"<@{uid}>" for uid in user_ids) + ".")
+        else:
+            lines.append("You have no memory notes on anyone yet.")
+        if has_summary and processed_through:
+            # ``processed_through`` is the end of the last 02:00-to-02:00 window; name it by its day.
+            last_end = _to_aware_utc(processed_through)
+            end = _window_date(last_end - WINDOW, last_end)
+            start = end - timedelta(days=CHANNEL_SUMMARY_DAYS)
+            lines.append(
+                f"This channel's memory covers about {start.isoformat()} to {end.isoformat()}; today's chat "
+                "is in the day summary instead."
+            )
+        elif not has_summary:
+            lines.append("This channel has no memory summary yet.")
+        lines.append(
+            "Nothing is kept per past day, so for what was said on a specific earlier day, search the chat."
+        )
+        return " ".join(lines)
+
     async def get_notes_block(self, guild_id: int, user_ids: Sequence[int]) -> str:
         """The ``<user_notes>`` block for the given users, or ``""`` if none have notes.
 

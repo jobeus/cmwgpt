@@ -64,6 +64,9 @@ class FakeStore:
     async def get_channel_summary(self, guild_id, channel_id):
         return self.channel_summaries.get(channel_id, "")
 
+    async def list_user_ids(self, guild_id):
+        return sorted(uid for uid, profile in self.rows.items() if profile)
+
     async def save_channel_summary(self, guild_id, channel_id, summary):
         self.channel_summaries[channel_id] = summary
 
@@ -320,6 +323,24 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("<@3>", block)
         self.assertIn("<@2>:\nStyle: likes short answers", block)
         self.assertEqual(await service.get_notes_block(42, [3]), "")
+
+    async def test_memory_index_lists_people_and_the_channel_summary_range(self):
+        store = FakeStore({2: "Style: short", 1: "Current: trucks"})
+        store.channel_summaries[5] = "tacos"
+        # The last window ended 02:00 Denver on Oct 30, so Oct 29 is the last day covered.
+        store.processed_through = datetime(2026, 10, 30, 8, 0)
+        service, _ = self.make_service(store, datetime.now(UTC))
+
+        index = await service.get_memory_index(42, 5)
+
+        self.assertIn("memory notes on: <@1>, <@2>.", index)
+        self.assertIn("covers about 2026-10-15 to 2026-10-29", index)
+        self.assertIn("search the chat", index)
+        self.assertIn("no memory summary yet", await service.get_memory_index(42, 6))
+        store.rows = {}
+        self.assertIn("no memory notes on anyone", await service.get_memory_index(42, 5))
+        store.list_user_ids = AsyncMock(side_effect=RuntimeError("redis down"))
+        self.assertEqual(await service.get_memory_index(42, 5), "")
 
     async def test_notes_block_swallows_store_errors(self):
         store = FakeStore()

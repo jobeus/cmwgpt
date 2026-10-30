@@ -112,6 +112,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         memory_corrector=memory_service.correct if memory_service.available else None,
         wiki_views=death_service.get_avg_monthly_views,
         quote_file=load_quote_file(app_config.old_quote_bot_path),
+        memory_index_provider=memory_service.get_memory_index,
     )
 
     return AppServices(

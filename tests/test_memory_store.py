@@ -27,6 +27,13 @@ class TestMemoryStore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.redis.get("cmwgpt:memory:42:1"), "Stable: has two dogs")
         self.assertEqual(await self.redis.ttl("cmwgpt:memory:42:1"), -1)  # never expires
 
+    async def test_list_user_ids_covers_only_that_servers_profiles(self):
+        await self.store.save_profile(42, 7, "a")
+        await self.store.save_profile(42, 3, "b")
+        await self.store.save_profile(43, 9, "c")
+        await self.store.save_channel_summary(42, 5, "not a profile")
+        self.assertEqual(await self.store.list_user_ids(42), [3, 7])
+
     async def test_saving_again_replaces_the_profile(self):
         await self.store.save_profile(42, 1, "old")
         await self.store.save_profile(42, 1, "new")
