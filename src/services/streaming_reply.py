@@ -1,10 +1,12 @@
 """
 Streaming Reply - Shows a mention reply in Discord while the model is still writing it.
 
-The model's service calls ``push`` with the reply so far. The first push posts a
-message and later ones edit it, at most once per ``EDIT_INTERVAL_SECONDS`` to stay
-clear of Discord's edit rate limit. ``finish`` swaps the preview for the final reply;
-``discard`` deletes it when the request fails.
+The model's service calls ``push`` with the reply so far, and ``status`` says what the
+bot is waiting on (reading links, thinking, a tool call), shown as a small line under
+the text until more text arrives. The first update posts a message and later ones edit
+it, at most once per ``EDIT_INTERVAL_SECONDS`` to stay clear of Discord's edit rate
+limit. ``finish`` swaps the preview for the final reply; ``discard`` deletes it when the
+request fails.
 """
 
 import asyncio
@@ -32,6 +34,7 @@ class StreamingReply:
         self._message_service = message_service
         self._message: Optional[discord.Message] = None
         self._latest = ""
+        self._status = ""
         self._shown = ""
         self._next_flush_at = 0.0
         self._task: Optional[asyncio.Task] = None
@@ -45,10 +48,25 @@ class StreamingReply:
         return self._message is not None
 
     def push(self, text: str) -> None:
-        """Record the reply so far and schedule a preview update."""
-        if self._closed or self._failed or not text.strip():
+        """Record the reply so far and schedule a preview update.
+
+        New text clears the status. Empty text clears what's shown (a discarded draft).
+        """
+        if self._closed or self._failed:
             return
-        self._latest = text
+        self._latest = text if text.strip() else ""
+        if self._latest:
+            self._status = ""
+        self._schedule()
+
+    def status(self, text: str) -> None:
+        """Show what the bot is doing, like ``reading links...``, under the reply so far."""
+        if self._closed or self._failed:
+            return
+        self._status = text.strip()
+        self._schedule()
+
+    def _schedule(self) -> None:
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._flush())
 
@@ -58,8 +76,8 @@ class StreamingReply:
             await asyncio.sleep(delay)
         if self._closed:
             return
-        preview = _preview(self._latest, self._message_service.DISCORD_MESSAGE_LIMIT)
-        if preview == self._shown:
+        preview = _preview(self._latest, self._status, self._message_service.DISCORD_MESSAGE_LIMIT)
+        if not preview or preview == self._shown:
             return
         self._sending = True
         try:
@@ -117,9 +135,13 @@ class StreamingReply:
                 logger.warning(f"Couldn't delete the streamed reply preview: {concise_error(e)}")
 
 
-def _preview(text: str, limit: int) -> str:
-    """The reply so far with a cursor, cut to fit in one Discord message."""
+def _preview(text: str, status: str, limit: int) -> str:
+    """The reply so far with a cursor and the status under it, cut to fit in one Discord message."""
     text = text.strip()
-    if len(text) + len(CURSOR) > limit:
-        text = text[: limit - len(CURSOR) - 1] + "…"
-    return text + CURSOR
+    status_line = f"-# {status}" if status else ""
+    if not text:
+        return status_line
+    tail = CURSOR + (f"\n{status_line}" if status_line else "")
+    if len(text) + len(tail) > limit:
+        text = text[: limit - len(tail) - 1] + "…"
+    return text + tail

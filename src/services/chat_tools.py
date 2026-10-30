@@ -58,8 +58,8 @@ class ChatTool:
     """A tool definition for the Messages API and the coroutine that runs a call to it."""
     definition: Dict[str, Any]
     run: Callable[[Dict[str, Any]], Awaitable[ToolResult]]
-    # Shown in the streamed preview while the call runs.
-    preview: str
+    # What the reply preview says while the call runs, like "drawing...".
+    status: str
 
 
 def text_result(text: str, *, is_error: bool = False) -> ToolResult:
@@ -770,29 +770,29 @@ def build_mention_tools(
         return text_result(text)
 
     if default_draw_model and state_service is not None and (gemini_service or runpod_service):
-        tools.append(ChatTool(DRAW_TOOL, draw, "-# drawing..."))
+        tools.append(ChatTool(DRAW_TOOL, draw, "drawing..."))
     if default_edit_model and state_service is not None and (gemini_service or runpod_service) and message:
-        tools.append(ChatTool(EDIT_IMAGE_TOOL, edit, "-# editing..."))
+        tools.append(ChatTool(EDIT_IMAGE_TOOL, edit, "editing..."))
     if user_notes_provider and guild_id:
-        tools.append(ChatTool(RECALL_USERS_TOOL, recall_users, "-# remembering..."))
+        tools.append(ChatTool(RECALL_USERS_TOOL, recall_users, "remembering..."))
     if day_summary_loader:
-        tools.append(ChatTool(RECALL_TODAY_TOOL, recall_today, "-# catching up on today..."))
+        tools.append(ChatTool(RECALL_TODAY_TOOL, recall_today, "catching up on today..."))
     if channel_summary_provider and guild_id:
-        tools.append(ChatTool(RECALL_CHANNEL_TOOL, recall_channel, "-# remembering..."))
+        tools.append(ChatTool(RECALL_CHANNEL_TOOL, recall_channel, "remembering..."))
     if memory_corrector and guild_id and guild is not None:
-        tools.append(ChatTool(REMEMBER_TOOL, remember, "-# making a note..."))
+        tools.append(ChatTool(REMEMBER_TOOL, remember, "making a note..."))
     if guild is not None:
-        tools.append(ChatTool(SEARCH_MESSAGES_TOOL, search, "-# searching the chat..."))
-        tools.append(ChatTool(READ_MESSAGES_TOOL, read_messages, "-# reading back..."))
+        tools.append(ChatTool(SEARCH_MESSAGES_TOOL, search, "searching the chat..."))
+        tools.append(ChatTool(READ_MESSAGES_TOOL, read_messages, "reading back..."))
     if irc_log:
-        tools.append(ChatTool(SEARCH_IRC_LOG_TOOL, search_irc_log, "-# digging through the irc logs..."))
-        tools.append(ChatTool(READ_IRC_LOG_DAY_TOOL, read_irc_log_day, "-# reading the irc logs..."))
-        tools.append(ChatTool(COUNT_IRC_LOG_TOOL, count_irc_log, "-# counting through the irc logs..."))
+        tools.append(ChatTool(SEARCH_IRC_LOG_TOOL, search_irc_log, "digging through the irc logs..."))
+        tools.append(ChatTool(READ_IRC_LOG_DAY_TOOL, read_irc_log_day, "reading the irc logs..."))
+        tools.append(ChatTool(COUNT_IRC_LOG_TOOL, count_irc_log, "counting through the irc logs..."))
     if url_content_fetcher:
-        tools.append(ChatTool(READ_URLS_TOOL, read_urls, "-# reading links..."))
+        tools.append(ChatTool(READ_URLS_TOOL, read_urls, "reading links..."))
     if quote_file:
-        tools.append(ChatTool(OLD_QUOTES_TOOL, old_quotes, "-# digging up old quotes..."))
+        tools.append(ChatTool(OLD_QUOTES_TOOL, old_quotes, "digging up old quotes..."))
     if wiki_views:
-        tools.append(ChatTool(WIKI_PAGEVIEWS_TOOL, wiki_pageviews, "-# checking wikipedia..."))
-    tools.append(ChatTool(HOW_I_WORK_TOOL, how_i_work, "-# checking how I work..."))
+        tools.append(ChatTool(WIKI_PAGEVIEWS_TOOL, wiki_pageviews, "checking wikipedia..."))
+    tools.append(ChatTool(HOW_I_WORK_TOOL, how_i_work, "checking how I work..."))
     return tools

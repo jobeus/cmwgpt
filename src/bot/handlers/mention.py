@@ -14,7 +14,9 @@ import discord
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url, transcribe_audio_attachment
 from src.utils.discord_error_utils import best_effort_typing, concise_error
 from src.services.openai_service import OpenAIServiceError
-from src.services.anthropic_service import AnthropicServiceError, THINK_HARDER_MODELS, is_direct_anthropic_model
+from src.services.anthropic_service import (
+    THINK_HARDER_MODELS, THINKING_STATUS, AnthropicServiceError, is_direct_anthropic_model,
+)
 from src.services.chat_tools import ChatTool, build_mention_tools
 from src.services.gemini_service import GeminiServiceError, is_gemini_model
 from src.services.irc_log_service import IrcLog
@@ -29,6 +31,12 @@ logger = logging.getLogger(__name__)
 # How long after a mention the next one keeps extending the same history window
 # instead of starting over. Matches the Claude API's 5-minute prompt cache lifetime.
 HISTORY_WINDOW_SECONDS = 300
+
+# What the reply preview says while the mention's context is put together.
+READING_CHAT_STATUS = "reading the chat..."
+DAY_SUMMARY_STATUS = "catching up on today..."
+TRANSCRIBING_STATUS = "transcribing a voice clip..."
+READING_LINKS_STATUS = "reading links..."
 
 # How many of the IRC log's top speakers the tools section lists.
 IRC_ROSTER_SIZE = 60
@@ -88,7 +96,7 @@ class MentionHandler:
         mention_legend_provider: Callable[[discord.TextChannel, discord.User], Awaitable[str]] = get_mention_legend,
         attachment_converter: Callable[[discord.Attachment], Awaitable[str]] = attachment_to_base64_data_url,
         url_converter: Callable[[str], Awaitable[str]] = url_to_base64_data_url,
-        url_content_fetcher: Callable[[str], Awaitable[tuple[str, List[Dict[str, Any]]]]] = fetch_all_url_content,
+        url_content_fetcher: Callable[..., Awaitable[tuple[str, List[Dict[str, Any]]]]] = fetch_all_url_content,
         user_notes_provider: Optional[Callable[[int, Sequence[int]], Awaitable[str]]] = None,
         channel_summary_provider: Optional[Callable[[int, int], Awaitable[str]]] = None,
         day_summary_provider: Optional[
@@ -210,20 +218,22 @@ class MentionHandler:
                 # Mark channel as active
                 self._state_service.mark_channel_active(message.channel.id)
 
-                recent_messages, system_prompt, summary_cost = await self._prepare_mention_context(
-                    message, bot_user, model=model
-                )
-                logger.info(
-                    f"Context prepared for mention by {message.author}, sending to {'Gemini' if is_gemini_model(model) else 'Claude API' if is_direct_anthropic_model(model) else 'OpenRouter'}...")
-                channel_id = message.channel.id
-
-                # Identity threaded into every model call for this mention.
-                identity = {"channel_id": channel_id, "discord_user_id": message.author.id}
-                tools = self._build_tools(message) if self._uses_tools(model) else None
-
-                # Posts the reply as it streams in, then edits in the final version below.
+                # Shows what the bot is doing, then the reply as it streams in, then the final
+                # version below.
                 streaming_reply = StreamingReply(message.channel, self._message_service)
                 try:
+                    recent_messages, system_prompt, summary_cost = await self._prepare_mention_context(
+                        message, bot_user, model=model, on_status=streaming_reply.status
+                    )
+                    logger.info(
+                        f"Context prepared for mention by {message.author}, sending to {'Gemini' if is_gemini_model(model) else 'Claude API' if is_direct_anthropic_model(model) else 'OpenRouter'}...")
+                    channel_id = message.channel.id
+
+                    # Identity threaded into every model call for this mention.
+                    identity = {"channel_id": channel_id, "discord_user_id": message.author.id}
+                    tools = self._build_tools(message) if self._uses_tools(model) else None
+
+                    streaming_reply.status(THINKING_STATUS)
                     reply_content, cost = await dispatch_completion(
                         model=model,
                         messages=recent_messages,
@@ -234,6 +244,7 @@ class MentionHandler:
                         identity=identity,
                         on_text=streaming_reply.push,
                         tools=tools,
+                        on_status=streaming_reply.status,
                     )
                 except BaseException:
                     await streaming_reply.discard()
@@ -341,7 +352,8 @@ class MentionHandler:
         )
 
     async def _prepare_mention_context(
-        self, message: discord.Message, bot_user: discord.User, model: Optional[str] = None
+        self, message: discord.Message, bot_user: discord.User, model: Optional[str] = None,
+        on_status: Optional[Callable[[str], None]] = None,
     ) -> tuple[List[Dict[str, Any]], str, float]:
         """
         Prepares the message list and system prompt for OpenAI context in case of a mention.
@@ -359,7 +371,12 @@ class MentionHandler:
             f"Mention by {message.author} in #{message.channel}: {message.content}"
         )
 
+        def status(text: str) -> None:
+            if on_status:
+                on_status(text)
+
         # Gather message history
+        status(READING_CHAT_STATUS)
         history_msgs = []
 
         current_time = time.time()
@@ -426,6 +443,7 @@ class MentionHandler:
         if history_msgs and model:
             self._window_starts[message.channel.id] = (history_msgs[0], bot_user.id, model)
         if self._day_summary_provider and history_msgs and model and not uses_tools:
+            status(DAY_SUMMARY_STATUS)
             day_summary, summary_cost = await self._day_summary_provider(
                 message.channel, history_msgs[0], bot_user.id, model
             )
@@ -505,14 +523,28 @@ class MentionHandler:
 
         # Build the native multimodal messages array. The mention path enriches
         # user messages with fetched URL content via the injected fetcher.
+        async def transcriber(attachment: discord.Attachment) -> Optional[str]:
+            status(TRANSCRIBING_STATUS)
+            return await transcribe_audio_attachment(attachment)
+
+        url_content_fetcher = None
+        # Models with tools read links themselves with read_urls, only when they need them.
+        if not uses_tools:
+            fetch = self._url_content_fetcher
+
+            async def url_content_fetcher(text: str, *, cache_only: bool = False) -> tuple[str, List[Dict[str, Any]]]:
+                if not cache_only and "http" in text:
+                    status(READING_LINKS_STATUS)
+                return await fetch(text, cache_only=cache_only)
+
+        status(READING_CHAT_STATUS)
         chat_context = await build_chat_context(
             history_msgs,
             bot_user.id,
             attachment_converter=self._attachment_converter,
             url_converter=self._url_converter,
-            transcriber=transcribe_audio_attachment,
-            # Models with tools read links themselves with read_urls, only when they need them.
-            url_content_fetcher=None if uses_tools else self._url_content_fetcher,
+            transcriber=transcriber,
+            url_content_fetcher=url_content_fetcher,
         )
         if not uses_tools:
             await self._append_user_notes(chat_context, message, history_msgs, bot_user)

@@ -691,6 +691,29 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIn("<day_summary>\nearlier: trucks", system_prompt)
         self.assertAlmostEqual(cost, 0.05)
 
+    async def test_prepare_context_reports_what_it_is_doing(self):
+        fetcher = AsyncMock(return_value=("", []))
+        handler, _, _, _, _ = self.make_handler(url_content_fetcher=fetcher)
+        handler._day_summary_provider = AsyncMock(return_value=("", 0.0))
+        channel = MagicMock()
+        channel.id = 50
+        channel.name = "status"
+        plain = self._simple_msg(1, channel, content="hi")
+        linked = self._simple_msg(2, channel, content="see https://youtu.be/abc")
+
+        async def history(limit=None, after=None):
+            yield linked
+            yield plain
+
+        channel.history = history
+        statuses = []
+
+        await handler._prepare_mention_context(linked, SimpleNamespace(id=999), model="gpt-test",
+                                               on_status=statuses.append)
+
+        self.assertEqual(statuses, ["reading the chat...", "catching up on today...", "reading the chat...",
+                                    "reading links..."])
+
     async def test_history_ranges_end_the_irc_log_where_discord_starts(self):
         handler, _, _, _, _ = self.make_handler()
         handler._irc_log = MagicMock()

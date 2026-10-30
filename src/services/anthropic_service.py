@@ -74,7 +74,11 @@ THINK_HARDER_TOOL = {
     },
     "strict": True,
 }
-THINKING_HARDER_PREVIEW = "-# thinking harder..."
+THINKING_HARDER_STATUS = "thinking harder..."
+# What the reply preview says while the model is working, by the content block it's on.
+THINKING_STATUS = "thinking..."
+WEB_SEARCH_STATUS = "searching the web..."
+SEARCH_RESULTS_STATUS = "reading search results..."
 
 # Cache diagnostics (beta): each request names the previous response in its
 # channel, and the API reports where the prompt-cache prefix diverged from it.
@@ -227,6 +231,20 @@ def _response_text(response: Any) -> str:
     ).strip()
 
 
+def _block_status(block: Any, tool_statuses: Dict[str, str]) -> Optional[str]:
+    """What the preview should say when the model starts this content block, if anything."""
+    kind = getattr(block, "type", None)
+    if kind in ("thinking", "redacted_thinking"):
+        return THINKING_STATUS
+    if kind == "server_tool_use":
+        return WEB_SEARCH_STATUS
+    if kind == "web_search_tool_result":
+        return SEARCH_RESULTS_STATUS
+    if kind == "tool_use":
+        return tool_statuses.get(getattr(block, "name", ""))
+    return None
+
+
 def _usage_cost(usage: Any, model: DirectModel) -> float:
     """Price a response's ``usage`` block in USD at ``model``'s rates."""
     if usage is None:
@@ -320,11 +338,15 @@ class AnthropicService:
         previous_message_id: Optional[str],
         resolved_bot_id: Optional[int],
         on_text: Optional[Callable[[str], None]],
+        on_status: Optional[Callable[[str], None]] = None,
+        tool_statuses: Optional[Dict[str, str]] = None,
     ) -> Tuple[Any, float, Optional[str], List[Dict[str, Any]]]:
         """Run one request, resuming ``pause_turn``s.
 
         Returns ``(response, cost, last message id, messages)``; ``messages`` ends with the
-        paused assistant content when the turn was resumed.
+        paused assistant content when the turn was resumed. While streaming, ``on_status``
+        hears what the model started on: thinking, a web search, or a tool call (its
+        status from ``tool_statuses``).
         """
         api_model = direct_model.api_id
         cost = 0.0
@@ -342,6 +364,10 @@ class AnthropicService:
                         if event.type == "text":
                             streamed += event.text
                             on_text(clean_openai_response(streamed, bot_id=resolved_bot_id))
+                        elif event.type == "content_block_start" and on_status:
+                            status = _block_status(getattr(event, "content_block", None), tool_statuses or {})
+                            if status:
+                                on_status(status)
                     response = await stream.get_final_message()
             else:
                 response = await client.beta.messages.create(**request)
@@ -357,7 +383,7 @@ class AnthropicService:
         return response, cost, previous_message_id, api_messages
 
     async def _run_tool_calls(
-        self, response: Any, client_tools: Dict[str, ChatTool], on_preview: Callable[[str], None],
+        self, response: Any, client_tools: Dict[str, ChatTool], on_status: Callable[[str], None],
     ) -> Tuple[List[Dict[str, Any]], float, List[discord.File]]:
         """Run ``response``'s client tool calls. Returns ``(tool_result blocks, cost, files)``."""
         results: List[Dict[str, Any]] = []
@@ -374,7 +400,7 @@ class AnthropicService:
             elif tool is None:
                 result = text_result(f"There's no tool named {name}.", is_error=True)
             else:
-                on_preview(tool.preview)
+                on_status(tool.status)
                 logger.info(f"[tool] {name} {str(args)[:300]}")
                 try:
                     result = await tool.run(args)
@@ -402,13 +428,15 @@ class AnthropicService:
         on_text: Optional[Callable[[str], None]] = None,
         effort: Optional[str] = None,
         tools: Optional[Sequence[ChatTool]] = None,
+        on_status: Optional[Callable[[str], None]] = None,
     ) -> Tuple[Union[str, Dict[str, Any]], float]:
         """Get a chat completion from the Claude API. Returns ``(reply, cost)``.
 
         With ``on_text``, the reply is streamed and ``on_text`` gets the cleaned text so far.
         ``effort`` overrides the model's default effort level. ``tools`` are client tools the
         model may call; their costs are added in, and when they made files the reply is
-        ``{"text": ..., "files": [...]}`` instead of a string.
+        ``{"text": ..., "files": [...]}`` instead of a string. ``on_status`` hears what the
+        model is doing while there's no new text: thinking, searching, or running a tool.
         """
         client = self.get_client()
         resolved_bot_id = resolve_bot_id(bot_id, state_service, self._bot_id_loader)
@@ -459,13 +487,21 @@ class AnthropicService:
             if on_text:
                 on_text("\n\n".join(texts + [text]))
 
+        def status(text: str) -> None:
+            if on_status:
+                on_status(text)
+
+        tool_statuses = {name: tool.status for name, tool in client_tools.items()}
+        tool_statuses["think_harder"] = THINKING_HARDER_STATUS
+
         escalated = False
         tool_rounds = 0
         try:
             while True:
+                status(THINKING_STATUS)
                 response, cost, previous_message_id, sent_messages = await self._send(
                     client, api_messages, kwargs, direct_model, channel_id, previous_message_id,
-                    resolved_bot_id, show if on_text else None,
+                    resolved_bot_id, show if on_text else None, status, tool_statuses,
                 )
                 total_cost += cost
                 reason = _think_harder_reason(response) if think_harder and not escalated else None
@@ -473,7 +509,9 @@ class AnthropicService:
                     # Throw this response away and ask again at high effort.
                     escalated = True
                     logger.info(f"[{api_model}] think_harder requested: {reason[:300]}")
-                    show(THINKING_HARDER_PREVIEW)
+                    # Clear any draft it wrote before the call.
+                    show("")
+                    status(THINKING_HARDER_STATUS)
                     # Same tools so the tools/system cache still reads. Without client tools,
                     # ``none`` stops a second call; with them, a repeat call gets an error result.
                     kwargs["output_config"] = {"effort": THINK_HARDER_EFFORT}
@@ -486,7 +524,7 @@ class AnthropicService:
                 text = _response_text(response)
                 if text:
                     texts.append(clean_openai_response(text, bot_id=resolved_bot_id))
-                results, cost, new_files = await self._run_tool_calls(response, client_tools, show)
+                results, cost, new_files = await self._run_tool_calls(response, client_tools, status)
                 total_cost += cost
                 files += new_files
                 api_messages = _with_assistant_content(sent_messages, response.content) + [

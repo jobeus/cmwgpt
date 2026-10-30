@@ -34,6 +34,7 @@ async def dispatch_completion(
     on_text: Optional[Callable[[str], None]] = None,
     effort: Optional[str] = None,
     tools: Optional[Sequence[Any]] = None,
+    on_status: Optional[Callable[[str], None]] = None,
 ) -> Tuple[ReplyContent, float]:
     """Route ``messages`` to the right model(s) and return ``(reply, cost)``.
 
@@ -51,6 +52,8 @@ async def dispatch_completion(
             the other routes ignore it.
         tools: Client tools (``ChatTool``) the model may call. Only the Claude API route
             offers them.
+        on_status: Called with what the model is doing (thinking, searching, a tool call)
+            while no new text is coming. Only the Claude API route reports it.
     """
     reply_content: ReplyContent = None
     cost = 0.0
@@ -72,6 +75,7 @@ async def dispatch_completion(
             on_text=on_text,
             effort=effort,
             tools=tools,
+            on_status=on_status,
             **identity,
         )
     else:

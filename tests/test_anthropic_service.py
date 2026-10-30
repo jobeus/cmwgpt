@@ -8,7 +8,10 @@ from src.services.anthropic_service import (
     CACHE_DIAGNOSIS_BETA,
     DIRECT_MODELS,
     MAX_TOOL_ROUNDS,
-    THINKING_HARDER_PREVIEW,
+    SEARCH_RESULTS_STATUS,
+    THINKING_HARDER_STATUS,
+    THINKING_STATUS,
+    WEB_SEARCH_STATUS,
     AnthropicService,
     AnthropicServiceError,
     build_anthropic_messages,
@@ -322,9 +325,10 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
 class FakeMessageStream:
     """Stands in for ``client.beta.messages.stream(...)``: yields text events, then the final message."""
 
-    def __init__(self, chunks, final):
+    def __init__(self, chunks, final, blocks=()):
         self._chunks = chunks
         self._final = final
+        self._blocks = blocks
 
     async def __aenter__(self):
         return self
@@ -334,6 +338,8 @@ class FakeMessageStream:
 
     async def __aiter__(self):
         yield SimpleNamespace(type="message_start")
+        for block in self._blocks:
+            yield SimpleNamespace(type="content_block_start", content_block=block)
         for chunk in self._chunks:
             yield SimpleNamespace(type="text", text=chunk)
 
@@ -365,6 +371,33 @@ class TestAnthropicStreaming(unittest.IsolatedAsyncioTestCase):
 
 
 class TestThinkHarderStreaming(unittest.IsolatedAsyncioTestCase):
+    async def test_statuses_follow_what_the_model_starts(self):
+        call = SimpleNamespace(type="tool_use", id="toolu_1", name="recall_channel", input={})
+        first = _response(stop_reason="tool_use", content=[call])
+        second = _response("answer")
+        blocks = [SimpleNamespace(type="thinking"), SimpleNamespace(type="server_tool_use", name="web_search"),
+                  SimpleNamespace(type="web_search_tool_result"), SimpleNamespace(type="tool_use", name="recall_channel"),
+                  SimpleNamespace(type="text")]
+        service = AnthropicService(api_key="test-key")
+        client = MagicMock()
+        client.beta.messages.stream = MagicMock(
+            side_effect=[FakeMessageStream([], first, blocks), FakeMessageStream(["answer"], second)])
+        service.set_client(client)
+        statuses = []
+        tool = ChatTool({"name": "recall_channel", "input_schema": {"type": "object"}},
+                        AsyncMock(return_value=text_result("lately")), "remembering...")
+
+        await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=USER, tools=[tool], on_text=lambda _: None,
+            on_status=statuses.append)
+
+        self.assertEqual(statuses, [
+            THINKING_STATUS, THINKING_STATUS, WEB_SEARCH_STATUS, SEARCH_RESULTS_STATUS,
+            "remembering...",  # as the call starts streaming
+            "remembering...",  # while it runs
+            THINKING_STATUS,   # the next request
+        ])
+
     async def test_preview_shows_thinking_harder_then_the_new_answer(self):
         call = SimpleNamespace(type="tool_use", id="toolu_1", name="think_harder", input={"reason": "hard"})
         first = _response(stop_reason="tool_use", content=[call], model="claude-opus-5-5")
@@ -374,13 +407,16 @@ class TestThinkHarderStreaming(unittest.IsolatedAsyncioTestCase):
         client.beta.messages.stream = MagicMock(
             side_effect=[FakeMessageStream([], first), FakeMessageStream(["answer"], second)])
         service.set_client(client)
-        seen = []
+        seen, statuses = [], []
 
         text, _ = await service.get_chat_completion(
-            model="opus-5.5-direct", messages=[{"role": "user", "content": "q"}], on_text=seen.append)
+            model="opus-5.5-direct", messages=[{"role": "user", "content": "q"}], on_text=seen.append,
+            on_status=statuses.append)
 
         self.assertEqual(text, "answer")
-        self.assertEqual(seen, [THINKING_HARDER_PREVIEW, "answer"])
+        # The discarded first answer is cleared, then the re-run streams in.
+        self.assertEqual(seen, ["", "answer"])
+        self.assertEqual(statuses, [THINKING_STATUS, THINKING_HARDER_STATUS, THINKING_STATUS])
 
 
 class TestDispatchRoutesDirect(unittest.IsolatedAsyncioTestCase):

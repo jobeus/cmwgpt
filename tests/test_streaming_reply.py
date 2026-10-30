@@ -130,11 +130,46 @@ class TestStreamingReply(unittest.IsolatedAsyncioTestCase):
         channel.send.assert_not_awaited()
 
 
+    async def test_status_shows_alone_then_under_text_until_more_text_arrives(self):
+        streamer, channel, sent, _ = make_streamer()
+        with patch("src.services.streaming_reply.EDIT_INTERVAL_SECONDS", 0.01):
+            streamer.status("reading links...")
+            await settle()
+            channel.send.assert_awaited_once_with(content="-# reading links...", suppress_embeds=True)
+
+            streamer.push("Here's")
+            await asyncio.sleep(0.03)
+            sent.edit.assert_awaited_with(content="Here's" + CURSOR, suppress=True)
+
+            streamer.status("drawing...")
+            await asyncio.sleep(0.03)
+            sent.edit.assert_awaited_with(content="Here's" + CURSOR + "\n-# drawing...", suppress=True)
+
+            streamer.push("Here's the cat")
+            await asyncio.sleep(0.03)
+            sent.edit.assert_awaited_with(content="Here's the cat" + CURSOR, suppress=True)
+
+    async def test_empty_push_clears_a_discarded_draft(self):
+        streamer, _, sent, _ = make_streamer()
+        with patch("src.services.streaming_reply.EDIT_INTERVAL_SECONDS", 0.01):
+            streamer.push("draft")
+            await settle()
+            streamer.push("")
+            streamer.status("thinking harder...")
+            await asyncio.sleep(0.03)
+        sent.edit.assert_awaited_with(content="-# thinking harder...", suppress=True)
+
+
 class TestPreview(unittest.TestCase):
     def test_long_text_is_cut_to_fit(self):
-        preview = _preview("x" * 5000, 2000)
+        preview = _preview("x" * 5000, "", 2000)
         self.assertEqual(len(preview), 2000)
         self.assertTrue(preview.endswith("…" + CURSOR))
+
+    def test_long_text_leaves_room_for_the_status(self):
+        preview = _preview("x" * 5000, "drawing...", 2000)
+        self.assertEqual(len(preview), 2000)
+        self.assertTrue(preview.endswith("…" + CURSOR + "\n-# drawing..."))
 
 
 if __name__ == "__main__":

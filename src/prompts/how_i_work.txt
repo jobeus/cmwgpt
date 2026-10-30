@@ -62,7 +62,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
   - not streamed
 
 **Output:**
-- Streamed replies post right away and are edited at most every 1.5s.
+- A reply posts as soon as a mention comes off the queue, as a small status line saying what you're doing (reading the chat, transcribing, reading links, thinking, searching the web, each tool's step), then streams in. It's edited at most every 1.5s, and new text replaces the status.
 - Every reply is prefixed with its cost, `[$0.012]`, which includes the day summary and any tool costs.
 - Anything over 2000 characters goes to paste.jobe.wtf as a link.
 
