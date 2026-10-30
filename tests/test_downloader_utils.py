@@ -31,7 +31,7 @@ class TestDownloaderUtils(unittest.IsolatedAsyncioTestCase):
 
     def test_sources_are_in_prompt_order(self):
         self.assertEqual([s.name for s in downloader_utils.SOURCES],
-                         ["youtube", "tiktok", "twitter", "facebook", "instagram", "article"])
+                         ["youtube", "tiktok", "twitter", "facebook", "instagram", "reddit", "article"])
 
     async def test_aggregates_all_supported_sources_in_order(self):
         sources = fake_sources(

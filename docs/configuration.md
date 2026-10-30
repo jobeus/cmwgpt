@@ -42,7 +42,7 @@ These are loaded by `src/config.py`.
 
 | Variable | Required when | Notes |
 | --- | --- | --- |
-| `RAPIDAPI_KEY` | Using Twitter/X enrichment | Required for tweet/context fetches |
+| `RAPIDAPI_KEY` | Using Twitter/X, Instagram or Reddit enrichment | Required for tweet, Instagram post and Reddit comment fetches |
 | `GROQ_API_KEY` | Using TikTok/Facebook/Twitter-video transcription | Used for audio transcription |
 
 ## Redis
@@ -66,7 +66,7 @@ Add these as needed:
 - `ANTHROPIC_API_KEY` for the `sonnet-5.5-direct` / `opus-5.5-direct` text models
 - `RUNPOD_IO_API_KEY` for image commands
 - `GROQ_API_KEY` for transcription-heavy sources
-- `RAPIDAPI_KEY` for Twitter/X enrichment
+- `RAPIDAPI_KEY` for Twitter/X, Instagram and Reddit enrichment
 - `REDIS_URL` for per-user memory and persistent caches (the bot runs without Redis, but `/memory` and the nightly job will not work and caches only last until restart)
 
 ### Full Docker dev stack

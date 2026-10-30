@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from src.utils.facebook_utils import extract_facebook_urls, get_facebook_transcript
 from src.utils.instagram_utils import extract_instagram_urls, get_instagram_context
+from src.utils.reddit_utils import extract_reddit_urls, get_reddit_thread
 from src.utils.tiktok_utils import extract_tiktok_urls, get_tiktok_transcript
 from src.utils.twitter_utils import extract_twitter_urls, get_tweet_context
 from src.utils.url_utils import extract_target_urls, get_article_text
@@ -66,6 +67,10 @@ SOURCES: List[_Source] = [
             _text_only("Target Facebook Video {key} Transcript:\n{text}")),
     _Source("instagram", extract_instagram_urls, get_instagram_context,
             "Included Instagram/Threads posts follow:", _render_instagram),
+    # Comments only; the post itself comes through the article source below.
+    _Source("reddit", extract_reddit_urls, get_reddit_thread,
+            "Included Reddit comment threads follow:",
+            _text_only("Reddit thread {key}:\n{text}"), QUICK_FETCH_TIMEOUT_SECONDS),
     _Source("article", extract_target_urls, get_article_text,
             "Included article content follows:",
             _text_only("URL content:\n{text}"), QUICK_FETCH_TIMEOUT_SECONDS),

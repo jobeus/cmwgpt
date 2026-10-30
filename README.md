@@ -26,7 +26,7 @@ Mention-first Discord bot with URL-aware prompt enrichment, image generation/edi
 | --- | --- |
 | Chat | Users mention the bot in Discord; there is no current `/chat` command |
 | Context building | Recent channel history, reply context, embeds, and attachments are folded into the prompt |
-| URL enrichment | The bot can inject transcripts/context from YouTube, TikTok, Twitter/X, Facebook, Instagram, and generic articles |
+| URL enrichment | The bot can inject transcripts/context from YouTube, TikTok, Twitter/X, Facebook, Instagram, Reddit, and generic articles |
 | Tools | On the Claude API direct models, the model calls tools itself: draw/edit images, memory and summaries, Discord and old IRC log search, viewing posted images, reactions, the old quote bot, reading any URL, code execution, Wikipedia pageviews (`docs/architecture.md#claude-api-tools`) |
 | Images | Slash commands support image generation and image editing through Runpod or Gemini |
 | Memory | A nightly job learns short per-user profiles (stored in Redis) and adds them to mentions; `/memory` shows and edits them |
@@ -85,7 +85,7 @@ Chat itself remains mention-based.
 
 | Variable | Required when | Why |
 | --- | --- | --- |
-| `RAPIDAPI_KEY` | Using Twitter/X enrichment | Fetches tweet/context data |
+| `RAPIDAPI_KEY` | Using Twitter/X, Instagram or Reddit enrichment | Fetches tweets, Instagram posts and Reddit comments |
 | `GROQ_API_KEY` | Using TikTok/Facebook/Twitter-video transcription | Runs audio transcription |
 | `TRANSCRIPT_PROXY` | Optional | Helps when direct transcript/media fetches fail |
 
