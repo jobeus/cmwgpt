@@ -1,31 +1,28 @@
 """
-Reddit Utils - A Reddit post's comment thread, through RapidAPI.
-
-The post itself still goes through the article fetcher (``url_utils``, via old.reddit),
-so a Reddit link gets both the post text and its comments.
+Reddit Utils - A Reddit post's details (title, text, link, images), through RapidAPI.
 """
 
 import html
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
 from src.config import get_config
 from src.utils.cache_utils import PersistentCache, skip_recent_failures
+from src.utils.discord_helper import url_to_base64_data_url
 
 logger = logging.getLogger(__name__)
 
-# Redis cache: normalized post URL -> rendered comment thread
-_reddit_cache = PersistentCache('reddit_threads')
+# Redis cache: normalized post URL -> (post text, image base64 data URLs)
+_reddit_cache = PersistentCache('reddit_posts')
 
 RAPIDAPI_HOST = "reddit34.p.rapidapi.com"
-COMMENTS_SORT = "top"
-# Longest comment body kept, and the most text one thread renders to.
-MAX_COMMENT_CHARS = 1000
-MAX_THREAD_CHARS = 20000
+# Longest post text kept, and most images (a gallery's first ones) returned.
+MAX_SELFTEXT_CHARS = 15000
+MAX_POST_IMAGES = 4
 
 # A post link: reddit.com/r/<sub>/comments/<id>/..., on any reddit host, or redd.it/<id>.
 _POST_RE = re.compile(
@@ -33,9 +30,12 @@ _POST_RE = re.compile(
     r'|https?://redd\.it/(?P<short>[a-z0-9]+)',
     re.IGNORECASE,
 )
-_HIDDEN_BODIES = {"[deleted]", "[removed]", ""}
 # Punctuation that ends a sentence around a link rather than belonging to it.
 _TRAILING_PUNCTUATION = ').,;:!?\'"]>'
+
+
+def is_reddit_post_url(url: str) -> bool:
+    return bool(_POST_RE.match(url))
 
 
 def extract_reddit_urls(text: str) -> List[str]:
@@ -57,69 +57,90 @@ def extract_reddit_urls(text: str) -> List[str]:
     return urls
 
 
-def _render_comment(comment: Dict[str, Any]) -> Optional[str]:
-    body = html.unescape(str(comment.get("body") or "")).strip()
-    if body in _HIDDEN_BODIES:
-        return None
-    if len(body) > MAX_COMMENT_CHARS:
-        body = body[:MAX_COMMENT_CHARS].rstrip() + "…"
-    depth = int(comment.get("depth") or 0)
-    created = comment.get("created_utc")
+def _image_urls(post: Dict[str, Any]) -> List[str]:
+    """The post's images: a gallery's in order, else its preview image."""
+    urls: List[str] = []
+    metadata = post.get("media_metadata") or {}
+    for item in (post.get("gallery_data") or {}).get("items") or []:
+        source = (metadata.get(item.get("media_id")) or {}).get("s") or {}
+        if source.get("u"):
+            urls.append(source["u"])
+    if not urls:
+        for image in (post.get("preview") or {}).get("images") or []:
+            if (image.get("source") or {}).get("url"):
+                urls.append(image["source"]["url"])
+    return [html.unescape(u) for u in urls[:MAX_POST_IMAGES]]
+
+
+def render_post(post: Dict[str, Any]) -> str:
+    """The post as text: title, where and by whom, flair, score, its text, and what it links to."""
+    created = post.get("created_utc")
     when = datetime.fromtimestamp(created, timezone.utc).strftime("%Y-%m-%d") if created else "?"
-    indent = "  " * depth
-    body = body.replace("\n", "\n" + indent + "  ")
-    return f"{indent}- u/{comment.get('author') or '?'} ({comment.get('score', 0)} points, {when}): {body}"
-
-
-def render_thread(comments: List[Dict[str, Any]]) -> str:
-    """The comments, in the API's order, indented by reply depth and capped at MAX_THREAD_CHARS."""
-    lines: List[str] = []
-    total = 0
-    for comment in comments:
-        line = _render_comment(comment)
-        if line is None:
-            continue
-        if total + len(line) > MAX_THREAD_CHARS:
-            lines.append("(more comments not shown)")
-            break
-        lines.append(line)
-        total += len(line) + 1
+    lines = [f"Title: {html.unescape(str(post.get('title') or ''))}"]
+    lines.append(
+        f"Posted in {post.get('subreddit_name_prefixed') or '?'} by u/{post.get('author') or '?'} on {when}"
+    )
+    flags = [f"flair: {post['link_flair_text']}"] if post.get("link_flair_text") else []
+    flags += [name for name in ("over_18", "spoiler", "locked") if post.get(name)]
+    if flags:
+        lines.append("(" + ", ".join(f.replace("over_18", "NSFW") for f in flags) + ")")
+    ratio = post.get("upvote_ratio")
+    lines.append(
+        f"Score {post.get('score', 0)}" + (f" ({round(ratio * 100)}% upvoted)" if ratio is not None else "")
+        + f", {post.get('num_comments', 0)} comments"
+    )
+    selftext = html.unescape(str(post.get("selftext") or "")).strip()
+    if selftext:
+        if len(selftext) > MAX_SELFTEXT_CHARS:
+            selftext = selftext[:MAX_SELFTEXT_CHARS].rstrip() + "…"
+        lines.append(f"Text:\n{selftext}")
+    link = post.get("url_overridden_by_dest") or ("" if post.get("is_self") else post.get("url"))
+    if post.get("is_video"):
+        lines.append("It's a video post.")
+    elif link and not post.get("gallery_data"):
+        lines.append(f"Links to: {html.unescape(str(link))}")
     return "\n".join(lines)
 
 
 @skip_recent_failures("reddit")
-async def get_reddit_thread(url: str, *, cache_only: bool = False) -> Optional[str]:
-    """The top comments of the Reddit post at ``url``, rendered as text and cached in Redis."""
+async def get_reddit_post(url: str, *, cache_only: bool = False) -> Optional[Tuple[str, List[str]]]:
+    """The Reddit post at ``url``: ``(text, image data URLs)``, cached in Redis."""
     cached = _reddit_cache.get(url)
     if cached is not None:
-        return cached
+        cached_text, cached_images = cached
+        return cached_text, list(cached_images or [])
     if cache_only:
         return None
 
     cfg = get_config()
     if not cfg.rapidapi_key:
-        logger.error("RAPIDAPI_KEY is not set. Cannot fetch Reddit comments.")
+        logger.error("RAPIDAPI_KEY is not set. Cannot fetch Reddit posts.")
         return None
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
             response = await client.get(
-                f"https://{RAPIDAPI_HOST}/getPostCommentsWithSortV2",
+                f"https://{RAPIDAPI_HOST}/getPostDetails",
                 headers={"x-rapidapi-host": RAPIDAPI_HOST, "x-rapidapi-key": cfg.rapidapi_key},
-                params={"post_url": url, "sort": COMMENTS_SORT},
+                params={"post_url": url},
             )
             response.raise_for_status()
             data = response.json()
     except (httpx.HTTPError, ValueError) as e:
-        logger.warning(f"Failed to fetch Reddit comments for {url}: {e}")
+        logger.warning(f"Failed to fetch Reddit post {url}: {e}")
         return None
 
-    if not data.get("success"):
-        logger.warning(f"RapidAPI returned no Reddit comments for {url}: {str(data)[:300]}")
+    post = data.get("data") if data.get("success") else None
+    if not isinstance(post, dict) or not post.get("title"):
+        logger.warning(f"RapidAPI returned no Reddit post for {url}: {str(data)[:300]}")
         return None
-    comments = (data.get("data") or {}).get("comments") or []
-    subreddit = next((c.get("subreddit_name_prefixed") for c in comments if c.get("subreddit_name_prefixed")), "")
-    thread = render_thread(comments)
-    text = f"{subreddit} comments, {COMMENTS_SORT} first:\n{thread}" if thread else "No comments."
-    _reddit_cache[url] = text
-    return text
+
+    images: List[str] = []
+    for image_url in _image_urls(post):
+        try:
+            images.append(await url_to_base64_data_url(image_url))
+        except Exception as e:
+            logger.warning(f"Failed to fetch Reddit image {image_url}: {e}")
+    text = render_post(post)
+    _reddit_cache[url] = (text, images)
+    return text, images

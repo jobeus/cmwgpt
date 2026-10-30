@@ -42,7 +42,7 @@ These are loaded by `src/config.py`.
 
 | Variable | Required when | Notes |
 | --- | --- | --- |
-| `RAPIDAPI_KEY` | Using Twitter/X, Instagram or Reddit enrichment | Required for tweet, Instagram post and Reddit comment fetches |
+| `RAPIDAPI_KEY` | Using Twitter/X, Instagram or Reddit enrichment | Required for tweet, Instagram post and Reddit post fetches |
 | `GROQ_API_KEY` | Using TikTok/Facebook/Twitter-video transcription | Used for audio transcription |
 
 ## Redis

@@ -85,7 +85,7 @@ Chat itself remains mention-based.
 
 | Variable | Required when | Why |
 | --- | --- | --- |
-| `RAPIDAPI_KEY` | Using Twitter/X, Instagram or Reddit enrichment | Fetches tweets, Instagram posts and Reddit comments |
+| `RAPIDAPI_KEY` | Using Twitter/X, Instagram or Reddit enrichment | Fetches tweets, Instagram posts and Reddit posts |
 | `GROQ_API_KEY` | Using TikTok/Facebook/Twitter-video transcription | Runs audio transcription |
 | `TRANSCRIPT_PROXY` | Optional | Helps when direct transcript/media fetches fail |
 

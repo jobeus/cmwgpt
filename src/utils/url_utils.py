@@ -10,6 +10,7 @@ import trafilatura
 from src.config import get_config
 from src.utils.cache_utils import PersistentCache, skip_recent_failures
 from src.utils.http_client import fetch_public
+from src.utils.reddit_utils import is_reddit_post_url
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,8 @@ def extract_target_urls(text: str) -> List[str]:
         domain = parsed.netloc.lower()
 
         # Exclude domains with dedicated downloader/media handling and obvious binary media URLs
-        is_excluded = _is_excluded_domain(domain) or _is_excluded_media_url(parsed)
+        # Reddit posts go through reddit_utils; other Reddit pages are still fetched here.
+        is_excluded = _is_excluded_domain(domain) or _is_excluded_media_url(parsed) or is_reddit_post_url(url)
 
         if not is_excluded and url not in urls:
             urls.append(url)

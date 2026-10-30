@@ -263,7 +263,7 @@ flowchart LR
     Discover --> TW[Twitter/X context]:::src
     Discover --> FB[Facebook transcript]:::src
     Discover --> IG[Instagram post/video]:::src
-    Discover --> RD[Reddit comments]:::src
+    Discover --> RD[Reddit post]:::src
     Discover --> AR[Article extraction]:::src
 
     YT --> Cache[Persistent caches]:::cache
@@ -287,7 +287,7 @@ flowchart LR
 | Twitter/X | `src/utils/twitter_utils.py` | Tweet/context lookup, with optional video transcription path |
 | Facebook | `src/utils/facebook_utils.py` | Thin wrapper over `src/utils/media_transcribe.py` (yt-dlp download -> Groq transcription) |
 | Instagram | `src/utils/instagram_utils.py` | Post lookup through RapidAPI (with images), videos through `media_transcribe.py` |
-| Reddit | `src/utils/reddit_utils.py` | Top comments, threaded by depth, through RapidAPI (`reddit34`); the post itself still comes through the article fetcher via old.reddit |
+| Reddit | `src/utils/reddit_utils.py` | Post details through RapidAPI (`reddit34` `getPostDetails`): title, subreddit, author, score, flair, text, linked URL and up to 4 images (gallery or preview). Post links skip the article fetcher; other Reddit pages still use it |
 | Generic articles | `src/utils/url_utils.py` | `fetch_public` fetch, then `trafilatura` extraction (retried with `favor_recall` if the first pass finds nothing) |
 | Shared media pipeline | `src/utils/media_transcribe.py` | yt-dlp or direct video download (3-minute limit) + proxy fallback, audio encoded at 16 kHz mono 32 kbps (what Whisper uses anyway; ~1h50m per 25 MB upload), longer audio split into 30-minute chunks, Groq Whisper transcription (near-instant). No length limit. Used by TikTok/Facebook/Twitter/Instagram and big Discord audio attachments |
 
