@@ -109,6 +109,7 @@ async def _convert_message(
         text_lines.append("[Empty Message]")
 
     # Note any replies
+    quotes_bot = False
     if msg.reference and msg.reference.message_id:
         reply_text = f"[Replying to message ID: {msg.reference.message_id}]"
 
@@ -138,6 +139,7 @@ async def _convert_message(
             reply_text = f"[Replying to message: \"{ref_text}\"]"
 
         text_lines.insert(0, reply_text + "\n\n")
+        quotes_bot = ref_author_id == bot_id
 
     # Note single-text representations for embeds
     if msg.embeds:
@@ -163,9 +165,11 @@ async def _convert_message(
     text_payload = [{"type": "text", "text": final_text}]
     file_payloads = []
 
-    # Fetch all supported URLs automatically (mention path only)
+    # Fetch all supported URLs automatically (mention path only). Not the links in a
+    # quoted reply of the bot's: those are often from logs or quotes its tools returned.
     if role == "user" and url_content_fetcher is not None:
-        url_content, url_images = await url_content_fetcher(final_text, cache_only=cache_only)
+        fetch_text = " ".join(text_lines[1:]).strip() if quotes_bot else final_text
+        url_content, url_images = await url_content_fetcher(fetch_text, cache_only=cache_only)
         if url_content:
             final_text = url_content + final_text
             text_payload[0]["text"] = final_text

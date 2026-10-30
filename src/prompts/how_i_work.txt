@@ -14,7 +14,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 - Images become JPEGs (max 1024px).
 - Audio and voice clips are transcribed with Groq Whisper.
 - Other files show up only as a filename.
-- Links in the newest 10 messages are fetched; older messages use cached results only. Supported links:
+- Links in the newest 10 messages are fetched, except links in a quoted reply to one of your own messages; older messages use cached results only. Supported links:
   - YouTube transcripts
   - TikTok, Facebook and Instagram video (downloaded with yt-dlp, then Whisper)
   - Twitter/X and Instagram posts (through RapidAPI)

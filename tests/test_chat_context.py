@@ -76,6 +76,29 @@ class TestBuildChatContext(unittest.IsolatedAsyncioTestCase):
         self.assertIn('[Replying to message: "[', text_of(result[1]))
         self.assertIn("[10] <@7>: original text", text_of(result[1]))
 
+    async def test_links_in_a_quoted_bot_reply_are_not_fetched(self):
+        fetcher = AsyncMock(return_value=("", []))
+        bot_reply = make_msg(10, "from the log: https://youtu.be/abc", author_id=BOT_ID)
+        reply = make_msg(11, "lol see https://example.com/x",
+                         reference=SimpleNamespace(message_id=10, resolved=None, cached_message=None))
+
+        result = await self.build([bot_reply, reply], url_content_fetcher=fetcher)
+
+        fetched = fetcher.await_args.args[0]
+        self.assertIn("https://example.com/x", fetched)
+        self.assertNotIn("youtu.be", fetched)
+        # The model still sees what was quoted.
+        self.assertIn("https://youtu.be/abc", text_of(result[1]))
+
+    async def test_links_in_a_quoted_human_message_are_still_fetched(self):
+        fetcher = AsyncMock(return_value=("", []))
+        original = make_msg(10, "watch https://youtu.be/abc", author_id=7)
+        reply = make_msg(11, "what is this", reference=SimpleNamespace(message_id=10, resolved=None, cached_message=None))
+
+        await self.build([original, reply], url_content_fetcher=fetcher)
+
+        self.assertIn("youtu.be/abc", fetcher.await_args_list[-1].args[0])
+
     async def test_order_is_preserved_when_conversion_finishes_out_of_order(self):
         delays = {1: 0.03, 2: 0.0, 3: 0.015}
 
