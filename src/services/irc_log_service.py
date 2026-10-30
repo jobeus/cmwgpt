@@ -12,11 +12,11 @@ import logging
 import mmap
 import re
 import threading
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Deque, List, Optional, Tuple
+from typing import Deque, Dict, List, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,63 @@ MAX_CONTEXT_LINES = 5
 MAX_LINE_CHARS = 400
 # Most lines one read_day call returns; busy days are paged.
 MAX_DAY_LINES = 500
+# Most nicks a count lists per group.
+MAX_TOP_NICKS = 50
+# A count stops after this many occurrences, so a pattern like '.' can't run for minutes.
+MAX_COUNTED = 3_000_000
+
+# A chat line's speaker: "12:00 <@nick> text" or an action, "12:00  * nick does". Joins, quits
+# and other "-!-" lines don't match, so they're never counted.
+_SPEAKER_RE = re.compile(rb"\d\d:\d\d(?::\d\d)?\s+(?:<[ @+%~&!]?([^>\s]+)>|\*\s+(\S+))")
+
+
+# The canonical name that drops a nick (bots and junk) in an irssistats nicks file.
+NULL_NICK = "<NULL>"
+
+
+class NickMap:
+    """Nick consolidation from an irssistats-style nicks file.
+
+    Each line is ``canonical pattern``; the pattern is a case-sensitive regex searched in the
+    nick, and the first matching line wins. A canonical name of ``<NULL>`` drops the nick.
+    A pattern that's invalid or matches empty text (``*>``, ``|-_-|``) is taken literally,
+    since as a regex it would fail or match every nick.
+    """
+
+    def __init__(self, rules: Sequence[Tuple[str, str]]):
+        self._rules: List[Tuple[str, re.Pattern]] = []
+        for canonical, pattern in rules:
+            try:
+                compiled = re.compile(pattern)
+                if compiled.search(""):
+                    compiled = re.compile(re.escape(pattern))
+            except re.error:
+                compiled = re.compile(re.escape(pattern))
+            self._rules.append((canonical, compiled))
+        self._cache: Dict[str, Optional[str]] = {}
+
+    @classmethod
+    def from_file(cls, path: str) -> "NickMap":
+        rules = []
+        for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
+            fields = line.split()
+            if len(fields) >= 2:
+                rules.append((fields[0], fields[1]))
+        return cls(rules)
+
+    def canonical(self, nick: str) -> Optional[str]:
+        """``nick``'s canonical name, ``nick`` itself when no line matches, or None when it's dropped."""
+        if nick not in self._cache:
+            name: Optional[str] = nick
+            for canonical, pattern in self._rules:
+                if pattern.search(nick):
+                    name = None if canonical == NULL_NICK else canonical
+                    break
+            self._cache[nick] = name
+        return self._cache[nick]
+
+    def __len__(self) -> int:
+        return len(self._rules)
 
 
 @dataclass(frozen=True)
@@ -42,8 +99,9 @@ class _Match:
 class IrcLog:
     """A lazily opened, memory-mapped IRC log with a date index."""
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, nicks: Optional[NickMap] = None):
         self.path = Path(path)
+        self.nicks = nicks
         self._lock = threading.Lock()
         self._data: Optional[mmap.mmap] = None
         self._mtime: float = 0.0
@@ -69,6 +127,23 @@ class IrcLog:
             logger.info(f"[irc log] Mapped {self.path} ({len(data) / 1e6:.1f}MB, {len(days)} date markers)")
             return data
 
+    def _nick_key(self, nick: str) -> Optional[str]:
+        """How a nick is compared and grouped: its canonical name, lowercased; None when dropped."""
+        name = self.nicks.canonical(nick) if self.nicks else nick
+        return name.lower() if name is not None else None
+
+    def _speaker(self, data: mmap.mmap, line_start: int, line_end: int) -> Tuple[Optional[str], str, int]:
+        """``(nick key, nick as shown, offset where the said text starts)`` for a chat or action line.
+
+        The key is None for other lines ("-!-" joins and quits) and for dropped nicks.
+        """
+        head = _SPEAKER_RE.match(data, line_start, line_end)
+        if head is None:
+            return None, "", line_end
+        raw = (head.group(1) or head.group(2)).decode("utf-8", "replace")
+        shown = self.nicks.canonical(raw) if self.nicks else raw
+        return (shown.lower() if shown is not None else None), shown or raw, head.end()
+
     def _date_at(self, offset: int) -> str:
         i = bisect.bisect_right(self._marker_offsets, offset) - 1
         return _day_label(self._marker_days[i] if i >= 0 else None)
@@ -93,11 +168,8 @@ class IrcLog:
             body = re.compile(query.encode("utf-8"), re.I)
         except re.error:
             body = re.compile(re.escape(query.encode("utf-8")), re.I)
-        # Nicks may carry a mode prefix (<@nick>, <+nick>) and actions look like " * nick does".
-        speaker = None
-        if nick:
-            n = re.escape(nick.encode("utf-8"))
-            speaker = re.compile(rb"\d\d:\d\d(?::\d\d)?\s+(?:<[ @+%~&!]?" + n + rb">|\*\s+" + n + rb"\b)", re.I)
+        # A nick filter matches every alias of the nick (from the nicks file), case-insensitively.
+        wanted = self._nick_key(nick) if nick else None
 
         # One hit per line: after a match, carry on from the next line.
         kept: Deque[_Match] = deque(maxlen=skip + limit if newest_first else None)
@@ -112,7 +184,7 @@ class IrcLog:
             if line_end < 0:
                 line_end = len(data)
             pos = line_end + 1
-            if m.end() > line_end or (speaker and not speaker.match(data, line_start)):
+            if m.end() > line_end or (nick and self._speaker(data, line_start, line_end)[0] != wanted):
                 continue
             total += 1
             if newest_first or skip < total <= skip + limit:
@@ -155,6 +227,105 @@ class IrcLog:
         parts = [header]
         for date, lines in blocks:
             parts.append(f"\n[{date}]\n" + "\n".join(lines))
+        return "\n".join(parts)
+
+    def _day_at(self, offset: int) -> Optional[date]:
+        i = bisect.bisect_right(self._marker_offsets, offset) - 1
+        return self._marker_days[i] if i >= 0 else None
+
+    def count(
+        self,
+        query: str,
+        *,
+        nick: str = "",
+        group_by: Sequence[str] = (),
+        top: int = 15,
+    ) -> str:
+        """Count occurrences of ``query`` (a case-insensitive regex) in what people said.
+
+        Only chat and action lines count, and only their text (not the nick). Every
+        occurrence counts, so a line saying it twice adds two. ``group_by`` takes
+        ``"nick"`` and/or ``"year"``; with both, each year lists its top nicks.
+        """
+        data = self._load()
+        top = max(1, min(top, MAX_TOP_NICKS))
+        try:
+            body = re.compile(query.encode("utf-8"), re.I)
+        except re.error:
+            body = re.compile(re.escape(query.encode("utf-8")), re.I)
+        if body.fullmatch(b""):
+            return (f"{query!r} matches empty text, so it can't be counted. "
+                    "Use a pattern that needs at least one character.")
+        wanted = self._nick_key(nick) if nick else None
+
+        total = 0
+        lines = 0
+        by_nick: Counter = Counter()
+        by_year: Counter = Counter()
+        by_year_nick: Dict[int, Counter] = {}
+        names: Dict[str, str] = {}
+        line_start = line_end = -1
+        key: Optional[str] = None
+        shown = ""
+        text_start = 0
+        year: Optional[int] = None
+        counted_line = False
+        truncated = False
+        for m in body.finditer(data):
+            if m.start() >= line_end:
+                line_start = data.rfind(b"\n", 0, m.start()) + 1
+                line_end = data.find(b"\n", m.start())
+                if line_end < 0:
+                    line_end = len(data)
+                key, shown, text_start = self._speaker(data, line_start, line_end)
+                if nick and key != wanted:
+                    key = None
+                counted_line = False
+                if key is not None:
+                    day = self._day_at(line_start)
+                    year = day.year if day else None
+            if key is None or m.start() < text_start or m.end() > line_end or m.end() == m.start():
+                continue
+            if not counted_line:
+                lines += 1
+                counted_line = True
+            total += 1
+            names.setdefault(key, shown)
+            if "nick" in group_by:
+                by_nick[key] += 1
+            if "year" in group_by and year is not None:
+                by_year[year] += 1
+                if "nick" in group_by:
+                    by_year_nick.setdefault(year, Counter())[key] += 1
+            if total >= MAX_COUNTED:
+                truncated = True
+                break
+
+        who = f" by {(self.nicks.canonical(nick) if self.nicks else None) or nick}" if nick else ""
+        if not total:
+            return f"No occurrences of {query!r}{who} in the IRC log."
+        parts = [f"{total:,} occurrence{'s' if total != 1 else ''} of {query!r}{who} on "
+                 f"{lines:,} line{'s' if lines != 1 else ''} "
+                 "(chat and action lines only, nicks not counted)."]
+        if truncated:
+            parts[0] += f" Stopped counting at {MAX_COUNTED:,}; the real total is higher."
+
+        def ranked(counter: Counter, out_of: int) -> List[str]:
+            rows = [f"  {names[k]}: {n:,} ({n / out_of:.1%})" for k, n in counter.most_common(top)]
+            rest = sum(counter.values()) - sum(n for _, n in counter.most_common(top))
+            if rest:
+                rows.append(f"  {len(counter) - top} others: {rest:,}")
+            return rows
+
+        if "year" in group_by:
+            parts.append("By year:")
+            for y in sorted(by_year):
+                parts.append(f"{y}: {by_year[y]:,}")
+                if "nick" in group_by:
+                    parts += ["  " + row for row in ranked(by_year_nick[y], by_year[y])]
+        elif "nick" in group_by:
+            parts.append(f"Top {min(top, len(by_nick))} of {len(by_nick)} nicks:")
+            parts += ranked(by_nick, total)
         return "\n".join(parts)
 
     def read_day(self, day: date, *, start_line: int = 0) -> str:
@@ -234,11 +405,21 @@ def _overlap(previous: List[str], lines: List[str]) -> int:
     return 0
 
 
-def load_irc_log(path: str) -> Optional[IrcLog]:
-    """An :class:`IrcLog` for ``path``, or None when it's unset or missing."""
+def load_irc_log(path: str, nicks_path: str = "") -> Optional[IrcLog]:
+    """An :class:`IrcLog` for ``path``, or None when it's unset or missing.
+
+    ``nicks_path`` is an optional irssistats-style nicks file for consolidating aliases.
+    """
     if not path:
         return None
     if not Path(path).is_file():
         logger.warning(f"[irc log] IRC_LOG={path} isn't a file; the search_irc_log tool is off.")
         return None
-    return IrcLog(path)
+    nicks = None
+    if nicks_path:
+        try:
+            nicks = NickMap.from_file(nicks_path)
+            logger.info(f"[irc log] Loaded {len(nicks)} nick rules from {nicks_path}")
+        except OSError as e:
+            logger.warning(f"[irc log] Couldn't read IRC_NICKS={nicks_path}: {e}; nicks won't be consolidated.")
+    return IrcLog(path, nicks)

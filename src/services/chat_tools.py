@@ -21,7 +21,7 @@ from src.services.discord_history import (
     HAS_FILTERS, MAX_READ_MESSAGES, SORTS, read_around, readable_channels, search_messages,
 )
 from src.services.image_service import edit_image, generate_image, resolve_draw_model, resolve_edit_model
-from src.services.irc_log_service import MAX_CONTEXT_LINES, MAX_DAY_LINES, IrcLog
+from src.services.irc_log_service import MAX_CONTEXT_LINES, MAX_DAY_LINES, MAX_TOP_NICKS, IrcLog
 from src.services.quote_service import MAX_RANDOM, QuoteFile
 from src.utils.discord_helper import compress_image, url_to_base64_data_url
 from src.utils.url_utils import wiki_title_candidates
@@ -315,7 +315,9 @@ SEARCH_IRC_LOG_TOOL = {
             },
             "nick": {
                 "type": "string",
-                "description": "Only lines said by this IRC nick (exact, without the @ or + mode prefix).",
+                "description": (
+                    "Only lines said by this person: any of their IRC nicks, without the @ or + mode prefix."
+                ),
             },
             "newest_first": {
                 "type": "boolean",
@@ -328,6 +330,45 @@ SEARCH_IRC_LOG_TOOL = {
             "skip": {
                 "type": "integer",
                 "description": "How many matches to skip, for paging past the first results. Default 0.",
+            },
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+COUNT_IRC_LOG_TOOL = {
+    "name": "count_irc_log",
+    "description": (
+        "Count exactly how often something was said in this channel's old IRC log: every occurrence of a "
+        "regex in chat and action lines (not nicks, joins or quits), optionally for one nick, and grouped "
+        "by nick and/or year with the top nicks. Use it for 'how many times', 'who said X the most' or "
+        "'when did X peak' questions instead of estimating from search results. One call scans the whole "
+        "log in a few seconds."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "A case-insensitive Python regex, e.g. 'fuck' (also counts 'fucking') or '\\bfuck\\b' "
+                    "for the word alone."
+                ),
+            },
+            "nick": {
+                "type": "string",
+                "description": "Only count what this person said: any of their IRC nicks, without a mode prefix.",
+            },
+            "group_by": {
+                "type": "array",
+                "items": {"type": "string", "enum": ["nick", "year"]},
+                "description": "Break the total down by nick, by year, or both (each year's top nicks).",
+            },
+            "top": {
+                "type": "integer",
+                "description": f"How many nicks to list per group, 1-{MAX_TOP_NICKS}. Default 15.",
             },
         },
         "required": ["query"],
@@ -706,6 +747,18 @@ def build_mention_tools(
         )
         return text_result(text)
 
+    async def count_irc_log(args: Dict[str, Any]) -> ToolResult:
+        assert irc_log is not None  # only offered when set
+        query = str(args.get("query") or "")
+        if not query.strip():
+            return text_result("No query given.", is_error=True)
+        nick = str(args.get("nick") or "").strip().lstrip("@+%~&")
+        group_by = [g for g in args.get("group_by") or [] if g in ("nick", "year")]
+        logger.info(f"[irc log tool] Channel {channel_id} Count: {query[:200]} Nick: {nick} Group: {group_by}")
+        text = await asyncio.to_thread(
+            irc_log.count, query, nick=nick, group_by=group_by, top=_int_arg(args, "top") or 15)
+        return text_result(text)
+
     async def read_irc_log_day(args: Dict[str, Any]) -> ToolResult:
         assert irc_log is not None  # only offered when set
         try:
@@ -734,6 +787,7 @@ def build_mention_tools(
     if irc_log:
         tools.append(ChatTool(SEARCH_IRC_LOG_TOOL, search_irc_log, "-# digging through the irc logs..."))
         tools.append(ChatTool(READ_IRC_LOG_DAY_TOOL, read_irc_log_day, "-# reading the irc logs..."))
+        tools.append(ChatTool(COUNT_IRC_LOG_TOOL, count_irc_log, "-# counting through the irc logs..."))
     if url_content_fetcher:
         tools.append(ChatTool(READ_URLS_TOOL, read_urls, "-# reading links..."))
     if quote_file:

@@ -601,7 +601,10 @@ class MentionHandler:
                 "back then, or when something first came up; every hit comes with its date. Then read "
                 "the whole day around a promising hit when you need the conversation, not just one "
                 "line. Say when things were said, and quote the log rather than guessing. IRC nicks "
-                "may not match Discord names.\n"
+                "may not match Discord names; nick filters and per-nick counts merge a person's known "
+                "aliases. For how many times something was said, who said it most, "
+                "or when it peaked, use `count_irc_log(query, nick?, group_by?, top?)`, which gives exact "
+                "counts in one call; never estimate counts from search pages.\n"
             )
         if "read_urls" in names:
             section += (

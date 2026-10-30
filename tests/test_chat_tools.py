@@ -272,6 +272,14 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
         loader.return_value = ("", 0.0)
         self.assertIn("Nothing was said", (await tools["recall_today"].run({})).content[0]["text"])
 
+    async def test_count_irc_log_passes_the_grouping_through(self):
+        irc_log = MagicMock()
+        irc_log.count.return_value = "42 occurrences"
+        tools, _ = _tools(irc_log=irc_log)
+        result = await tools["count_irc_log"].run({"query": "fuck", "nick": "@Cyc66", "group_by": ["year", "bogus"]})
+        irc_log.count.assert_called_once_with("fuck", nick="Cyc66", group_by=["year"], top=15)
+        self.assertEqual(result.content[0]["text"], "42 occurrences")
+
     def test_wiki_title_candidates(self):
         self.assertEqual(wiki_title_candidates("https://en.wikipedia.org/wiki/Las_Vegas"), ["Las_Vegas"])
         self.assertEqual(wiki_title_candidates("las vegas"), ["Las_vegas", "Las_Vegas"])
