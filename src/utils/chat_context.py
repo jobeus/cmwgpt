@@ -200,15 +200,15 @@ async def _convert_message(
             logger.error(f"Failed to convert attachment context for msg {msg.id}: {e}")
 
     # 3. Add native embed image previews
-    for e in msg.embeds:
-        logger.debug(f"Checking embed for image previews: {e.title}")
+    for embed in msg.embeds:
+        logger.debug(f"Checking embed for image previews: {embed.title}")
         # Prefer Discord's media proxy: it's always reachable, already
         # resized, and never points at an address of the poster's choosing.
         embed_url = None
-        if e.image and (e.image.proxy_url or e.image.url):
-            embed_url = e.image.proxy_url or e.image.url
-        elif e.thumbnail and (e.thumbnail.proxy_url or e.thumbnail.url):
-            embed_url = e.thumbnail.proxy_url or e.thumbnail.url
+        if embed.image and (embed.image.proxy_url or embed.image.url):
+            embed_url = embed.image.proxy_url or embed.image.url
+        elif embed.thumbnail and (embed.thumbnail.proxy_url or embed.thumbnail.url):
+            embed_url = embed.thumbnail.proxy_url or embed.thumbnail.url
 
         if embed_url:
             try:

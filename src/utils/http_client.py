@@ -66,13 +66,13 @@ async def _fetch(
                 content = await _read_capped(response, max_bytes, sink)
                 # The body is already decoded, so drop the headers describing
                 # the wire encoding or httpx would try to decompress it again.
-                headers = [
+                decoded_headers = [
                     (k, v) for k, v in response.headers.multi_items()
                     if k.lower() not in _WIRE_ENCODING_HEADERS
                 ]
                 return httpx.Response(
                     response.status_code,
-                    headers=headers,
+                    headers=decoded_headers,
                     content=content,
                     request=response.request,
                 )

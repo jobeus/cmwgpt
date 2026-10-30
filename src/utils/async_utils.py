@@ -4,6 +4,7 @@ Async command utilities for Discord bot commands.
 
 import logging
 import traceback
+from typing import Any, Awaitable, Callable
 
 import discord
 
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 async def safe_run(interaction: discord.Interaction,
-                   handler: callable, *args, **kwargs) -> None:
+                   handler: Callable[..., Awaitable[Any]], *args, **kwargs) -> None:
     """
     Run an async command handler, reporting any error to the user.
 

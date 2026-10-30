@@ -47,7 +47,7 @@ def format_prompt_message(message: str) -> str:
     return f"> {message}"
 
 
-def clean_openai_response(response: str, bot_id: int = None) -> str:
+def clean_openai_response(response: str, bot_id: Optional[int] = None) -> str:
     """
     Clean OpenAI response by removing unwanted quote wrapping and fixing escaped characters.
 

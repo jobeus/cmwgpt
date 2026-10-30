@@ -32,6 +32,11 @@ class TestIrcLog(unittest.TestCase):
     def test_first_day(self):
         self.assertEqual(self.log.first_day(), date(2020, 5, 19))
 
+    def test_coverage_ends_on_the_last_day_anything_was_said(self):
+        with open(self.path, "a") as f:
+            f.write("--- Day changed Thu May 21 2020\n--- Day changed Fri May 22 2020\n")
+        self.assertEqual(self.log.coverage(), "2020-05-19 (Tue) to 2020-05-20 (Wed)")
+
     def test_hits_are_dated_by_the_last_day_marker(self):
         out = self.log.search("podcast")
         self.assertIn("2 matching lines", out)

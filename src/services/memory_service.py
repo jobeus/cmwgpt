@@ -27,7 +27,7 @@ import json
 import logging
 import re
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import discord
 from zoneinfo import ZoneInfo
@@ -436,7 +436,8 @@ class MemoryService:
         source: str,
         progress: Optional[ProgressCallback] = None,
     ) -> Dict[str, Any]:
-        totals = {"days": 0, "messages": 0, "users_updated": set(), "cost": 0.0}
+        days, messages, cost = 0, 0, 0.0
+        users_updated: Set[int] = set()
         for index, (start, end) in enumerate(windows, 1):
             try:
                 stats = await self.process_window(guild, start, end)
@@ -444,10 +445,10 @@ class MemoryService:
                 logger.exception(f"Memory window {start:%Y-%m-%d %H:%M} failed for guild {guild.id}")
                 await self._store.set_job_state(guild.id, _to_naive_utc(start), f"failed: {e}")
                 raise
-            totals["days"] += 1
-            totals["messages"] += stats["messages"]
-            totals["users_updated"].update(stats["users_updated"])
-            totals["cost"] += stats["cost"]
+            days += 1
+            messages += stats["messages"]
+            users_updated.update(stats["users_updated"])
+            cost += stats["cost"]
             await self._store.set_job_state(
                 guild.id,
                 _to_naive_utc(end),
@@ -458,12 +459,11 @@ class MemoryService:
                     f"Day {index}/{len(windows)}: read {stats['messages']} messages, "
                     f"updated {len(stats['users_updated'])} people"
                 )
-        totals["users_updated"] = sorted(totals["users_updated"])
         logger.info(
-            f"Memory {source} for guild {guild.id}: {totals['days']} days, {totals['messages']} messages, "
-            f"{len(totals['users_updated'])} users, ${totals['cost']:.4f}"
+            f"Memory {source} for guild {guild.id}: {days} days, {messages} messages, "
+            f"{len(users_updated)} users, ${cost:.4f}"
         )
-        return totals
+        return {"days": days, "messages": messages, "users_updated": sorted(users_updated), "cost": cost}
 
     async def process_window(self, guild: discord.Guild, start: datetime, end: datetime) -> Dict[str, Any]:
         """Read ``[start, end)`` from every readable text channel and update profiles and channel summaries."""

@@ -346,7 +346,7 @@ class AnthropicService:
             else:
                 response = await client.beta.messages.create(**request)
             # A safety fallback can serve the turn on another model; price it at that model's rates.
-            served_by = _MODELS_BY_API_ID.get(getattr(response, "model", None), direct_model)
+            served_by = _MODELS_BY_API_ID.get(getattr(response, "model", None) or "", direct_model)
             cost += _usage_cost(getattr(response, "usage", None), served_by)
             _log_cache_diagnostics(api_model, channel_id, response)
             previous_message_id = getattr(response, "id", None) or previous_message_id

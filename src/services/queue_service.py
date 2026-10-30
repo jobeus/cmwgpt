@@ -11,8 +11,8 @@ This service provides a queue-based message processing system to ensure:
 
 import asyncio
 import logging
-from typing import Dict, Any, Callable, Awaitable
-from dataclasses import dataclass
+from typing import Dict, Any, Callable, Awaitable, Optional
+from dataclasses import dataclass, field
 from enum import Enum
 import discord
 
@@ -34,6 +34,10 @@ class MessageType(Enum):
     RESTART = "restart"
 
 
+async def _shutdown_handler() -> None:
+    """Placeholder for shutdown messages; the worker stops before calling it."""
+
+
 @dataclass
 class QueuedMessage:
     """Represents a message in the processing queue."""
@@ -43,12 +47,12 @@ class QueuedMessage:
     timestamp: float
     channel_id: int = 0
     # Additional data for different message types
-    discord_message: discord.Message = None
-    bot_user: discord.User = None
-    model: str = None
-    interaction: discord.Interaction = None
-    args: tuple = None
-    kwargs: dict = None
+    discord_message: Optional[discord.Message] = None
+    bot_user: Optional[discord.User] = None
+    model: Optional[str] = None
+    interaction: Optional[discord.Interaction] = None
+    args: tuple = ()
+    kwargs: dict = field(default_factory=dict)
 
 
 class QueueService:
@@ -96,7 +100,7 @@ class QueueService:
             try:
                 shutdown_msg = QueuedMessage(
                     message_type=MessageType.SHUTDOWN,
-                    handler=None,
+                    handler=_shutdown_handler,
                     timestamp=asyncio.get_event_loop().time(),
                     channel_id=channel_id,
                 )
@@ -354,11 +358,11 @@ class QueueService:
             # Log processing start
             if queued_msg.message_type == MessageType.MENTION:
                 logger.debug(
-                    f"Processing {queued_msg.message_type.value} message from {queued_msg.discord_message.author}"
+                    f"Processing {queued_msg.message_type.value} message from {getattr(queued_msg.discord_message, "author", None)}"
                 )
             elif queued_msg.message_type == MessageType.COMMAND:
                 logger.debug(
-                    f"Processing {queued_msg.message_type.value} from {queued_msg.interaction.user}"
+                    f"Processing {queued_msg.message_type.value} from {getattr(queued_msg.interaction, "user", None)}"
                 )
             elif queued_msg.message_type == MessageType.RESTART:
                 logger.debug(
@@ -384,9 +388,9 @@ class QueueService:
             # misbehaving handler can never propagate up and kill the worker.
             self._stats["messages_failed"] += 1
             if queued_msg.message_type == MessageType.MENTION:
-                user_info = f"{queued_msg.discord_message.author}"
+                user_info = f"{getattr(queued_msg.discord_message, "author", None)}"
             elif queued_msg.message_type == MessageType.COMMAND:
-                user_info = f"{queued_msg.interaction.user}"
+                user_info = f"{getattr(queued_msg.interaction, "user", None)}"
             elif queued_msg.message_type == MessageType.RESTART:
                 user_info = "system"
             else:

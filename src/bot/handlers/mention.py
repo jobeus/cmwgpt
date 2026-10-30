@@ -124,7 +124,7 @@ class MentionHandler:
         self._discord_starts: Dict[int, str] = {}
         # Cache for history fetching optimization (bounded, LRU-ish eviction)
         # channel_id -> {"timestamp": float, "oldest_message": discord.Message}
-        self._history_cache = {}
+        self._history_cache: Dict[int, Dict[str, Any]] = {}
 
     def _uses_tools(self, model: Optional[str]) -> bool:
         """Whether ``model`` gets client tools: memory, how_i_work and drawing are then looked up on demand."""
@@ -314,7 +314,7 @@ class MentionHandler:
         )
 
     async def _prepare_mention_context(
-        self, message: discord.Message, bot_user: discord.User, model: str = None
+        self, message: discord.Message, bot_user: discord.User, model: Optional[str] = None
     ) -> tuple[List[Dict[str, Any]], str, float]:
         """
         Prepares the message list and system prompt for OpenAI context in case of a mention.

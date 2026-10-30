@@ -142,7 +142,7 @@ class GeminiService:
                 # Include ALL past messages EXCEPT the current message
                 messages_to_transcript = messages[:-1]
 
-        parts = []
+        parts: List[Dict[str, Any]] = []
 
         def add_text(text_val: str):
             if not text_val:
@@ -303,10 +303,10 @@ class GeminiService:
         *,
         model: str,
         messages: List[Dict[str, Any]],
-        system_prompt: str = None,
-        channel_id: int = None,
+        system_prompt: Optional[str] = None,
+        channel_id: Optional[int] = None,
         discord_user_id: Optional[int] = None,
-        bot_id: int = None,
+        bot_id: Optional[int] = None,
         thinking_level: Optional[str] = None,
         disable_cache: bool = False,
         # Accept and ignore extra kwargs for compatibility

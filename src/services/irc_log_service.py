@@ -191,12 +191,23 @@ class IrcLog:
         return next((d for d in self._marker_days if d), None)
 
     def coverage(self) -> str:
-        """The first and last dates in the log, e.g. ``2014-01-03 (Fri) to 2026-10-25 (Sun)``."""
-        self._load()
-        days = [d for d in self._marker_days if d]
-        if not days:
+        """The first date in the log to the last one anything was said on, e.g. ``2014-01-03 (Fri) to 2023-06-18 (Sun)``.
+
+        Day markers keep getting logged after the channel went quiet, so the end comes from
+        the last chat line rather than the last marker.
+        """
+        data = self._load()
+        first = self.first_day()
+        if first is None:
             return "unknown dates"
-        return f"{_day_label(days[0])} to {_day_label(days[-1])}"
+        pos = len(data)
+        while pos > 0:
+            line_start = data.rfind(b"\n", 0, pos) + 1
+            line = data[line_start:pos].strip()
+            if line and not line.startswith(b"--- "):
+                return f"{_day_label(first)} to {self._date_at(line_start)}"
+            pos = line_start - 1
+        return _day_label(first)
 
 
 def _parse_marker_day(month_day: bytes, year: bytes) -> Optional[date]:

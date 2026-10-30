@@ -9,7 +9,7 @@ and the process manager (systemd, pm2, start.sh) starts it again.
 
 import asyncio
 import logging
-from typing import Awaitable, Callable, Optional
+from typing import Any, Callable, Coroutine, Optional
 
 from src.utils.git_utils import perform_git_pull as default_perform_git_pull
 
@@ -30,12 +30,12 @@ class RestartHandler:
         self._state_service = state_service
         self._git_pull = git_pull
         self._restart_in_progress = False
-        self._shutdown: Optional[Callable[[], Awaitable[None]]] = None
+        self._shutdown: Optional[Callable[[], Coroutine[Any, Any, None]]] = None
         self._shutdown_task: Optional[asyncio.Task] = None
         # Set when the process should exit with a specific code after the loop ends.
         self.exit_code: Optional[int] = None
 
-    def set_shutdown_callback(self, shutdown: Callable[[], Awaitable[None]]) -> None:
+    def set_shutdown_callback(self, shutdown: Callable[[], Coroutine[Any, Any, None]]) -> None:
         """The coroutine that shuts the bot down (services, then the Discord connection)."""
         self._shutdown = shutdown
 
