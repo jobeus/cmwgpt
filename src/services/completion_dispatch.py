@@ -11,7 +11,7 @@ service call) so the decision lives in exactly one place.
 """
 
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from src.services.anthropic_service import is_direct_anthropic_model
 from src.services.gemini_service import is_gemini_model, get_thinking_level
@@ -33,6 +33,7 @@ async def dispatch_completion(
     search: bool = True,
     on_text: Optional[Callable[[str], None]] = None,
     effort: Optional[str] = None,
+    tools: Optional[Sequence[Any]] = None,
 ) -> Tuple[ReplyContent, float]:
     """Route ``messages`` to the right model(s) and return ``(reply, cost)``.
 
@@ -48,6 +49,8 @@ async def dispatch_completion(
             Claude API routes stream; Gemini returns the whole reply at once.
         effort: Overrides the model's default effort level on the Claude API route;
             the other routes ignore it.
+        tools: Client tools (``ChatTool``) the model may call. Only the Claude API route
+            offers them.
     """
     reply_content: ReplyContent = None
     cost = 0.0
@@ -68,6 +71,7 @@ async def dispatch_completion(
             search=search,
             on_text=on_text,
             effort=effort,
+            tools=tools,
             **identity,
         )
     else:

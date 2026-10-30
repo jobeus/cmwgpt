@@ -12,16 +12,12 @@ from discord import app_commands
 from discord.app_commands import Choice
 from discord.ext import commands
 from src.services.openai_service import OpenAIServiceError
+from src.services.image_service import GEMINI_IMAGE_MODELS, LEGACY_MODEL_IDS, generate_image, resolve_draw_model
 from src.services.runpod_service import RunpodServiceError
 from src.utils.async_utils import safe_run
 from src.utils.discord_error_utils import best_effort_typing, safe_defer
 
 logger = logging.getLogger(__name__)
-
-GEMINI_IMAGE_MODELS = ("gemini-3-pro-image", "gemini-nano-banana-2.1")
-# Old model IDs that channels may still have saved as their default.
-LEGACY_MODEL_IDS = {"gemini-3.1-flash-image": "gemini-nano-banana-2.1"}
-
 
 class ImageCommands:
     """Handles image-related Discord commands."""
@@ -121,10 +117,8 @@ class ImageCommands:
 
         self._state_service.mark_channel_active(channel_id)
 
-        # Use provided model, or channel default, or global default
-        active_model = model or self._state_service.get_draw_model(
-            channel_id) or self._default_draw_model
-        active_model = LEGACY_MODEL_IDS.get(active_model, active_model)
+        active_model = resolve_draw_model(
+            self._state_service, channel_id, self._default_draw_model, model)
 
         logger.info(
             f"[/draw] Channel {channel_id} Prompt: {prompt} Model: {active_model}")
@@ -132,32 +126,22 @@ class ImageCommands:
         # Interaction already deferred in slash command handler
         async with best_effort_typing(interaction.channel):
             try:
-                cost = None
-                # Generate the image
+                images_b64 = []
                 if active_model in GEMINI_IMAGE_MODELS:
-                    images_b64 = []
                     for img in [image1, image2, image3, image4]:
                         if img:
                             img_bytes = await img.read()
                             images_b64.append(base64.b64encode(img_bytes).decode('utf-8'))
-                            
-                    img_bytes, cost = await self._gemini_service.generate_image(
-                        prompt=prompt,
-                        model=active_model,
-                        images_b64=images_b64,
-                        discord_user_id=interaction.user.id,
-                        discord_channel_id=channel_id
-                    )
-                elif self._runpod_service.has_model(active_model):
-                    img_bytes, cost = await self._runpod_service.generate_image(
-                        prompt=prompt,
-                        model=active_model,
-                        discord_user_id=interaction.user.id,
-                        discord_channel_id=channel_id
-                    )
-                else:
-                    raise Exception(
-                        f"Model {active_model} is not supported or not configured via Runpod.")
+
+                img_bytes, cost = await generate_image(
+                    prompt=prompt,
+                    model=active_model,
+                    gemini_service=self._gemini_service,
+                    runpod_service=self._runpod_service,
+                    images_b64=images_b64,
+                    discord_user_id=interaction.user.id,
+                    discord_channel_id=channel_id,
+                )
 
                 # Log success and create Discord file
                 logger.info(f"[/draw] Channel {channel_id}: image generated")

@@ -593,6 +593,58 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             if expected:
                 self.assertIn("`think_harder`", system_prompt)
 
+    async def test_direct_models_get_tools_instead_of_injected_memory(self):
+        handler, _, _, _, _ = self.make_handler(anthropic_service=MagicMock())
+        handler._user_notes_provider = AsyncMock(return_value="<user_notes>n</user_notes>")
+        handler._channel_summary_provider = AsyncMock(return_value="## Lately in this channel")
+        channel = MagicMock()
+        channel.id = 45
+        channel.name = "tools"
+        mention_msg = self._simple_msg(1, channel)
+        mention_msg.author.bot = False
+        mention_msg.guild = SimpleNamespace(id=5)
+        mention_msg.mentions = []
+
+        async def history(limit=None, after=None):
+            yield mention_msg
+
+        channel.history = history
+
+        with patch("src.bot.handlers.mention._load_how_i_work", return_value="## How you work"):
+            context, system_prompt, _ = await handler._prepare_mention_context(
+                mention_msg, SimpleNamespace(id=999), model="sonnet-5.5-direct")
+            self.assertIn("## Your tools", system_prompt)
+            self.assertIn("`recall_users(user_ids)`", system_prompt)
+            self.assertIn("`how_i_work()`", system_prompt)
+            self.assertNotIn("## How you work", system_prompt)
+            self.assertNotIn("## Lately in this channel", system_prompt)
+            self.assertNotIn("user_notes", str(context))
+            handler._user_notes_provider.assert_not_awaited()
+            handler._channel_summary_provider.assert_not_awaited()
+
+            context, system_prompt, _ = await handler._prepare_mention_context(
+                mention_msg, SimpleNamespace(id=999), model="gpt-test")
+            self.assertNotIn("## Your tools", system_prompt)
+            self.assertIn("## How you work", system_prompt)
+            self.assertIn("## Lately in this channel", system_prompt)
+            self.assertIn("<user_notes>n</user_notes>", str(context))
+
+    async def test_handle_mention_passes_tools_only_to_direct_models(self):
+        anthropic_service = MagicMock()
+        anthropic_service.get_chat_completion = AsyncMock(return_value=("hi", 0.0))
+        handler, _, _, openai_service, _ = self.make_handler(anthropic_service=anthropic_service)
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
+        openai_service.get_chat_completion = AsyncMock(return_value=("hi", 0.0))
+        channel, _ = self.make_streaming_channel()
+        message = SimpleNamespace(author=SimpleNamespace(id=123), channel=channel, guild=None)
+
+        await handler.handle_mention(message, SimpleNamespace(id=999), "sonnet-5.5-direct")
+        await handler.handle_mention(message, SimpleNamespace(id=999), "gpt-test")
+
+        tools = anthropic_service.get_chat_completion.await_args.kwargs["tools"]
+        self.assertEqual([t.definition["name"] for t in tools], ["how_i_work"])
+        self.assertNotIn("tools", openai_service.get_chat_completion.await_args.kwargs)
+
     async def test_prepare_context_puts_queued_mention_after_replies_posted_while_waiting(self):
         handler, _, _, _, _ = self.make_handler()
         channel = MagicMock()

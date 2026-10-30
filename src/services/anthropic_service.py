@@ -8,11 +8,13 @@ Accepts the same OpenAI-style message array the rest of the bot builds
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import anthropic
+import discord
 
 from src.config import get_config
+from src.services.chat_tools import ChatTool, ToolResult, text_result
 from src.utils.message_utils import clean_openai_response, resolve_bot_id
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,8 @@ MAX_TOKENS = 16000
 WEB_SEARCH_MAX_USES = 10
 # A server-tool turn can come back as ``pause_turn``; resume it this many times.
 MAX_CONTINUATIONS = 5
+# Rounds of client tool calls (draw, recall, ...) per reply; the last request after them can't call tools.
+MAX_TOOL_ROUNDS = 4
 
 # Models that run at ``low`` effort but may ask, through the ``think_harder`` tool,
 # for the message to be answered again at ``high``.
@@ -209,6 +213,20 @@ def _with_think_harder_note(api_messages: List[Dict[str, Any]], reason: str) -> 
     return api_messages + [{"role": "system", "content": note}]
 
 
+def _with_assistant_content(api_messages: List[Dict[str, Any]], content: List[Any]) -> List[Dict[str, Any]]:
+    """Copy ``api_messages`` with ``content`` added to the assistant turn it ends on, or as a new one."""
+    if api_messages and api_messages[-1]["role"] == "assistant":
+        last = api_messages[-1]
+        return api_messages[:-1] + [{**last, "content": list(last["content"]) + list(content)}]
+    return api_messages + [{"role": "assistant", "content": list(content)}]
+
+
+def _response_text(response: Any) -> str:
+    return "".join(
+        block.text for block in response.content if getattr(block, "type", None) == "text"
+    ).strip()
+
+
 def _usage_cost(usage: Any, model: DirectModel) -> float:
     """Price a response's ``usage`` block in USD at ``model``'s rates."""
     if usage is None:
@@ -302,8 +320,12 @@ class AnthropicService:
         previous_message_id: Optional[str],
         resolved_bot_id: Optional[int],
         on_text: Optional[Callable[[str], None]],
-    ) -> Tuple[Any, float, Optional[str]]:
-        """Run one request, resuming ``pause_turn``s. Returns ``(response, cost, last message id)``."""
+    ) -> Tuple[Any, float, Optional[str], List[Dict[str, Any]]]:
+        """Run one request, resuming ``pause_turn``s.
+
+        Returns ``(response, cost, last message id, messages)``; ``messages`` ends with the
+        paused assistant content when the turn was resumed.
+        """
         api_model = direct_model.api_id
         cost = 0.0
         streamed = ""
@@ -331,8 +353,41 @@ class AnthropicService:
             if response.stop_reason != "pause_turn":
                 break
             # Resume a paused server-tool turn by sending its content back.
-            api_messages = api_messages + [{"role": "assistant", "content": response.content}]
-        return response, cost, previous_message_id
+            api_messages = _with_assistant_content(api_messages, response.content)
+        return response, cost, previous_message_id, api_messages
+
+    async def _run_tool_calls(
+        self, response: Any, client_tools: Dict[str, ChatTool], on_preview: Callable[[str], None],
+    ) -> Tuple[List[Dict[str, Any]], float, List[discord.File]]:
+        """Run ``response``'s client tool calls. Returns ``(tool_result blocks, cost, files)``."""
+        results: List[Dict[str, Any]] = []
+        cost = 0.0
+        files: List[discord.File] = []
+        for block in response.content:
+            if getattr(block, "type", None) != "tool_use":
+                continue
+            name = getattr(block, "name", "")
+            args = getattr(block, "input", None) or {}
+            tool = client_tools.get(name)
+            if name == "think_harder":
+                result = text_result("You're already at high effort; answer directly.", is_error=True)
+            elif tool is None:
+                result = text_result(f"There's no tool named {name}.", is_error=True)
+            else:
+                on_preview(tool.preview)
+                logger.info(f"[tool] {name} {str(args)[:300]}")
+                try:
+                    result = await tool.run(args)
+                except Exception as e:
+                    logger.warning(f"[tool] {name} failed: {e}")
+                    result = text_result(f"{name} failed: {e}", is_error=True)
+            cost += result.cost
+            files += result.files
+            entry: Dict[str, Any] = {"type": "tool_result", "tool_use_id": block.id, "content": result.content}
+            if result.is_error:
+                entry["is_error"] = True
+            results.append(entry)
+        return results, cost, files
 
     async def get_chat_completion(
         self,
@@ -346,11 +401,14 @@ class AnthropicService:
         search: bool = True,
         on_text: Optional[Callable[[str], None]] = None,
         effort: Optional[str] = None,
-    ) -> Tuple[str, float]:
-        """Get a chat completion from the Claude API. Returns ``(text, cost)``.
+        tools: Optional[Sequence[ChatTool]] = None,
+    ) -> Tuple[Union[str, Dict[str, Any]], float]:
+        """Get a chat completion from the Claude API. Returns ``(reply, cost)``.
 
         With ``on_text``, the reply is streamed and ``on_text`` gets the cleaned text so far.
-        ``effort`` overrides the model's default effort level.
+        ``effort`` overrides the model's default effort level. ``tools`` are client tools the
+        model may call; their costs are added in, and when they made files the reply is
+        ``{"text": ..., "files": [...]}`` instead of a string.
         """
         client = self.get_client()
         resolved_bot_id = resolve_bot_id(bot_id, state_service, self._bot_id_loader)
@@ -379,6 +437,9 @@ class AnthropicService:
                 "name": "web_search",
                 "max_uses": WEB_SEARCH_MAX_USES,
             }]
+        client_tools: Dict[str, ChatTool] = {t.definition["name"]: t for t in tools or ()}
+        if client_tools:
+            kwargs["tools"] = kwargs.get("tools", []) + [t.definition for t in client_tools.values()]
         # Only at the model's default effort: a caller that set its own effort gets exactly that.
         think_harder = model in THINK_HARDER_MODELS and effort is None
         if think_harder:
@@ -390,25 +451,50 @@ class AnthropicService:
 
         total_cost = 0.0
         previous_message_id = self._last_message_ids.get(channel_id) if channel_id else None
+        # Text the model wrote before each finished tool round, and the files its tools made.
+        texts: List[str] = []
+        files: List[discord.File] = []
+
+        def show(text: str) -> None:
+            if on_text:
+                on_text("\n\n".join(texts + [text]))
+
+        escalated = False
+        tool_rounds = 0
         try:
-            response, cost, previous_message_id = await self._send(
-                client, api_messages, kwargs, direct_model, channel_id, previous_message_id,
-                resolved_bot_id, on_text,
-            )
-            total_cost += cost
-            reason = _think_harder_reason(response) if think_harder else None
-            if reason is not None:
-                logger.info(f"[{api_model}] think_harder requested: {reason[:300]}")
-                if on_text:
-                    on_text(THINKING_HARDER_PREVIEW)
-                # Same tools so the tools/system cache still reads; ``none`` stops a second call.
-                kwargs["output_config"] = {"effort": THINK_HARDER_EFFORT}
-                kwargs["tool_choice"] = {"type": "none"}
-                response, cost, previous_message_id = await self._send(
-                    client, _with_think_harder_note(api_messages, reason), kwargs, direct_model,
-                    channel_id, previous_message_id, resolved_bot_id, on_text,
+            while True:
+                response, cost, previous_message_id, sent_messages = await self._send(
+                    client, api_messages, kwargs, direct_model, channel_id, previous_message_id,
+                    resolved_bot_id, show if on_text else None,
                 )
                 total_cost += cost
+                reason = _think_harder_reason(response) if think_harder and not escalated else None
+                if reason is not None:
+                    # Throw this response away and ask again at high effort.
+                    escalated = True
+                    logger.info(f"[{api_model}] think_harder requested: {reason[:300]}")
+                    show(THINKING_HARDER_PREVIEW)
+                    # Same tools so the tools/system cache still reads. Without client tools,
+                    # ``none`` stops a second call; with them, a repeat call gets an error result.
+                    kwargs["output_config"] = {"effort": THINK_HARDER_EFFORT}
+                    if not client_tools:
+                        kwargs["tool_choice"] = {"type": "none"}
+                    api_messages = _with_think_harder_note(api_messages, reason)
+                    continue
+                if response.stop_reason != "tool_use" or not client_tools:
+                    break
+                text = _response_text(response)
+                if text:
+                    texts.append(clean_openai_response(text, bot_id=resolved_bot_id))
+                results, cost, new_files = await self._run_tool_calls(response, client_tools, show)
+                total_cost += cost
+                files += new_files
+                api_messages = _with_assistant_content(sent_messages, response.content) + [
+                    {"role": "user", "content": results}
+                ]
+                tool_rounds += 1
+                if tool_rounds >= MAX_TOOL_ROUNDS:
+                    kwargs["tool_choice"] = {"type": "none"}
         except anthropic.AuthenticationError as e:
             logger.error(f"Anthropic authentication error: {e}")
             raise AnthropicServiceError("Authentication failed. Please check ANTHROPIC_API_KEY.") from e
@@ -438,18 +524,18 @@ class AnthropicService:
             logger.warning(f"[{api_model}] Request declined (category={category})")
             raise AnthropicServiceError(f"Claude declined this request (category: {category or 'unknown'}).")
 
-        response_text = "".join(
-            block.text for block in response.content if getattr(block, "type", None) == "text"
-        ).strip()
+        response_text = _response_text(response)
         usage = getattr(response, "usage", None)
         logger.info(
             f"[{response.model}] stop_reason={response.stop_reason} cost=${total_cost:.4f} "
             f"cache_read={getattr(usage, 'cache_read_input_tokens', 0)} "
             f"cache_write={getattr(usage, 'cache_creation_input_tokens', 0)} "
+            f"tool_rounds={tool_rounds} "
             f"response snippet: {response_text.replace(chr(10), ' ')[:150]}"
         )
-        if not response_text:
+        cleaned = "\n\n".join(texts + [clean_openai_response(response_text, bot_id=resolved_bot_id)]).strip()
+        if files:
+            return {"text": cleaned, "files": files}, total_cost
+        if not cleaned:
             raise AnthropicServiceError("The Claude API returned an empty response.")
-
-        cleaned = clean_openai_response(response_text, bot_id=resolved_bot_id)
         return cleaned, total_cost

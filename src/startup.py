@@ -103,6 +103,8 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         user_notes_provider=memory_service.get_notes_block,
         channel_summary_provider=memory_service.get_channel_summary,
         day_summary_provider=day_summary_service.get_summary,
+        runpod_service=runpod_service,
+        default_draw_model=app_config.default_draw_model,
     )
 
     return AppServices(

@@ -26,19 +26,24 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 1. The channel's `/systemprompt`, or the default personality file.
 2. Chat-format rules.
 3. On `opus-5.5-direct`, how to use `think_harder`.
-4. A legend of channel members.
-5. This section.
-6. A summary of what's been going on lately in this channel, rebuilt nightly. Items drop out after 14 days without coming up.
-7. A summary of today's chat from before your history window. "Today" starts at 02:00 Denver time. The summary is written incrementally by the channel's current model.
+4. On the Claude API direct models, a list of your tools and when to use them.
+5. A legend of channel members.
+6. This section. On the direct models it isn't here; you read it with the `how_i_work` tool.
+7. A summary of what's been going on lately in this channel, rebuilt nightly. Items drop out after 14 days without coming up. On the direct models it isn't here; you read it with `recall_channel`.
+8. A summary of today's chat from before your history window. "Today" starts at 02:00 Denver time. The summary is written incrementally by the channel's current model.
 
 **Memory:**
 - At 02:00 Denver every night, a job runs on `sonnet-5.5-direct` over the previous day's chat in every channel you can see. It pulls out facts per person and merges them into one Redis profile per user per server, with Stable, Current and Style parts. Current items expire after 3 weeks. The same job also summarizes each channel's day and folds it into that channel's "lately" summary. Its calls, and `/memory correct`, use medium effort.
-- The profiles of up to 8 relevant people are appended to the mention as `<user_notes>`: the asker, anyone they @mentioned, and recent speakers.
+- On the Claude API direct models, you look profiles up yourself with `recall_users` (up to 8 per call). On the other models, the profiles of up to 8 relevant people are appended to the mention as `<user_notes>`: the asker, anyone they @mentioned, and recent speakers.
 - `/memory show|correct|clear` lets people view or fix their own profile. `/fillmemory` (admin only) rebuilds every profile and channel summary from the last 7 days. `/fillsummaries` (admin only) rebuilds just the channel summaries.
 
 **Models:** each channel picks one with `/model`. The default is `anthropic/claude-sonnet-5.5` via OpenRouter.
 - **Claude API direct**, `sonnet-5.5-direct` and `opus-5.5-direct`:
   - effort low, 16k max tokens
+  - client tools, up to 4 rounds per reply:
+    - `draw(prompt)`: makes an image with the channel's `/drawmodel` and attaches it to the reply. You get the image back to comment on. At most 2 per reply, and the image's cost is in the cost prefix.
+    - `recall_users(user_ids)` and `recall_channel()`: the memory profiles and channel summary described above.
+    - `how_i_work()`: this description.
   - `opus-5.5-direct` also has a `think_harder(reason)` tool: calling it throws away the reply and re-asks the same message at high effort with the reason attached. The cost prefix covers both runs.
   - web search (up to 10 per reply)
   - prompt caching on the system prompt and history
@@ -55,7 +60,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 - Anything over 2000 characters goes to paste.jobe.wtf as a link.
 
 **Other features:**
-- `/draw` and `/edit` make images through Runpod (seedream (default), z-image, wan-2.6, pruna, qwen, flux) or Gemini (banana-pro, banana-2.1).
+- `/draw` and `/edit` make images (the `draw` tool uses the same models) through Runpod (seedream (default), z-image, wan-2.6, pruna, qwen, flux) or Gemini (banana-pro, banana-2.1).
 - **Deathwatch** polls Wikipedia's "Deaths in <year>" every 15s. It posts RIP plus a limerick you write for anyone averaging at least 40k monthly pageviews over 3 months.
 - `/wikicount` looks up an article's average monthly pageviews.
 - `/death`, `/forcedeath` and `/limerick` cover the rest of deathwatch.

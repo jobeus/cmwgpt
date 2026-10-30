@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from src.services.anthropic_service import (
     CACHE_DIAGNOSIS_BETA,
     DIRECT_MODELS,
+    MAX_TOOL_ROUNDS,
     THINKING_HARDER_PREVIEW,
     AnthropicService,
     AnthropicServiceError,
@@ -15,6 +16,7 @@ from src.services.anthropic_service import (
     _usage_cost,
     apply_history_breakpoints,
 )
+from src.services.chat_tools import ChatTool, ToolResult, text_result
 from src.services.completion_dispatch import dispatch_completion
 
 
@@ -468,3 +470,98 @@ class TestCacheDiagnostics(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestClientTools(unittest.IsolatedAsyncioTestCase):
+    def make_service(self, *responses):
+        service = AnthropicService(api_key="test-key")
+        client = MagicMock()
+        client.beta.messages.create = AsyncMock(side_effect=list(responses))
+        service.set_client(client)
+        return service, client
+
+    def tool(self, name="recall_channel", result=None, preview="-# remembering..."):
+        definition = {"name": name, "input_schema": {"type": "object", "properties": {}}}
+        run = AsyncMock(return_value=result or text_result("the summary"))
+        return ChatTool(definition, run, preview)
+
+    async def test_runs_the_call_and_sends_its_result_back(self):
+        call = SimpleNamespace(type="tool_use", id="toolu_1", name="recall_channel", input={})
+        first = _response(stop_reason="tool_use", content=[call], id="msg_1")
+        service, client = self.make_service(first, _response("answer", id="msg_2"))
+        tool = self.tool()
+
+        text, _ = await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=USER, tools=[tool])
+
+        self.assertEqual(text, "answer")
+        tool.run.assert_awaited_once_with({})
+        first_call, second_call = (c.kwargs for c in client.beta.messages.create.call_args_list)
+        self.assertIn("recall_channel", [t.get("name") for t in first_call["tools"]])
+        self.assertEqual(second_call["tools"], first_call["tools"])
+        _, assistant, results = second_call["messages"]
+        self.assertEqual(assistant, {"role": "assistant", "content": [call]})
+        self.assertEqual(results["content"], [
+            {"type": "tool_result", "tool_use_id": "toolu_1", "content": [{"type": "text", "text": "the summary"}]},
+        ])
+
+    async def test_files_and_costs_from_tools_reach_the_reply(self):
+        call = SimpleNamespace(type="tool_use", id="toolu_1", name="draw", input={"prompt": "a cat"})
+        first = _response(stop_reason="tool_use", content=[SimpleNamespace(type="text", text="On it."), call])
+        service, _ = self.make_service(first, _response("Came out great."))
+        image = MagicMock()
+        tool = self.tool("draw", ToolResult(content=[{"type": "text", "text": "drew"}], cost=0.5, files=[image]))
+
+        reply, cost = await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=USER, tools=[tool])
+
+        self.assertEqual(reply, {"text": "On it.\n\nCame out great.", "files": [image]})
+        self.assertAlmostEqual(cost, 0.5 + 2 * _usage_cost(_usage(), DIRECT_MODELS["sonnet-5.5-direct"]))
+
+    async def test_a_failing_tool_becomes_an_error_result(self):
+        call = SimpleNamespace(type="tool_use", id="toolu_1", name="recall_channel", input={})
+        service, client = self.make_service(
+            _response(stop_reason="tool_use", content=[call]), _response("sorry"))
+        tool = self.tool()
+        tool.run.side_effect = RuntimeError("redis down")
+
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[tool])
+
+        result = client.beta.messages.create.call_args.kwargs["messages"][-1]["content"][0]
+        self.assertTrue(result["is_error"])
+        self.assertIn("redis down", result["content"][0]["text"])
+
+    async def test_stops_offering_tool_calls_after_the_round_limit(self):
+        call = SimpleNamespace(type="tool_use", id="toolu_1", name="recall_channel", input={})
+        rounds = [_response(stop_reason="tool_use", content=[call]) for _ in range(MAX_TOOL_ROUNDS)]
+        service, client = self.make_service(*rounds, _response("done"))
+
+        text, _ = await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=USER, tools=[self.tool()])
+
+        self.assertEqual(text, "done")
+        calls = client.beta.messages.create.call_args_list
+        self.assertEqual(len(calls), MAX_TOOL_ROUNDS + 1)
+        self.assertNotIn("tool_choice", calls[-2].kwargs)
+        self.assertEqual(calls[-1].kwargs["tool_choice"], {"type": "none"})
+
+    async def test_think_harder_with_client_tools_keeps_them_available(self):
+        think = SimpleNamespace(type="tool_use", id="toolu_1", name="think_harder", input={"reason": "hard"})
+        again = SimpleNamespace(type="tool_use", id="toolu_2", name="think_harder", input={"reason": "still"})
+        service, client = self.make_service(
+            _response(stop_reason="tool_use", content=[think], model="claude-opus-5-5"),
+            _response(stop_reason="tool_use", content=[again], model="claude-opus-5-5"),
+            _response("answer", model="claude-opus-5-5"),
+        )
+
+        text, _ = await service.get_chat_completion(
+            model="opus-5.5-direct", messages=USER, tools=[self.tool()])
+
+        self.assertEqual(text, "answer")
+        _, rerun, final = (c.kwargs for c in client.beta.messages.create.call_args_list)
+        self.assertEqual(rerun["output_config"], {"effort": "high"})
+        self.assertNotIn("tool_choice", rerun)
+        # A second think_harder is answered with an error instead of escalating again.
+        result = final["messages"][-1]["content"][0]
+        self.assertEqual(result["tool_use_id"], "toolu_2")
+        self.assertTrue(result["is_error"])

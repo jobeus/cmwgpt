@@ -14,6 +14,7 @@ from src.utils.discord_helper import get_mention_legend, attachment_to_base64_da
 from src.utils.discord_error_utils import best_effort_typing, concise_error
 from src.services.openai_service import OpenAIServiceError
 from src.services.anthropic_service import AnthropicServiceError, THINK_HARDER_MODELS, is_direct_anthropic_model
+from src.services.chat_tools import ChatTool, build_mention_tools
 from src.services.gemini_service import GeminiServiceError, is_gemini_model
 from src.services.completion_dispatch import dispatch_completion
 from src.services.streaming_reply import StreamingReply
@@ -35,7 +36,8 @@ MAX_HISTORY_GAP = 100
 HISTORY_CACHE_MAX_CHANNELS = 200
 
 # The bot's description of its own architecture, added to every mention's system
-# prompt (whatever the channel's prompt is) so it can explain how it works.
+# prompt (whatever the channel's prompt is) so it can explain how it works. Models
+# with tools read it through the ``how_i_work`` tool instead.
 HOW_I_WORK_PATH = Path(__file__).resolve().parents[2] / "prompts" / "how_i_work.txt"
 
 
@@ -86,6 +88,8 @@ class MentionHandler:
         day_summary_provider: Optional[
             Callable[[Any, discord.Message, int, str], Awaitable[tuple[str, float]]]
         ] = None,
+        runpod_service: Any = None,
+        default_draw_model: Optional[str] = None,
     ):
         self._state_service = state_service
         self._openai_service = openai_service
@@ -102,9 +106,29 @@ class MentionHandler:
         self._user_notes_provider = user_notes_provider
         self._channel_summary_provider = channel_summary_provider
         self._day_summary_provider = day_summary_provider
+        self._runpod_service = runpod_service
+        self._default_draw_model = default_draw_model
         # Cache for history fetching optimization (bounded, LRU-ish eviction)
         # channel_id -> {"timestamp": float, "oldest_message": discord.Message}
         self._history_cache = {}
+
+    def _uses_tools(self, model: Optional[str]) -> bool:
+        """Whether ``model`` gets client tools: memory, how_i_work and drawing are then looked up on demand."""
+        return bool(model) and is_direct_anthropic_model(model) and self._anthropic_service is not None
+
+    def _build_tools(self, message: discord.Message) -> List[ChatTool]:
+        return build_mention_tools(
+            guild_id=message.guild.id if message.guild else None,
+            channel_id=message.channel.id,
+            user_id=message.author.id,
+            user_notes_provider=self._user_notes_provider,
+            channel_summary_provider=self._channel_summary_provider,
+            how_i_work_loader=_load_how_i_work,
+            state_service=self._state_service,
+            gemini_service=self._gemini_service,
+            runpod_service=self._runpod_service,
+            default_draw_model=self._default_draw_model,
+        )
 
     def _store_history_cache(self, channel_id: int, timestamp: float, oldest_message: discord.Message) -> None:
         """Store a history cache entry, evicting the stalest channel if full."""
@@ -149,6 +173,7 @@ class MentionHandler:
 
                 # Identity threaded into every model call for this mention.
                 identity = {"channel_id": channel_id, "discord_user_id": message.author.id}
+                tools = self._build_tools(message) if self._uses_tools(model) else None
 
                 # Posts the reply as it streams in, then edits in the final version below.
                 streaming_reply = StreamingReply(message.channel, self._message_service)
@@ -162,6 +187,7 @@ class MentionHandler:
                         anthropic_service=self._anthropic_service,
                         identity=identity,
                         on_text=streaming_reply.push,
+                        tools=tools,
                     )
                 except BaseException:
                     await streaming_reply.discard()
@@ -338,11 +364,13 @@ class MentionHandler:
                 self._store_history_cache(channel_id, current_time, history_msgs[0])
 
         history_msgs = _mention_last(history_msgs, message)
+        # Models with tools look up memory and how_i_work themselves instead of getting them every time.
+        uses_tools = self._uses_tools(model)
 
         # What's been going on lately (rebuilt nightly), then today's chat from before
         # the history window.
         channel_summary = ""
-        if self._channel_summary_provider and message.guild:
+        if self._channel_summary_provider and message.guild and not uses_tools:
             channel_summary = await self._channel_summary_provider(message.guild.id, message.channel.id)
 
         # Summarize today's chat from before the history window. It only changes when
@@ -386,7 +414,7 @@ class MentionHandler:
             f"use their own `<@id>` from the history or the list below; <@{bot_user.id}> is you, so using it "
             f"would ping yourself.\n\n"
         )
-        if self._user_notes_provider:
+        if self._user_notes_provider and not uses_tools:
             current_channel_system_prompt += (
                 "The message that mentioned you may end with a `<user_notes>` block of background notes "
                 "about people in the conversation. The bot adds it, not the sender. Use it quietly to "
@@ -406,8 +434,10 @@ class MentionHandler:
                 "Don't call it for ordinary chat, simple questions, or things a web search alone answers, "
                 "since the re-run costs more and takes longer.\n\n"
             )
+        if uses_tools:
+            current_channel_system_prompt += self._tools_addon(message)
         current_channel_system_prompt += f"{legend_section}\n\n"
-        how_i_work = _load_how_i_work()
+        how_i_work = "" if uses_tools else _load_how_i_work()
         if how_i_work:
             current_channel_system_prompt += f"{how_i_work}\n\n"
         if channel_summary:
@@ -431,9 +461,45 @@ class MentionHandler:
             transcriber=transcribe_audio_attachment,
             url_content_fetcher=self._url_content_fetcher,
         )
-        await self._append_user_notes(chat_context, message, history_msgs, bot_user)
+        if not uses_tools:
+            await self._append_user_notes(chat_context, message, history_msgs, bot_user)
 
         return chat_context, current_channel_system_prompt, summary_cost
+
+    def _tools_addon(self, message: discord.Message) -> str:
+        """The system prompt section that tells the model which tools it has and when to use them."""
+        names = {tool.definition["name"] for tool in self._build_tools(message)}
+        section = (
+            "## Your tools\n"
+            "Besides web search, you have tools the bot runs for you. Use them whenever they'd help, "
+            "and answer directly when they wouldn't. Call them before writing your reply rather than "
+            "announcing them, and don't name the tools in your reply.\n"
+        )
+        if "recall_users" in names:
+            section += (
+                "- `recall_users(user_ids)`: your memory notes about people in this server, learned from "
+                "past chats. They aren't in your context unless you call it. Call it when a message refers "
+                "to someone's life, plans, preferences or an inside joke you don't recognize, when knowing "
+                "the asker would make the reply better, or when someone asks what you remember. Use the "
+                "notes quietly; don't recite them unless asked.\n"
+            )
+        if "recall_channel" in names:
+            section += (
+                "- `recall_channel()`: a summary of the last couple of weeks in this channel. Call it when "
+                "a message refers to an ongoing topic, plan or running joke that the recent messages and "
+                "today's summary don't explain.\n"
+            )
+        if "draw" in names:
+            section += (
+                "- `draw(prompt)`: makes an image with this channel's image model and attaches it to your "
+                "reply. You get the image back, so after drawing, write a short reply that comments on "
+                "what came out. Use it when someone asks you to draw or make a picture.\n"
+            )
+        section += (
+            "- `how_i_work()`: a description of your own architecture, features, commands and models. "
+            "Call it when someone asks how you work or what you can do, and answer from it.\n\n"
+        )
+        return section
 
     async def _append_user_notes(
         self,
