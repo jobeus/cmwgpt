@@ -573,9 +573,11 @@ class MentionHandler:
             )
         if "old_quotes" in names:
             section += (
-                "- `old_quotes(query?, random_count?, skip?)`: the old IRC quote bot's ~5000 mostly undated "
-                "one-liners. They're jokes from the IRC days, out of context and sometimes very offensive, "
-                "saved because they were funny. Use them when someone asks for an old quote or what the "
+                "- `old_quotes(query?, random_count?, skip?)`: the old IRC quote bot's ~5000 "
+                "one-liners. They aren't in time order, so don't date a quote or say which came first "
+                "unless its own text gives a date or year; for when something was said, use the IRC log. "
+                "They're jokes from the IRC days, out of context and sometimes very offensive, saved "
+                "because they were funny. Use them when someone asks for an old quote or what the "
                 "quote bot had about someone; search or pick random ones rather than paging through all. "
                 "Present them as quote-bot jokes, not as anyone's real views or facts about them.\n"
             )
