@@ -3,12 +3,11 @@ WikiCount Command - Look up Wikipedia page views.
 """
 
 import logging
-from urllib.parse import urlparse, unquote
-
 import discord
 from discord import app_commands
 
 from src.services.death_service import PAGEVIEW_MONTHS
+from src.utils.url_utils import wiki_title_candidates
 from src.utils.async_utils import safe_run
 from src.utils.discord_error_utils import safe_defer
 
@@ -34,24 +33,8 @@ class WikiCountCommands:
             await safe_run(interaction, self._handle_wikicount, interaction, target)
 
     async def _handle_wikicount(self, interaction: discord.Interaction, target: str) -> None:
-        # Determine the article title
-        article_title = ""
-        
-        if "wikipedia.org/wiki/" in target:
-            parsed = urlparse(target)
-            path_parts = parsed.path.split("/wiki/")
-            if len(path_parts) > 1:
-                article_title = unquote(path_parts[1])
-        else:
-            # If it's just a name like "Daveigh Chase" or "Las Vegas"
-            # Wikipedia URLs typically replace spaces with underscores.
-            article_title = target.strip().replace(" ", "_")
-            
-            # Uppercase the first letter as Wikipedia is case-sensitive for first letters
-            if article_title:
-                article_title = article_title[0].upper() + article_title[1:]
-
-        if not article_title:
+        candidates = wiki_title_candidates(target)
+        if not candidates:
             await interaction.followup.send("Could not determine a valid Wikipedia article title from the input.")
             return
 
@@ -60,16 +43,13 @@ class WikiCountCommands:
             settings = self._state_service.get_death_settings() or {}
             months = settings.get("pageview_months", PAGEVIEW_MONTHS)
 
-            avg_views = await self._death_service.get_avg_monthly_views(article_title)
-            
-            # Fallback to title case if views are 0 or None (e.g. "daveigh chase" -> "Daveigh_Chase")
-            if not avg_views and "wikipedia.org/wiki/" not in target:
-                title_cased = target.strip().title().replace(" ", "_")
-                if title_cased != article_title:
-                    fallback_views = await self._death_service.get_avg_monthly_views(title_cased)
-                    if fallback_views:
-                        article_title = title_cased
-                        avg_views = fallback_views
+            # Fall back to title case if views are 0 or None (e.g. "daveigh chase" -> "Daveigh_Chase")
+            article_title, avg_views = candidates[0], None
+            for title in candidates:
+                avg_views = await self._death_service.get_avg_monthly_views(title)
+                if avg_views:
+                    article_title = title
+                    break
 
             if not avg_views:
                 await interaction.followup.send(f"Could not fetch pageviews for `{article_title}`. Make sure the title is exact (including capitalization).")

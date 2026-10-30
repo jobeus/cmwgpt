@@ -40,10 +40,14 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 **Models:** each channel picks one with `/model`. The default is `anthropic/claude-sonnet-5.5` via OpenRouter.
 - **Claude API direct**, `sonnet-5.5-direct` and `opus-5.5-direct`:
   - effort low, 16k max tokens
-  - client tools, up to 4 rounds per reply:
-    - `draw(prompt)`: makes an image with the channel's `/drawmodel` and attaches it to the reply. You get the image back to comment on. At most 2 per reply, and the image's cost is in the cost prefix.
+  - client tools, up to 6 rounds per reply:
+    - `draw(prompt)`: makes an image with the channel's `/drawmodel` and attaches it to the reply. You get the image back to comment on. The image's cost is in the cost prefix.
+    - `edit_image(prompt, message_ids)`: edits images from messages in the channel (attachments or embed images, up to 4) with the channel's `/editmodel`, same as `draw` otherwise. `draw` and `edit_image` together make at most 2 images per reply.
     - `recall_users(user_ids)` and `recall_channel()`: the memory profiles and channel summary described above.
+    - `remember(user_id, note)`: applies a note to a profile right away, the same way `/memory correct` does. People can change their own; only admins can change someone else's.
+    - `search_messages(...)` and `read_messages(message_id)`: Discord's own server message search (open to bots since March 2026; 25 hits per call, pageable, filters for author, channel, dates and has:link/image/...) and up to 50 messages around one. Both cover only channels the asker and you can both read.
     - `search_irc_log(query, ...)` and `read_irc_log_day(date)`: when `IRC_LOG` points at the channel's old IRC log, a regex search over it (each hit dated from the log's day markers, 20 hits per call, pageable) and a whole day's lines (500 per call). The file is memory-mapped, not loaded into the bot.
+    - `wiki_pageviews(title)`: the same pageview lookup as `/wikicount`.
     - `how_i_work()`: this description.
   - `opus-5.5-direct` also has a `think_harder(reason)` tool: calling it throws away the reply and re-asks the same message at high effort with the reason attached. The cost prefix covers both runs.
   - web search (up to 10 per reply)

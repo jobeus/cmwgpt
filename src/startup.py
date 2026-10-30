@@ -107,6 +107,9 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         runpod_service=runpod_service,
         default_draw_model=app_config.default_draw_model,
         irc_log=load_irc_log(app_config.irc_log_path),
+        default_edit_model=app_config.default_edit_model,
+        memory_corrector=memory_service.correct if memory_service.available else None,
+        wiki_views=death_service.get_avg_monthly_views,
     )
 
     return AppServices(

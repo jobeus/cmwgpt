@@ -46,7 +46,7 @@ WEB_SEARCH_MAX_USES = 10
 # A server-tool turn can come back as ``pause_turn``; resume it this many times.
 MAX_CONTINUATIONS = 5
 # Rounds of client tool calls (draw, recall, ...) per reply; the last request after them can't call tools.
-MAX_TOOL_ROUNDS = 4
+MAX_TOOL_ROUNDS = 6
 
 # Models that run at ``low`` effort but may ask, through the ``think_harder`` tool,
 # for the message to be answered again at ``high``.

@@ -207,3 +207,22 @@ async def get_article_text(url: str, *, cache_only: bool = False) -> Optional[st
     except Exception as e:
         logger.warning(f"Failed to fetch article text for {url}: {e}")
         return None
+
+
+def wiki_title_candidates(target: str) -> List[str]:
+    """Article titles to try for a Wikipedia URL or a typed title, best guess first.
+
+    A URL gives its own title. A typed title gets underscores and a capital first letter
+    (Wikipedia is case-sensitive after that), then title case as a fallback.
+    """
+    if "wikipedia.org/wiki/" in target:
+        path_parts = urlparse(target).path.split("/wiki/")
+        return [unquote(path_parts[1])] if len(path_parts) > 1 and path_parts[1] else []
+    title = target.strip().replace(" ", "_")
+    if not title:
+        return []
+    candidates = [title[0].upper() + title[1:]]
+    title_cased = target.strip().title().replace(" ", "_")
+    if title_cased not in candidates:
+        candidates.append(title_cased)
+    return candidates

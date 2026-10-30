@@ -92,6 +92,9 @@ class MentionHandler:
         runpod_service: Any = None,
         default_draw_model: Optional[str] = None,
         irc_log: Optional[IrcLog] = None,
+        default_edit_model: Optional[str] = None,
+        memory_corrector: Optional[Callable[[int, int, str, str], Awaitable[tuple[str, float]]]] = None,
+        wiki_views: Optional[Callable[[str], Awaitable[Optional[int]]]] = None,
     ):
         self._state_service = state_service
         self._openai_service = openai_service
@@ -111,13 +114,16 @@ class MentionHandler:
         self._runpod_service = runpod_service
         self._default_draw_model = default_draw_model
         self._irc_log = irc_log
+        self._default_edit_model = default_edit_model
+        self._memory_corrector = memory_corrector
+        self._wiki_views = wiki_views
         # Cache for history fetching optimization (bounded, LRU-ish eviction)
         # channel_id -> {"timestamp": float, "oldest_message": discord.Message}
         self._history_cache = {}
 
     def _uses_tools(self, model: Optional[str]) -> bool:
         """Whether ``model`` gets client tools: memory, how_i_work and drawing are then looked up on demand."""
-        return bool(model) and is_direct_anthropic_model(model) and self._anthropic_service is not None
+        return model is not None and is_direct_anthropic_model(model) and self._anthropic_service is not None
 
     def _build_tools(self, message: discord.Message) -> List[ChatTool]:
         return build_mention_tools(
@@ -132,6 +138,10 @@ class MentionHandler:
             runpod_service=self._runpod_service,
             default_draw_model=self._default_draw_model,
             irc_log=self._irc_log,
+            message=message,
+            default_edit_model=self._default_edit_model,
+            memory_corrector=self._memory_corrector,
+            wiki_views=self._wiki_views,
         )
 
     def _store_history_cache(self, channel_id: int, timestamp: float, oldest_message: discord.Message) -> None:
@@ -493,6 +503,21 @@ class MentionHandler:
                 "a message refers to an ongoing topic, plan or running joke that the recent messages and "
                 "today's summary don't explain.\n"
             )
+        if "remember" in names:
+            section += (
+                "- `remember(user_id, note)`: saves, fixes or forgets something in someone's memory now. "
+                "Only when someone explicitly asks you to remember, correct or forget something; people "
+                "can change their own memory, and only admins can change someone else's.\n"
+            )
+        if "search_messages" in names:
+            section += (
+                "- `search_messages(query?, author_ids?, all_channels?, has?, after?, before?, sort?, skip?)` "
+                "and `read_messages(message_id, channel_id?, count?)`: this server's Discord history beyond "
+                "what you were sent. Search when someone asks what was said earlier, when something came "
+                "up, or for a link or picture someone posted; then read around a hit when you need the "
+                "conversation. Searches cover only channels the asker can read. Say when things were "
+                "said, and quote rather than guess.\n"
+            )
         if "search_irc_log" in names:
             section += (
                 "- `search_irc_log(query, nick?, newest_first?, context?, skip?)` and "
@@ -508,6 +533,17 @@ class MentionHandler:
                 "- `draw(prompt)`: makes an image with this channel's image model and attaches it to your "
                 "reply. You get the image back, so after drawing, write a short reply that comments on "
                 "what came out. Use it when someone asks you to draw or make a picture.\n"
+            )
+        if "edit_image" in names:
+            section += (
+                "- `edit_image(prompt, message_ids)`: edits an image from a message in this channel (use the "
+                "[message ID] from its header) with the channel's edit model and attaches the result. You "
+                "get it back to comment on. Use it when someone asks you to change or fix a picture.\n"
+            )
+        if "wiki_pageviews" in names:
+            section += (
+                "- `wiki_pageviews(title)`: a Wikipedia article's average monthly pageviews, the number "
+                "deathwatch uses. Use it when someone asks how famous someone is.\n"
             )
         section += (
             "- `how_i_work()`: a description of your own architecture, features, commands and models. "

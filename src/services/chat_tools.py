@@ -13,13 +13,17 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 
 import discord
 
-from src.services.image_service import generate_image, resolve_draw_model
+from src.services.discord_history import (
+    HAS_FILTERS, MAX_READ_MESSAGES, SORTS, read_around, readable_channels, search_messages,
+)
+from src.services.image_service import edit_image, generate_image, resolve_draw_model, resolve_edit_model
 from src.services.irc_log_service import MAX_CONTEXT_LINES, MAX_DAY_LINES, IrcLog
-from src.utils.discord_helper import compress_image
+from src.utils.discord_helper import compress_image, url_to_base64_data_url
+from src.utils.url_utils import wiki_title_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +31,8 @@ logger = logging.getLogger(__name__)
 MAX_DRAWS_PER_REPLY = 2
 # Most user IDs one ``recall_users`` call looks up.
 MAX_RECALL_USERS = 8
+# Most images one ``edit_image`` call sends to the edit model.
+MAX_EDIT_IMAGES = 4
 
 _USER_ID_RE = re.compile(r"\d{5,25}")
 
@@ -125,6 +131,150 @@ HOW_I_WORK_TOOL = {
 }
 
 
+EDIT_IMAGE_TOOL = {
+    "name": "edit_image",
+    "description": (
+        "Edit an image someone posted (or one you posted earlier) with this channel's image edit model, "
+        "and attach the result to your reply. The result is returned to you so you can comment on it. Use "
+        "it when someone asks you to change, fix, restyle or add to a picture in the chat. Costs money and "
+        "takes several seconds; it counts toward the same per-reply limit as draw."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": "What to change, written as an instruction to the edit model, e.g. 'make the hat red'.",
+            },
+            "message_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "IDs of messages in this channel whose images to use (the [message ID] in a history "
+                    f"header). The first message's first image is the one edited; up to {MAX_EDIT_IMAGES} "
+                    "images in all, the rest as references."
+                ),
+            },
+        },
+        "required": ["prompt", "message_ids"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+REMEMBER_TOOL = {
+    "name": "remember",
+    "description": (
+        "Save, fix or forget something in a person's memory profile right away, instead of waiting for the "
+        "nightly memory job. Use it only when someone explicitly asks you to remember, correct or forget "
+        "something. People can change their own memory; only server admins can change someone else's."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "user_id": {"type": "string", "description": "Discord user ID of the person the memory is about."},
+            "note": {
+                "type": "string",
+                "description": (
+                    "The change in plain words, as the person put it, e.g. 'I sold the Tacoma, I drive a "
+                    "Ranger now' or 'forget that I'm job hunting'."
+                ),
+            },
+        },
+        "required": ["user_id", "note"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+SEARCH_MESSAGES_TOOL = {
+    "name": "search_messages",
+    "description": (
+        "Search this Discord server's message history (Discord's own search) beyond the recent messages you "
+        "were sent. Use it when someone asks what was said earlier, when something came up, to find a link "
+        "or picture someone posted, or what a person said about a topic. Each hit has its time, message ID, "
+        "channel and author; use read_messages to see the conversation around one."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Words to find in the message text. Leave empty to filter only by the other fields.",
+            },
+            "author_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Only messages by these Discord user IDs.",
+            },
+            "all_channels": {
+                "type": "boolean",
+                "description": "Search every channel the asker can read instead of just this one. Default false.",
+            },
+            "has": {
+                "type": "array",
+                "items": {"type": "string", "enum": list(HAS_FILTERS)},
+                "description": "Only messages containing all of these, e.g. ['link'] or ['image'].",
+            },
+            "after": {"type": "string", "description": "Only messages from this day on, as YYYY-MM-DD."},
+            "before": {"type": "string", "description": "Only messages before this day, as YYYY-MM-DD."},
+            "sort": {
+                "type": "string",
+                "enum": list(SORTS),
+                "description": "Result order. Default newest.",
+            },
+            "skip": {"type": "integer", "description": "How many results to skip, for paging. Default 0."},
+        },
+        "required": [],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+READ_MESSAGES_TOOL = {
+    "name": "read_messages",
+    "description": (
+        "Read the Discord messages around one message: the conversation before and after a search hit, "
+        "or older chat in this channel than you were sent."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "message_id": {"type": "string", "description": "The message to read around."},
+            "channel_id": {
+                "type": "string",
+                "description": "The channel it's in, from its search hit. Default this channel.",
+            },
+            "count": {
+                "type": "integer",
+                "description": f"How many messages to read, 1-{MAX_READ_MESSAGES}. Default 20.",
+            },
+        },
+        "required": ["message_id"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+WIKI_PAGEVIEWS_TOOL = {
+    "name": "wiki_pageviews",
+    "description": (
+        "Look up a Wikipedia article's average monthly pageviews over the last few months, the same number "
+        "deathwatch uses to decide who's famous enough. Use it when someone asks how famous or popular "
+        "someone or something is, or about deathwatch's cutoff."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "The article's exact title or its Wikipedia URL."},
+        },
+        "required": ["title"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+
 SEARCH_IRC_LOG_TOOL = {
     "name": "search_irc_log",
     "description": (
@@ -196,6 +346,12 @@ def _int_arg(args: Dict[str, Any], key: str) -> int:
         return 0
 
 
+def _parse_day(args: Dict[str, Any], key: str) -> Optional[date]:
+    """``args[key]`` as a date; None when it's missing. Raises ``ValueError`` when it's malformed."""
+    value = str(args.get(key) or "").strip()
+    return date.fromisoformat(value) if value else None
+
+
 def _parse_user_ids(values: Any) -> List[int]:
     ids: List[int] = []
     for value in values if isinstance(values, list) else []:
@@ -218,10 +374,36 @@ def build_mention_tools(
     runpod_service: Any,
     default_draw_model: Optional[str],
     irc_log: Optional[IrcLog] = None,
+    message: Any = None,
+    default_edit_model: Optional[str] = None,
+    memory_corrector: Optional[Callable[[int, int, str, str], Awaitable[Tuple[str, float]]]] = None,
+    wiki_views: Optional[Callable[[str], Awaitable[Optional[int]]]] = None,
 ) -> List[ChatTool]:
-    """The tools for one mention, in a fixed order. Tools without their dependencies are left out."""
+    """The tools for one mention, in a fixed order. Tools without their dependencies are left out.
+
+    ``message`` is the mention; the tools that fetch or check Discord things need it.
+    """
     tools: List[ChatTool] = []
     draws = 0
+    guild = getattr(message, "guild", None)
+    asker = getattr(message, "author", None)
+
+    def image_result(text: str, img_bytes: bytes, preview: bytes, cost: Optional[float]) -> ToolResult:
+        return ToolResult(
+            content=[
+                {"type": "text", "text": text},
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": base64.b64encode(preview).decode("ascii"),
+                    },
+                },
+            ],
+            cost=cost or 0.0,
+            files=[discord.File(io.BytesIO(img_bytes), filename=f"image{draws}.png")],
+        )
 
     async def draw(args: Dict[str, Any]) -> ToolResult:
         nonlocal draws
@@ -243,26 +425,57 @@ def build_mention_tools(
             discord_channel_id=channel_id,
         )
         preview = await asyncio.to_thread(compress_image, img_bytes)
-        return ToolResult(
-            content=[
-                {
-                    "type": "text",
-                    "text": (
-                        f"Drew it with {model}. The image is attached to your reply, so don't link or "
-                        "describe it as missing; here it is so you can comment on how it came out."
-                    ),
-                },
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": base64.b64encode(preview).decode("ascii"),
-                    },
-                },
-            ],
-            cost=cost or 0.0,
-            files=[discord.File(io.BytesIO(img_bytes), filename=f"image{draws}.png")],
+        return image_result(
+            f"Drew it with {model}. The image is attached to your reply, so don't link or "
+            "describe it as missing; here it is so you can comment on how it came out.",
+            img_bytes, preview, cost,
+        )
+
+    async def images_from(message_ids: List[int]) -> List[str]:
+        """Base64 images from these messages in this channel: attachments, then embed images."""
+        images: List[str] = []
+        for message_id in message_ids:
+            source = await message.channel.fetch_message(message_id)
+            for attachment in source.attachments:
+                if (attachment.content_type or "").startswith("image/"):
+                    images.append(base64.b64encode(await attachment.read()).decode("ascii"))
+            for embed in source.embeds:
+                url = (embed.image and embed.image.url) or (embed.thumbnail and embed.thumbnail.url)
+                if url:
+                    images.append((await url_to_base64_data_url(url)).split(",", 1)[1])
+        return images[:MAX_EDIT_IMAGES]
+
+    async def edit(args: Dict[str, Any]) -> ToolResult:
+        nonlocal draws
+        prompt = str(args.get("prompt") or "").strip()
+        message_ids = _parse_user_ids(args.get("message_ids"))
+        if not prompt or not message_ids:
+            return text_result("Give a prompt and at least one message ID.", is_error=True)
+        if draws >= MAX_DRAWS_PER_REPLY:
+            return text_result(f"You've already made {draws} images for this reply; that's the limit.",
+                               is_error=True)
+        try:
+            images = await images_from(message_ids)
+        except discord.NotFound:
+            return text_result("One of those messages isn't in this channel.", is_error=True)
+        if not images:
+            return text_result("Those messages have no images.", is_error=True)
+        draws += 1
+        model = resolve_edit_model(state_service, channel_id, default_edit_model or "")
+        logger.info(f"[edit tool] Channel {channel_id} Model: {model} Images: {len(images)} Prompt: {prompt[:200]}")
+        img_bytes, cost = await edit_image(
+            prompt=prompt,
+            model=model,
+            images_b64=images,
+            gemini_service=gemini_service,
+            runpod_service=runpod_service,
+            discord_user_id=user_id,
+            discord_channel_id=channel_id,
+        )
+        preview = await asyncio.to_thread(compress_image, img_bytes)
+        return image_result(
+            f"Edited it with {model}. The result is attached to your reply; here it is so you can comment on it.",
+            img_bytes, preview, cost,
         )
 
     async def recall_users(args: Dict[str, Any]) -> ToolResult:
@@ -279,10 +492,80 @@ def build_mention_tools(
         )
         return text_result(summary or "No memory of this channel yet.")
 
+    async def remember(args: Dict[str, Any]) -> ToolResult:
+        # Only offered when these are set.
+        assert memory_corrector is not None and guild is not None and guild_id is not None
+        ids = _parse_user_ids([args.get("user_id")])
+        note = str(args.get("note") or "").strip()
+        if not ids or not note:
+            return text_result("Give a user ID and a note.", is_error=True)
+        target_id = ids[0]
+        is_admin = bool(getattr(getattr(asker, "guild_permissions", None), "administrator", False))
+        if target_id != user_id and not is_admin:
+            return text_result(
+                "Only server admins can change someone else's memory. That person can ask you themselves, "
+                "or use /memory correct.", is_error=True)
+        member = guild.get_member(target_id)
+        name = getattr(member, "display_name", None) or str(target_id)
+        logger.info(f"[remember tool] {user_id} changed memory for {target_id}: {note[:200]}")
+        try:
+            profile, cost = await memory_corrector(guild_id, target_id, name, note)
+        except ValueError:
+            return text_result("Couldn't apply that, so nothing changed.", is_error=True)
+        return ToolResult(content=[{"type": "text", "text": f"Saved. <@{target_id}>'s memory now reads:\n{profile}"}],
+                          cost=cost)
+
+    async def search(args: Dict[str, Any]) -> ToolResult:
+        try:
+            after, before = _parse_day(args, "after"), _parse_day(args, "before")
+        except ValueError:
+            return text_result("Give dates as YYYY-MM-DD.", is_error=True)
+        channels = readable_channels(guild, asker)
+        if not args.get("all_channels"):
+            channels = [c for c in channels if c.id == channel_id]
+        query = str(args.get("query") or "").strip()
+        logger.info(f"[search tool] Channel {channel_id} Query: {query[:200]} All: {bool(args.get('all_channels'))}")
+        text = await search_messages(
+            guild,
+            channels,
+            query=query,
+            author_ids=_parse_user_ids(args.get("author_ids")),
+            has=[str(h) for h in args.get("has") or []],
+            after=after,
+            before=before,
+            sort=str(args.get("sort") or "newest"),
+            skip=_int_arg(args, "skip"),
+        )
+        return text_result(text)
+
+    async def read_messages(args: Dict[str, Any]) -> ToolResult:
+        message_ids = _parse_user_ids([args.get("message_id")])
+        if not message_ids:
+            return text_result("Give a message ID.", is_error=True)
+        wanted = _parse_user_ids([args.get("channel_id")])
+        target = wanted[0] if wanted else channel_id
+        channel = next((c for c in readable_channels(guild, asker) if c.id == target), None)
+        if channel is None:
+            return text_result("That channel doesn't exist or isn't one you and the asker can both read.",
+                               is_error=True)
+        return text_result(await read_around(channel, message_ids[0], _int_arg(args, "count") or 20))
+
+    async def wiki_pageviews(args: Dict[str, Any]) -> ToolResult:
+        assert wiki_views is not None  # only offered when set
+        candidates = wiki_title_candidates(str(args.get("title") or ""))
+        if not candidates:
+            return text_result("Give an article title or Wikipedia URL.", is_error=True)
+        for title in candidates:
+            views = await wiki_views(title)
+            if views:
+                return text_result(f"{title.replace('_', ' ')}: {views:,} average monthly pageviews.")
+        return text_result(f"No pageviews found for {candidates[0]}; the title must be exact.", is_error=True)
+
     async def how_i_work(_args: Dict[str, Any]) -> ToolResult:
         return text_result(how_i_work_loader() or "The architecture description isn't available.")
 
     async def search_irc_log(args: Dict[str, Any]) -> ToolResult:
+        assert irc_log is not None  # only offered when set
         query = str(args.get("query") or "")
         if not query.strip():
             return text_result("No query given.", is_error=True)
@@ -299,6 +582,7 @@ def build_mention_tools(
         return text_result(text)
 
     async def read_irc_log_day(args: Dict[str, Any]) -> ToolResult:
+        assert irc_log is not None  # only offered when set
         try:
             day = date.fromisoformat(str(args.get("date") or "").strip())
         except ValueError:
@@ -309,12 +593,21 @@ def build_mention_tools(
 
     if default_draw_model and state_service is not None and (gemini_service or runpod_service):
         tools.append(ChatTool(DRAW_TOOL, draw, "-# drawing..."))
+    if default_edit_model and state_service is not None and (gemini_service or runpod_service) and message:
+        tools.append(ChatTool(EDIT_IMAGE_TOOL, edit, "-# editing..."))
     if user_notes_provider and guild_id:
         tools.append(ChatTool(RECALL_USERS_TOOL, recall_users, "-# remembering..."))
     if channel_summary_provider and guild_id:
         tools.append(ChatTool(RECALL_CHANNEL_TOOL, recall_channel, "-# remembering..."))
+    if memory_corrector and guild_id and guild is not None:
+        tools.append(ChatTool(REMEMBER_TOOL, remember, "-# making a note..."))
+    if guild is not None:
+        tools.append(ChatTool(SEARCH_MESSAGES_TOOL, search, "-# searching the chat..."))
+        tools.append(ChatTool(READ_MESSAGES_TOOL, read_messages, "-# reading back..."))
     if irc_log:
         tools.append(ChatTool(SEARCH_IRC_LOG_TOOL, search_irc_log, "-# digging through the irc logs..."))
         tools.append(ChatTool(READ_IRC_LOG_DAY_TOOL, read_irc_log_day, "-# reading the irc logs..."))
+    if wiki_views:
+        tools.append(ChatTool(WIKI_PAGEVIEWS_TOOL, wiki_pageviews, "-# checking wikipedia..."))
     tools.append(ChatTool(HOW_I_WORK_TOOL, how_i_work, "-# checking how I work..."))
     return tools
