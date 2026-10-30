@@ -16,6 +16,7 @@ from src.services.openai_service import OpenAIServiceError
 from src.services.anthropic_service import AnthropicServiceError, THINK_HARDER_MODELS, is_direct_anthropic_model
 from src.services.chat_tools import ChatTool, build_mention_tools
 from src.services.gemini_service import GeminiServiceError, is_gemini_model
+from src.services.irc_log_service import IrcLog
 from src.services.completion_dispatch import dispatch_completion
 from src.services.streaming_reply import StreamingReply
 from src.utils.chat_context import build_chat_context
@@ -90,6 +91,7 @@ class MentionHandler:
         ] = None,
         runpod_service: Any = None,
         default_draw_model: Optional[str] = None,
+        irc_log: Optional[IrcLog] = None,
     ):
         self._state_service = state_service
         self._openai_service = openai_service
@@ -108,6 +110,7 @@ class MentionHandler:
         self._day_summary_provider = day_summary_provider
         self._runpod_service = runpod_service
         self._default_draw_model = default_draw_model
+        self._irc_log = irc_log
         # Cache for history fetching optimization (bounded, LRU-ish eviction)
         # channel_id -> {"timestamp": float, "oldest_message": discord.Message}
         self._history_cache = {}
@@ -128,6 +131,7 @@ class MentionHandler:
             gemini_service=self._gemini_service,
             runpod_service=self._runpod_service,
             default_draw_model=self._default_draw_model,
+            irc_log=self._irc_log,
         )
 
     def _store_history_cache(self, channel_id: int, timestamp: float, oldest_message: discord.Message) -> None:
@@ -488,6 +492,16 @@ class MentionHandler:
                 "- `recall_channel()`: a summary of the last couple of weeks in this channel. Call it when "
                 "a message refers to an ongoing topic, plan or running joke that the recent messages and "
                 "today's summary don't explain.\n"
+            )
+        if "search_irc_log" in names:
+            section += (
+                "- `search_irc_log(query, nick?, newest_first?, context?, skip?)` and "
+                "`read_irc_log_day(date, start_line?)`: this channel's old IRC log, from before it "
+                "moved to Discord. Search it when someone asks about the IRC days, what someone said "
+                "back then, or when something first came up; every hit comes with its date. Then read "
+                "the whole day around a promising hit when you need the conversation, not just one "
+                "line. Say when things were said, and quote the log rather than guessing. IRC nicks "
+                "may not match Discord names.\n"
             )
         if "draw" in names:
             section += (

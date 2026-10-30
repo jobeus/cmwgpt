@@ -12,11 +12,13 @@ import io
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 import discord
 
 from src.services.image_service import generate_image, resolve_draw_model
+from src.services.irc_log_service import MAX_CONTEXT_LINES, MAX_DAY_LINES, IrcLog
 from src.utils.discord_helper import compress_image
 
 logger = logging.getLogger(__name__)
@@ -123,6 +125,77 @@ HOW_I_WORK_TOOL = {
 }
 
 
+SEARCH_IRC_LOG_TOOL = {
+    "name": "search_irc_log",
+    "description": (
+        "Search this channel's old IRC log, from before it moved to Discord. Each matching line comes back "
+        "under the date it was said. Use it when someone asks about the IRC days: what someone said, when "
+        "something first came up, old jokes, links or arguments. Nicks there may differ from Discord names. "
+        "Searches take a second or two, so make each one count; read_irc_log_day shows a whole day around "
+        "a hit."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "A case-insensitive Python regex matched within one line, e.g. 'joe rogan' or "
+                    "'physx|havok'. Use '.' with a nick to list everything that nick said."
+                ),
+            },
+            "nick": {
+                "type": "string",
+                "description": "Only lines said by this IRC nick (exact, without the @ or + mode prefix).",
+            },
+            "newest_first": {
+                "type": "boolean",
+                "description": "Show the most recent matches first instead of the oldest. Default false.",
+            },
+            "context": {
+                "type": "integer",
+                "description": f"Lines of surrounding chat to show around each match, 0-{MAX_CONTEXT_LINES}. Default 0.",
+            },
+            "skip": {
+                "type": "integer",
+                "description": "How many matches to skip, for paging past the first results. Default 0.",
+            },
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+READ_IRC_LOG_DAY_TOOL = {
+    "name": "read_irc_log_day",
+    "description": (
+        "Read everything said on one day in this channel's old IRC log. Use it to see the whole "
+        "conversation around a search hit, or when someone asks what happened on a particular day."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "date": {"type": "string", "description": "The day, as YYYY-MM-DD."},
+            "start_line": {
+                "type": "integer",
+                "description": f"Line to start from; a call returns at most {MAX_DAY_LINES} lines. Default 0.",
+            },
+        },
+        "required": ["date"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+
+def _int_arg(args: Dict[str, Any], key: str) -> int:
+    try:
+        return int(args.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _parse_user_ids(values: Any) -> List[int]:
     ids: List[int] = []
     for value in values if isinstance(values, list) else []:
@@ -144,6 +217,7 @@ def build_mention_tools(
     gemini_service: Any,
     runpod_service: Any,
     default_draw_model: Optional[str],
+    irc_log: Optional[IrcLog] = None,
 ) -> List[ChatTool]:
     """The tools for one mention, in a fixed order. Tools without their dependencies are left out."""
     tools: List[ChatTool] = []
@@ -208,11 +282,39 @@ def build_mention_tools(
     async def how_i_work(_args: Dict[str, Any]) -> ToolResult:
         return text_result(how_i_work_loader() or "The architecture description isn't available.")
 
+    async def search_irc_log(args: Dict[str, Any]) -> ToolResult:
+        query = str(args.get("query") or "")
+        if not query.strip():
+            return text_result("No query given.", is_error=True)
+        nick = str(args.get("nick") or "").strip().lstrip("@+%~&")
+        logger.info(f"[irc log tool] Channel {channel_id} Query: {query[:200]} Nick: {nick}")
+        text = await asyncio.to_thread(
+            irc_log.search,
+            query,
+            nick=nick,
+            context=_int_arg(args, "context"),
+            newest_first=bool(args.get("newest_first")),
+            skip=_int_arg(args, "skip"),
+        )
+        return text_result(text)
+
+    async def read_irc_log_day(args: Dict[str, Any]) -> ToolResult:
+        try:
+            day = date.fromisoformat(str(args.get("date") or "").strip())
+        except ValueError:
+            return text_result("Give the date as YYYY-MM-DD.", is_error=True)
+        logger.info(f"[irc log tool] Channel {channel_id} Day: {day}")
+        text = await asyncio.to_thread(irc_log.read_day, day, start_line=_int_arg(args, "start_line"))
+        return text_result(text)
+
     if default_draw_model and state_service is not None and (gemini_service or runpod_service):
         tools.append(ChatTool(DRAW_TOOL, draw, "-# drawing..."))
     if user_notes_provider and guild_id:
         tools.append(ChatTool(RECALL_USERS_TOOL, recall_users, "-# remembering..."))
     if channel_summary_provider and guild_id:
         tools.append(ChatTool(RECALL_CHANNEL_TOOL, recall_channel, "-# remembering..."))
+    if irc_log:
+        tools.append(ChatTool(SEARCH_IRC_LOG_TOOL, search_irc_log, "-# digging through the irc logs..."))
+        tools.append(ChatTool(READ_IRC_LOG_DAY_TOOL, read_irc_log_day, "-# reading the irc logs..."))
     tools.append(ChatTool(HOW_I_WORK_TOOL, how_i_work, "-# checking how I work..."))
     return tools

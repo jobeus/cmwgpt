@@ -15,6 +15,7 @@ from src.services.message_service import MessageService
 from src.services.openai_service import OpenAIService
 from src.services.anthropic_service import AnthropicService
 from src.services.gemini_service import GeminiService
+from src.services.irc_log_service import load_irc_log
 from src.services.memory_service import MemoryService
 from src.services.day_summary_service import DaySummaryService
 from src.services.paste_service import PasteService
@@ -105,6 +106,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         day_summary_provider=day_summary_service.get_summary,
         runpod_service=runpod_service,
         default_draw_model=app_config.default_draw_model,
+        irc_log=load_irc_log(app_config.irc_log_path),
     )
 
     return AppServices(

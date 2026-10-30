@@ -29,6 +29,7 @@ These are loaded by `src/config.py`.
 | `INCLUDE_NUM_CHATLINES` | `10` | No | Recent-history lines included in context |
 | `DISCORD_GUILD_ID` | empty | No | Guild-scoped sync/behavior |
 | `DEATH_CHANNEL_ID` | empty | No | Target channel for deathwatch posts |
+| `IRC_LOG` | empty | No | Path to the channel's old irssi IRC log; enables the direct models' `search_irc_log`/`read_irc_log_day` tools |
 | `DEPLOY_WEBHOOK_SECRET` | empty | No | Shared secret for the signed deploy webhook; the listener is off when empty (see `docs/auto-update.md`) |
 | `DEPLOY_WEBHOOK_HOST` | `0.0.0.0` | No | Interface the deploy webhook binds to |
 | `DEPLOY_WEBHOOK_PORT` | `8787` | No | Port the deploy webhook listens on (`POST /deploy`) |

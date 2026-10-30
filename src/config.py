@@ -75,6 +75,8 @@ class AppConfig:
     deploy_webhook_secret: str = ""
     deploy_webhook_host: str = "0.0.0.0"
     deploy_webhook_port: int = 8787
+    # The channel's old IRC log, searchable by the direct models; the tools are off when unset.
+    irc_log_path: str = ""
 
 
 def load_config(
@@ -111,6 +113,7 @@ def load_config(
         deploy_webhook_secret=source.get("DEPLOY_WEBHOOK_SECRET", ""),
         deploy_webhook_host=source.get("DEPLOY_WEBHOOK_HOST", "0.0.0.0"),
         deploy_webhook_port=_read_int(source.get("DEPLOY_WEBHOOK_PORT"), 8787),
+        irc_log_path=source.get("IRC_LOG", "").strip(),
     )
 
 
