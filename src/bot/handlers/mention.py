@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 # instead of starting over. Matches the Claude API's 5-minute prompt cache lifetime.
 HISTORY_WINDOW_SECONDS = 300
 
+# How many of the IRC log's top speakers the tools section lists.
+IRC_ROSTER_SIZE = 60
+
 # How many messages a channel's growing history window may gain before it resets
 # to the last INCLUDE_NUM_CHATLINES messages.
 MAX_HISTORY_GAP = 100
@@ -125,6 +128,7 @@ class MentionHandler:
         self._memory_index_provider = memory_index_provider
         # Found once and kept, so the system prompt stays the same between requests.
         self._irc_start: Optional[str] = None
+        self._irc_roster: Optional[str] = None
         # channel_id -> day of the channel's first Discord message
         self._discord_starts: Dict[int, str] = {}
         # channel_id -> (oldest message sent, bot ID, model) for the mention being answered,
@@ -535,6 +539,17 @@ class MentionHandler:
                 logger.warning(f"Couldn't read the IRC log's dates: {e}")
                 first_day = None
             self._irc_start = first_day.isoformat() if first_day else ""
+        if self._irc_log and self._irc_roster is None:
+            try:
+                speakers = await asyncio.to_thread(self._irc_log.speakers, IRC_ROSTER_SIZE)
+            except Exception as e:
+                logger.warning(f"Couldn't tally the IRC log's speakers: {e}")
+                speakers = []
+            self._irc_roster = "; ".join(
+                f"{name} {lines:,}" + (f" {first}-{last}" if first and last and first != last else
+                                       f" {first}" if first else "")
+                for name, lines, first, last in speakers
+            )
 
         # The log still gets day markers since the move, but nothing was said there after Discord started.
         ranges = []
@@ -547,6 +562,12 @@ class MentionHandler:
         note = "Dates covered: " + "; ".join(ranges) + "."
         if start and self._irc_start:
             note += f" For anything before {start}, search the IRC log; from then on, search Discord."
+        if self._irc_roster:
+            note += (
+                f"\nThe {IRC_ROSTER_SIZE} people who said the most in the IRC log, by merged nick, with "
+                f"their line count and years active: {self._irc_roster}. Use these names for the IRC "
+                "tools' nick filters; any of a person's aliases also works."
+            )
         return note + "\n"
 
     def _tools_addon(self, message: discord.Message, ranges: str = "", memory_index: str = "") -> str:

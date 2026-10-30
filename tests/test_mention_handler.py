@@ -695,6 +695,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         handler, _, _, _, _ = self.make_handler()
         handler._irc_log = MagicMock()
         handler._irc_log.first_day.return_value = datetime(2014, 1, 3).date()
+        handler._irc_log.speakers.return_value = [("Cyc66", 600999, 2014, 2022), ("td", 5, 2015, 2015)]
         first = SimpleNamespace(created_at=datetime(2023, 6, 19, 21, 22, tzinfo=timezone.utc))
         calls = []
 
@@ -707,10 +708,12 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIn("the IRC log covers 2014-01-03 to 2023-06-19", note)
         self.assertIn("Discord history starts 2023-06-19", note)
         self.assertIn("before 2023-06-19, search the IRC log", note)
+        self.assertIn("line count and years active: Cyc66 600,999 2014-2022; td 5 2015.", note)
         # Found once per channel, so the system prompt stays cacheable.
         self.assertEqual(await handler._history_ranges(channel), note)
         self.assertEqual(calls, [(1, True)])
         handler._irc_log.first_day.assert_called_once()
+        handler._irc_log.speakers.assert_called_once_with(60)
 
     async def test_history_ranges_fall_back_to_channel_creation(self):
         handler, _, _, _, _ = self.make_handler()

@@ -39,6 +39,8 @@ MAX_COUNTED = 3_000_000
 # A chat line's speaker: "12:00 <@nick> text" or an action, "12:00  * nick does". Joins, quits
 # and other "-!-" lines don't match, so they're never counted.
 _SPEAKER_RE = re.compile(rb"\d\d:\d\d(?::\d\d)?\s+(?:<[ @+%~&!]?([^>\s]+)>|\*\s+(\S+))")
+# The same, found anywhere in the log, for tallying who spoke.
+_SPEAKER_LINE_RE = re.compile(rb"^" + _SPEAKER_RE.pattern, re.M)
 
 
 # The canonical name that drops a nick (bots and junk) in an irssistats nicks file.
@@ -127,9 +129,15 @@ class IrcLog:
             logger.info(f"[irc log] Mapped {self.path} ({len(data) / 1e6:.1f}MB, {len(days)} date markers)")
             return data
 
+    def _canonical(self, nick: str) -> Optional[str]:
+        """``nick``'s canonical name; None when the nicks file drops it or it isn't a person (``***``)."""
+        if not any(c.isalnum() for c in nick):
+            return None
+        return self.nicks.canonical(nick) if self.nicks else nick
+
     def _nick_key(self, nick: str) -> Optional[str]:
         """How a nick is compared and grouped: its canonical name, lowercased; None when dropped."""
-        name = self.nicks.canonical(nick) if self.nicks else nick
+        name = self._canonical(nick)
         return name.lower() if name is not None else None
 
     def _speaker(self, data: mmap.mmap, line_start: int, line_end: int) -> Tuple[Optional[str], str, int]:
@@ -141,7 +149,7 @@ class IrcLog:
         if head is None:
             return None, "", line_end
         raw = (head.group(1) or head.group(2)).decode("utf-8", "replace")
-        shown = self.nicks.canonical(raw) if self.nicks else raw
+        shown = self._canonical(raw)
         return (shown.lower() if shown is not None else None), shown or raw, head.end()
 
     def _date_at(self, offset: int) -> str:
@@ -301,7 +309,7 @@ class IrcLog:
                 truncated = True
                 break
 
-        who = f" by {(self.nicks.canonical(nick) if self.nicks else None) or nick}" if nick else ""
+        who = f" by {self._canonical(nick) or nick}" if nick else ""
         if not total:
             return f"No occurrences of {query!r}{who} in the IRC log."
         parts = [f"{total:,} occurrence{'s' if total != 1 else ''} of {query!r}{who} on "
@@ -327,6 +335,33 @@ class IrcLog:
             parts.append(f"Top {min(top, len(by_nick))} of {len(by_nick)} nicks:")
             parts += ranked(by_nick, total)
         return "\n".join(parts)
+
+    def speakers(self, top: int = 60) -> List[Tuple[str, int, Optional[int], Optional[int]]]:
+        """The ``top`` people with the most chat and action lines, as ``(name, lines, first year, last year)``.
+
+        Names are canonical when there's a nicks file, and dropped nicks aren't listed.
+        """
+        data = self._load()
+        counts: Counter = Counter()
+        names: Dict[str, str] = {}
+        first: Dict[str, int] = {}
+        last: Dict[str, int] = {}
+        marker = 0
+        for m in _SPEAKER_LINE_RE.finditer(data):
+            shown = self._canonical((m.group(1) or m.group(2)).decode("utf-8", "replace"))
+            if shown is None:
+                continue
+            key = shown.lower()
+            counts[key] += 1
+            names.setdefault(key, shown)
+            # Lines come in order, so the current day only moves forward.
+            while marker < len(self._marker_offsets) and self._marker_offsets[marker] <= m.start():
+                marker += 1
+            day = self._marker_days[marker - 1] if marker else None
+            if day:
+                first.setdefault(key, day.year)
+                last[key] = day.year
+        return [(names[k], n, first.get(k), last.get(k)) for k, n in counts.most_common(top)]
 
     def read_day(self, day: date, *, start_line: int = 0) -> str:
         """Every line logged on ``day``, up to :data:`MAX_DAY_LINES` from ``start_line`` on."""

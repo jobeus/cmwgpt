@@ -133,6 +133,17 @@ class TestIrcLog(unittest.TestCase):
         self.assertIn("<+Mem0ut> joe rogan podcast again", out)
         self.assertIn("<@LIkver> rogan again", out)
 
+    def test_speakers_rank_merged_nicks_with_years(self):
+        log = self.with_nicks()
+        self.append("07:02 <***> Buffer Playback...\n")
+        speakers = log.speakers()
+        # memout: Mem0ut's two 2020 lines plus LIkver's 2021 line; cmwbot and *** aren't people.
+        self.assertEqual(speakers[0], ("memout", 3, 2020, 2021))
+        self.assertIn(("Cyc66", 2, 2020, 2020), speakers)
+        self.assertNotIn("cmwbot", [s[0] for s in speakers])
+        self.assertNotIn("***", [s[0] for s in speakers])
+        self.assertEqual(len(log.speakers(top=1)), 1)
+
     def test_unreadable_nicks_file_still_loads_the_log(self):
         log = load_irc_log(self.path, self.path + ".missing")
         self.assertIsNotNone(log)
