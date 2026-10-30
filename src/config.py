@@ -77,6 +77,8 @@ class AppConfig:
     deploy_webhook_port: int = 8787
     # The channel's old IRC log, searchable by the direct models; the tools are off when unset.
     irc_log_path: str = ""
+    # The old IRC quote bot's quotes, one per line; the old_quotes tool is off when unset.
+    old_quote_bot_path: str = ""
 
 
 def load_config(
@@ -114,6 +116,7 @@ def load_config(
         deploy_webhook_host=source.get("DEPLOY_WEBHOOK_HOST", "0.0.0.0"),
         deploy_webhook_port=_read_int(source.get("DEPLOY_WEBHOOK_PORT"), 8787),
         irc_log_path=source.get("IRC_LOG", "").strip(),
+        old_quote_bot_path=source.get("OLD_QUOTE_BOT", "").strip(),
     )
 
 

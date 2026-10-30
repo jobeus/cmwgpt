@@ -16,6 +16,7 @@ from src.services.openai_service import OpenAIService
 from src.services.anthropic_service import AnthropicService
 from src.services.gemini_service import GeminiService
 from src.services.irc_log_service import load_irc_log
+from src.services.quote_service import load_quote_file
 from src.services.memory_service import MemoryService
 from src.services.day_summary_service import DaySummaryService
 from src.services.paste_service import PasteService
@@ -110,6 +111,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         default_edit_model=app_config.default_edit_model,
         memory_corrector=memory_service.correct if memory_service.available else None,
         wiki_views=death_service.get_avg_monthly_views,
+        quote_file=load_quote_file(app_config.old_quote_bot_path),
     )
 
     return AppServices(

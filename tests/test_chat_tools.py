@@ -232,6 +232,17 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([c.args[0] for c in views.await_args_list], ["Daveigh_chase", "Daveigh_Chase"])
         self.assertIn("52,000", result.content[0]["text"])
 
+    async def test_old_quotes_only_when_a_quote_file_is_set(self):
+        tools, _ = _full_tools()
+        self.assertNotIn("old_quotes", tools)
+        quote_file = MagicMock()
+        quote_file.get.return_value = "quotes"
+        tools, _ = _full_tools(quote_file=quote_file)
+        self.assertEqual(list(tools)[-3:], ["old_quotes", "wiki_pageviews", "how_i_work"])
+        result = await tools["old_quotes"].run({"query": "rogan", "random_count": 3})
+        quote_file.get.assert_called_once_with(query="rogan", random_count=3, skip=0)
+        self.assertEqual(result.content[0]["text"], "quotes")
+
     def test_wiki_title_candidates(self):
         self.assertEqual(wiki_title_candidates("https://en.wikipedia.org/wiki/Las_Vegas"), ["Las_Vegas"])
         self.assertEqual(wiki_title_candidates("las vegas"), ["Las_vegas", "Las_Vegas"])
