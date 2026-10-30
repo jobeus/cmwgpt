@@ -111,6 +111,20 @@ class TestHistoryBreakpoints(unittest.TestCase):
         apply_history_breakpoints(messages, 50)
         self.assertEqual(_marked(messages), [3])
 
+    def test_skips_messages_posted_after_the_mention(self):
+        # The mention (id 3) waited while the bot replied (ids 4 and 5) to an earlier mention.
+        messages = _history(5)
+        for message, message_id in zip(messages, [1, 2, 4, 5, 3]):
+            message["message_id"] = message_id
+        self.assertEqual(apply_history_breakpoints(messages, None), 1)
+        self.assertEqual(_marked(messages), [1])
+        self.assertFalse(any("message_id" in m for m in messages))
+
+    def test_untagged_messages_keep_the_last_history_breakpoint(self):
+        messages = _history(5)
+        messages[-1]["message_id"] = 3
+        self.assertEqual(apply_history_breakpoints(messages, None), 3)
+
     def test_single_message_gets_no_history_breakpoint(self):
         messages = _history(1)
         self.assertIsNone(apply_history_breakpoints(messages, None))

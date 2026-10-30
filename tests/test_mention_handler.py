@@ -611,6 +611,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         context, _, _ = await handler._prepare_mention_context(second_q, SimpleNamespace(id=999))
 
         self.assertEqual([c["role"] for c in context], ["user", "assistant", "user"])
+        self.assertEqual([c["message_id"] for c in context], [1, 3, 2])
         self.assertIn("a1", context[1]["content"][0]["text"])
         self.assertIn("q2", context[-1]["content"][0]["text"])
 

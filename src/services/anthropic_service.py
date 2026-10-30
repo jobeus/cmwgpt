@@ -133,7 +133,11 @@ def build_anthropic_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, A
         parts = content if isinstance(content, list) else [content]
         blocks = [b for b in (_convert_part(p, role) for p in parts) if b is not None]
         if blocks:
-            converted.append({"role": role, "content": blocks})
+            entry: Dict[str, Any] = {"role": role, "content": blocks}
+            if msg.get("message_id") is not None:
+                # Read (and removed) by ``apply_history_breakpoints``; the API doesn't take it.
+                entry["message_id"] = msg["message_id"]
+            converted.append(entry)
 
     # The conversation must open with a user turn.
     if converted and converted[0]["role"] != "user":
@@ -155,8 +159,18 @@ def apply_history_breakpoints(
     still change (Discord unfurls link embeds a moment after posting). A second
     breakpoint goes where the previous request's history ended, so the read hits even
     when more than 20 blocks (the API's lookback limit) were added since.
+
+    Messages posted after the mention (it waited in the queue while the bot replied to
+    another one) sit just before it now but after it in the next request's history, so
+    the history breakpoint goes before them. Entries' ``message_id`` tags (Discord
+    snowflakes, so ordered by time) are how they're spotted; they're removed here.
     """
+    message_ids = [message.pop("message_id", None) for message in api_messages]
+    mention_id = message_ids[-1] if message_ids else None
     current_index = len(api_messages) - 2
+    if mention_id is not None:
+        while current_index >= 0 and (message_ids[current_index] or 0) > mention_id:
+            current_index -= 1
     if current_index < 0:
         return None
     marked = {current_index}

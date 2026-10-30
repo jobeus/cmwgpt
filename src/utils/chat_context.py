@@ -70,7 +70,12 @@ async def build_chat_context(
             )
 
     converted = await asyncio.gather(*(convert(i, m) for i, m in enumerate(messages)))
-    return [entry for entries in converted for entry in entries]
+    # Tag each entry with its Discord message so services can tell which came after the mention.
+    return [
+        {**entry, "message_id": msg.id}
+        for msg, entries in zip(messages, converted)
+        for entry in entries
+    ]
 
 
 async def _convert_message(
