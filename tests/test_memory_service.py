@@ -11,6 +11,7 @@ import discord
 from src.bot.commands.memory import MemoryCommands, build_self_embed, format_memory, resolve_target
 from src.bot.handlers.mention import MentionHandler
 from src.services.memory_service import (
+    parse_corrected_profile,
     CHANNEL_SUMMARY_SYSTEM_PROMPT,
     DAY_SUMMARY_SYSTEM_PROMPT,
     MAX_FOLLOW_UPS,
@@ -385,7 +386,7 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
     async def test_correct_rewrites_profile_and_saves(self):
         store = FakeStore({1: "Stable: drives a 2019 Tacoma"})
         service, _ = self.make_service(store, datetime(2026, 10, 19, 18, 0, tzinfo=UTC))
-        reply = json.dumps({"profile": "Stable: drives a Ranger"})
+        reply = 'Stable: drives a Ranger, goes by "Jobe" online, 6\'2"'
         with patch(
             "src.services.memory_service.dispatch_completion", new=AsyncMock(return_value=(reply, 0.003))
         ) as dispatch:
@@ -395,15 +396,23 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Today: 2026-10-19", prompt)
         self.assertIn("Stable: drives a 2019 Tacoma", prompt)
         self.assertIn("Correction:\nsold the Tacoma, drive a Ranger now", prompt)
-        self.assertEqual(store.rows[1], "Stable: drives a Ranger")
-        self.assertEqual(profile, "Stable: drives a Ranger")
+        self.assertEqual(store.rows[1], 'Stable: drives a Ranger, goes by "Jobe" online, 6\'2"')
+        self.assertEqual(profile, store.rows[1])
         self.assertEqual(cost, 0.003)
+
+    def test_correction_replies_are_read_as_plain_text_or_old_json(self):
+        self.assertEqual(parse_corrected_profile("```\nStable: bald\nStyle: brief\n```"), "Stable: bald\nStyle: brief")
+        self.assertEqual(parse_corrected_profile("(none)"), "")
+        self.assertEqual(parse_corrected_profile(json.dumps({"profile": "Current: moving (2026-10-30)"})),
+                         "Current: moving (2026-10-30)")
+        self.assertIsNone(parse_corrected_profile("Sorry, I can't do that."))
+        self.assertIsNone(parse_corrected_profile(""))
 
     async def test_correct_leaves_memory_alone_on_bad_reply(self):
         store = FakeStore({1: "keep me"})
         service, _ = self.make_service(store, datetime(2026, 10, 19, tzinfo=UTC))
         with patch("src.services.memory_service.dispatch_completion", new=AsyncMock(return_value=("sorry", 0.0))):
-            with self.assertRaises(ValueError):
+            with self.assertRaises(ValueError), self.assertLogs("src.services.memory_service", level="WARNING"):
                 await service.correct(42, 1, "Jobe", "whatever")
         self.assertEqual(store.rows[1], "keep me")
         self.assertEqual(store.saved, [])
