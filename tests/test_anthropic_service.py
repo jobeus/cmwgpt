@@ -375,6 +375,39 @@ class TestAnthropicStreaming(unittest.IsolatedAsyncioTestCase):
         self.assertIn("diagnostics", client.beta.messages.stream.call_args.kwargs)
 
 
+class ThinkingThenTextStream(FakeMessageStream):
+    """A stream that thinks out loud before answering, like a medium-effort reply."""
+
+    async def __aiter__(self):
+        yield SimpleNamespace(type="content_block_start", content_block=SimpleNamespace(type="thinking"))
+        yield SimpleNamespace(type="thinking", thinking="Let me work out the secret plan")
+        yield SimpleNamespace(type="content_block_delta",
+                              delta=SimpleNamespace(type="thinking_delta", thinking=" in detail"))
+        yield SimpleNamespace(type="content_block_stop")
+        for chunk in self._chunks:
+            yield SimpleNamespace(type="text", text=chunk)
+
+
+class TestThinkingStaysOutOfTheReply(unittest.IsolatedAsyncioTestCase):
+    async def test_only_text_is_streamed_and_returned(self):
+        final = _response(content=[
+            SimpleNamespace(type="thinking", thinking="Let me work out the secret plan in detail"),
+            SimpleNamespace(type="text", text="Here's the answer."),
+        ])
+        service = AnthropicService(api_key="test-key")
+        client = MagicMock()
+        client.beta.messages.stream = MagicMock(return_value=ThinkingThenTextStream(["Here's ", "the answer."], final))
+        service.set_client(client)
+        seen = []
+
+        text, _ = await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, on_text=seen.append)
+
+        self.assertEqual(text, "Here's the answer.")
+        self.assertEqual(seen, ["Here's", "Here's the answer."])
+        self.assertFalse(any("secret plan" in s for s in seen))
+        self.assertEqual(client.beta.messages.stream.call_args.kwargs["output_config"], {"effort": "medium"})
+
+
 class TestThinkHarderStreaming(unittest.IsolatedAsyncioTestCase):
     async def test_statuses_follow_what_the_model_starts(self):
         call = SimpleNamespace(type="tool_use", id="toolu_1", name="recall_channel", input={})

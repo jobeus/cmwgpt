@@ -41,7 +41,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 
 **Models:** each channel picks one with `/model`. The default is `anthropic/claude-sonnet-5.5` via OpenRouter.
 - **Claude API direct**, `sonnet-5.5-direct` and `opus-5.5-direct`:
-  - effort low, 16k max tokens
+  - effort medium on sonnet, low on opus (which can escalate with `think_harder`), 16k max tokens
   - client tools, up to 6 rounds per reply:
     - `draw(prompt)`: makes an image with the channel's `/drawmodel` and attaches it to the reply. You get the image back to comment on. The image's cost is in the cost prefix.
     - `edit_image(prompt, message_ids)`: edits images from messages in the channel (attachments or embed images, up to 4) with the channel's `/editmodel`, same as `draw` otherwise. `draw` and `edit_image` together make at most 2 images per reply.

@@ -36,8 +36,9 @@ class DirectModel:
 
 # Bot-facing model alias -> Claude API model.
 DIRECT_MODELS: Dict[str, DirectModel] = {
-    # Sonnet 5.5 recommends ``low`` for chat and search; it still thinks when a message needs it.
-    "sonnet-5.5-direct": DirectModel("claude-sonnet-5-5", 2.00, 10.00, 2.50, 0.20, effort="low"),
+    # ``medium``: at ``low`` Sonnet 5.5 skipped web searches it should have made. Its thinking
+    # stays out of the reply; only text blocks are streamed and posted.
+    "sonnet-5.5-direct": DirectModel("claude-sonnet-5-5", 2.00, 10.00, 2.50, 0.20, effort="medium"),
     # Opus 5.5 can't turn thinking off; its default ``medium`` overthinks chat, so run it at ``low``.
     "opus-5.5-direct": DirectModel("claude-opus-5-5", 4.00, 20.00, 5.00, 0.20, effort="low"),
 }
