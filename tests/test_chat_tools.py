@@ -414,3 +414,35 @@ class TestReact(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result.is_error)
         self.assertIn("doesn't know that emoji", result.content[0]["text"])
+
+
+class TestStrictSchemaLimits(unittest.TestCase):
+    """The API rejects a request whose strict tool schemas, all together, go over these limits."""
+
+    def _schemas(self):
+        from src.services import chat_tools
+        from src.services.anthropic_service import THINK_HARDER_TOOL
+        tools, _ = _full_tools(
+            irc_log=MagicMock(),
+            quote_file=MagicMock(),
+            url_content_fetcher=AsyncMock(),
+            day_summary_loader=AsyncMock(),
+            self_state_updater=AsyncMock(),
+            follow_up_updater=AsyncMock(),
+        )
+        every_tool = {v["name"] for k, v in vars(chat_tools).items() if k.endswith("_TOOL") and isinstance(v, dict)}
+        self.assertEqual(set(tools), every_tool)  # so a new tool can't sneak past this test
+        return [t.definition for t in tools.values()] + [THINK_HARDER_TOOL]
+
+    def test_strict_schemas_stay_under_the_api_limits(self):
+        strict = [d for d in self._schemas() if d.get("strict")]
+        props = [
+            (name, spec, name in d["input_schema"].get("required", []))
+            for d in strict for name, spec in d["input_schema"]["properties"].items()
+        ]
+        optional = [name for name, _, required in props if not required]
+        unions = [name for name, spec, _ in props if "anyOf" in spec or isinstance(spec.get("type"), list)]
+
+        self.assertLessEqual(len(strict), 20, "strict tools per request")
+        self.assertLessEqual(len(optional), 24, f"optional parameters across strict tools: {optional}")
+        self.assertLessEqual(len(unions), 16, f"union-type parameters across strict tools: {unions}")

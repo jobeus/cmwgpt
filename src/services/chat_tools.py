@@ -344,7 +344,7 @@ SEARCH_MESSAGES_TOOL = {
             },
             "all_channels": {
                 "type": "boolean",
-                "description": "Search every channel the asker can read instead of just this one. Default false.",
+                "description": "Search every channel the asker can read instead of just this one. Usually false.",
             },
             "has": {
                 "type": "array",
@@ -358,9 +358,9 @@ SEARCH_MESSAGES_TOOL = {
                 "enum": list(SORTS),
                 "description": "Result order. Default newest.",
             },
-            "skip": {"type": "integer", "description": "How many results to skip, for paging. Default 0."},
+            "skip": {"type": "integer", "description": "How many results to skip, for paging. 0 for the first page."},
         },
-        "required": [],
+        "required": ["all_channels", "skip"],
         "additionalProperties": False,
     },
     "strict": True,
@@ -368,7 +368,7 @@ SEARCH_MESSAGES_TOOL = {
 
 # Covers read_messages too.
 SEARCH_MESSAGES_GUIDANCE = (
-    "- `search_messages(query?, author_ids?, all_channels?, has?, after?, before?, sort?, skip?)` "
+    "- `search_messages(all_channels, skip, query?, author_ids?, has?, after?, before?, sort?)` "
     "and `read_messages(message_id, channel_id?, count?)`: this server's Discord history beyond "
     "what you were sent. Search when someone asks what was said earlier, when something came "
     "up, or for a link or picture someone posted; then read around a hit when you need the "
@@ -452,18 +452,18 @@ SEARCH_IRC_LOG_TOOL = {
             },
             "newest_first": {
                 "type": "boolean",
-                "description": "Show the most recent matches first instead of the oldest. Default false.",
+                "description": "Show the most recent matches first instead of the oldest. Usually false.",
             },
             "context": {
                 "type": "integer",
-                "description": f"Lines of surrounding chat to show around each match, 0-{MAX_CONTEXT_LINES}. Default 0.",
+                "description": f"Lines of surrounding chat to show around each match, 0-{MAX_CONTEXT_LINES}. Usually 0.",
             },
             "skip": {
                 "type": "integer",
-                "description": "How many matches to skip, for paging past the first results. Default 0.",
+                "description": "How many matches to skip, for paging past the first results. 0 for the first page.",
             },
         },
-        "required": ["query"],
+        "required": ["query", "newest_first", "context", "skip"],
         "additionalProperties": False,
     },
     "strict": True,
@@ -471,8 +471,8 @@ SEARCH_IRC_LOG_TOOL = {
 
 # Covers read_irc_log_day and count_irc_log too.
 SEARCH_IRC_LOG_GUIDANCE = (
-    "- `search_irc_log(query, nick?, newest_first?, context?, skip?)` and "
-    "`read_irc_log_day(date, start_line?)`: this channel's old IRC log, from before it "
+    "- `search_irc_log(query, newest_first, context, skip, nick?)` and "
+    "`read_irc_log_day(date, start_line)`: this channel's old IRC log, from before it "
     "moved to Discord. Search it when someone asks about the IRC days, what someone said "
     "back then, or when something first came up; every hit comes with its date. Then read "
     "the whole day around a promising hit when you need the conversation, not just one "
@@ -534,10 +534,10 @@ READ_IRC_LOG_DAY_TOOL = {
             "date": {"type": "string", "description": "The day, as YYYY-MM-DD."},
             "start_line": {
                 "type": "integer",
-                "description": f"Line to start from; a call returns at most {MAX_DAY_LINES} lines. Default 0.",
+                "description": f"Line to start from; a call returns at most {MAX_DAY_LINES} lines. 0 for the start of the day.",
             },
         },
-        "required": ["date"],
+        "required": ["date", "start_line"],
         "additionalProperties": False,
     },
     "strict": True,
@@ -604,16 +604,16 @@ OLD_QUOTES_TOOL = {
                 "type": "integer",
                 "description": f"Return this many random quotes (1-{MAX_RANDOM}) instead of all of them.",
             },
-            "skip": {"type": "integer", "description": "How many quotes to skip, for paging. Default 0."},
+            "skip": {"type": "integer", "description": "How many quotes to skip, for paging. 0 for the first page."},
         },
-        "required": [],
+        "required": ["skip"],
         "additionalProperties": False,
     },
     "strict": True,
 }
 
 OLD_QUOTES_GUIDANCE = (
-    "- `old_quotes(query?, random_count?, skip?)`: the old IRC quote bot's ~5000 "
+    "- `old_quotes(skip, query?, random_count?)`: the old IRC quote bot's ~5000 "
     "one-liners. They aren't in time order, so don't date a quote or say which came first "
     "unless its own text gives a date or year; for when something was said, use the IRC log. "
     "They're jokes from the IRC days, out of context and sometimes very offensive, saved "
