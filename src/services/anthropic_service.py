@@ -202,6 +202,15 @@ def apply_history_breakpoints(
     return current_index
 
 
+def _is_grammar_error(error: Exception) -> bool:
+    """Whether the API refused the request because the strict tools' combined grammar is too big."""
+    return "grammar is too large" in str(getattr(error, "message", "") or error)
+
+
+def _without_strict(tool: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: v for k, v in tool.items() if k != "strict"}
+
+
 def _think_harder_reason(response: Any) -> Optional[str]:
     """Return the ``reason`` if ``response`` stopped to call ``think_harder``, else None."""
     if getattr(response, "stop_reason", None) != "tool_use":
@@ -557,14 +566,25 @@ class AnthropicService:
         tool_statuses["think_harder"] = THINKING_HARDER_STATUS
 
         escalated = False
+        strict_dropped = False
         tool_rounds = 0
         try:
             while True:
                 status(THINKING_STATUS)
-                response, cost, previous_message_id, sent_messages = await self._send(
-                    client, api_messages, kwargs, direct_model, channel_id, previous_message_id,
-                    resolved_bot_id, show if on_text else None, status, tool_statuses, code_file_ids,
-                )
+                try:
+                    response, cost, previous_message_id, sent_messages = await self._send(
+                        client, api_messages, kwargs, direct_model, channel_id, previous_message_id,
+                        resolved_bot_id, show if on_text else None, status, tool_statuses, code_file_ids,
+                    )
+                except anthropic.BadRequestError as e:
+                    if strict_dropped or not _is_grammar_error(e) or not kwargs.get("tools"):
+                        raise
+                    # Too many or too big strict schemas: the arguments just aren't guaranteed
+                    # to match then, and every handler checks its own input anyway.
+                    logger.warning(f"[{api_model}] Strict tool grammar too large; retrying without strict mode")
+                    kwargs["tools"] = [_without_strict(t) for t in kwargs["tools"]]
+                    strict_dropped = True
+                    continue
                 total_cost += cost
                 reason = _think_harder_reason(response) if think_harder and not escalated else None
                 if reason is not None:

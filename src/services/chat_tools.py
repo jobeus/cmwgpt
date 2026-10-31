@@ -465,7 +465,6 @@ SEARCH_MESSAGES_TOOL = {
         "required": ["all_channels", "skip"],
         "additionalProperties": False,
     },
-    "strict": True,
 }
 
 # Covers read_messages too.
@@ -500,7 +499,6 @@ READ_MESSAGES_TOOL = {
         "required": ["message_id"],
         "additionalProperties": False,
     },
-    "strict": True,
 }
 
 WIKI_PAGEVIEWS_TOOL = {
@@ -567,7 +565,6 @@ SEARCH_IRC_LOG_TOOL = {
         "required": ["query", "newest_first", "context", "skip"],
         "additionalProperties": False,
     },
-    "strict": True,
 }
 
 # Covers read_irc_log_day and count_irc_log too.
@@ -620,7 +617,6 @@ COUNT_IRC_LOG_TOOL = {
         "required": ["query"],
         "additionalProperties": False,
     },
-    "strict": True,
 }
 
 READ_IRC_LOG_DAY_TOOL = {
@@ -641,7 +637,6 @@ READ_IRC_LOG_DAY_TOOL = {
         "required": ["date", "start_line"],
         "additionalProperties": False,
     },
-    "strict": True,
 }
 
 
@@ -758,7 +753,6 @@ OLD_QUOTES_TOOL = {
         "required": ["skip"],
         "additionalProperties": False,
     },
-    "strict": True,
 }
 
 OLD_QUOTES_GUIDANCE = (
@@ -796,7 +790,6 @@ VIEW_IMAGES_TOOL = {
         "required": ["message_ids"],
         "additionalProperties": False,
     },
-    "strict": True,
 }
 
 VIEW_IMAGES_GUIDANCE = (
@@ -853,6 +846,13 @@ def _image_block(part: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _as_list(value: Any) -> List[Any]:
+    """A list argument, accepting a lone value (non-strict tools can get one)."""
+    if value is None or value == "":
+        return []
+    return value if isinstance(value, list) else [value]
+
+
 def _int_arg(args: Dict[str, Any], key: str) -> int:
     try:
         return int(args.get(key) or 0)
@@ -869,7 +869,7 @@ def _parse_day(args: Dict[str, Any], key: str) -> Optional[date]:
 def _parse_ids(values: Any) -> List[int]:
     """Discord snowflakes (user, message or channel IDs) from a tool argument, deduped, at most 8."""
     ids: List[int] = []
-    for value in values if isinstance(values, list) else []:
+    for value in _as_list(values):
         match = _SNOWFLAKE_RE.search(str(value))
         if match:
             ids.append(int(match.group()))
@@ -1186,7 +1186,7 @@ def build_mention_tools(
             channels,
             query=query,
             author_ids=_parse_ids(args.get("author_ids")),
-            has=[str(h) for h in args.get("has") or []],
+            has=[str(h) for h in _as_list(args.get("has"))],
             after=after,
             before=before,
             sort=str(args.get("sort") or "newest"),
@@ -1350,7 +1350,7 @@ def build_mention_tools(
         if not query.strip():
             return text_result("No query given.", is_error=True)
         nick = str(args.get("nick") or "").strip().lstrip("@+%~&")
-        group_by = [g for g in args.get("group_by") or [] if g in ("nick", "year")]
+        group_by = [g for g in _as_list(args.get("group_by")) if g in ("nick", "year")]
         logger.info(f"[irc log tool] Channel {channel_id} Count: {query[:200]} Nick: {nick} Group: {group_by}")
         text = await asyncio.to_thread(
             irc_log.count, query, nick=nick, group_by=group_by, top=_int_arg(args, "top") or 15)

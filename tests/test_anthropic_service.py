@@ -5,6 +5,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import anthropic
+import httpx
+
 from src.services.anthropic_service import (
     CACHE_DIAGNOSIS_BETA,
     CODE_EXECUTION_TOOL,
@@ -631,6 +634,31 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
 
         self.assertAlmostEqual(ledger.by_provider["claude-direct"], cost)
         self.assertAlmostEqual(cost, 2 * _usage_cost(_usage(), DIRECT_MODELS["sonnet-5.5-direct"]))
+
+    async def test_a_too_large_strict_grammar_retries_without_strict(self):
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        too_big = anthropic.BadRequestError(
+            "The compiled grammar is too large, which would cause performance issues.",
+            response=httpx.Response(400, request=request), body=None)
+        service, client = self.make_service(too_big, _response("answer"))
+        strict_tool = self.tool()
+        strict_tool.definition["strict"] = True
+
+        text, _ = await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[strict_tool])
+
+        self.assertEqual(text, "answer")
+        first, retry = (c.kwargs for c in client.beta.messages.create.call_args_list)
+        self.assertTrue(any(t.get("strict") for t in first["tools"]))
+        self.assertFalse(any(t.get("strict") for t in retry["tools"]))
+
+    async def test_other_bad_requests_still_fail(self):
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        bad = anthropic.BadRequestError("messages: roles must alternate", response=httpx.Response(400, request=request),
+                                        body=None)
+        service, client = self.make_service(bad)
+        with self.assertRaises(AnthropicServiceError):
+            await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[self.tool()])
+        self.assertEqual(client.beta.messages.create.await_count, 1)
 
     async def test_a_failing_tool_becomes_an_error_result(self):
         call = SimpleNamespace(type="tool_use", id="toolu_1", name="recall_channel", input={})
