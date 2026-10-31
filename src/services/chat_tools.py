@@ -292,8 +292,10 @@ FOLLOW_UP_TOOL = {
     "description": (
         "Keep your list of things to ask people about later (the follow-ups in <about_you>). Add one when "
         "someone mentions something a friend would check in on later: an interview, a trip, a game, a "
-        "purchase, a problem they're dealing with. Mark follow-ups done once you've asked about them or "
-        "they've already told you how it went. Follow-ups drop off on their own after two weeks."
+        "purchase, a problem they're dealing with. Whenever you're about to ask about a follow-up, mark it "
+        "done first, in the same reply, before writing the question; also mark ones they've already "
+        "told you about. A follow-up you ask about without marking done gets asked again later. "
+        "Follow-ups drop off on their own after two weeks."
     ),
     "input_schema": {
         "type": "object",
@@ -318,7 +320,8 @@ FOLLOW_UP_TOOL = {
 
 FOLLOW_UP_GUIDANCE = (
     "- `follow_up(user_id?, about?, done?)`: adds something to ask a person about later, or marks "
-    "follow-ups done once you've asked. Add one when someone mentions something coming up or a "
+    "follow-ups done. Always mark one done before you ask about it in your reply, never after or "
+    "not at all. Add one when someone mentions something coming up or a "
     "problem a friend would check in on.\n"
 )
 

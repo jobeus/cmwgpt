@@ -529,7 +529,10 @@ class MentionHandler:
                 "follow-ups: things people here mentioned that you meant to ask them about. When one fits, "
                 "ask about it the way a friend catching up would, one at a time, and skip it if they're busy "
                 "with something else."
-                + (" Once you've asked, mark it done with `follow_up`." if uses_tools else "")
+                + (" Whenever you ask about one, first call `follow_up` with its number in `done`, then "
+                   "ask in your reply. Never ask about a follow-up without marking it done in that same "
+                   "reply, or you'll ask them the same thing again later. Do the same when someone tells "
+                   "you how it went before you ask." if uses_tools else "")
                 + "\n\n"
             )
         if model in THINK_HARDER_MODELS:
