@@ -31,13 +31,13 @@ class TestWatchFile(unittest.IsolatedAsyncioTestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    async def watch(self, seconds, gemini=None):
+    async def watch(self, seconds, gemini=None, *, name="download.mkv", size=2048):
         gemini = gemini or _gemini()
 
         async def fake_download(url, temp_dir):
-            path = os.path.join(temp_dir, "download")
+            path = os.path.join(temp_dir, name)
             with open(path, "wb") as f:
-                f.write(b"x" * 2048)
+                f.truncate(size)
             return path
 
         def fake_ffmpeg(args):
@@ -58,11 +58,25 @@ class TestWatchFile(unittest.IsolatedAsyncioTestCase):
         args = ffmpeg.call_args.args[0]
         self.assertEqual(args[0], "ffmpeg")
         self.assertIn("scale=-2:'min(480,ih)'", args)
+        self.assertEqual(gemini.upload_video.await_args.args[1], "video/mp4")
         uri, prompt = gemini.watch_video.await_args.args
         self.assertEqual(uri, "files/abc-uri")
         self.assertIn("the trick", prompt)
         self.assertFalse(gemini.watch_video.await_args.kwargs["agentic"])
         gemini.delete_file.assert_awaited_once_with("files/abc")
+
+    async def test_small_videos_gemini_takes_are_uploaded_as_they_are(self):
+        _, gemini, ffmpeg = await self.watch(42.0, name="download.mov", size=50 * 1024 * 1024)
+        ffmpeg.assert_not_called()
+        path, mime_type = gemini.upload_video.await_args.args
+        self.assertTrue(path.endswith("download.mov"))
+        self.assertEqual(mime_type, "video/mov")
+        self.assertEqual(gemini.watch_video.await_args.kwargs["mime_type"], "video/mov")
+
+    async def test_videos_of_100mb_or_more_are_reencoded(self):
+        _, gemini, ffmpeg = await self.watch(42.0, name="download.mp4", size=100 * 1024 * 1024)
+        ffmpeg.assert_called_once()
+        self.assertTrue(gemini.upload_video.await_args.args[0].endswith("watch.mp4"))
 
     async def test_long_videos_are_watched_agentically(self):
         _, gemini, _ = await self.watch(AGENTIC_MIN_SECONDS + 1)

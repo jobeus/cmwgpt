@@ -240,7 +240,7 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | `set_timezone` | `src/services/timezone_service.py` (Redis; also feeds the `<time_zones>` block on every mention) | a guild, Redis |
 | `summarize_youtube` | `VideoWatcher.summarize_youtube`: agentic through the Interactions API from 5 minutes (length from yt-dlp's metadata), else `GeminiService.summarize_youtube` (static), cached in `cmwgpt:cache:youtube_summaries` | `GEMINI_API_KEY` |
 | `transcribe_youtube` | `youtube_utils.get_transcript` (captions) | — |
-| `watch_video` | `VideoWatcher.watch` (`src/services/video_service.py`): downloads, re-encodes to 480p/10 fps, uploads to the Files API, then `GeminiService.watch_video` (Interactions API, `processing` static under 5 minutes, agentic from 5 minutes), cached in `cmwgpt:cache:video_watches` | `GEMINI_API_KEY`, ffmpeg |
+| `watch_video` | `VideoWatcher.watch` (`src/services/video_service.py`): downloads, uploads to the Files API as is under 100 MB (else re-encodes to 480p/10 fps first), then `GeminiService.watch_video` (Interactions API, `processing` static under 5 minutes, agentic from 5 minutes), cached in `cmwgpt:cache:video_watches` | `GEMINI_API_KEY`, ffmpeg |
 | `read_urls` | `fetch_all_url_content` (same fetchers and cache as enrichment), for any URL, including web search results; used instead of the API's `web_fetch` so links go through the site-specific fetchers | — |
 | `wiki_pageviews` | `DeathService.get_avg_monthly_views` | — |
 | `how_i_work` | `src/prompts/how_i_work.txt` | — |

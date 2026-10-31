@@ -9,8 +9,9 @@ transcribe with Groq can be watched instead:
   posts; TikTok, Facebook, Reddit and other pages yt-dlp understands are downloaded with
   yt-dlp (through ``TRANSCRIPT_PROXY`` if a direct download fails); direct video links
   and Discord attachments are downloaded as they are.
-- Downloaded videos are re-encoded small (``REENCODE_ARGS``: 480p, 10 fps, mono audio),
-  uploaded to Gemini's Files API, watched, and deleted.
+- Downloaded videos under ``UPLOAD_AS_IS_BYTES`` in a format Gemini takes go up to its
+  Files API as they are; bigger ones (or other formats) are re-encoded small first
+  (``REENCODE_ARGS``: 480p, 10 fps, mono audio). Either way the upload is deleted after.
 
 Videos under ``AGENTIC_MIN_SECONDS`` are watched statically: Gemini samples the whole
 thing at 1 fps, which is best for a short clip or a summary. Longer ones are watched
@@ -57,6 +58,14 @@ REENCODE_ARGS = [
     "-c:a", "aac", "-ac", "1", "-b:a", "48k",
     "-movflags", "+faststart",
 ]
+# Smaller videos skip re-encoding and are uploaded as they are.
+UPLOAD_AS_IS_BYTES = 100 * 1024 * 1024
+# What Gemini's Files API takes, by file extension.
+GEMINI_VIDEO_TYPES = {
+    ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/mov", ".webm": "video/webm",
+    ".mpeg": "video/mpeg", ".mpg": "video/mpg", ".avi": "video/avi", ".flv": "video/x-flv",
+    ".wmv": "video/wmv", ".3gp": "video/3gpp",
+}
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm", ".mkv", ".m4v", ".avi", ".3gp", ".mpeg", ".mpg", ".flv", ".wmv")
 
 _watch_cache = PersistentCache("video_watches")
@@ -140,7 +149,8 @@ async def download_video(url: str, temp_dir: str) -> str:
         if not source:
             raise VideoError("That post has no video I can get.")
     if source != url or is_direct_video_url(source):
-        path = os.path.join(temp_dir, "download")
+        # Keep the extension, which says what format it is.
+        path = os.path.join(temp_dir, "download" + os.path.splitext(urlparse(source).path)[1].lower())
         try:
             await download_public(source, path, max_bytes=MAX_DOWNLOAD_BYTES, timeout=DOWNLOAD_TIMEOUT_SECONDS)
         except Exception as e:
@@ -218,19 +228,25 @@ class VideoWatcher:
                 raise VideoError("That file isn't a video I can read.")
             if seconds > MAX_VIDEO_SECONDS:
                 raise VideoError(f"That video is {seconds / 3600:.1f} hours long; I can watch up to 3.")
-            small = os.path.join(temp_dir, "watch.mp4")
+            size = os.path.getsize(downloaded)
+            mime_type = GEMINI_VIDEO_TYPES.get(os.path.splitext(downloaded)[1].lower())
+            if size < UPLOAD_AS_IS_BYTES and mime_type:
+                upload = downloaded
+                logger.info(f"[video] {url}: {seconds:.0f}s, uploading {size // 1024} KB as it is")
+            else:
+                upload, mime_type = os.path.join(temp_dir, "watch.mp4"), "video/mp4"
+                try:
+                    await asyncio.to_thread(_run, ["ffmpeg", "-y", "-i", downloaded, *REENCODE_ARGS, upload])
+                except subprocess.CalledProcessError as e:
+                    raise VideoError("Couldn't re-encode that video.") from e
+                logger.info(
+                    f"[video] {url}: {seconds:.0f}s, re-encoded {size // 1024} KB -> "
+                    f"{os.path.getsize(upload) // 1024} KB")
             try:
-                await asyncio.to_thread(_run, ["ffmpeg", "-y", "-i", downloaded, *REENCODE_ARGS, small])
-            except subprocess.CalledProcessError as e:
-                raise VideoError("Couldn't re-encode that video.") from e
-            logger.info(
-                f"[video] {url}: {seconds:.0f}s, re-encoded {os.path.getsize(downloaded) // 1024} KB -> "
-                f"{os.path.getsize(small) // 1024} KB")
-            try:
-                uploaded = await self._gemini.upload_video(small)
+                uploaded = await self._gemini.upload_video(upload, mime_type)
                 return await self._gemini.watch_video(
                     uploaded.uri, watch_prompt(focus), agentic=seconds >= AGENTIC_MIN_SECONDS,
-                    mime_type="video/mp4")
+                    mime_type=mime_type)
             except GeminiServiceError as e:
                 raise VideoError(str(e)) from e
         finally:
