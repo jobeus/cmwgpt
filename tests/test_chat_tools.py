@@ -102,11 +102,11 @@ class TestChatTools(unittest.IsolatedAsyncioTestCase):
 
     def test_offers_all_tools_in_a_fixed_order(self):
         tools, _ = _tools()
-        self.assertEqual(list(tools), ["draw", "recall_users", "recall_channel", "how_i_work"])
+        self.assertEqual(list(tools), ["draw", "recall_users", "recall_channel", "transcribe_youtube", "how_i_work"])
 
     def test_leaves_out_tools_without_their_dependencies(self):
         tools, _ = _tools(guild_id=None, default_draw_model=None)
-        self.assertEqual(list(tools), ["how_i_work"])
+        self.assertEqual(list(tools), ["transcribe_youtube", "how_i_work"])
 
     @patch("src.services.chat_tools.compress_image", return_value=b"jpeg")
     async def test_draw_uses_the_channel_model_and_returns_the_image(self, _compress):
@@ -157,13 +157,15 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
         tools, _ = _full_tools()
         self.assertEqual(list(tools), [
             "draw", "edit_image", "recall_users", "recall_channel", "remember",
-            "search_messages", "read_messages", "view_images", "react", "wiki_pageviews", "how_i_work",
+            "search_messages", "read_messages", "view_images", "react", "transcribe_youtube", "wiki_pageviews",
+            "how_i_work",
         ])
 
     def test_every_tool_is_named_in_the_prompt_guidance(self):
         tools, _ = _full_tools(
             irc_log=MagicMock(), quote_file=MagicMock(), url_content_fetcher=AsyncMock(),
-            day_summary_loader=AsyncMock(),
+            day_summary_loader=AsyncMock(), reminder_service=MagicMock(), timezone_store=MagicMock(),
+            video_summarizer=AsyncMock(),
         )
         guidance = "".join(tool.guidance for tool in tools.values())
         for name in tools:
@@ -429,6 +431,9 @@ class TestStrictSchemaLimits(unittest.TestCase):
             day_summary_loader=AsyncMock(),
             self_state_updater=AsyncMock(),
             follow_up_updater=AsyncMock(),
+            reminder_service=MagicMock(),
+            timezone_store=MagicMock(),
+            video_summarizer=AsyncMock(),
         )
         every_tool = {v["name"] for k, v in vars(chat_tools).items() if k.endswith("_TOOL") and isinstance(v, dict)}
         self.assertEqual(set(tools), every_tool)  # so a new tool can't sneak past this test

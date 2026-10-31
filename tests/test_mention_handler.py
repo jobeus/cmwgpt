@@ -560,6 +560,70 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             created_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
         )
 
+    async def test_mention_replying_to_an_old_thread_gets_its_earlier_messages(self):
+        handler, _, _, _, _ = self.make_handler()
+        channel = MagicMock()
+        channel.id = 44
+        channel.name = "threads"
+        root = self._simple_msg(40, channel, content="anyone tried the new Zelda?", author_id=222)
+        bot_reply = self._simple_msg(50, channel, content="[$0.010] I hear it's great", author_id=999)
+        bot_reply.reference = SimpleNamespace(message_id=40, resolved=None)
+        mention = self._simple_msg(60, channel, content="<@999> why great?")
+        mention.reference = SimpleNamespace(message_id=50, resolved=None)
+        channel.fetch_message = AsyncMock(side_effect=lambda mid: {40: root, 50: bot_reply}[mid])
+
+        async def history(limit=None, after=None):
+            yield mention
+
+        channel.history = history
+        context, _, _ = await handler._prepare_mention_context(mention, SimpleNamespace(id=999))
+
+        block = context[-1]["content"][-1]["text"]
+        self.assertTrue(block.startswith("<reply_thread>"))
+        self.assertLess(block.index("[40] <@222>: anyone tried"), block.index("[50] <@999>: I hear it's great"))
+        self.assertNotIn("$0.010", block)
+
+    async def test_reply_threads_stop_at_the_history_window(self):
+        handler, _, _, _, _ = self.make_handler()
+        channel = MagicMock()
+        channel.id = 45
+        channel.name = "threads"
+        parent = self._simple_msg(50, channel, content="in the window")
+        mention = self._simple_msg(60, channel, content="<@999> right")
+        mention.reference = SimpleNamespace(message_id=50, resolved=None)
+        channel.fetch_message = AsyncMock()
+
+        async def history(limit=None, after=None):
+            for msg in (mention, parent):
+                yield msg
+
+        channel.history = history
+        context, _, _ = await handler._prepare_mention_context(mention, SimpleNamespace(id=999))
+
+        channel.fetch_message.assert_not_awaited()
+        self.assertFalse(any("<reply_thread>" in p.get("text", "") for p in context[-1]["content"]))
+
+    async def test_saved_time_zones_ride_on_the_mention(self):
+        handler, _, _, _, _ = self.make_handler()
+        handler._timezone_store = MagicMock()
+        handler._timezone_store.time_zones_block = AsyncMock(return_value="<time_zones>\n<@111>: America/Denver")
+        channel = MagicMock()
+        channel.id = 46
+        channel.name = "tz"
+        mention = self._simple_msg(60, channel, content="<@999> remind me at 8pm")
+        mention.guild = SimpleNamespace(id=10)
+        mention.mentions = []
+        mention.author.bot = False
+
+        async def history(limit=None, after=None):
+            yield mention
+
+        channel.history = history
+        context, _, _ = await handler._prepare_mention_context(mention, SimpleNamespace(id=999))
+
+        handler._timezone_store.time_zones_block.assert_awaited_once_with(10, [111])
+        self.assertIn("America/Denver", context[-1]["content"][-1]["text"])
+
     async def test_prepare_context_calls_url_fetcher_with_cache_only_flag(self):
         fetcher = AsyncMock(return_value=("", []))
         handler, _, _, _, _ = self.make_handler(url_content_fetcher=fetcher)
@@ -765,7 +829,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         await handler.handle_mention(message, SimpleNamespace(id=999), "gpt-test")
 
         tools = anthropic_service.get_chat_completion.await_args.kwargs["tools"]
-        self.assertEqual([t.definition["name"] for t in tools], ["read_urls", "how_i_work"])
+        self.assertEqual([t.definition["name"] for t in tools], ["read_urls", "transcribe_youtube", "how_i_work"])
         self.assertNotIn("tools", openai_service.get_chat_completion.await_args.kwargs)
 
     async def test_prepare_context_puts_queued_mention_after_replies_posted_while_waiting(self):

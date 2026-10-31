@@ -66,6 +66,10 @@ class DiscordBotClient:
         if getattr(self.services, "memory_service", None) is not None:
             self.services.memory_service.set_bot(self.bot)
 
+        # Reminders post themselves when due
+        if getattr(self.services, "reminder_service", None) is not None:
+            self.services.reminder_service.set_bot(self.bot)
+
         # Set up event handlers
         self._setup_events()
 
@@ -202,6 +206,9 @@ class DiscordBotClient:
 
             if getattr(self.services, "memory_service", None) is not None:
                 self.services.memory_service.start()
+
+            if getattr(self.services, "reminder_service", None) is not None:
+                self.services.reminder_service.start()
 
             print(f"🤖 Logged in as {self.bot.user}")
 

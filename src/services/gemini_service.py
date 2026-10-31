@@ -33,6 +33,17 @@ PRICE_CACHED_PER_M = 0.15  # cached tokens
 
 GEMINI_MODEL = "gemini-3.8-flash"
 
+# Watching a YouTube video (summarize_youtube): low media resolution is ~100 tokens per
+# second of video, so an hour is ~360k tokens (~$0.54), and long videos still fit.
+VIDEO_TIMEOUT_SECONDS = 600
+VIDEO_SUMMARY_PROMPT = (
+    "Watch this YouTube video and write a summary for people in a group chat who won't watch it. Cover: what "
+    "it is (title and channel if shown); the main points or story in order, with rough [mm:ss] timestamps; "
+    "notable quotes, word for word; anything shown on screen that matters, not just what's said; and how it "
+    "ends or what it concludes. Scale the length to the video: a few sentences for a short clip, up to about "
+    "800 words for a long one. Plain text, no preamble, and don't make up anything you didn't see or hear."
+)
+
 # How long before a channel's cached interaction ID expires (seconds)
 INTERACTION_CACHE_TTL = 600  # 10 minutes
 
@@ -271,6 +282,53 @@ class GeminiService:
         except Exception as e:
             logger.warning(f"Failed to estimate Gemini cost: {e}")
             return 0.0
+
+    async def summarize_youtube(self, video_url: str, focus: str = "") -> tuple[str, float]:
+        """Have Gemini watch a public YouTube video and summarize it. Returns ``(summary, cost)``.
+
+        ``focus`` is what to pay special attention to (a question someone asked about it).
+        Raises ``GeminiServiceError`` if Gemini can't watch it (private, removed, too long).
+        """
+        from google.genai import types
+
+        prompt = VIDEO_SUMMARY_PROMPT
+        if focus.strip():
+            prompt += f"\n\nPay special attention to this, and answer it if it's a question: {focus.strip()}"
+        logger.info(f"[gemini/video] Summarizing {video_url} focus={focus[:100]!r}")
+        try:
+            response = await self._get_client().aio.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=types.Content(parts=[
+                    types.Part(file_data=types.FileData(file_uri=video_url)),
+                    types.Part.from_text(text=prompt),
+                ]),
+                config=types.GenerateContentConfig(
+                    media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
+                    http_options=types.HttpOptions(timeout=VIDEO_TIMEOUT_SECONDS * 1000),
+                ),
+            )
+        except Exception as e:
+            raise GeminiServiceError(f"Gemini couldn't watch that video: {e}") from e
+        usage = getattr(response, "usage_metadata", None)
+        cost = self._estimate_video_cost(usage)
+        await record_cost(GEMINI_DIRECT, cost)
+        text = (getattr(response, "text", None) or "").strip()
+        if not text:
+            raise GeminiServiceError("Gemini watched the video but wrote nothing.")
+        logger.info(f"[gemini/video] Usage: {usage}. Estimated cost: ${cost:.4f}")
+        return text, cost
+
+    def _estimate_video_cost(self, usage_metadata: Any) -> float:
+        """Price a GenerateContent call at Gemini's chat rates (video input costs the same as text)."""
+        if not usage_metadata:
+            return 0.0
+        input_tokens = getattr(usage_metadata, "prompt_token_count", 0) or 0
+        cached = getattr(usage_metadata, "cached_content_token_count", 0) or 0
+        output = (getattr(usage_metadata, "candidates_token_count", 0) or 0) + (
+            getattr(usage_metadata, "thoughts_token_count", 0) or 0)
+        return (
+            (input_tokens - cached) * PRICE_INPUT_PER_M + cached * PRICE_CACHED_PER_M + output * PRICE_OUTPUT_PER_M
+        ) / 1_000_000
 
     def _estimate_image_cost(self, usage_metadata: Any, model: str) -> float:
         """Estimate cost from GenerateContent API usage metadata for image models."""

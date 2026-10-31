@@ -641,3 +641,121 @@ class AnthropicService:
         if not cleaned:
             raise AnthropicServiceError("The Claude API returned an empty response.")
         return cleaned, total_cost
+
+
+# -- Message Batches ------------------------------------------------------------------
+
+# Requests made within this long of each other go in one batch.
+BATCH_COLLECT_SECONDS = 2.0
+BATCH_POLL_SECONDS = 60.0
+# Batches can take up to 24 hours; give up (and cancel) a little before the API would.
+BATCH_MAX_WAIT_SECONDS = 23 * 3600
+# Batched requests cost half the normal rates, cache reads and writes included.
+BATCH_DISCOUNT = 0.5
+
+
+@dataclass
+class _BatchItem:
+    custom_id: str
+    params: Dict[str, Any]
+    model: DirectModel
+    future: "asyncio.Future[Tuple[str, float]]"
+
+
+class MessageBatcher:
+    """Sends Claude API requests through the Message Batches API: half price, but slower.
+
+    :meth:`complete` looks like one request to the caller. Requests made within
+    ``BATCH_COLLECT_SECONDS`` of each other go in one batch, which is polled until it
+    ends. A request that fails in the batch (errored, expired, or the batch couldn't be
+    sent) raises ``AnthropicServiceError``, so the caller can retry it normally.
+    """
+
+    def __init__(
+        self, service: "AnthropicService", *,
+        collect_seconds: float = BATCH_COLLECT_SECONDS, poll_seconds: float = BATCH_POLL_SECONDS,
+        max_wait_seconds: float = BATCH_MAX_WAIT_SECONDS,
+    ):
+        self._service = service
+        self._collect_seconds = collect_seconds
+        self._poll_seconds = poll_seconds
+        self._max_wait_seconds = max_wait_seconds
+        self._pending: List[_BatchItem] = []
+        self._flush: Optional[asyncio.Task] = None
+        self._tasks: set = set()
+        self._next_id = 0
+
+    async def complete(
+        self, *, model: str, system_prompt: str, user_text: str, effort: Optional[str] = None,
+    ) -> Tuple[str, float]:
+        """Queue one single-turn request and wait for its ``(text, cost)``."""
+        direct_model = DIRECT_MODELS.get(model) or DIRECT_MODELS["sonnet-5.5-direct"]
+        params: Dict[str, Any] = {
+            "model": direct_model.api_id,
+            "max_tokens": MAX_TOKENS,
+            "output_config": {"effort": effort or direct_model.effort},
+            "messages": [{"role": "user", "content": [{"type": "text", "text": user_text}]}],
+        }
+        if system_prompt:
+            params["system"] = [{"type": "text", "text": system_prompt, "cache_control": _EPHEMERAL}]
+        self._next_id += 1
+        item = _BatchItem(f"req-{self._next_id}", params, direct_model, asyncio.get_running_loop().create_future())
+        self._pending.append(item)
+        if self._flush is None or self._flush.done():
+            self._flush = asyncio.create_task(self._flush_soon())
+        return await item.future
+
+    async def _flush_soon(self) -> None:
+        await asyncio.sleep(self._collect_seconds)
+        items, self._pending = self._pending, []
+        if items:
+            # Its own task, so requests made while this batch runs start the next one.
+            task = asyncio.create_task(self._run(items))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+
+    async def _run(self, items: List[_BatchItem]) -> None:
+        by_id = {item.custom_id: item for item in items}
+        try:
+            await self._run_batch(by_id)
+        except Exception as e:
+            logger.warning(f"[batch] Batch of {len(items)} failed: {e}")
+        finally:
+            for item in by_id.values():
+                if not item.future.done():
+                    item.future.set_exception(AnthropicServiceError("The batched request didn't complete."))
+
+    async def _run_batch(self, by_id: Dict[str, _BatchItem]) -> None:
+        client = self._service.get_client()
+        batch = await client.beta.messages.batches.create(
+            requests=[{"custom_id": cid, "params": item.params} for cid, item in by_id.items()])
+        logger.info(f"[batch] Sent {batch.id} with {len(by_id)} requests")
+        waited = 0.0
+        while getattr(batch, "processing_status", None) != "ended":
+            if waited >= self._max_wait_seconds:
+                logger.warning(f"[batch] {batch.id} took too long; cancelling it")
+                await client.beta.messages.batches.cancel(batch.id)
+                return
+            await asyncio.sleep(self._poll_seconds)
+            waited += self._poll_seconds
+            batch = await client.beta.messages.batches.retrieve(batch.id)
+        total = 0.0
+        async for entry in await client.beta.messages.batches.results(batch.id):
+            item = by_id.get(entry.custom_id)
+            if item is None or item.future.done():
+                continue
+            result = entry.result
+            if getattr(result, "type", None) != "succeeded":
+                item.future.set_exception(AnthropicServiceError(f"Batched request {getattr(result, 'type', '?')}."))
+                continue
+            message = result.message
+            served_by = _MODELS_BY_API_ID.get(getattr(message, "model", None) or "", item.model)
+            cost = _usage_cost(getattr(message, "usage", None), served_by) * BATCH_DISCOUNT
+            total += cost
+            await record_cost(CLAUDE_DIRECT, cost)
+            if getattr(message, "stop_reason", None) == "refusal":
+                item.future.set_exception(AnthropicServiceError("Claude declined this request."))
+                continue
+            item.future.set_result((_response_text(message), cost))
+        logger.info(f"[batch] {batch.id} ended: {len(by_id)} requests, ${total:.4f}")
+

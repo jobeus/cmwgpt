@@ -22,6 +22,8 @@ from src.services.memory_service import MemoryService
 from src.services.day_summary_service import DaySummaryService
 from src.services.paste_service import PasteService
 from src.services.queue_service import QueueService
+from src.services.reminder_service import ReminderService
+from src.services.timezone_service import TimezoneStore
 from src.services.restart_handler import RestartHandler
 from src.services.runpod_service import RunpodService
 from src.services.state_service import StateService
@@ -48,6 +50,7 @@ class AppServices:
     memory_store: Any = None
     memory_service: Any = None
     cost_store: Any = None
+    reminder_service: Any = None
 
 
 def create_services(config: Optional[AppConfig] = None) -> AppServices:
@@ -100,6 +103,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         anthropic_service=anthropic_service,
         store=memory_store,
     )
+    reminder_service = ReminderService(is_testing=app_config.is_testing)
     mention_handler = MentionHandler(
         state_service=state_service,
         openai_service=openai_service,
@@ -123,6 +127,9 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         self_state_provider=memory_service.get_self_block,
         self_state_updater=memory_service.update_self,
         follow_up_updater=memory_service.update_follow_ups,
+        reminder_service=reminder_service,
+        timezone_store=None if app_config.is_testing else TimezoneStore(),
+        video_summarizer=gemini_service.summarize_youtube if app_config.gemini_api_key else None,
     )
 
     return AppServices(
@@ -142,6 +149,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         memory_store=memory_store,
         memory_service=memory_service,
         cost_store=cost_store,
+        reminder_service=reminder_service,
     )
 
 
@@ -162,6 +170,8 @@ async def shutdown_services(services: AppServices) -> None:
     await step("deploy webhook stop", services.auto_update_service.stop)
     if services.memory_service is not None:
         await step("memory job stop", services.memory_service.stop)
+    if getattr(services, "reminder_service", None) is not None:
+        await step("reminders stop", services.reminder_service.stop)
     await step("death service close", services.death_service.close)
     # Lets each channel finish the reply it is working on (bounded by a timeout).
     await step("queue drain", services.queue_service.stop)

@@ -236,6 +236,10 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | `react` | `add_reaction` on a message in the mention's channel (5 per reply; the tools section lists the server's custom emoji) | a guild |
 | `search_irc_log`, `read_irc_log_day`, `count_irc_log` | `src/services/irc_log_service.py` (memory-mapped log) | `IRC_LOG` (`IRC_NICKS` optional) |
 | `old_quotes` | `src/services/quote_service.py` | `OLD_QUOTE_BOT` |
+| `remind`, `list_reminders`, `cancel_reminder` | `src/services/reminder_service.py` (Redis; posts due reminders every 15s) | a guild |
+| `set_timezone` | `src/services/timezone_service.py` (Redis; also feeds the `<time_zones>` block on every mention) | a guild, Redis |
+| `summarize_youtube` | `GeminiService.summarize_youtube` (Gemini watches the video), cached in `cmwgpt:cache:youtube_summaries` | `GEMINI_API_KEY` |
+| `transcribe_youtube` | `youtube_utils.get_transcript` (captions) | — |
 | `read_urls` | `fetch_all_url_content` (same fetchers and cache as enrichment), for any URL, including web search results; used instead of the API's `web_fetch` so links go through the site-specific fetchers | — |
 | `wiki_pageviews` | `DeathService.get_avg_monthly_views` | — |
 | `how_i_work` | `src/prompts/how_i_work.txt` | — |
@@ -243,7 +247,7 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 
 ### Adding a tool
 
-1. In `src/services/chat_tools.py`, add the `*_TOOL` definition (strict JSON schema), a `*_GUIDANCE` bullet for the system prompt's "Your tools" section, and a handler inside `build_mention_tools`. Register it with `ChatTool(definition, handler, status, guidance)`; `status` is what the reply preview shows while it runs.
+1. In `src/services/chat_tools.py`, add the `*_TOOL` definition (a JSON schema; mark it `"strict": True` unless it's trivial, since the API allows at most 20 strict tools and 24 optional strict parameters per request, which `TestStrictSchemaLimits` checks), a `*_GUIDANCE` bullet for the system prompt's "Your tools" section, and a handler inside `build_mention_tools`. Register it with `ChatTool(definition, handler, status, guidance)`; `status` is what the reply preview shows while it runs.
 2. Pass any new dependency through `MentionHandler.__init__` and `_build_tools`, and wire it in `src/startup.py`. Leave the tool out when the dependency is missing.
 3. Treat anything other people wrote (messages, pages, logs, quotes) as material, not instructions; if the tool returns such text, add its name to the set at the end of `MentionHandler._tools_addon` that adds the warning.
 4. Describe it in `src/prompts/how_i_work.txt` (see `.agents/rules/keep-how-i-work-current.md`) and in the table above.

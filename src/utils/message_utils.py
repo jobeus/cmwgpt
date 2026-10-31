@@ -6,7 +6,7 @@ stateless utility functions from stateful service classes.
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, tzinfo
 
 import discord
 import re
@@ -19,16 +19,20 @@ from typing import Any, Callable, List, Optional, Union
 PROMPT_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
-def format_discord_timestamp(timestamp: datetime) -> str:
-    """Format a Discord timestamp in the timezone requested by the process."""
+def prompt_timezone() -> Optional[tzinfo]:
+    """The timezone the prompt's timestamps are in: ``TZ`` if set and known, else the system's."""
     tz_name = os.environ.get("TZ", "").strip()
     if tz_name:
         try:
-            return timestamp.astimezone(ZoneInfo(tz_name)).strftime(PROMPT_TIMESTAMP_FORMAT)
+            return ZoneInfo(tz_name)
         except ZoneInfoNotFoundError:
             pass
+    return datetime.now().astimezone().tzinfo
 
-    return timestamp.astimezone().strftime(PROMPT_TIMESTAMP_FORMAT)
+
+def format_discord_timestamp(timestamp: datetime) -> str:
+    """Format a Discord timestamp in the timezone requested by the process."""
+    return timestamp.astimezone(prompt_timezone()).strftime(PROMPT_TIMESTAMP_FORMAT)
 
 
 def format_attachment_message(

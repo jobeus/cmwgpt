@@ -1,7 +1,7 @@
 import re
 import logging
 import asyncio
-from typing import List, Optional
+from typing import Awaitable, Callable, List, Optional, Tuple
 from youtube_transcript_api import YouTubeTranscriptApi
 from src.config import get_config
 from src.utils.cache_utils import PersistentCache, skip_recent_failures
@@ -10,6 +10,28 @@ logger = logging.getLogger(__name__)
 
 # Redis cache for transcripts: video_id -> transcript text
 _transcript_cache = PersistentCache('youtube_transcripts')
+# Gemini's summaries: "<video_id>:<focus>" -> summary text
+_summary_cache = PersistentCache('youtube_summaries')
+
+
+def video_url(video_id: str) -> str:
+    return f"https://www.youtube.com/watch?v={video_id}"
+
+
+async def get_video_summary(
+    video_id: str, focus: str, summarizer: Callable[[str, str], Awaitable[Tuple[str, float]]],
+) -> Tuple[str, float]:
+    """``summarizer``'s summary of the video, cached per video and focus. Returns ``(summary, cost)``.
+
+    The cost is 0 for a cached summary. ``summarizer`` errors propagate.
+    """
+    key = f"{video_id}:{' '.join(focus.lower().split())}"
+    cached = await _summary_cache.get(key)
+    if cached is not None:
+        return cached, 0.0
+    summary, cost = await summarizer(video_url(video_id), focus)
+    await _summary_cache.set(key, summary)
+    return summary, cost
 
 
 def extract_video_ids(text: str) -> List[str]:

@@ -26,6 +26,13 @@ also change it while replying with the ``update_self`` tool.
 :meth:`MemoryService.get_self_block` returns it for the mention handler to add to the
 mention.
 
+The nightly run sends its calls through the Message Batches API when the memory model
+is a Claude API model: half price, but each round of calls can take minutes (rarely
+hours), so a day's channel summaries and profile extraction run side by side and the
+merges after them, two rounds a day. A call that fails in a batch is retried normally.
+Everything else (``/fillmemory``, ``/memory correct``, the bot's own state) calls the
+model directly, since someone may be waiting on it.
+
 ``/fillmemory`` rebuilds every learned profile and channel summary from the last seven
 days the same way; ``/fillsummaries`` rebuilds only the channel summaries. At reply time, :meth:`MemoryService.get_notes_block` returns the
 profiles of the people in the conversation and :meth:`MemoryService.get_channel_summary`
@@ -36,6 +43,7 @@ read: no URL fetching, transcription or images.
 """
 
 import asyncio
+import contextvars
 import json
 import logging
 import re
@@ -47,6 +55,7 @@ from zoneinfo import ZoneInfo
 
 from src.config import AppConfig, get_system_prompt
 from src.db.memory_store import MemoryStore
+from src.services.anthropic_service import AnthropicServiceError, MessageBatcher, is_direct_anthropic_model
 from src.services.completion_dispatch import dispatch_completion
 from src.services.model_catalog import is_model_unavailable
 
@@ -68,6 +77,12 @@ EMBED_MAX_CHARS = 300
 TRANSCRIPT_CHUNK_CHARS = 200_000
 MAX_FACTS_PER_USER = 15
 MERGE_CONCURRENCY = 4
+# In a batched run, calls cost nothing to have in flight, so (nearly) all go at once.
+BATCH_CONCURRENCY = 64
+
+# The batcher for the nightly run's calls, set only inside that run (so a /memory correct
+# made while it runs still answers right away).
+_batcher: contextvars.ContextVar[Optional[MessageBatcher]] = contextvars.ContextVar("memory_batcher", default=None)
 # Effort level for every memory call: the nightly job and /memory corrections
 # (Claude API models only).
 MEMORY_EFFORT = "medium"
@@ -528,16 +543,21 @@ class MemoryService:
         if self._bot is None:
             return
         async with self._lock:
-            for guild in self._bot.guilds:
-                now = self._now()
-                stored = await self._store.get_processed_through(guild.id)
-                start = _to_aware_utc(stored) if stored else now - WINDOW
-                start = max(start, now - timedelta(days=FILL_DAYS))
-                try:
-                    await self._run_windows(guild, split_windows(start, now), source="nightly")
-                except Exception:
-                    # Already logged and recorded; the next night resumes from the failed window.
-                    continue
+            batched = is_direct_anthropic_model(self._model) and self._anthropic_service is not None
+            token = _batcher.set(MessageBatcher(self._anthropic_service) if batched else None)
+            try:
+                for guild in self._bot.guilds:
+                    now = self._now()
+                    stored = await self._store.get_processed_through(guild.id)
+                    start = _to_aware_utc(stored) if stored else now - WINDOW
+                    start = max(start, now - timedelta(days=FILL_DAYS))
+                    try:
+                        await self._run_windows(guild, split_windows(start, now), source="nightly")
+                    except Exception:
+                        # Already logged and recorded; the next night resumes from the failed window.
+                        continue
+            finally:
+                _batcher.reset(token)
 
     async def fill(self, guild: discord.Guild, progress: Optional[ProgressCallback] = None) -> Dict[str, Any]:
         """Wipe the server's learned profiles and channel summaries and rebuild them from the last week.
@@ -634,26 +654,41 @@ class MemoryService:
         message_count = sum(len(msgs) for _, msgs in channel_messages)
         today = _window_date(start, end)
         stats: Dict[str, Any] = {"messages": message_count, "users_updated": [], "cost": 0.0}
-        stats["cost"] += await self._update_channel_summaries(guild.id, channel_messages, bot_id, today)
+        # Independent, so they share batch rounds when the run is batched.
+        summaries_cost, (users_updated, profiles_cost) = await asyncio.gather(
+            self._update_channel_summaries(guild.id, channel_messages, bot_id, today),
+            self._update_profiles(guild, channel_messages, bot_id, today),
+        )
+        stats["cost"] += summaries_cost + profiles_cost
+        stats["users_updated"] = users_updated
+        return stats
 
+    async def _update_profiles(
+        self,
+        guild: discord.Guild,
+        channel_messages: List[Tuple[Any, List[discord.Message]]],
+        bot_id: Optional[int],
+        today: date,
+    ) -> Tuple[List[int], float]:
+        """Extract the day's facts per speaker and merge them into profiles. Returns ``(users updated, cost)``."""
         chunks, speakers = build_transcript_chunks([(c.name, m) for c, m in channel_messages], bot_id)
         if not chunks or not speakers:
-            return stats
+            return [], 0.0
 
+        total_cost = 0.0
         observations: Dict[int, List[str]] = {}
-        for chunk in chunks:
-            facts, cost = await self._extract(chunk, speakers)
-            stats["cost"] += cost
+        for facts, cost in await asyncio.gather(*(self._extract(chunk, speakers) for chunk in chunks)):
+            total_cost += cost
             for user_id, user_facts in facts.items():
                 observations.setdefault(user_id, []).extend(user_facts)
         observations = {
             uid: list(dict.fromkeys(facts))[:MAX_FACTS_PER_USER] for uid, facts in observations.items() if facts
         }
         if not observations:
-            return stats
+            return [], total_cost
 
         existing = await self._store.get_many(guild.id, observations.keys())
-        semaphore = asyncio.Semaphore(MERGE_CONCURRENCY)
+        semaphore = asyncio.Semaphore(self._concurrency())
 
         async def merge_one(user_id: int, facts: List[str]) -> float:
             async with semaphore:
@@ -664,9 +699,11 @@ class MemoryService:
                 return cost
 
         costs = await asyncio.gather(*(merge_one(uid, facts) for uid, facts in observations.items()))
-        stats["cost"] += sum(costs)
-        stats["users_updated"] = list(observations.keys())
-        return stats
+        return list(observations.keys()), total_cost + sum(costs)
+
+    @staticmethod
+    def _concurrency() -> int:
+        return BATCH_CONCURRENCY if _batcher.get() is not None else MERGE_CONCURRENCY
 
     async def _update_channel_summaries(
         self,
@@ -676,7 +713,7 @@ class MemoryService:
         today: date,
     ) -> float:
         """Fold one day into every channel's summary, a few channels at a time. Returns the cost."""
-        semaphore = asyncio.Semaphore(MERGE_CONCURRENCY)
+        semaphore = asyncio.Semaphore(self._concurrency())
 
         async def summarize_channel(channel: Any, messages: List[discord.Message]) -> float:
             async with semaphore:
@@ -742,6 +779,13 @@ class MemoryService:
         return results
 
     async def _complete(self, system_prompt: str, user_text: str, *, search: bool = False) -> Tuple[str, float]:
+        batcher = _batcher.get()
+        if batcher is not None and not search:
+            try:
+                return await batcher.complete(
+                    model=self._model, system_prompt=system_prompt, user_text=user_text, effort=MEMORY_EFFORT)
+            except AnthropicServiceError as e:
+                logger.warning(f"Batched memory call failed ({e}); retrying it directly")
         reply, cost = await dispatch_completion(
             model=self._model,
             messages=[{"role": "user", "content": [{"type": "text", "text": user_text}]}],
