@@ -45,6 +45,32 @@ async def _image_to_data_url(image_url: Optional[str]) -> Optional[str]:
         return None
 
 
+async def _fetch_instagram_info(url: str, rapidapi_key: str) -> dict:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+        response = await client.get(
+            f"https://{RAPIDAPI_HOST}/get-info-rapidapi",
+            headers={"x-rapidapi-host": RAPIDAPI_HOST, "x-rapidapi-key": rapidapi_key},
+            params={"url": url},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def find_instagram_video_url(url: str) -> Optional[str]:
+    """The download URL of an Instagram/Threads video post, or ``None`` (not a video, or the lookup failed)."""
+    key = get_config().rapidapi_key
+    if not key:
+        return None
+    try:
+        data = await _fetch_instagram_info(url, key)
+    except Exception as e:
+        logger.warning(f"Couldn't look up the video in {url}: {e}")
+        return None
+    if data.get("error") or data.get("type") != "video":
+        return None
+    return data.get("download_url") or None
+
+
 @skip_recent_failures("instagram")
 async def get_instagram_context(url: str, *, cache_only: bool = False) -> Optional[Tuple[str, Optional[str]]]:
     """
@@ -65,14 +91,7 @@ async def get_instagram_context(url: str, *, cache_only: bool = False) -> Option
         return None
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
-            response = await client.get(
-                f"https://{RAPIDAPI_HOST}/get-info-rapidapi",
-                headers={"x-rapidapi-host": RAPIDAPI_HOST, "x-rapidapi-key": cfg.rapidapi_key},
-                params={"url": url},
-            )
-            response.raise_for_status()
-            data = response.json()
+        data = await _fetch_instagram_info(url, cfg.rapidapi_key)
 
         if data.get("error"):
             logger.warning(f"Error returned from RapidAPI for Instagram {url}: {data}")

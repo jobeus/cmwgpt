@@ -24,6 +24,7 @@ from src.services.image_service import edit_image, generate_image, resolve_draw_
 from src.services.irc_log_service import MAX_CONTEXT_LINES, MAX_DAY_LINES, MAX_TOP_NICKS, IrcLog
 from src.services.quote_service import MAX_RANDOM, QuoteFile
 from src.services.timezone_service import describe_zone, resolve_zone
+from src.services.video_service import looks_like_message_id, video_attachment_url
 from src.utils.discord_helper import attachment_to_base64_data_url, compress_image, url_to_base64_data_url
 from src.utils.url_utils import wiki_title_candidates
 from src.utils.youtube_utils import extract_video_ids, get_transcript, get_video_summary, video_url
@@ -715,6 +716,36 @@ TRANSCRIBE_YOUTUBE_TOOL = {
     },
 }
 
+WATCH_VIDEO_TOOL = {
+    "name": "watch_video",
+    "description": (
+        "Have Gemini watch a video, picture and sound, and tell you what's in it, with timestamps: TikTok, "
+        "Instagram, Facebook, Twitter/X, Reddit and other video links, direct video files, or a video attached "
+        "to a Discord message (give the message ID). Long videos are explored agentically, jumping to the "
+        "moments that matter. Use it when what a video shows matters, not just what's said, and for YouTube "
+        "use summarize_youtube. Takes a while and costs a little the first time."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "The video link, or the ID of a message with a video attached."},
+            "focus": {
+                "type": "string",
+                "description": "What to look for or answer, e.g. 'what trick does the dog do'. Empty for a summary.",
+            },
+        },
+        "required": ["url"],
+        "additionalProperties": False,
+    },
+}
+
+WATCH_VIDEO_GUIDANCE = (
+    "- `watch_video(url, focus?)`: Gemini watches any other video (TikTok, Instagram, Facebook, X, Reddit, "
+    "a video file, or a Discord message's video attachment by message ID) and says what's shown and said, "
+    "with timestamps. Videos over 5 minutes are explored agentically for the moments that matter. Prefer "
+    "it to `read_urls` when what the video shows matters; `read_urls` only gets the speech as text.\n"
+)
+
 YOUTUBE_GUIDANCE = (
     "- YouTube links: `summarize_youtube(url, focus)` has Gemini watch the video and summarize what's "
     "said and shown, with timestamps (best for most videos, anything visual, and videos without "
@@ -932,6 +963,7 @@ def build_mention_tools(
     reminder_service: Any = None,
     timezone_store: Any = None,
     video_summarizer: Optional[Callable[[str, str], Awaitable[Tuple[str, float]]]] = None,
+    video_watcher: Optional[Callable[[str, str], Awaitable[Tuple[str, float]]]] = None,
 ) -> List[ChatTool]:
     """The tools for one mention, in a fixed order. Tools without their dependencies are left out.
 
@@ -1304,6 +1336,28 @@ def build_mention_tools(
         return ToolResult(
             content=[{"type": "text", "text": f"Gemini's summary of {video_url(video_id)}:\n{summary}"}], cost=cost)
 
+    async def watch_video(args: Dict[str, Any]) -> ToolResult:
+        assert video_watcher is not None  # only offered when set
+        target = str(args.get("url") or "").strip()
+        focus = str(args.get("focus") or "").strip()
+        if looks_like_message_id(target):
+            try:
+                found = await message.channel.fetch_message(int(target))
+            except (discord.NotFound, discord.Forbidden):
+                return text_result("That message isn't in this channel.", is_error=True)
+            target = video_attachment_url(found) or ""
+            if not target:
+                return text_result("That message has no video attached.", is_error=True)
+        elif not target.startswith(("http://", "https://")):
+            return text_result("Give a video link or the ID of a message with a video.", is_error=True)
+        logger.info(f"[watch_video tool] Channel {channel_id} {target[:200]} focus={focus[:100]!r}")
+        try:
+            answer, cost = await video_watcher(target, focus)
+        except Exception as e:
+            logger.warning(f"[watch_video tool] {target[:200]} failed: {e}")
+            return text_result(f"Couldn't watch that video: {e}", is_error=True)
+        return ToolResult(content=[{"type": "text", "text": f"Gemini watched the video:\n{answer}"}], cost=cost)
+
     async def transcribe_youtube(args: Dict[str, Any]) -> ToolResult:
         video_id = youtube_id(args)
         if not video_id:
@@ -1401,6 +1455,8 @@ def build_mention_tools(
         tools.append(ChatTool(COUNT_IRC_LOG_TOOL, count_irc_log, "counting through the irc logs..."))
     if url_content_fetcher:
         tools.append(ChatTool(READ_URLS_TOOL, read_urls, "reading links...", READ_URLS_GUIDANCE))
+    if video_watcher and message is not None:
+        tools.append(ChatTool(WATCH_VIDEO_TOOL, watch_video, "watching the video...", WATCH_VIDEO_GUIDANCE))
     if video_summarizer:
         tools.append(ChatTool(SUMMARIZE_YOUTUBE_TOOL, summarize_youtube, "watching the video...", YOUTUBE_GUIDANCE))
         tools.append(ChatTool(TRANSCRIBE_YOUTUBE_TOOL, transcribe_youtube, "reading the transcript..."))

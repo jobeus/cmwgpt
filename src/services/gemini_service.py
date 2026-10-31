@@ -35,7 +35,11 @@ GEMINI_MODEL = "gemini-3.8-flash"
 
 # Watching a YouTube video (summarize_youtube): low media resolution is ~100 tokens per
 # second of video, so an hour is ~360k tokens (~$0.54), and long videos still fit.
-VIDEO_TIMEOUT_SECONDS = 600
+VIDEO_TIMEOUT_SECONDS = 900
+# Uploaded videos (watch_video) are processed by the Files API before use.
+FILE_READY_TIMEOUT_SECONDS = 600
+FILE_POLL_SECONDS = 3.0
+INTERACTION_POLL_SECONDS = 5.0
 VIDEO_SUMMARY_PROMPT = (
     "Watch this YouTube video and write a summary for people in a group chat who won't watch it. Cover: what "
     "it is (title and channel if shown); the main points or story in order, with rough [mm:ss] timestamps; "
@@ -59,6 +63,21 @@ except ValueError:
 class GeminiServiceError(Exception):
     """Custom exception for Gemini service errors."""
     pass
+
+
+def _interaction_text(interaction: Any) -> str:
+    """The text an interaction ended with (from its last step, or its outputs)."""
+    try:
+        data = interaction.model_dump()
+    except AttributeError:
+        data = vars(interaction)
+    if data.get("steps"):
+        items = data["steps"][-1].get("content") or []
+    else:
+        items = data.get("outputs") or []
+    return "\n".join(
+        item.get("text", "") for item in items if isinstance(item, dict) and item.get("type") == "text"
+    ).strip()
 
 
 def _is_retryable(error: Exception) -> bool:
@@ -317,6 +336,85 @@ class GeminiService:
             raise GeminiServiceError("Gemini watched the video but wrote nothing.")
         logger.info(f"[gemini/video] Usage: {usage}. Estimated cost: ${cost:.4f}")
         return text, cost
+
+    async def upload_video(self, path: str, mime_type: str = "video/mp4") -> Any:
+        """Upload a video to the Files API and wait until it's ready. Returns the file (``.uri``, ``.name``)."""
+        client = self._get_client()
+        file = await client.aio.files.upload(file=path, config={"mime_type": mime_type})
+        deadline = time.monotonic() + FILE_READY_TIMEOUT_SECONDS
+        while getattr(getattr(file, "state", None), "name", "ACTIVE") == "PROCESSING":
+            if time.monotonic() > deadline:
+                raise GeminiServiceError("Gemini took too long to process the uploaded video.")
+            await asyncio.sleep(FILE_POLL_SECONDS)
+            file = await client.aio.files.get(name=file.name)
+        if getattr(getattr(file, "state", None), "name", "ACTIVE") != "ACTIVE":
+            raise GeminiServiceError(f"Gemini couldn't process the uploaded video ({file.state.name}).")
+        return file
+
+    async def delete_file(self, name: str) -> None:
+        try:
+            await self._get_client().aio.files.delete(name=name)
+        except Exception as e:
+            logger.warning(f"[gemini/video] Couldn't delete uploaded file {name}: {e}")
+
+    async def watch_video(
+        self, uri: str, prompt: str, *, agentic: bool, mime_type: Optional[str] = None,
+    ) -> tuple[str, float]:
+        """Ask about one video through the Interactions API. Returns ``(text, cost)``.
+
+        ``agentic`` lets the model move around the video timeline itself, changing frame rate
+        and resolution as it goes; Google recommends it for videos over ~5 minutes and
+        questions about particular moments. Otherwise the whole video is sampled at 1 fps.
+        Both run at low resolution, in the background, polled until done.
+        """
+        client = self._get_client()
+        video: Dict[str, Any] = {
+            "type": "video", "uri": uri, "processing": "agentic" if agentic else "static", "resolution": "low",
+        }
+        if mime_type:
+            video["mime_type"] = mime_type
+        mode = "agentic" if agentic else "static"
+        logger.info(f"[gemini/video] Watching {uri} ({mode})")
+        try:
+            interaction = await client.aio.interactions.create(
+                model=GEMINI_MODEL, input=[video, {"type": "text", "text": prompt}], background=True, store=True)
+            deadline = time.monotonic() + VIDEO_TIMEOUT_SECONDS
+            while getattr(interaction, "status", None) in ("in_progress", "queued"):
+                if time.monotonic() > deadline:
+                    raise GeminiServiceError("Gemini took too long watching the video.")
+                await asyncio.sleep(INTERACTION_POLL_SECONDS)
+                interaction = await client.aio.interactions.get(interaction.id)
+        except GeminiServiceError:
+            raise
+        except Exception as e:
+            raise GeminiServiceError(f"Gemini couldn't watch that video: {e}") from e
+        usage = getattr(interaction, "usage", None)
+        cost = self._estimate_interaction_cost(usage)
+        await record_cost(GEMINI_DIRECT, cost)
+        status = getattr(interaction, "status", None)
+        if status != "completed":
+            raise GeminiServiceError(f"Gemini stopped watching the video ({status}).")
+        text = _interaction_text(interaction)
+        if not text:
+            raise GeminiServiceError("Gemini watched the video but wrote nothing.")
+        logger.info(f"[gemini/video] Watched {uri} ({mode}). Usage: {usage}. Estimated cost: ${cost:.4f}")
+        return text, cost
+
+    @staticmethod
+    def _estimate_interaction_cost(usage: Any) -> float:
+        """Price Interactions API usage: input (and what agentic tools loaded) at the input rate."""
+        if not usage:
+            return 0.0
+
+        def tokens(name: str) -> int:
+            return (usage.get(name) if isinstance(usage, dict) else getattr(usage, name, 0)) or 0
+
+        cached = tokens("total_cached_tokens")
+        uncached_input = max(tokens("total_input_tokens") - cached, 0) + tokens("total_tool_use_tokens")
+        output = tokens("total_output_tokens") + tokens("total_thought_tokens")
+        return (
+            uncached_input * PRICE_INPUT_PER_M + cached * PRICE_CACHED_PER_M + output * PRICE_OUTPUT_PER_M
+        ) / 1_000_000
 
     def _estimate_video_cost(self, usage_metadata: Any) -> float:
         """Price a GenerateContent call at Gemini's chat rates (video input costs the same as text)."""

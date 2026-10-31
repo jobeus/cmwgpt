@@ -24,6 +24,7 @@ from src.services.paste_service import PasteService
 from src.services.queue_service import QueueService
 from src.services.reminder_service import ReminderService
 from src.services.timezone_service import TimezoneStore
+from src.services.video_service import VideoWatcher
 from src.services.restart_handler import RestartHandler
 from src.services.runpod_service import RunpodService
 from src.services.state_service import StateService
@@ -104,6 +105,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         store=memory_store,
     )
     reminder_service = ReminderService(is_testing=app_config.is_testing)
+    video_watcher = VideoWatcher(gemini_service) if app_config.gemini_api_key else None
     mention_handler = MentionHandler(
         state_service=state_service,
         openai_service=openai_service,
@@ -129,7 +131,8 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         follow_up_updater=memory_service.update_follow_ups,
         reminder_service=reminder_service,
         timezone_store=None if app_config.is_testing else TimezoneStore(),
-        video_summarizer=gemini_service.summarize_youtube if app_config.gemini_api_key else None,
+        video_summarizer=video_watcher.summarize_youtube if video_watcher else None,
+        video_watcher=video_watcher.watch if video_watcher else None,
     )
 
     return AppServices(

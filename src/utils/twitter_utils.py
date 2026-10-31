@@ -43,7 +43,16 @@ def extract_twitter_urls(text: str) -> List[str]:
     return urls
 
 
-def extract_media(data):
+# For watching a tweet's video, the best variant up to this bitrate (it's re-encoded anyway).
+WATCH_MAX_BITRATE = 2_500_000
+
+
+def extract_media(data, *, for_watching: bool = False):
+    """Photos and the video from a TweetDetail response.
+
+    The video is its smallest mp4 (only the audio is transcribed), or with ``for_watching``
+    the best one up to ``WATCH_MAX_BITRATE``.
+    """
     media_items = []
     try:
         entries = data['data']['threaded_conversation_with_injections_v2']['instructions'][1]['entries']
@@ -57,8 +66,9 @@ def extract_media(data):
                 variants = m['video_info']['variants']
                 mp4s = [v for v in variants if v.get('content_type') == 'video/mp4']
                 if mp4s:
-                    # Smallest bitrate: we only need the audio track.
-                    video_url = min(mp4s, key=lambda v: v.get('bitrate', 999999))['url']
+                    by_bitrate = sorted(mp4s, key=lambda v: v.get('bitrate', 0))
+                    watchable = [v for v in by_bitrate if v.get('bitrate', 0) <= WATCH_MAX_BITRATE] or by_bitrate[:1]
+                    video_url = (watchable[-1] if for_watching else by_bitrate[0])['url']
                     media_items.append({'type': 'video', 'url': video_url})
     except (KeyError, TypeError, IndexError):
         pass
@@ -86,6 +96,37 @@ def _extract_author(result) -> str:
     return result['core']['user_results']['result']['legacy']['name']
 
 
+async def _fetch_tweet_detail(tweet_url: str, rapidapi_key: str) -> Optional[dict]:
+    """The RapidAPI TweetDetail response for a tweet URL, or ``None`` if it has no tweet ID."""
+    # The numeric ID after /status/, ignoring trailing segments like /photo/1.
+    id_match = re.search(r'/status/(\d+)', tweet_url)
+    if not id_match:
+        logger.warning(f"No /status/<id> tweet ID found in URL, skipping: {tweet_url}")
+        return None
+    async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+        response = await client.get(
+            f"https://{RAPIDAPI_HOST}/v2/TweetDetail/",
+            headers={"x-rapidapi-host": RAPIDAPI_HOST, "x-rapidapi-key": rapidapi_key},
+            params={"id": id_match.group(1)},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def find_tweet_video_url(tweet_url: str) -> Optional[str]:
+    """A watchable mp4 of the tweet's video, or ``None`` (no video, no RapidAPI key, or a failed lookup)."""
+    key = get_config().rapidapi_key
+    if not key:
+        return None
+    try:
+        data = await _fetch_tweet_detail(tweet_url, key)
+    except Exception as e:
+        logger.warning(f"Couldn't look up the video in {tweet_url}: {e}")
+        return None
+    media = extract_media(data, for_watching=True) if data else []
+    return next((m['url'] for m in media if m['type'] == 'video'), None)
+
+
 @skip_recent_failures("twitter")
 async def get_tweet_context(tweet_url: str, *, cache_only: bool = False) -> Optional[Tuple[str, List[str]]]:
     """
@@ -106,21 +147,9 @@ async def get_tweet_context(tweet_url: str, *, cache_only: bool = False) -> Opti
         return None
 
     try:
-        # The numeric ID after /status/, ignoring trailing segments like /photo/1.
-        id_match = re.search(r'/status/(\d+)', tweet_url)
-        if not id_match:
-            logger.warning(f"No /status/<id> tweet ID found in URL, skipping: {tweet_url}")
+        data = await _fetch_tweet_detail(tweet_url, cfg.rapidapi_key)
+        if data is None:
             return None
-        tweet_id = id_match.group(1)
-
-        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
-            response = await client.get(
-                f"https://{RAPIDAPI_HOST}/v2/TweetDetail/",
-                headers={"x-rapidapi-host": RAPIDAPI_HOST, "x-rapidapi-key": cfg.rapidapi_key},
-                params={"id": tweet_id},
-            )
-            response.raise_for_status()
-            data = response.json()
 
         entries = data['data']['threaded_conversation_with_injections_v2']['instructions'][1]['entries']
         main_result = entries[0]['content']['itemContent']['tweet_results']['result']
