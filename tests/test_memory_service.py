@@ -12,6 +12,8 @@ from src.bot.commands.memory import MemoryCommands, build_self_embed, format_mem
 from src.bot.handlers.mention import MentionHandler
 from src.services.memory_service import (
     parse_corrected_profile,
+    parse_extracted_facts,
+    parse_self_state_reply,
     CHANNEL_SUMMARY_SYSTEM_PROMPT,
     DAY_SUMMARY_SYSTEM_PROMPT,
     MAX_FOLLOW_UPS,
@@ -399,6 +401,41 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(store.rows[1], 'Stable: drives a Ranger, goes by "Jobe" online, 6\'2"')
         self.assertEqual(profile, store.rows[1])
         self.assertEqual(cost, 0.003)
+
+    def test_extracted_facts_are_read_from_lines_even_with_quotes(self):
+        reply = (
+            '<@123456789> started a new job at the "Red Robin" downtown\n'
+            "- <@123456789>: is 6'2\" and bald\n"
+            "<@!987654321> has two dogs\n"
+            "Here's what I found:\n"
+        )
+        self.assertEqual(parse_extracted_facts(reply), {
+            123456789: ['started a new job at the "Red Robin" downtown', "is 6'2\" and bald"],
+            987654321: ["has two dogs"],
+        })
+        self.assertEqual(parse_extracted_facts("(none)"), {})
+        self.assertEqual(parse_extracted_facts(json.dumps({"123": ["old style"]})), {123: ["old style"]})
+
+    def test_bot_state_is_read_from_labeled_lines(self):
+        reply = (
+            'mood: wired after the "Dune" trailer\n'
+            "interests: frame rust; Dune\n"
+            "wondering: is the Tacoma worth it?\n"
+            "keep: 1, 3\n"
+            "add: <@123456789> how the test drive went\n"
+            "add: nobody in particular\n"
+        )
+        self.assertEqual(parse_self_state_reply(reply), {
+            "mood": 'wired after the "Dune" trailer',
+            "interests": "frame rust; Dune",
+            "wondering": "is the Tacoma worth it?",
+            "follow_ups": {"keep": [1, 3], "add": [{"user_id": "123456789", "about": "how the test drive went"}]},
+        })
+        # No keep line means nothing changes about which follow-ups stay.
+        self.assertNotIn("keep", parse_self_state_reply("mood: fine")["follow_ups"])
+        self.assertEqual(parse_self_state_reply("keep:")["follow_ups"]["keep"], [])
+        old = json.dumps({"mood": "ok", "follow_ups": {"keep": [2]}})
+        self.assertEqual(parse_self_state_reply(old + "\n\nNotes: {kept everything}")["mood"], "ok")
 
     def test_correction_replies_are_read_as_plain_text_or_old_json(self):
         self.assertEqual(parse_corrected_profile("```\nStable: bald\nStyle: brief\n```"), "Stable: bald\nStyle: brief")
