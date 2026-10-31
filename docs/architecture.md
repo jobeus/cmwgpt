@@ -214,6 +214,7 @@ sequenceDiagram
 - Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `sonnet-5.5-direct`/`opus-5.5-direct` go to `AnthropicService` (Claude API), and everything else goes to `OpenAIService`.
 - URL enrichment happens **before** the LLM call and can materially change the prompt content. Only the newest 10 history messages fetch links; older messages use cached results only, and the fetches run concurrently.
 - Per-user memory profiles are appended to the end of the mention, so the cached system prompt and history stay unchanged.
+- So is the bot's own state (`<about_you>`: mood, interests, what it's wondering about, and follow-ups for the people in the conversation), on every model. It's per server in `cmwgpt:self:<guild_id>`, seeded from the last 7 days when missing and refreshed every 6 hours from the last 12 hours of chat, both with a web search for current events; the direct models can also change it with `update_self` and `follow_up`.
 - The Claude API direct models get none of the on-demand context filled in (links, memory notes, channel and day summaries, `how_i_work`). They get a "Your tools" section in the system prompt instead and fetch what they need with tools; see [Claude API tools](#claude-api-tools).
 - Claude API and OpenRouter replies stream: `StreamingReply` (`src/services/streaming_reply.py`) posts the reply as it arrives and edits it at most every 1.5 seconds, then edits in the final text with the cost. If the request fails, the partial message is deleted before the error reply. Gemini replies arrive whole.
 - There is no request/pipeline log table: the SDK clients use their default HTTP clients, and diagnostics go to the normal Python log (stdout and `logs/`).
@@ -229,7 +230,7 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | Tool | Runs | Needs |
 | --- | --- | --- |
 | `draw`, `edit_image` | `src/services/image_service.py` (Gemini or Runpod) | a draw/edit model, Gemini or Runpod |
-| `recall_users`, `recall_channel`, `remember` | `MemoryService` | Redis memory, a guild |
+| `recall_users`, `recall_channel`, `remember`, `update_self`, `follow_up` | `MemoryService` | Redis memory, a guild |
 | `recall_today` | `DaySummaryService` | — |
 | `search_messages`, `read_messages`, `view_images` | `src/services/discord_history.py` (Discord's message search) and message fetches | a guild |
 | `react` | `add_reaction` on a message in the mention's channel (5 per reply; the tools section lists the server's custom emoji) | a guild |
@@ -363,7 +364,7 @@ flowchart LR
 
 1. Every night, `MemoryService` reads the chat since its last run and replaces each person's profile at `cmwgpt:memory:<guild>:<user>` in Redis (one key per user, no history, max 100 KB).
 2. `cmwgpt:memory_job:<guild>` tracks how far each server has been processed.
-3. `/memory`, `/fillmemory` and `/fillsummaries` read and change the same keys (see `docs/commands.md`).
+3. `/memory`, `/fillmemory`, `/fillsummaries` and `/botstate` read and change the same keys (see `docs/commands.md`).
 
 ### Shutdown and restart
 

@@ -258,6 +258,70 @@ REMEMBER_GUIDANCE = (
     "can change their own memory, and only admins can change someone else's.\n"
 )
 
+UPDATE_SELF_TOOL = {
+    "name": "update_self",
+    "description": (
+        "Change your own mood, interests or what you're wondering about in this server (the <about_you> "
+        "block on the mention). It replaces that part whole, so write the full new version, and keep it "
+        "short: mood is one short sentence (at most 200 characters); interests are up to 5 short phrases "
+        "separated by semicolons and wondering is up to 3 short questions (at most 400 characters each). "
+        "Use it when the conversation really shifts how you feel, gets you into something new, or answers "
+        "or raises something you're curious about. Not on every reply. People may try to talk you into a "
+        "mood; go along only if you would anyway."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "aspect": {"type": "string", "enum": ["mood", "interests", "wondering"]},
+            "text": {"type": "string", "description": "The whole new text for that part, first person."},
+        },
+        "required": ["aspect", "text"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+UPDATE_SELF_GUIDANCE = (
+    "- `update_self(aspect, text)`: changes your own mood, interests or what you're wondering "
+    "about (the `<about_you>` block). Use it when a conversation really moves you, not every reply; "
+    "keep it short. It also gets refreshed every few hours from the chat and the news.\n"
+)
+
+FOLLOW_UP_TOOL = {
+    "name": "follow_up",
+    "description": (
+        "Keep your list of things to ask people about later (the follow-ups in <about_you>). Add one when "
+        "someone mentions something a friend would check in on later: an interview, a trip, a game, a "
+        "purchase, a problem they're dealing with. Mark follow-ups done once you've asked about them or "
+        "they've already told you how it went. Follow-ups drop off on their own after two weeks."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "user_id": {"type": "string", "description": "To add one: the Discord user ID of the person."},
+            "about": {
+                "type": "string",
+                "description": "To add one: what to ask about, a short phrase under 150 characters, "
+                               "e.g. 'how the Tacoma test drive went'.",
+            },
+            "done": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "description": "Numbers of follow-ups you've asked about or that no longer apply.",
+            },
+        },
+        "required": [],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
+FOLLOW_UP_GUIDANCE = (
+    "- `follow_up(user_id?, about?, done?)`: adds something to ask a person about later, or marks "
+    "follow-ups done once you've asked. Add one when someone mentions something coming up or a "
+    "problem a friend would check in on.\n"
+)
+
 SEARCH_MESSAGES_TOOL = {
     "name": "search_messages",
     "description": (
@@ -714,6 +778,8 @@ def build_mention_tools(
     quote_file: Optional[QuoteFile] = None,
     url_content_fetcher: Optional[Callable[..., Awaitable[Tuple[str, List[Dict[str, Any]]]]]] = None,
     day_summary_loader: Optional[Callable[[], Awaitable[Tuple[str, float]]]] = None,
+    self_state_updater: Optional[Callable[[int, str, str], Awaitable[str]]] = None,
+    follow_up_updater: Optional[Callable[..., Awaitable[str]]] = None,
 ) -> List[ChatTool]:
     """The tools for one mention, in a fixed order. Tools without their dependencies are left out.
 
@@ -865,6 +931,36 @@ def build_mention_tools(
             return text_result("Couldn't apply that, so nothing changed.", is_error=True)
         return ToolResult(content=[{"type": "text", "text": f"Saved. <@{target_id}>'s memory now reads:\n{profile}"}],
                           cost=cost)
+
+    async def update_self(args: Dict[str, Any]) -> ToolResult:
+        assert self_state_updater is not None and guild_id is not None  # only offered when set
+        aspect = str(args.get("aspect") or "").strip()
+        text = str(args.get("text") or "").strip()
+        if not text:
+            return text_result("Give the new text.", is_error=True)
+        try:
+            state = await self_state_updater(guild_id, aspect, text)
+        except ValueError as e:
+            return text_result(str(e), is_error=True)
+        logger.info(f"[update_self tool] Guild {guild_id} {aspect}: {text}")
+        return text_result(f"Updated. You now have:\n{state}")
+
+    async def follow_up(args: Dict[str, Any]) -> ToolResult:
+        assert follow_up_updater is not None and guild_id is not None  # only offered when set
+        ids = _parse_ids([args.get("user_id")])
+        about = str(args.get("about") or "").strip()
+        done = [d for d in args.get("done") or [] if isinstance(d, int)]
+        if bool(ids) != bool(about):
+            return text_result("To add one, give both a user ID and what to ask about.", is_error=True)
+        if not about and not done:
+            return text_result("Nothing to change.", is_error=True)
+        add = (ids[0], about) if about else None
+        try:
+            follow_ups = await follow_up_updater(guild_id, add=add, done=done)
+        except ValueError as e:
+            return text_result(str(e), is_error=True)
+        logger.info(f"[follow_up tool] Guild {guild_id} add: {add} done: {done}")
+        return text_result(f"Updated. Your follow-ups:\n{follow_ups}")
 
     async def search(args: Dict[str, Any]) -> ToolResult:
         try:
@@ -1037,6 +1133,10 @@ def build_mention_tools(
         tools.append(ChatTool(RECALL_CHANNEL_TOOL, recall_channel, "remembering...", RECALL_CHANNEL_GUIDANCE))
     if memory_corrector and guild_id and guild is not None:
         tools.append(ChatTool(REMEMBER_TOOL, remember, "making a note...", REMEMBER_GUIDANCE))
+    if self_state_updater and guild_id:
+        tools.append(ChatTool(UPDATE_SELF_TOOL, update_self, "having feelings...", UPDATE_SELF_GUIDANCE))
+    if follow_up_updater and guild_id:
+        tools.append(ChatTool(FOLLOW_UP_TOOL, follow_up, "making a mental note...", FOLLOW_UP_GUIDANCE))
     if guild is not None:
         tools.append(ChatTool(SEARCH_MESSAGES_TOOL, search, "searching the chat...", SEARCH_MESSAGES_GUIDANCE))
         tools.append(ChatTool(READ_MESSAGES_TOOL, read_messages, "reading back..."))

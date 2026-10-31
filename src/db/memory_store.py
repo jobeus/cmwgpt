@@ -7,13 +7,18 @@ One key per user holds their current profile and nothing else (no history):
   channel, at most ``MAX_PROFILE_BYTES``
 - ``cmwgpt:memory_job:<guild_id>`` - hash with the nightly job's ``processed_through``,
   ``last_run_at`` and ``last_status``
+- ``cmwgpt:self:<guild_id>`` - hash of the bot's own state in that server: one field per
+  aspect (``mood``, ``interests``, ...) plus ``<aspect>_updated`` with when it last changed,
+  ``refreshed_at`` with when the scheduled refresh last rewrote it, and ``follow_ups``, a
+  JSON list of things to ask people about later
 
 None of these keys expire. All datetimes passed in and returned are naive UTC.
 """
 
+import json
 import logging
 from datetime import datetime, timezone
-from typing import Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import redis.asyncio as aioredis
 
@@ -35,6 +40,10 @@ def _channel_summary_key(guild_id: int, channel_id: int) -> str:
 
 def _job_key(guild_id: int) -> str:
     return f"{KEY_PREFIX}memory_job:{guild_id}"
+
+
+def _self_key(guild_id: int) -> str:
+    return f"{KEY_PREFIX}self:{guild_id}"
 
 
 def cap_profile(profile: str) -> str:
@@ -116,6 +125,39 @@ class MemoryStore:
         keys = [key async for key in client.scan_iter(match=match, count=500)]
         if keys:
             await client.delete(*keys)
+
+    async def get_self_state(self, guild_id: int) -> Dict[str, str]:
+        """The bot's own state in a server (aspects and their ``_updated`` stamps), or ``{}``."""
+        return await self._redis_getter().hgetall(_self_key(guild_id)) or {}
+
+    async def save_self_state(self, guild_id: int, fields: Dict[str, str]) -> None:
+        """Set some of the bot's own state; each aspect's ``_updated`` stamp becomes now.
+
+        An empty value removes that aspect.
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
+        client = self._redis_getter()
+        kept = {name: cap_profile(value) for name, value in fields.items() if value}
+        removed = [name for name, value in fields.items() if not value]
+        if kept:
+            mapping = dict(kept)
+            mapping.update({f"{name}_updated": now for name in kept})
+            await client.hset(_self_key(guild_id), mapping=mapping)
+        if removed:
+            await client.hdel(_self_key(guild_id), *removed, *(f"{name}_updated" for name in removed))
+
+    async def save_follow_ups(self, guild_id: int, items: List[Dict[str, Any]]) -> None:
+        """Replace the bot's follow-up list (an empty one removes it)."""
+        if items:
+            await self._redis_getter().hset(_self_key(guild_id), "follow_ups", json.dumps(items))
+        else:
+            await self._redis_getter().hdel(_self_key(guild_id), "follow_ups")
+
+    async def mark_self_refreshed(self, guild_id: int, when: datetime) -> None:
+        await self._redis_getter().hset(_self_key(guild_id), "refreshed_at", when.isoformat())
+
+    async def clear_self_state(self, guild_id: int) -> None:
+        await self._redis_getter().delete(_self_key(guild_id))
 
     async def get_processed_through(self, guild_id: int) -> Optional[datetime]:
         value = await self._redis_getter().hget(_job_key(guild_id), "processed_through")

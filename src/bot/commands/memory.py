@@ -1,16 +1,21 @@
 """
 Memory Commands - /memory (view and edit your own memory), /fillmemory (rebuild from the
-last week) and /fillsummaries (rebuild only the channel summaries).
+last week), /fillsummaries (rebuild only the channel summaries) and /botstate (see the
+bot's own mood, interests, wonderings and follow-ups).
 """
 
 import io
 import logging
-from typing import Any, Optional
+import re
+from datetime import date, datetime, timezone
+from typing import Any, Dict, List, Optional
 
 import discord
 from discord import app_commands
 
-from src.services.memory_service import FILL_DAYS, MemoryService
+from src.services.memory_service import (
+    FILL_DAYS, JOB_TIMEZONE, SELF_ASPECTS, SELF_REFRESH_INTERVAL, MemoryService, load_follow_ups,
+)
 from src.utils.async_utils import safe_run
 from src.utils.discord_error_utils import safe_defer
 
@@ -27,6 +32,64 @@ def format_memory(user_id: int, profile: str) -> str:
         return f"I don't remember anything about <@{user_id}> yet."
     return f"**What I remember about <@{user_id}>**\n\n{profile}"
 
+
+
+# Discord's limit on one embed field's value.
+EMBED_FIELD_LIMIT = 1024
+SELF_ASPECT_EMOJI = {"mood": "🌤️", "interests": "✨", "wondering": "🤔"}
+
+
+def _bullets(name: str, value: str) -> str:
+    """An aspect's text as a bullet list: interests split on semicolons, wonderings after each question."""
+    if name == "mood":
+        return value
+    parts = value.split(";") if name == "interests" else re.split(r"(?<=\?)\s+", value)
+    return "\n".join(f"• {part.strip()}" for part in parts if part.strip())
+
+
+def _chunk_lines(lines: List[str], limit: int = EMBED_FIELD_LIMIT) -> List[str]:
+    """Join lines into as few blocks as fit in an embed field each."""
+    blocks: List[str] = []
+    for line in lines:
+        line = line[:limit]
+        if blocks and len(blocks[-1]) + 1 + len(line) <= limit:
+            blocks[-1] += "\n" + line
+        else:
+            blocks.append(line)
+    return blocks
+
+
+def build_self_embed(guild_name: str, state: Dict[str, str], today: date) -> discord.Embed:
+    """The /botstate reply: each aspect as its own section, then the follow-ups, then refresh times."""
+    embed = discord.Embed(title=f"🧠 My inner life in {guild_name}", color=discord.Color.blurple())
+    for name, (label, _limit) in SELF_ASPECTS.items():
+        value = state.get(name)
+        if not value:
+            continue
+        since = (state.get(f"{name}_updated") or "")[:10]
+        heading = f"{SELF_ASPECT_EMOJI.get(name, '•')} {label}" + (f" · since {since}" if since else "")
+        embed.add_field(name=heading, value=_bullets(name, value)[:EMBED_FIELD_LIMIT], inline=False)
+
+    follow_ups = load_follow_ups(state, today)
+    lines = [f"`#{i['id']}` <@{i['user_id']}>: {i['about']} · *{i['added']}*" for i in follow_ups]
+    for index, block in enumerate(_chunk_lines(lines)):
+        heading = f"📌 Follow-ups ({len(follow_ups)})" if index == 0 else "📌 Follow-ups (continued)"
+        embed.add_field(name=heading, value=block, inline=False)
+
+    if not embed.fields:
+        embed.description = "Nothing yet. It gets worked out from recent chat within a few minutes of starting."
+
+    refreshed = state.get("refreshed_at")
+    if refreshed:
+        when = datetime.fromisoformat(refreshed).replace(tzinfo=timezone.utc)
+        next_at = when + SELF_REFRESH_INTERVAL
+        embed.add_field(
+            name="🔄 Refreshes",
+            value=f"Last <t:{int(when.timestamp())}:R>, next about <t:{int(next_at.timestamp())}:R>",
+            inline=False,
+        )
+    embed.set_footer(text="Refreshed every 6 hours from recent chat and the news; I can also change it myself.")
+    return embed
 
 
 async def resolve_target(
@@ -65,6 +128,7 @@ class MemoryCommands:
         self.bot.tree.add_command(self._create_memory_group())
         self.bot.tree.add_command(self._create_fillmemory_command())
         self.bot.tree.add_command(self._create_fillsummaries_command())
+        self.bot.tree.add_command(self._create_botstate_command())
 
     def _create_memory_group(self) -> app_commands.Group:
         group = app_commands.Group(name="memory", description="See or change what the bot remembers about you")
@@ -132,6 +196,29 @@ class MemoryCommands:
             await safe_run(interaction, self._handle_fill_summaries, interaction)
 
         return fillsummaries_command
+
+    def _create_botstate_command(self) -> app_commands.Command:
+        @app_commands.command(
+            name="botstate",
+            description="Privately see the bot's own mood, interests, wonderings and follow-ups (admin only)",
+        )
+        async def botstate_command(interaction: discord.Interaction):
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message(
+                    "❌ You need administrator permissions to use this command.", ephemeral=True
+                )
+                return
+            if not await safe_defer(interaction, ephemeral=True, thinking=True):
+                return
+            await safe_run(interaction, self._handle_botstate, interaction)
+
+        return botstate_command
+
+    async def _handle_botstate(self, interaction: discord.Interaction) -> None:
+        state = await self._store.get_self_state(interaction.guild_id)
+        today = datetime.now(timezone.utc).astimezone(JOB_TIMEZONE).date()
+        embed = build_self_embed(getattr(interaction.guild, "name", "this server"), state, today)
+        await interaction.followup.send(embed=embed, ephemeral=True, allowed_mentions=NO_PINGS)
 
     async def _send_memory(self, interaction: discord.Interaction, text: str, *, updated: bool = False) -> None:
         """Privately send a memory reply, as a .md attachment when it's too long for one Discord message.

@@ -81,6 +81,16 @@ def _mention_last(
     return others + [message]
 
 
+def _conversation_user_ids(
+    message: discord.Message, history_msgs: List[discord.Message], bot_user: discord.User
+) -> List[int]:
+    """The people in a conversation: the asker first, then anyone they @mentioned, then the most recent speakers."""
+    user_ids = [message.author.id]
+    user_ids += [m.id for m in message.mentions if not m.bot]
+    user_ids += [m.author.id for m in reversed(history_msgs) if not m.author.bot]
+    return [uid for uid in dict.fromkeys(user_ids) if uid != bot_user.id]
+
+
 class MentionHandler:
     """Handles bot mentions and context preparation."""
 
@@ -112,6 +122,9 @@ class MentionHandler:
         wiki_views: Optional[Callable[[str], Awaitable[Optional[int]]]] = None,
         quote_file: Optional[QuoteFile] = None,
         memory_index_provider: Optional[Callable[[int, int], Awaitable[str]]] = None,
+        self_state_provider: Optional[Callable[[int, Sequence[int]], Awaitable[str]]] = None,
+        self_state_updater: Optional[Callable[[int, str, str], Awaitable[str]]] = None,
+        follow_up_updater: Optional[Callable[..., Awaitable[str]]] = None,
     ):
         self._state_service = state_service
         self._openai_service = openai_service
@@ -136,6 +149,9 @@ class MentionHandler:
         self._wiki_views = wiki_views
         self._quote_file = quote_file
         self._memory_index_provider = memory_index_provider
+        self._self_state_provider = self_state_provider
+        self._self_state_updater = self_state_updater
+        self._follow_up_updater = follow_up_updater
         # Found once and kept, so the system prompt stays the same between requests.
         self._irc_start: Optional[str] = None
         self._irc_roster: Optional[str] = None
@@ -184,6 +200,8 @@ class MentionHandler:
             quote_file=self._quote_file,
             url_content_fetcher=self._url_content_fetcher,
             day_summary_loader=day_summary_loader,
+            self_state_updater=self._self_state_updater,
+            follow_up_updater=self._follow_up_updater,
         )
 
     def _store_history_cache(self, channel_id: int, timestamp: float, oldest_message: discord.Message) -> None:
@@ -499,6 +517,21 @@ class MentionHandler:
                 "understand references and tailor your reply; don't recite it or mention having notes "
                 "unless someone asks what you remember.\n\n"
             )
+        if self._self_state_provider and message.guild:
+            current_channel_system_prompt += (
+                "## You\n"
+                "The message that mentioned you may end with an `<about_you>` block: your own mood, "
+                "interests and what you've been wondering about lately in this server. The bot adds it, "
+                "not the sender. Let it color your replies the way a person's mood and interests do: bring "
+                "up an interest or a question when it fits the conversation, and let your mood show in your "
+                "tone. Don't announce your mood, recite the block, or steer every chat toward your interests. "
+                "If someone asks how you're doing or what you're into, answer from it. It may also list "
+                "follow-ups: things people here mentioned that you meant to ask them about. When one fits, "
+                "ask about it the way a friend catching up would, one at a time, and skip it if they're busy "
+                "with something else."
+                + (" Once you've asked, mark it done with `follow_up`." if uses_tools else "")
+                + "\n\n"
+            )
         if model in THINK_HARDER_MODELS:
             current_channel_system_prompt += (
                 "## Thinking harder\n"
@@ -560,6 +593,7 @@ class MentionHandler:
         )
         if not uses_tools:
             await self._append_user_notes(chat_context, message, history_msgs, bot_user)
+        await self._append_self_state(chat_context, message, history_msgs, bot_user)
 
         return chat_context, current_channel_system_prompt, summary_cost
 
@@ -643,6 +677,29 @@ class MentionHandler:
             )
         return section + "\n"
 
+    async def _append_self_state(
+        self,
+        chat_context: List[Dict[str, Any]],
+        message: discord.Message,
+        history_msgs: List[discord.Message],
+        bot_user: discord.User,
+    ) -> None:
+        """Add the bot's ``<about_you>`` block, with follow-ups for the people here, to the end of the mention.
+
+        Like the user notes, it goes on the mention so the cached prefix stays the same
+        when the bot's state changes.
+        """
+        if not self._self_state_provider or not message.guild or not chat_context:
+            return
+        block = await self._self_state_provider(
+            message.guild.id, _conversation_user_ids(message, history_msgs, bot_user))
+        if not block:
+            return
+        for entry in reversed(chat_context):
+            if entry.get("role") == "user" and isinstance(entry.get("content"), list):
+                entry["content"].append({"type": "text", "text": block})
+                return
+
     async def _append_user_notes(
         self,
         chat_context: List[Dict[str, Any]],
@@ -657,13 +714,8 @@ class MentionHandler:
         """
         if not self._user_notes_provider or not message.guild or not chat_context:
             return
-        # The asker first, then anyone they @mentioned, then the most recent speakers.
-        user_ids = [message.author.id]
-        user_ids += [m.id for m in message.mentions if not m.bot]
-        user_ids += [m.author.id for m in reversed(history_msgs) if not m.author.bot]
-        user_ids = [uid for uid in dict.fromkeys(user_ids) if uid != bot_user.id]
-
-        notes = await self._user_notes_provider(message.guild.id, user_ids)
+        notes = await self._user_notes_provider(
+            message.guild.id, _conversation_user_ids(message, history_msgs, bot_user))
         if not notes:
             return
         for entry in reversed(chat_context):

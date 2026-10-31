@@ -73,6 +73,33 @@ def _full_tools(message=None, **overrides):
 
 
 class TestChatTools(unittest.IsolatedAsyncioTestCase):
+    async def test_follow_up_adds_and_marks_done(self):
+        updater = AsyncMock(return_value="#1 <@123456789> (from 2026-10-30): the trip")
+        tools, _ = _tools(follow_up_updater=updater)
+
+        result = await tools["follow_up"].run({"user_id": "<@123456789>", "about": "the trip", "done": [3]})
+        updater.assert_awaited_once_with(10, add=(123456789, "the trip"), done=[3])
+        self.assertIn("the trip", result.content[0]["text"])
+
+        for bad in ({"user_id": "123456789"}, {}, {"about": "no one"}):
+            self.assertTrue((await tools["follow_up"].run(bad)).is_error)
+        self.assertEqual(updater.await_count, 1)
+
+    async def test_update_self_saves_and_reports_errors(self):
+        updater = AsyncMock(return_value="Mood (since 2026-10-30): chipper")
+        tools, _ = _tools(self_state_updater=updater)
+        self.assertEqual(list(tools)[3], "update_self")
+
+        result = await tools["update_self"].run({"aspect": "mood", "text": "chipper"})
+        updater.assert_awaited_once_with(10, "mood", "chipper")
+        self.assertFalse(result.is_error)
+        self.assertIn("chipper", result.content[0]["text"])
+
+        updater.side_effect = ValueError("too long")
+        result = await tools["update_self"].run({"aspect": "mood", "text": "x" * 500})
+        self.assertTrue(result.is_error)
+        self.assertEqual(result.content[0]["text"], "too long")
+
     def test_offers_all_tools_in_a_fixed_order(self):
         tools, _ = _tools()
         self.assertEqual(list(tools), ["draw", "recall_users", "recall_channel", "how_i_work"])

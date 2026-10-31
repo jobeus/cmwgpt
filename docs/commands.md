@@ -34,6 +34,7 @@ The bot's main chat experience is **mention-based**:
 | `/memory clear` | Privately forgets everything about you | persisted per user, per server |
 | `/fillmemory` | Rebuilds everyone's learned memory from the last 7 days (admin only) | rewrites every memory key |
 | `/fillsummaries` | Rebuilds every channel's "lately" summary from the last 7 days (admin only) | rewrites channel summaries |
+| `/botstate` | Privately shows the bot's own mood, interests, wonderings and follow-ups (admin only) | reads `cmwgpt:self:<guild>` in Redis |
 | `/wikicount` | Looks up a Wikipedia article's average monthly pageviews | runtime action |
 | `/restart` | Triggers restart flow and `git pull` | runtime action |
 
@@ -80,6 +81,14 @@ nightly job then picks up from where the fill ended.
 Same permission as `/fillmemory`. It wipes and rebuilds only the channel "lately" summaries
 from the last 7 days, posting progress after each day. People's profiles, their corrections
 and the nightly job's progress are left alone.
+
+### `/botstate`
+
+Administrators only; the reply is visible only to them. Shows the bot's own state in this
+server as an embed: its mood, interests and what it's wondering about (each with the date
+it last changed), every follow-up it has on anyone (number, person, what to ask, when it
+was added), and when the 6-hourly refresh last ran and runs next. It only reads; nothing
+changes.
 
 ## Model and prompt commands
 

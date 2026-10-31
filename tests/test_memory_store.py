@@ -55,6 +55,27 @@ class TestMemoryStore(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(stored.encode("utf-8")), MAX_PROFILE_BYTES)
         self.assertTrue(stored.startswith("éé"))
 
+    async def test_self_state_stamps_aspects_and_removes_empty_ones(self):
+        await self.store.save_self_state(42, {"mood": "chipper", "interests": "trucks"})
+        await self.store.save_self_state(42, {"interests": ""})
+        await self.store.mark_self_refreshed(42, datetime(2026, 10, 30, 12, 0))
+
+        state = await self.store.get_self_state(42)
+        self.assertEqual(state["mood"], "chipper")
+        self.assertIn("mood_updated", state)
+        self.assertNotIn("interests", state)
+        self.assertNotIn("interests_updated", state)
+        self.assertEqual(state["refreshed_at"], "2026-10-30T12:00:00")
+        self.assertEqual(await self.store.get_self_state(43), {})
+
+        await self.store.save_follow_ups(42, [{"id": 1, "user_id": 2, "about": "trip", "added": "2026-10-30"}])
+        self.assertIn('"about": "trip"', (await self.store.get_self_state(42))["follow_ups"])
+        await self.store.save_follow_ups(42, [])
+        self.assertNotIn("follow_ups", await self.store.get_self_state(42))
+
+        await self.store.clear_self_state(42)
+        self.assertEqual(await self.store.get_self_state(42), {})
+
     def test_cap_profile_never_splits_a_character(self):
         capped = cap_profile("a" + "€" * MAX_PROFILE_BYTES)
         capped.encode("utf-8")  # valid UTF-8

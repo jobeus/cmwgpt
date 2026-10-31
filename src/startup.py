@@ -113,6 +113,9 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         wiki_views=death_service.get_avg_monthly_views,
         quote_file=load_quote_file(app_config.old_quote_bot_path),
         memory_index_provider=memory_service.get_memory_index,
+        self_state_provider=memory_service.get_self_block,
+        self_state_updater=memory_service.update_self,
+        follow_up_updater=memory_service.update_follow_ups,
     )
 
     return AppServices(
