@@ -29,6 +29,7 @@ These are loaded by `src/config.py`.
 | `INCLUDE_NUM_CHATLINES` | `10` | No | Recent-history lines included in context |
 | `DISCORD_GUILD_ID` | empty | No | Guild-scoped sync/behavior |
 | `DEATH_CHANNEL_ID` | empty | No | Target channel for deathwatch posts |
+| `DISCORD_CHANNEL_ID` | empty | No | The main chat channel: the only place the bot checks in on follow-ups unprompted after an hour of quiet. Check-ins are off when empty |
 | `IRC_LOG` | empty | No | Path to the channel's old irssi IRC log; enables the direct models' `search_irc_log`/`read_irc_log_day` tools |
 | `IRC_NICKS` | empty | No | irssistats-style nicks file (`canonical regex` per line, first match wins, `<NULL>` drops a nick) that merges aliases in the IRC log tools' nick filters and counts |
 | `OLD_QUOTE_BOT` | empty | No | Path to the old IRC quote bot's quotes (one per line); enables the direct models' `old_quotes` tool |
@@ -78,6 +79,5 @@ Use `.env.development.example` as the baseline. It already includes:
 
 ## Reality checks and gotchas
 
-- `DISCORD_CHANNEL_ID` still appears in sample env files, but it is not part of the core current runtime configuration described here.
 - `make run` and restart-wrapper workflows can behave differently from `make run-direct`; see `docs/development.md`.
 - If `/memory` fails or mentions never include profiles, check `redis-cli ping` and `REDIS_URL` (see `docs/redis_setup.md`).

@@ -614,7 +614,7 @@ class TestIdleFollowUps(unittest.IsolatedAsyncioTestCase):
             {"id": 3, "user_id": 5, "about": "not in this channel", "added": "2026-10-29"},
         ])}
         self.service = MemoryService(
-            store=self.store, config=cfg(anthropic_api_key="key"), openai_service=MagicMock(),
+            store=self.store, config=cfg(anthropic_api_key="key", discord_channel_id="5"), openai_service=MagicMock(),
             anthropic_service=MagicMock(), now=lambda: self.now,
         )
         self.channel = FakeChannel(5, "general", [])
@@ -661,6 +661,23 @@ class TestIdleFollowUps(unittest.IsolatedAsyncioTestCase):
         self.now = datetime(2026, 10, 30, 9, 0, tzinfo=UTC)  # 03:00 in Denver
         self.assertIsNone(await self.ask())
         self.dispatch.assert_not_awaited()
+
+    async def test_only_in_the_configured_channel(self):
+        other = FakeChannel(6, "games", [])
+        other.now = self.now
+        other.post(2, self.now - timedelta(hours=1, minutes=5))  # more recent, but not the main channel
+        self.guild.text_channels.insert(0, other)
+        await self.ask()
+        self.assertEqual(other.sent, [])
+        self.assertEqual(len(self.channel.sent), 1)
+
+        for channel_id in ("", "7"):  # unset, or not a channel in this server
+            self.service._config = cfg(anthropic_api_key="key", discord_channel_id=channel_id)
+            self.store.self_state.pop("idle_ask", None)
+            self.store.self_state["follow_ups"] = json.dumps(
+                [{"id": 2, "user_id": 2, "about": "the trip", "added": "2026-10-29"}])
+            self.assertIsNone(await self.ask())
+        self.assertEqual(other.sent, [])
 
     async def test_nothing_without_follow_ups_for_people_here(self):
         self.store.self_state["follow_ups"] = json.dumps(

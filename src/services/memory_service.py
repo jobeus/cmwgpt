@@ -20,7 +20,7 @@ start with this feature, or after it's cleared) it's worked out from the last se
 of chat, and every ``SELF_REFRESH_INTERVAL`` after that it's rewritten from the last
 ``SELF_REFRESH_LOOKBACK`` of chat. Both also web search for current events. When a
 channel has been quiet for ``IDLE_ASK_AFTER`` and someone who talks there has a
-follow-up, the loop asks them about it (pinging them) and drops it, but only once until
+follow-up (only the ``DISCORD_CHANNEL_ID`` channel; off when it's unset), the loop asks them about it (pinging them) and drops it, but only once until
 someone talks again. The model can
 also change it while replying with the ``update_self`` tool.
 :meth:`MemoryService.get_self_block` returns it for the mention handler to add to the
@@ -910,13 +910,16 @@ class MemoryService:
                 logger.exception(f"Couldn't ask an idle follow-up in guild {guild.id}")
 
     async def ask_idle_follow_up(self, guild: discord.Guild) -> Optional[discord.Message]:
-        """Ask one follow-up in the most recently active channel that's been quiet for ``IDLE_ASK_AFTER``.
+        """Ask one follow-up in the ``DISCORD_CHANNEL_ID`` channel once it's been quiet for ``IDLE_ASK_AFTER``.
 
-        It goes to someone who has a follow-up and spoke among the channel's last
+        Nothing is asked when that's unset or isn't a channel in ``guild``. It goes to someone who has a follow-up and spoke among the channel's last
         ``IDLE_ASK_HISTORY`` messages, pings them, and the follow-up is dropped. Nothing is
         asked outside ``IDLE_ASK_HOURS``, or until someone other than a bot has talked
         since the last one. Returns the message sent, if any.
         """
+        idle_channel_id = self._config.discord_channel_id
+        if not idle_channel_id.isdigit():
+            return None
         now = self._now()
         local = now.astimezone(JOB_TIMEZONE)
         if local.hour not in IDLE_ASK_HOURS:
@@ -929,6 +932,8 @@ class MemoryService:
         me = guild.me
         candidates = []
         for channel in guild.text_channels:
+            if channel.id != int(idle_channel_id):
+                continue
             perms = channel.permissions_for(me)
             if not (perms.view_channel and perms.read_message_history and perms.send_messages):
                 continue

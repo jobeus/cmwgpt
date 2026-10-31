@@ -81,6 +81,8 @@ class AppConfig:
     irc_nicks_path: str = ""
     # The old IRC quote bot's quotes, one per line; the old_quotes tool is off when unset.
     old_quote_bot_path: str = ""
+    # The main chat channel; the bot's unprompted follow-up check-ins only go here, and are off when unset.
+    discord_channel_id: str = ""
 
 
 def load_config(
@@ -120,6 +122,7 @@ def load_config(
         irc_log_path=source.get("IRC_LOG", "").strip(),
         irc_nicks_path=source.get("IRC_NICKS", "").strip(),
         old_quote_bot_path=source.get("OLD_QUOTE_BOT", "").strip(),
+        discord_channel_id=source.get("DISCORD_CHANNEL_ID", "").strip(),
     )
 
 
