@@ -582,6 +582,36 @@ SEARCH_IRC_LOG_GUIDANCE = (
     "counts in one call; never estimate counts from search pages.\n"
 )
 
+SEARCH_IRC_BY_MEANING_TOOL = {
+    "name": "search_irc_by_meaning",
+    "description": (
+        "Search the old IRC log by what was talked about rather than exact words: describe the conversation "
+        "or event in plain language ('someone's truck getting towed outside a bar', 'arguing about whether "
+        "Firefly was good') and get the closest whole conversations with their dates. Use it when you don't "
+        "know the exact words used; use search_irc_log for exact words, quotes or regex, and count_irc_log "
+        "for counts."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "What the conversation was about, in plain words."},
+            "nick": {"type": "string", "description": "Only conversations this person spoke in (any alias)."},
+            "after": {"type": "string", "description": "Only from this day on, YYYY-MM-DD."},
+            "before": {"type": "string", "description": "Only up to this day, YYYY-MM-DD."},
+            "limit": {"type": "integer", "description": "How many conversations, 1-10 (default 6)."},
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    },
+}
+
+SEARCH_IRC_BY_MEANING_GUIDANCE = (
+    "- `search_irc_by_meaning(query, nick?, after?, before?, limit?)`: finds IRC log conversations by "
+    "what they were about, described in plain words, when you don't know the exact wording; each comes "
+    "whole, with its date. Follow up with `read_irc_log_day` for more of that day, or `search_irc_log` "
+    "for exact words.\n"
+)
+
 COUNT_IRC_LOG_TOOL = {
     "name": "count_irc_log",
     "description": (
@@ -964,6 +994,7 @@ def build_mention_tools(
     timezone_store: Any = None,
     video_summarizer: Optional[Callable[[str, str], Awaitable[Tuple[str, float]]]] = None,
     video_watcher: Optional[Callable[[str, str], Awaitable[Tuple[str, float]]]] = None,
+    irc_meaning_index: Any = None,
 ) -> List[ChatTool]:
     """The tools for one mention, in a fixed order. Tools without their dependencies are left out.
 
@@ -1398,6 +1429,21 @@ def build_mention_tools(
         )
         return text_result(text)
 
+    async def search_irc_by_meaning(args: Dict[str, Any]) -> ToolResult:
+        assert irc_meaning_index is not None  # only offered when set
+        query = str(args.get("query") or "").strip()
+        if not query:
+            return text_result("Describe what the conversation was about.", is_error=True)
+        try:
+            after, before = _parse_day(args, "after"), _parse_day(args, "before")
+        except ValueError:
+            return text_result("Give dates as YYYY-MM-DD.", is_error=True)
+        nick = str(args.get("nick") or "").strip().lstrip("@+%~&")
+        logger.info(f"[irc meaning tool] Channel {channel_id} Query: {query[:200]} Nick: {nick}")
+        text = await irc_meaning_index.search(
+            query, nick=nick, after=after, before=before, limit=_int_arg(args, "limit") or 6)
+        return text_result(text)
+
     async def count_irc_log(args: Dict[str, Any]) -> ToolResult:
         assert irc_log is not None  # only offered when set
         query = str(args.get("query") or "")
@@ -1453,6 +1499,9 @@ def build_mention_tools(
                                   SEARCH_IRC_LOG_GUIDANCE))
         tools.append(ChatTool(READ_IRC_LOG_DAY_TOOL, read_irc_log_day, "reading the irc logs..."))
         tools.append(ChatTool(COUNT_IRC_LOG_TOOL, count_irc_log, "counting through the irc logs..."))
+    if irc_log and irc_meaning_index is not None:
+        tools.append(ChatTool(SEARCH_IRC_BY_MEANING_TOOL, search_irc_by_meaning, "remembering the irc days...",
+                              SEARCH_IRC_BY_MEANING_GUIDANCE))
     if url_content_fetcher:
         tools.append(ChatTool(READ_URLS_TOOL, read_urls, "reading links...", READ_URLS_GUIDANCE))
     if video_watcher and message is not None:

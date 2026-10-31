@@ -11,7 +11,9 @@ transcribe with Groq can be watched instead:
   and Discord attachments are downloaded as they are.
 - Downloaded videos under ``UPLOAD_AS_IS_BYTES`` in a format Gemini takes go up to its
   Files API as they are; bigger ones (or other formats) are re-encoded small first
-  (``REENCODE_ARGS``: 480p, 10 fps, mono audio). Either way the upload is deleted after.
+  (``REENCODE_ARGS``: 480p, 10 fps, mono audio). Gemini keeps an upload for 48 hours, so
+  it's remembered (``cmwgpt:cache:video_uploads``) and a new question about the same
+  video in that time skips the download and upload.
 
 Videos under ``AGENTIC_MIN_SECONDS`` are watched statically: Gemini samples the whole
 thing at 1 fps, which is best for a short clip or a summary. Longer ones are watched
@@ -28,6 +30,7 @@ import re
 import shutil
 import subprocess  # nosec B404
 import tempfile
+import time
 from typing import Any, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -69,6 +72,9 @@ GEMINI_VIDEO_TYPES = {
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm", ".mkv", ".m4v", ".avi", ".3gp", ".mpeg", ".mpg", ".flv", ".wmv")
 
 _watch_cache = PersistentCache("video_watches")
+# Gemini deletes uploads 48 hours after they're made; reuse them for a little less.
+UPLOAD_REUSE_SECONDS = 47 * 3600
+_upload_cache = PersistentCache("video_uploads", ttl_seconds=UPLOAD_REUSE_SECONDS)
 
 
 class VideoError(Exception):
@@ -219,8 +225,25 @@ class VideoWatcher:
             raise VideoError(str(e)) from e
 
     async def _watch_file(self, url: str, focus: str) -> Tuple[str, float]:
+        upload = await _upload_cache.get(url)
+        if upload and time.time() < upload["expires_at"]:
+            try:
+                return await self._gemini.watch_video(
+                    upload["uri"], watch_prompt(focus), agentic=upload["seconds"] >= AGENTIC_MIN_SECONDS,
+                    mime_type=upload["mime_type"])
+            except GeminiServiceError as e:
+                logger.info(f"[video] The earlier upload of {url} didn't work ({e}); uploading it again")
+        upload = await self._upload(url)
+        try:
+            return await self._gemini.watch_video(
+                upload["uri"], watch_prompt(focus), agentic=upload["seconds"] >= AGENTIC_MIN_SECONDS,
+                mime_type=upload["mime_type"])
+        except GeminiServiceError as e:
+            raise VideoError(str(e)) from e
+
+    async def _upload(self, url: str) -> dict:
+        """Download the video, re-encode it if needed, and upload it; remembered for reuse."""
         temp_dir = tempfile.mkdtemp(prefix="watch_")
-        uploaded = None
         try:
             downloaded = await download_video(url, temp_dir)
             seconds = await asyncio.to_thread(_probe_seconds, downloaded)
@@ -231,27 +254,25 @@ class VideoWatcher:
             size = os.path.getsize(downloaded)
             mime_type = GEMINI_VIDEO_TYPES.get(os.path.splitext(downloaded)[1].lower())
             if size < UPLOAD_AS_IS_BYTES and mime_type:
-                upload = downloaded
+                path = downloaded
                 logger.info(f"[video] {url}: {seconds:.0f}s, uploading {size // 1024} KB as it is")
             else:
-                upload, mime_type = os.path.join(temp_dir, "watch.mp4"), "video/mp4"
+                path, mime_type = os.path.join(temp_dir, "watch.mp4"), "video/mp4"
                 try:
-                    await asyncio.to_thread(_run, ["ffmpeg", "-y", "-i", downloaded, *REENCODE_ARGS, upload])
+                    await asyncio.to_thread(_run, ["ffmpeg", "-y", "-i", downloaded, *REENCODE_ARGS, path])
                 except subprocess.CalledProcessError as e:
                     raise VideoError("Couldn't re-encode that video.") from e
                 logger.info(
-                    f"[video] {url}: {seconds:.0f}s, re-encoded {size // 1024} KB -> "
-                    f"{os.path.getsize(upload) // 1024} KB")
+                    f"[video] {url}: {seconds:.0f}s, re-encoded {size // 1024} KB -> {os.path.getsize(path) // 1024} KB")
             try:
-                uploaded = await self._gemini.upload_video(upload, mime_type)
-                return await self._gemini.watch_video(
-                    uploaded.uri, watch_prompt(focus), agentic=seconds >= AGENTIC_MIN_SECONDS,
-                    mime_type=mime_type)
+                uploaded = await self._gemini.upload_video(path, mime_type)
             except GeminiServiceError as e:
                 raise VideoError(str(e)) from e
+            upload = {"uri": uploaded.uri, "mime_type": mime_type, "seconds": seconds,
+                      "expires_at": time.time() + UPLOAD_REUSE_SECONDS}
+            await _upload_cache.set(url, upload)
+            return upload
         finally:
-            if uploaded is not None:
-                await self._gemini.delete_file(uploaded.name)
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 

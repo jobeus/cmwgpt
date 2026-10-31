@@ -8,6 +8,7 @@ and each match is dated by the last marker before it.
 """
 
 import bisect
+import hashlib
 import logging
 import mmap
 import re
@@ -57,6 +58,8 @@ class NickMap:
     """
 
     def __init__(self, rules: Sequence[Tuple[str, str]]):
+        # Identifies these rules, so an index built with them is rebuilt when they change.
+        self.signature = hashlib.sha1(repr(list(rules)).encode("utf-8")).hexdigest()
         self._rules: List[Tuple[str, re.Pattern]] = []
         for canonical, pattern in rules:
             try:
@@ -390,6 +393,93 @@ class IrcLog:
         if end_line < len(lines):
             header += f" Use start_line={end_line} for the rest."
         return header + "\n" + "\n".join(shown)
+
+    def conversations(
+        self, *, max_lines: int = 40, gap_minutes: int = 30, max_chars: int = 6000,
+    ) -> List[Tuple[int, int, Optional[date]]]:
+        """Split the log into conversations: ``(start offset, end offset, day)``.
+
+        One ends at a day marker, a pause of ``gap_minutes`` between chat lines,
+        ``max_lines`` chat lines or ``max_chars``. Joins, quits and other non-chat lines
+        don't count toward a conversation and never start one.
+        """
+        data = self._load()
+        spans: List[Tuple[int, int, Optional[date]]] = []
+        start = -1
+        end = lines = chars = 0
+        last_minute = -1
+        day: Optional[date] = None
+        marker = 0
+
+        def close() -> None:
+            nonlocal start
+            if start >= 0:
+                spans.append((start, end, day))
+            start = -1
+
+        pos = 0
+        size = len(data)
+        while pos < size:
+            nl = data.find(b"\n", pos)
+            line_end = size if nl < 0 else nl
+            while marker < len(self._marker_offsets) and self._marker_offsets[marker] <= pos:
+                close()
+                day = self._marker_days[marker]
+                marker += 1
+                last_minute = -1
+            head = _SPEAKER_RE.match(data, pos, line_end)
+            if head is not None:
+                stamp = data[pos:pos + 5]
+                minute = int(stamp[:2]) * 60 + int(stamp[3:5]) if stamp[:2].isdigit() and stamp[3:5].isdigit() else -1
+                gap = minute >= 0 and last_minute >= 0 and minute - last_minute >= gap_minutes
+                length = line_end - pos
+                if start >= 0 and (gap or lines >= max_lines or chars + length > max_chars):
+                    close()
+                if start < 0:
+                    start, lines, chars = pos, 0, 0
+                end = line_end
+                lines += 1
+                chars += length
+                if minute >= 0:
+                    last_minute = minute
+            pos = line_end + 1
+        close()
+        return spans
+
+    def excerpt(self, start: int, end: int) -> Tuple[str, List[str]]:
+        """``(day label, chat lines)`` for a span from :meth:`conversations`.
+
+        Each speaker is shown by their canonical name from the nicks file, so every alias of a
+        person reads (and is searched) as the same name. Lines from nicks it drops (bots),
+        joins and quits are left out.
+        """
+        data = self._load()
+        lines = []
+        for raw in data[start:end].split(b"\n"):
+            head = _SPEAKER_RE.match(raw) if raw else None
+            if head is None:
+                continue
+            nick = (head.group(1) or head.group(2)).decode("utf-8", "replace")
+            name = self._canonical(nick)
+            if name is None:
+                continue
+            said = _decode_line(raw[head.end():]).strip()
+            stamp = raw[:head.start(1) if head.group(1) else head.start(2)].decode("utf-8", "replace").split()[0]
+            lines.append(f"{stamp} <{name}> {said}" if head.group(1) else f"{stamp} * {name} {said}")
+        return self._date_at(start), lines
+
+    def speaks_in(self, start: int, end: int, nick: str) -> bool:
+        """Whether ``nick`` (or any of their aliases) has a chat line between the offsets."""
+        wanted = self._nick_key(nick)
+        data = self._load()
+        pos = start
+        while pos < end:
+            nl = data.find(b"\n", pos, end)
+            line_end = end if nl < 0 else nl
+            if self._speaker(data, pos, line_end)[0] == wanted:
+                return True
+            pos = line_end + 1
+        return False
 
     def first_day(self) -> Optional[date]:
         """The first dated day in the log."""

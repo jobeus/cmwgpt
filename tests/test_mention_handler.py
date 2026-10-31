@@ -805,6 +805,28 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         handler._irc_log.first_day.assert_called_once()
         handler._irc_log.speakers.assert_called_once_with(60)
 
+    async def test_warm_up_reads_the_irc_log_once_before_any_mention(self):
+        handler, _, _, _, _ = self.make_handler()
+        handler._irc_log = MagicMock()
+        handler._irc_log.first_day.return_value = datetime(2014, 1, 3).date()
+        handler._irc_log.speakers.return_value = [("Cyc66", 10, 2014, 2022)]
+
+        handler.warm_up()
+        handler.warm_up()
+        await handler._irc_facts
+        channel = MagicMock(id=7, created_at=datetime(2023, 5, 1, tzinfo=timezone.utc))
+
+        async def history(limit=None, oldest_first=False):
+            if False:
+                yield None
+
+        channel.history = history
+        note = await handler._history_ranges(channel)
+
+        self.assertIn("2014-01-03", note)
+        self.assertIn("Cyc66 10 2014-2022", note)
+        handler._irc_log.speakers.assert_called_once_with(60)
+
     async def test_history_ranges_fall_back_to_channel_creation(self):
         handler, _, _, _, _ = self.make_handler()
 

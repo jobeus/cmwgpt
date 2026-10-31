@@ -165,7 +165,7 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
         tools, _ = _full_tools(
             irc_log=MagicMock(), quote_file=MagicMock(), url_content_fetcher=AsyncMock(),
             day_summary_loader=AsyncMock(), reminder_service=MagicMock(), timezone_store=MagicMock(),
-            video_summarizer=AsyncMock(), video_watcher=AsyncMock(),
+            video_summarizer=AsyncMock(), video_watcher=AsyncMock(), irc_meaning_index=MagicMock(),
         )
         guidance = "".join(tool.guidance for tool in tools.values())
         for name in tools:
@@ -435,6 +435,7 @@ class TestStrictSchemaLimits(unittest.TestCase):
             timezone_store=MagicMock(),
             video_summarizer=AsyncMock(),
             video_watcher=AsyncMock(),
+            irc_meaning_index=MagicMock(),
         )
         every_tool = {v["name"] for k, v in vars(chat_tools).items() if k.endswith("_TOOL") and isinstance(v, dict)}
         self.assertEqual(set(tools), every_tool)  # so a new tool can't sneak past this test

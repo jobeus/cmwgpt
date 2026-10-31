@@ -351,12 +351,6 @@ class GeminiService:
             raise GeminiServiceError(f"Gemini couldn't process the uploaded video ({file.state.name}).")
         return file
 
-    async def delete_file(self, name: str) -> None:
-        try:
-            await self._get_client().aio.files.delete(name=name)
-        except Exception as e:
-            logger.warning(f"[gemini/video] Couldn't delete uploaded file {name}: {e}")
-
     async def watch_video(
         self, uri: str, prompt: str, *, agentic: bool, mime_type: Optional[str] = None,
     ) -> tuple[str, float]:

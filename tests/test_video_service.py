@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 
+from src.services import video_service
 from src.services.chat_tools import build_mention_tools
 from src.services.cost_service import cost_scope
 from src.services.gemini_service import GeminiService, GeminiServiceError
@@ -21,17 +22,17 @@ def _gemini():
     gemini.upload_video = AsyncMock(return_value=SimpleNamespace(uri="files/abc-uri", name="files/abc"))
     gemini.watch_video = AsyncMock(return_value=("A dog does a backflip at [0:12].", 0.02))
     gemini.summarize_youtube = AsyncMock(return_value=("static summary", 0.01))
-    gemini.delete_file = AsyncMock()
     return gemini
 
 
 class TestWatchFile(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        patcher = patch("src.services.video_service._watch_cache", AsyncDictCache())
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for name in ("_watch_cache", "_upload_cache"):
+            patcher = patch(f"src.services.video_service.{name}", AsyncDictCache())
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
-    async def watch(self, seconds, gemini=None, *, name="download.mkv", size=2048):
+    async def watch(self, seconds, gemini=None, *, name="download.mkv", size=2048, focus="the trick"):
         gemini = gemini or _gemini()
 
         async def fake_download(url, temp_dir):
@@ -48,7 +49,7 @@ class TestWatchFile(unittest.IsolatedAsyncioTestCase):
         with patch("src.services.video_service.download_video", side_effect=fake_download), patch(
             "src.services.video_service._probe_seconds", return_value=seconds
         ), patch("src.services.video_service._run", side_effect=fake_ffmpeg) as ffmpeg:
-            answer = await VideoWatcher(gemini).watch("https://www.tiktok.com/@a/video/1", "the trick")
+            answer = await VideoWatcher(gemini).watch("https://www.tiktok.com/@a/video/1", focus)
         return answer, gemini, ffmpeg
 
     async def test_short_videos_are_reencoded_uploaded_and_watched_statically(self):
@@ -63,7 +64,6 @@ class TestWatchFile(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(uri, "files/abc-uri")
         self.assertIn("the trick", prompt)
         self.assertFalse(gemini.watch_video.await_args.kwargs["agentic"])
-        gemini.delete_file.assert_awaited_once_with("files/abc")
 
     async def test_small_videos_gemini_takes_are_uploaded_as_they_are(self):
         _, gemini, ffmpeg = await self.watch(42.0, name="download.mov", size=50 * 1024 * 1024)
@@ -82,12 +82,29 @@ class TestWatchFile(unittest.IsolatedAsyncioTestCase):
         _, gemini, _ = await self.watch(AGENTIC_MIN_SECONDS + 1)
         self.assertTrue(gemini.watch_video.await_args.kwargs["agentic"])
 
-    async def test_the_upload_is_deleted_even_when_watching_fails(self):
+    async def test_a_new_question_reuses_the_upload(self):
+        gemini = _gemini()
+        await self.watch(30.0, gemini, focus="the trick")
+        _, _, ffmpeg = await self.watch(30.0, gemini, focus="the dog's name")
+        gemini.upload_video.assert_awaited_once()
+        ffmpeg.assert_not_called()
+        self.assertEqual(gemini.watch_video.await_count, 2)
+        self.assertIn("the dog's name", gemini.watch_video.await_args.args[1])
+
+    async def test_an_expired_upload_is_uploaded_again(self):
+        gemini = _gemini()
+        gemini.watch_video.side_effect = [GeminiServiceError("file not found"), ("fresh answer", 0.02)]
+        await video_service._upload_cache.set("https://www.tiktok.com/@a/video/1", {
+            "uri": "files/old", "mime_type": "video/mp4", "seconds": 30.0, "expires_at": 9e12})
+        answer, _, _ = await self.watch(30.0, gemini)
+        self.assertEqual(answer[0], "fresh answer")
+        gemini.upload_video.assert_awaited_once()
+
+    async def test_a_watch_failure_is_a_video_error(self):
         gemini = _gemini()
         gemini.watch_video.side_effect = GeminiServiceError("failed")
         with self.assertRaises(VideoError):
             await self.watch(30.0, gemini)
-        gemini.delete_file.assert_awaited_once()
 
     async def test_too_long_and_unreadable_videos_are_refused(self):
         with self.assertRaises(VideoError):

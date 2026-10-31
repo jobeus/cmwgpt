@@ -370,3 +370,6 @@ system_prompt.txt
 
 # Local pip outdated-packages report
 outdated.txt
+# IRC log meaning index (built next to IRC_LOG)
+*.meaning.npz
+*.meaning.npz.tmp.npz

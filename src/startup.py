@@ -17,6 +17,7 @@ from src.services.openai_service import OpenAIService
 from src.services.anthropic_service import AnthropicService
 from src.services.gemini_service import GeminiService
 from src.services.irc_log_service import load_irc_log
+from src.services.irc_meaning_index import IrcMeaningIndex
 from src.services.quote_service import load_quote_file
 from src.services.memory_service import MemoryService
 from src.services.day_summary_service import DaySummaryService
@@ -106,6 +107,8 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     )
     reminder_service = ReminderService(is_testing=app_config.is_testing)
     video_watcher = VideoWatcher(gemini_service) if app_config.gemini_api_key else None
+    irc_log = load_irc_log(app_config.irc_log_path, app_config.irc_nicks_path)
+    irc_meaning_index = IrcMeaningIndex(irc_log, gemini_service) if irc_log and app_config.gemini_api_key else None
     mention_handler = MentionHandler(
         state_service=state_service,
         openai_service=openai_service,
@@ -120,7 +123,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         day_summary_provider=day_summary_service.get_summary,
         runpod_service=runpod_service,
         default_draw_model=app_config.default_draw_model,
-        irc_log=load_irc_log(app_config.irc_log_path, app_config.irc_nicks_path),
+        irc_log=irc_log,
         default_edit_model=app_config.default_edit_model,
         memory_corrector=memory_service.correct if memory_service.available else None,
         wiki_views=death_service.get_avg_monthly_views,
@@ -133,6 +136,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         timezone_store=None if app_config.is_testing else TimezoneStore(),
         video_summarizer=video_watcher.summarize_youtube if video_watcher else None,
         video_watcher=video_watcher.watch if video_watcher else None,
+        irc_meaning_index=irc_meaning_index,
     )
 
     return AppServices(

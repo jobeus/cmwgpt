@@ -210,6 +210,10 @@ class DiscordBotClient:
             if getattr(self.services, "reminder_service", None) is not None:
                 self.services.reminder_service.start()
 
+            # Read the IRC log's dates and top speakers now, not on the first mention.
+            if hasattr(self.mention_handler, "warm_up"):
+                self.mention_handler.warm_up()
+
             print(f"🤖 Logged in as {self.bot.user}")
 
             # Log auto-update status

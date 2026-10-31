@@ -235,6 +235,7 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | `search_messages`, `read_messages`, `view_images` | `src/services/discord_history.py` (Discord's message search) and message fetches | a guild |
 | `react` | `add_reaction` on a message in the mention's channel (5 per reply; the tools section lists the server's custom emoji) | a guild |
 | `search_irc_log`, `read_irc_log_day`, `count_irc_log` | `src/services/irc_log_service.py` (memory-mapped log) | `IRC_LOG` (`IRC_NICKS` optional) |
+| `search_irc_by_meaning` | `src/services/irc_meaning_index.py`: conversations from `IrcLog.conversations`, embedded with `gemini-embedding-2` (canonical nicks, bots left out), searched with numpy; the index is `<IRC_LOG>.meaning.npz`, built in the background at startup | `IRC_LOG`, `GEMINI_API_KEY` |
 | `old_quotes` | `src/services/quote_service.py` | `OLD_QUOTE_BOT` |
 | `remind`, `list_reminders`, `cancel_reminder` | `src/services/reminder_service.py` (Redis; posts due reminders every 15s) | a guild |
 | `set_timezone` | `src/services/timezone_service.py` (Redis; also feeds the `<time_zones>` block on every mention) | a guild, Redis |
