@@ -17,6 +17,8 @@ off. It's rebuilt when the log or the nicks file changes. Building costs about $
 (~$4 for an 80MB log); a search costs a fraction of a cent.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -26,12 +28,26 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, List, Optional, Sequence, Tuple
 
-import numpy as np
-
 from src.services.cost_service import GEMINI_DIRECT, record_cost
 from src.services.irc_log_service import IrcLog
 
 logger = logging.getLogger(__name__)
+
+# numpy is optional: if it won't load (a CPU its build doesn't support raises at import),
+# the meaning search is off and the rest of the bot runs.
+try:
+    import numpy as np
+    NUMPY_ERROR = ""
+except Exception as e:  # pragma: no cover - depends on the machine
+    np = None  # type: ignore[assignment]
+    NUMPY_ERROR = f"{type(e).__name__}: {e}"
+
+
+def available() -> bool:
+    """Whether the meaning search can run here (numpy loads)."""
+    if NUMPY_ERROR:
+        logger.warning(f"[irc meaning] numpy won't load, so search_irc_by_meaning is off: {NUMPY_ERROR}")
+    return not NUMPY_ERROR
 
 EMBED_MODEL = "gemini-embedding-2"
 EMBED_DIMS = 768

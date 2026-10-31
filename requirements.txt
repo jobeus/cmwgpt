@@ -10,4 +10,5 @@ trafilatura>=2.3.1
 yt-dlp>=2026.8.19
 google-genai>=2.32.0
 redis>=8.1.0
-numpy>=2.3.0
+# 2.4+ needs an x86-64-v2 CPU (SSE4.2, POPCNT), which the server lacks; 2.3 only needs SSE3.
+numpy>=2.3.5,<2.4

@@ -17,7 +17,7 @@ from src.services.openai_service import OpenAIService
 from src.services.anthropic_service import AnthropicService
 from src.services.gemini_service import GeminiService
 from src.services.irc_log_service import load_irc_log
-from src.services.irc_meaning_index import IrcMeaningIndex
+from src.services import irc_meaning_index as meaning
 from src.services.quote_service import load_quote_file
 from src.services.memory_service import MemoryService
 from src.services.day_summary_service import DaySummaryService
@@ -108,7 +108,10 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     reminder_service = ReminderService(is_testing=app_config.is_testing)
     video_watcher = VideoWatcher(gemini_service) if app_config.gemini_api_key else None
     irc_log = load_irc_log(app_config.irc_log_path, app_config.irc_nicks_path)
-    irc_meaning_index = IrcMeaningIndex(irc_log, gemini_service) if irc_log and app_config.gemini_api_key else None
+    irc_meaning_index = (
+        meaning.IrcMeaningIndex(irc_log, gemini_service)
+        if irc_log and app_config.gemini_api_key and meaning.available() else None
+    )
     mention_handler = MentionHandler(
         state_service=state_service,
         openai_service=openai_service,

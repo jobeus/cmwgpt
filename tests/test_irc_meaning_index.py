@@ -117,6 +117,23 @@ class TestIrcMeaningIndex(unittest.IsolatedAsyncioTestCase):
         self.assertIn("still being built", await index.search("anything"))
 
 
+class TestWithoutNumpy(unittest.TestCase):
+    def test_the_bot_starts_without_the_tool_when_numpy_wont_load(self):
+        from src.startup import create_services
+        from tests.config_helpers import cfg
+
+        path = os.path.join(tempfile.mkdtemp(), "cmw.txt")
+        with open(path, "w") as f:
+            f.write(LOG)
+        config = cfg(is_testing=True, irc_log_path=path, gemini_api_key="key")
+        self.assertIsNotNone(create_services(config).mention_handler._irc_meaning_index)
+        with patch.object(irc_meaning_index, "NUMPY_ERROR", "RuntimeError: needs X86_V2"), \
+                self.assertLogs("src.services.irc_meaning_index", level="WARNING"):
+            services = create_services(config)
+        self.assertIsNone(services.mention_handler._irc_meaning_index)
+        self.assertIsNotNone(services.mention_handler._irc_log)
+
+
 class TestTool(unittest.IsolatedAsyncioTestCase):
     async def test_tool_passes_filters_and_rejects_bad_dates(self):
         from src.services.chat_tools import build_mention_tools
