@@ -22,6 +22,7 @@ from openai import (
 
 from src.config import get_config
 from src.utils.message_utils import clean_openai_response, resolve_bot_id
+from src.services.cost_service import OPENROUTER, record_cost
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +213,9 @@ class OpenAIService:
             snippet = response_text.strip().replace("\n", " ")
             logger.info(f"[{model}] response snippet: {snippet[:150]}{'...' if len(snippet) > 150 else ''}")
             cleaned = clean_openai_response(response_text, bot_id=resolved_bot_id)
-            return cleaned, _response_cost(response)
+            cost = _response_cost(response)
+            await record_cost(OPENROUTER, cost)
+            return cleaned, cost
 
         raise OpenAIServiceError("Failed to get chat completion after all retry attempts")
 
@@ -262,12 +265,21 @@ def _prompt_snippet(api_input: List[Dict[str, Any]]) -> str:
 
 
 def _response_cost(response: Any) -> float:
+    """What a response cost in USD, from OpenRouter's usage accounting.
+
+    ``cost`` is what OpenRouter charged. With BYOK that's only its fee, and the
+    provider's bill comes separately as ``cost_details.upstream_inference_cost``.
+    """
     try:
         model_extra = getattr(getattr(response, "usage", None), "model_extra", None)
-        if isinstance(model_extra, dict):
-            cost_details = model_extra.get("cost_details", {})
-            if isinstance(cost_details, dict):
-                return cost_details.get("upstream_inference_cost", 0.0) or 0.0
+        if not isinstance(model_extra, dict):
+            return 0.0
+        cost_details = model_extra.get("cost_details")
+        upstream = (cost_details.get("upstream_inference_cost") if isinstance(cost_details, dict) else 0.0) or 0.0
+        charged = model_extra.get("cost")
+        if charged is None:
+            return float(upstream)
+        return float(charged) + (float(upstream) if model_extra.get("is_byok") else 0.0)
     except Exception as e:
         logger.warning(f"Failed to parse cost: {e}")
     return 0.0

@@ -13,6 +13,7 @@ from discord.ext import commands
 from src.config import AppConfig, get_system_prompt, load_config
 from src.bot.commands.image import ImageCommands
 from src.bot.commands.system import SystemCommands
+from src.bot.commands.cost import build_cost_commands
 from src.bot.commands.death import DeathCommands
 from src.bot.commands.memory import MemoryCommands
 from src.bot.commands.wikicount import WikiCountCommands
@@ -264,6 +265,10 @@ class DiscordBotClient:
             state_service_instance=self.services.state_service,
         )
         wikicount_commands.setup_commands()
+
+        cost_commands = build_cost_commands(self.bot, getattr(self.services, "cost_store", None))
+        if cost_commands is not None:
+            cost_commands.setup_commands()
 
         if getattr(self.services, "memory_service", None) is not None:
             memory_commands = MemoryCommands(

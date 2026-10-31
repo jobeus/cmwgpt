@@ -9,7 +9,6 @@ coverage>=7.16.2
 fakeredis>=2.40.0
 
 # Code quality and linting tools
-flake8>=7.4.1
-autopep8>=2.3.2
+ruff>=0.17.3
 black>=26.10.1
 mypy>=2.4.0

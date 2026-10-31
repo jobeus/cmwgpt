@@ -41,7 +41,7 @@ async def get_transcript(video_id: str, *, cache_only: bool = False) -> Optional
     Results are cached in Redis. Returns ``None`` on failure, or on a
     cache miss when ``cache_only`` is set.
     """
-    cached = _transcript_cache.get(video_id)
+    cached = await _transcript_cache.get(video_id)
     if cached is not None or cache_only:
         return cached
 
@@ -59,7 +59,7 @@ async def get_transcript(video_id: str, *, cache_only: bool = False) -> Optional
             return " ".join(snippet.text for snippet in api.fetch(video_id))
 
         transcript_text = await asyncio.to_thread(_fetch)
-        _transcript_cache[video_id] = transcript_text
+        await _transcript_cache.set(video_id, transcript_text)
         return transcript_text
 
     except Exception as e:

@@ -8,6 +8,7 @@ from typing import Any, Awaitable, Callable
 
 import discord
 
+from src.services.cost_service import cost_scope
 from src.utils.discord_error_utils import concise_error
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,12 @@ async def safe_run(interaction: discord.Interaction,
         **kwargs: Keyword arguments for the handler
     """
     try:
-        await handler(*args, **kwargs)
+        # Charges what the command spends to whoever ran it, where they ran it.
+        with cost_scope(
+            user_id=getattr(interaction.user, "id", None),
+            channel_id=getattr(interaction.channel, "id", None),
+        ):
+            await handler(*args, **kwargs)
     except discord.NotFound as e:
         # The interaction's response message was deleted (or the token
         # expired) mid-command. Nothing to respond to — one small log line,

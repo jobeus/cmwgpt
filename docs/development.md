@@ -66,7 +66,7 @@ This starts:
 | Service | Purpose |
 | --- | --- |
 | `redis` | Redis 8 for per-user memory, channel summaries and content caches (data kept in the `redis-data` volume) |
-| `bot` | Python Discord bot (`python:3.13-slim` image) |
+| `bot` | Python Discord bot (`python:3.14-slim` image) |
 
 The checkout is mounted at `/app`, so code changes only need a restart
 (`docker compose restart bot`), but requirement changes need `--build`. Compose always
@@ -74,7 +74,7 @@ points the bot at the `redis` container and loads only `.env.development`, even 
 `.env` or `.env.production` sits in the checkout. `make docker-logs` follows the bot's logs
 and `make docker-down` stops the stack. Leave `DEPLOY_WEBHOOK_SECRET` empty in development.
 
-CI runs only the Python job, on Python 3.13.
+CI runs only the Python job, on Python 3.14 (what the server runs): ruff, mypy, then the tests. The deploy notification only goes out once that passes.
 
 ## Fast command cheat sheet
 

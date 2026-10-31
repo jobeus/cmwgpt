@@ -2,7 +2,7 @@
 
 import json
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import fakeredis
 import redis
@@ -11,80 +11,84 @@ from src.utils import cache_utils
 from src.utils.cache_utils import LRUCache, PersistentCache
 
 
-class TestPersistentCache(unittest.TestCase):
+class TestPersistentCache(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.redis = fakeredis.FakeRedis(decode_responses=True)
+        self.redis = fakeredis.FakeAsyncRedis(decode_responses=True)
 
     def make(self, name, **kwargs):
         return PersistentCache(name, client_getter=lambda: self.redis, **kwargs)
 
-    def test_values_round_trip_as_json_under_a_prefixed_key(self):
+    async def test_values_round_trip_as_json_under_a_prefixed_key(self):
         cache = self.make("demo")
-        cache["https://x.com/a/status/1"] = ("text", ["data:image/jpeg;base64,AAA"])
+        await cache.set("https://x.com/a/status/1", ("text", ["data:image/jpeg;base64,AAA"]))
 
-        self.assertEqual(cache.get("https://x.com/a/status/1"), ["text", ["data:image/jpeg;base64,AAA"]])
-        raw = self.redis.get("cmwgpt:cache:demo:https://x.com/a/status/1")
+        self.assertEqual(await cache.get("https://x.com/a/status/1"), ["text", ["data:image/jpeg;base64,AAA"]])
+        raw = await self.redis.get("cmwgpt:cache:demo:https://x.com/a/status/1")
         self.assertEqual(json.loads(raw), ["text", ["data:image/jpeg;base64,AAA"]])
 
-    def test_entries_expire_and_reads_refresh_the_ttl(self):
+    async def test_big_values_round_trip_off_the_event_loop(self):
+        cache = self.make("big-ok")
+        value = ["text", ["data:image/jpeg;base64," + "A" * 300_000]]
+        with patch("src.utils.cache_utils.asyncio.to_thread", wraps=cache_utils.asyncio.to_thread) as to_thread:
+            await cache.set("k", value)
+            self.assertEqual(await cache.get("k"), value)
+        self.assertEqual(to_thread.call_count, 2)
+
+    async def test_entries_expire_and_reads_refresh_the_ttl(self):
         cache = self.make("ttl", ttl_seconds=100)
-        cache["k"] = "v"
-        self.redis.expire("cmwgpt:cache:ttl:k", 5)
+        await cache.set("k", "v")
+        await self.redis.expire("cmwgpt:cache:ttl:k", 5)
 
-        self.assertEqual(cache.get("k"), "v")
-        self.assertGreater(self.redis.ttl("cmwgpt:cache:ttl:k"), 50)
+        self.assertEqual(await cache.get("k"), "v")
+        self.assertGreater(await self.redis.ttl("cmwgpt:cache:ttl:k"), 50)
 
-    def test_get_missing_returns_default_and_getitem_raises(self):
+    async def test_get_missing_returns_default(self):
         cache = self.make("missing")
-        self.assertIsNone(cache.get("nope"))
-        self.assertEqual(cache.get("nope", "dflt"), "dflt")
-        with self.assertRaises(KeyError):
-            cache["nope"]
+        self.assertIsNone(await cache.get("nope"))
+        self.assertEqual(await cache.get("nope", "dflt"), "dflt")
 
-    def test_contains_and_delete(self):
+    async def test_delete(self):
         cache = self.make("delete")
-        cache["key"] = "value"
-        self.assertIn("key", cache)
-        cache.delete("key")
-        self.assertNotIn("key", cache)
+        await cache.set("key", "value")
+        await cache.delete("key")
+        self.assertIsNone(await cache.get("key"))
 
-    def test_non_string_keys_work(self):
+    async def test_non_string_keys_work(self):
         cache = self.make("ids")
-        cache[1234] = "transcript"
-        self.assertEqual(cache.get(1234), "transcript")
+        await cache.set(1234, "transcript")
+        self.assertEqual(await cache.get(1234), "transcript")
 
-    def test_oversized_values_are_not_stored(self):
+    async def test_oversized_values_are_not_stored(self):
         with patch("src.utils.cache_utils.MAX_VALUE_BYTES", 10):
             cache = self.make("big")
-            cache["k"] = "x" * 50
-        self.assertIsNone(cache.get("k"))
+            await cache.set("k", "x" * 50)
+        self.assertIsNone(await cache.get("k"))
 
-    def test_without_redis_it_works_from_memory(self):
+    async def test_without_redis_it_works_from_memory(self):
         def unavailable():
             raise RuntimeError("Real Redis client requested during IS_TESTING=True")
 
         cache = PersistentCache("offline", client_getter=unavailable)
-        cache["k"] = "v"
-        self.assertEqual(cache.get("k"), "v")
-        self.assertIn("k", cache)
-        cache.delete("k")
-        self.assertNotIn("k", cache)
+        await cache.set("k", "v")
+        self.assertEqual(await cache.get("k"), "v")
+        await cache.delete("k")
+        self.assertIsNone(await cache.get("k"))
 
-    def test_redis_errors_fall_back_to_memory_then_retry_later(self):
+    async def test_redis_errors_fall_back_to_memory_then_retry_later(self):
         broken = MagicMock()
-        broken.set.side_effect = redis.ConnectionError("down")
-        broken.getex.side_effect = redis.ConnectionError("down")
+        broken.set = AsyncMock(side_effect=redis.ConnectionError("down"))
+        broken.getex = AsyncMock(side_effect=redis.ConnectionError("down"))
         cache = PersistentCache("flaky", client_getter=lambda: broken)
 
         with self.assertLogs("src.utils.cache_utils", level="WARNING"):
-            cache["k"] = "v"
-        self.assertEqual(cache.get("k"), "v")  # served from memory without touching Redis
+            await cache.set("k", "v")
+        self.assertEqual(await cache.get("k"), "v")  # served from memory without touching Redis
         broken.getex.assert_not_called()
 
         with patch("src.utils.cache_utils.time.monotonic", return_value=cache._down_until + 1):
             broken.getex.side_effect = None
             broken.getex.return_value = json.dumps("from redis")
-            self.assertEqual(cache.get("k"), "from redis")
+            self.assertEqual(await cache.get("k"), "from redis")
 
 
 class TestLRUCache(unittest.TestCase):
@@ -121,7 +125,7 @@ class TestLRUCache(unittest.TestCase):
 
 class TestSkipRecentFailures(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        fake = fakeredis.FakeRedis(decode_responses=True)
+        fake = fakeredis.FakeAsyncRedis(decode_responses=True)
         self.store = PersistentCache(
             "fetch_failures", ttl_seconds=cache_utils.FETCH_FAILURE_TTL_SECONDS, client_getter=lambda: fake
         )
@@ -142,23 +146,23 @@ class TestSkipRecentFailures(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), 1)
 
         with patch("src.utils.cache_utils.time.time",
-                   return_value=self.store.get("demo:https://dead.example") + 3601):
+                   return_value=await self.store.get("demo:https://dead.example") + 3601):
             await fetch("https://dead.example")
         self.assertEqual(len(calls), 2)
 
-    def test_success_clears_failure_for_sync_fetcher(self):
+    async def test_success_clears_failure(self):
         results = iter([None, "text"])
 
         @cache_utils.skip_recent_failures("demo")
-        def fetch(url):
+        async def fetch(url):
             return next(results)
 
-        self.assertIsNone(fetch("u"))
-        self.store["demo:u"] = 0  # pretend the failure is old
-        self.assertEqual(fetch("u"), "text")
-        self.assertNotIn("demo:u", self.store)
+        self.assertIsNone(await fetch("u"))
+        await self.store.set("demo:u", 0)  # pretend the failure is old
+        self.assertEqual(await fetch("u"), "text")
+        self.assertIsNone(await self.store.get("demo:u"))
 
-    async def test_cache_only_async_call_passes_through_and_never_records(self):
+    async def test_cache_only_call_passes_through_and_never_records(self):
         calls = []
 
         @cache_utils.skip_recent_failures("demo")
@@ -167,20 +171,12 @@ class TestSkipRecentFailures(unittest.IsolatedAsyncioTestCase):
             return None
 
         self.assertIsNone(await fetch("u", cache_only=True))
-        self.assertNotIn("demo:u", self.store)
+        self.assertIsNone(await self.store.get("demo:u"))
 
         # Even a recorded failure doesn't short-circuit a cache_only lookup.
-        self.store["demo:u"] = cache_utils.time.time()
+        await self.store.set("demo:u", cache_utils.time.time())
         await fetch("u", cache_only=True)
         self.assertEqual(calls, [True, True])
-
-    def test_cache_only_sync_call_passes_through_and_never_records(self):
-        @cache_utils.skip_recent_failures("demo")
-        def fetch(url, *, cache_only=False):
-            return None
-
-        self.assertIsNone(fetch("u", cache_only=True))
-        self.assertNotIn("demo:u", self.store)
 
 
 if __name__ == "__main__":

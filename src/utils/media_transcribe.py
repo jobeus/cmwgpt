@@ -21,12 +21,17 @@ import httpx
 import yt_dlp
 
 from src.config import get_config
+from src.services.cost_service import GROQ, record_cost
 from src.utils.http_client import download_public
 
 logger = logging.getLogger(__name__)
 
 GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 GROQ_MODEL = "whisper-large-v3-turbo"
+# Groq bills audio time: USD per hour for GROQ_MODEL, with each request billed as
+# at least GROQ_MIN_BILLED_SECONDS.
+GROQ_PRICE_PER_HOUR = 0.04
+GROQ_MIN_BILLED_SECONDS = 10
 
 # Whisper resamples everything to 16 kHz mono, so encoding to exactly that at
 # 32 kbps costs no accuracy: ~14 MB per hour, i.e. ~1h50m per Groq upload.
@@ -58,15 +63,27 @@ async def transcribe_audio(audio_bytes: bytes, filename: str, mime_type: str) ->
         response = await client.post(
             GROQ_TRANSCRIBE_URL,
             headers={"Authorization": f"Bearer {api_key}"},
-            data={"model": GROQ_MODEL, "temperature": "0", "response_format": "text"},
+            # verbose_json, for the audio's duration, which is what Groq bills.
+            data={"model": GROQ_MODEL, "temperature": "0", "response_format": "verbose_json"},
             files={"file": (filename, audio_bytes, mime_type)},
         )
         response.raise_for_status()
-    transcript = response.text.strip()
+    body = response.json()
+    await record_cost(GROQ, groq_cost(body.get("duration")))
+    transcript = str(body.get("text") or "").strip()
     if not transcript:
         logger.warning(f"Groq returned an empty transcript for {filename}")
         return None
     return transcript
+
+
+def groq_cost(duration_seconds: Optional[float]) -> float:
+    """What Groq charges to transcribe ``duration_seconds`` of audio in one request."""
+    try:
+        seconds = max(float(duration_seconds or 0), GROQ_MIN_BILLED_SECONDS)
+    except (TypeError, ValueError):
+        seconds = GROQ_MIN_BILLED_SECONDS
+    return seconds / 3600 * GROQ_PRICE_PER_HOUR
 
 
 def _run_ffmpeg(args: List[str]) -> None:
@@ -186,7 +203,7 @@ async def download_and_transcribe_video(
 
     Returns the transcript, or ``None`` on any failure.
     """
-    cached = cache.get(url)
+    cached = await cache.get(url)
     if cached is not None or cache_only:
         return cached
 
@@ -225,7 +242,7 @@ async def download_and_transcribe_video(
 
         transcript = await transcribe_audio_file(audio_file)
         if transcript:
-            cache[url] = transcript
+            await cache.set(url, transcript)
         return transcript
     except Exception as e:
         logger.error(f"Unexpected error processing {label} video {url}: {e}")

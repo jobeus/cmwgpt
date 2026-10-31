@@ -129,7 +129,7 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
     Raises:
         Exception: If download or encoding fails
     """
-    cached = _attachment_base64_cache.get(attachment.id)
+    cached = await _attachment_base64_cache.get(attachment.id)
     if cached is not None:
         return cached
 
@@ -145,7 +145,7 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
         else:
             data_url = await _image_bytes_to_data_url(file_bytes)
 
-        _attachment_base64_cache[attachment.id] = data_url
+        await _attachment_base64_cache.set(attachment.id, data_url)
         return data_url
 
     except Exception as e:
@@ -164,7 +164,7 @@ async def url_to_base64_data_url(url: str) -> str:
     """
     if url.startswith("data:"):
         return url
-    cached = _url_base64_cache.get(url)
+    cached = await _url_base64_cache.get(url)
     if cached is not None:
         return cached
 
@@ -173,7 +173,7 @@ async def url_to_base64_data_url(url: str) -> str:
             url, headers=_IMAGE_FETCH_HEADERS, timeout=10.0, max_bytes=MAX_IMAGE_DOWNLOAD_BYTES)
         response.raise_for_status()
         data_url = await _image_bytes_to_data_url(response.content)
-        _url_base64_cache[url] = data_url
+        await _url_base64_cache.set(url, data_url)
         return data_url
     except Exception as e:
         logger.warning(f"Failed to fetch image URL '{url}': {type(e).__name__}: {e}")
@@ -205,7 +205,7 @@ async def transcribe_audio_attachment(attachment: discord.Attachment) -> Optiona
     Transcribe a Discord audio attachment using Groq Whisper.
     Results are cached in Redis to avoid repetitive API calls.
     """
-    cached = _audio_transcript_cache.get(attachment.id)
+    cached = await _audio_transcript_cache.get(attachment.id)
     if cached is not None:
         return cached
 
@@ -234,7 +234,7 @@ async def transcribe_audio_attachment(attachment: discord.Attachment) -> Optiona
                 transcript = await transcribe_audio_file(path, content_type)
         if transcript:
             logger.info(f"Successfully transcribed audio attachment {filename} using Groq.")
-            _audio_transcript_cache[attachment.id] = transcript
+            await _audio_transcript_cache.set(attachment.id, transcript)
         return transcript
 
     except Exception as e:

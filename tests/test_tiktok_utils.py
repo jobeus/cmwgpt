@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from src.utils import tiktok_utils
+from tests.config_helpers import AsyncDictCache
 
 
 class TestTikTokUrlExtraction(unittest.TestCase):
@@ -69,7 +70,7 @@ class TestTikTokTranscript(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(mock_dl.await_args.kwargs["cache_only"])
 
     async def test_returns_cached_transcript_without_download(self):
-        with patch("src.utils.tiktok_utils._tiktok_cache", {self.URL: "cached"}), patch(
+        with patch("src.utils.tiktok_utils._tiktok_cache", AsyncDictCache({self.URL: "cached"})), patch(
             "src.utils.media_transcribe.yt_dlp.YoutubeDL"
         ) as mock_ydl:
             self.assertEqual(await tiktok_utils.get_tiktok_transcript(self.URL), "cached")

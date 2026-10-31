@@ -36,22 +36,15 @@ print_error() {
     echo -e "${RED}[PRE-COMMIT]${NC} ❌ $1"
 }
 
+# ruff from the project's virtualenv (rules in ruff.toml)
+RUFF=".venv/bin/ruff"
+
 # Check if required tools are installed
 check_dependencies() {
-    local missing_deps=()
-    
-    if ! command -v flake8 &> /dev/null; then
-        missing_deps+=("flake8")
-    fi
-    
-    if ! command -v autopep8 &> /dev/null; then
-        missing_deps+=("autopep8")
-    fi
-    
-    if [ ${#missing_deps[@]} -ne 0 ]; then
-        print_error "Missing required dependencies: ${missing_deps[*]}"
-        print_status "Installing missing dependencies..."
-        pip install "${missing_deps[@]}"
+    if [ ! -x "$RUFF" ]; then
+        print_error "ruff isn't installed in .venv"
+        print_status "Installing test dependencies..."
+        .venv/bin/python -m pip install -r test_requirements.txt
     fi
 }
 
@@ -81,8 +74,8 @@ check_linting() {
     
     print_status "Checking linting issues in staged files..."
     
-    # Run flake8 on staged files
-    if flake8 "${files[@]}" --max-line-length=120 --ignore=E501,W503 > /dev/null 2>&1; then
+    # Run ruff on staged files
+    if "$RUFF" check --quiet "${files[@]}" > /dev/null 2>&1; then
         print_success "No linting issues found"
         return 0
     else
@@ -99,8 +92,8 @@ autofix_files() {
     
     print_status "Auto-fixing linting issues..."
     
-    # Run autopep8 to fix issues
-    autopep8 --in-place --aggressive --aggressive "${files[@]}"
+    # Let ruff fix what it safely can
+    "$RUFF" check --fix --quiet "${files[@]}" > /dev/null 2>&1 || true
     
     print_success "Auto-fix completed"
 }

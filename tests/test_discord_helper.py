@@ -11,7 +11,8 @@ import httpx
 from PIL import Image
 
 from src.utils import discord_helper
-from src.utils.cache_utils import LRUCache, PersistentCache
+from src.utils.cache_utils import PersistentCache
+from tests.config_helpers import AsyncDictCache
 
 
 def ok_response(content=b"image-bytes", status=200, url="https://example.com/image.png"):
@@ -41,7 +42,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         attachment.filename = "image.png"
         attachment.read = AsyncMock(return_value=b"image-bytes")
 
-        with patch("src.utils.discord_helper._attachment_base64_cache", {}), patch(
+        with patch("src.utils.discord_helper._attachment_base64_cache", AsyncDictCache()), patch(
             "src.utils.discord_helper.compress_image", return_value=b"jpeg"
         ):
             result = await discord_helper.attachment_to_base64_data_url(attachment)
@@ -55,7 +56,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         broken.id = 2
         broken.filename = "broken.png"
         broken.read = AsyncMock(side_effect=RuntimeError("nope"))
-        with patch("src.utils.discord_helper._attachment_base64_cache", {}) as failure_cache:
+        with patch("src.utils.discord_helper._attachment_base64_cache", AsyncDictCache()) as failure_cache:
             with self.assertRaises(RuntimeError):
                 await discord_helper.attachment_to_base64_data_url(broken)
             with self.assertRaises(RuntimeError):
@@ -69,7 +70,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         attachment.id = 2
         attachment.filename = "recovered.png"
         attachment.read = AsyncMock(return_value=b"image-bytes")
-        legacy_cache = {2: None}
+        legacy_cache = AsyncDictCache({2: None})
 
         with patch("src.utils.discord_helper._attachment_base64_cache", legacy_cache), patch(
             "src.utils.discord_helper.compress_image", return_value=b"jpeg"
@@ -100,7 +101,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
             self.assertIs(fn, discord_helper.compress_image)
             return b"jpeg"
 
-        with patch("src.utils.discord_helper._attachment_base64_cache", LRUCache(5)), patch(
+        with patch("src.utils.discord_helper._attachment_base64_cache", AsyncDictCache()), patch(
             "src.utils.discord_helper.asyncio.to_thread", side_effect=fake_to_thread
         ) as mock_to_thread:
             result = await discord_helper.attachment_to_base64_data_url(attachment)
@@ -116,7 +117,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         attachment.content_type = "audio/ogg; codecs=opus"
         attachment.read = AsyncMock(return_value=b"raw-audio-bytes")
 
-        with patch("src.utils.discord_helper._attachment_base64_cache", {}), patch(
+        with patch("src.utils.discord_helper._attachment_base64_cache", AsyncDictCache()), patch(
             "src.utils.discord_helper.compress_image"
         ) as mock_compress:
             result = await discord_helper.attachment_to_base64_data_url(attachment)
@@ -133,7 +134,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         attachment.is_voice_message = MagicMock(return_value=True)
         attachment.read = AsyncMock(return_value=b"voice-bytes")
 
-        with patch("src.utils.discord_helper._attachment_base64_cache", {}), patch(
+        with patch("src.utils.discord_helper._attachment_base64_cache", AsyncDictCache()), patch(
             "src.utils.discord_helper.compress_image"
         ) as mock_compress:
             result = await discord_helper.attachment_to_base64_data_url(attachment)
@@ -152,7 +153,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         raw_pcm = b"\x00\x01" * 96000  # 1 second of stereo 16-bit PCM at 48000Hz
         attachment.read = AsyncMock(return_value=raw_pcm)
 
-        with patch("src.utils.discord_helper._attachment_base64_cache", {}), patch(
+        with patch("src.utils.discord_helper._attachment_base64_cache", AsyncDictCache()), patch(
             "src.utils.discord_helper.compress_image"
         ) as mock_compress:
             result = await discord_helper.attachment_to_base64_data_url(attachment)
@@ -185,7 +186,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         attachment.content_type = None
         attachment.read = AsyncMock(return_value=b"bytes")
 
-        with patch("src.utils.discord_helper._attachment_base64_cache", LRUCache(5)), patch(
+        with patch("src.utils.discord_helper._attachment_base64_cache", AsyncDictCache()), patch(
             "src.utils.discord_helper.compress_image", return_value=b"jpeg"
         ):
             result = await discord_helper.attachment_to_base64_data_url(attachment)
@@ -201,7 +202,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
     async def test_url_to_base64_data_url_uses_fetch_public_and_caches_success(self):
         mock_fetch = AsyncMock(return_value=ok_response())
 
-        with patch("src.utils.discord_helper._url_base64_cache", LRUCache(5)), patch(
+        with patch("src.utils.discord_helper._url_base64_cache", AsyncDictCache()), patch(
             "src.utils.discord_helper.fetch_public", new=mock_fetch
         ), patch("src.utils.discord_helper.compress_image", return_value=b"jpeg") as mock_compress:
             result = await discord_helper.url_to_base64_data_url("https://example.com/image.png")
@@ -223,18 +224,18 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
             AsyncMock(side_effect=ValueError("Refusing to fetch non-public URL")),
         ]
         for mock_fetch in cases:
-            cache = LRUCache(5)
+            cache = AsyncDictCache()
             with self.subTest(mock_fetch=mock_fetch), patch(
                 "src.utils.discord_helper._url_base64_cache", cache
             ), patch("src.utils.discord_helper.fetch_public", new=mock_fetch):
                 for _ in range(2):
-                    with self.assertRaises(Exception):
+                    with self.assertRaises(Exception):  # noqa: B017 - each case fails differently
                         await discord_helper.url_to_base64_data_url("https://example.com/fail.png")
                 self.assertEqual(mock_fetch.await_count, 2)
                 self.assertEqual(len(cache), 0)
 
     async def test_url_to_base64_data_url_does_not_cache_compression_failure(self):
-        cache = LRUCache(5)
+        cache = AsyncDictCache()
         with patch("src.utils.discord_helper._url_base64_cache", cache), patch(
             "src.utils.discord_helper.fetch_public", new=AsyncMock(return_value=ok_response())
         ), patch("src.utils.discord_helper.compress_image", side_effect=RuntimeError("compress failed")):
@@ -243,23 +244,9 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(cache), 0)
 
-    async def test_url_to_base64_data_url_evicts_least_recently_used(self):
-        cache = LRUCache(2)
-        cache["https://cached/0"] = "cached-0"
-        cache["https://cached/1"] = "cached-1"
-
-        with patch("src.utils.discord_helper._url_base64_cache", cache), patch(
-            "src.utils.discord_helper.fetch_public", new=AsyncMock(return_value=ok_response())
-        ), patch("src.utils.discord_helper.compress_image", return_value=b"jpeg"):
-            await discord_helper.url_to_base64_data_url("https://example.com/image.png")
-
-        self.assertNotIn("https://cached/0", cache)
-        self.assertIn("https://cached/1", cache)
-        self.assertIn("https://example.com/image.png", cache)
-
     async def test_url_to_base64_data_url_blocks_non_public_urls(self):
         # Real fetch_public + real SSRF guard: a literal private IP never hits the network.
-        with patch("src.utils.discord_helper._url_base64_cache", LRUCache(5)) as guard_cache, patch(
+        with patch("src.utils.discord_helper._url_base64_cache", AsyncDictCache()) as guard_cache, patch(
             "src.utils.http_client.httpx.AsyncClient"
         ) as mock_client:
             with self.assertRaises(ValueError):
@@ -284,7 +271,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         attachment.content_type = "audio/mp3"
         attachment.filename = "test.mp3"
         attachment.read = AsyncMock(return_value=b"some-mp3-bytes")
-        cache = LRUCache(5)
+        cache = AsyncDictCache()
 
         with patch(
             "src.utils.discord_helper.transcribe_audio", new=AsyncMock(return_value="This is a test transcript")
@@ -294,7 +281,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, "This is a test transcript")
         self.assertEqual(again, result)
-        self.assertEqual(cache.get(5001), "This is a test transcript")
+        self.assertEqual(cache[5001], "This is a test transcript")
         mock_transcribe.assert_awaited_once_with(b"some-mp3-bytes", "test.mp3", "audio/mp3")
 
     async def test_large_audio_attachment_goes_through_the_chunker(self):
@@ -315,7 +302,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
             "src.utils.discord_helper.transcribe_audio", new=AsyncMock()
         ) as mock_single, patch(
             "src.utils.discord_helper.transcribe_audio_file", side_effect=fake_file_transcribe
-        ), patch("src.utils.discord_helper._audio_transcript_cache", LRUCache(5)):
+        ), patch("src.utils.discord_helper._audio_transcript_cache", AsyncDictCache()):
             result = await discord_helper.transcribe_audio_attachment(attachment)
 
         self.assertEqual(result, "long transcript")
@@ -333,7 +320,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "src.utils.discord_helper.transcribe_audio", new=AsyncMock(return_value="Wav transcript")
-        ) as mock_transcribe, patch("src.utils.discord_helper._audio_transcript_cache", LRUCache(5)):
+        ) as mock_transcribe, patch("src.utils.discord_helper._audio_transcript_cache", AsyncDictCache()):
             result = await discord_helper.transcribe_audio_attachment(attachment)
 
         self.assertEqual(result, "Wav transcript")
@@ -354,7 +341,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "src.utils.discord_helper.transcribe_audio", new=AsyncMock(return_value="ok")
-        ) as mock_transcribe, patch("src.utils.discord_helper._audio_transcript_cache", LRUCache(5)):
+        ) as mock_transcribe, patch("src.utils.discord_helper._audio_transcript_cache", AsyncDictCache()):
             await discord_helper.transcribe_audio_attachment(attachment)
 
         self.assertEqual(mock_transcribe.await_args.args[1], "memo.m4a")
@@ -369,7 +356,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "src.utils.discord_helper.transcribe_audio", new=AsyncMock(return_value="hi")
-        ) as mock_transcribe, patch("src.utils.discord_helper._audio_transcript_cache", LRUCache(5)):
+        ) as mock_transcribe, patch("src.utils.discord_helper._audio_transcript_cache", AsyncDictCache()):
             await discord_helper.transcribe_audio_attachment(attachment)
 
         self.assertEqual(mock_transcribe.await_args.args[1:], ("voice-message.ogg", "audio/ogg"))
@@ -380,7 +367,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
         attachment.content_type = "audio/ogg"
         attachment.filename = "a.ogg"
         attachment.read = AsyncMock(return_value=b"bytes")
-        cache = LRUCache(5)
+        cache = AsyncDictCache()
 
         with patch("src.utils.discord_helper.transcribe_audio", new=AsyncMock(return_value=None)), patch(
             "src.utils.discord_helper._audio_transcript_cache", cache
@@ -398,7 +385,7 @@ class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "src.utils.discord_helper.transcribe_audio", new=AsyncMock(side_effect=httpx.HTTPError("groq down"))
-        ), patch("src.utils.discord_helper._audio_transcript_cache", LRUCache(5)):
+        ), patch("src.utils.discord_helper._audio_transcript_cache", AsyncDictCache()):
             self.assertIsNone(await discord_helper.transcribe_audio_attachment(attachment))
 
     def test_prod_module_does_not_import_unittest_mock(self):

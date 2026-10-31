@@ -68,8 +68,8 @@ test-specific:
 
 # Run code linting
 lint:
-	@echo "Running flake8 linting from $(VENV)..."
-	@$(PYTHON) -m flake8 main.py src/ tests/ --select=F63,F7,F82,E9 || (echo "❌ High-signal Python lint issues found." && exit 1)
+	@echo "Running ruff from $(VENV) (rules in ruff.toml)..."
+	@$(PYTHON) -m ruff check main.py src/ tests/ || (echo "❌ Python lint issues found. Try 'make autofix'." && exit 1)
 	@echo "✅ No linting issues found!"
 
 # Run Python type checks
@@ -81,8 +81,7 @@ typecheck:
 # Auto-fix linting issues
 autofix:
 	@echo "🔧 Auto-fixing linting issues..."
-	@find src tests -name "*.py" -exec $(PYTHON) -m autopep8 --in-place --aggressive --aggressive {} \;
-	@$(PYTHON) -m autopep8 --in-place --aggressive --aggressive main.py
+	@$(PYTHON) -m ruff check --fix main.py src/ tests/
 	@echo "✅ Auto-fix complete! Run 'make lint' to verify."
 
 # Format code (if black is installed)

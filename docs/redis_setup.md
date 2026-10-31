@@ -6,6 +6,8 @@ Redis holds everything the bot keeps between restarts:
 | --- | --- | --- |
 | `cmwgpt:memory:<guild>:<user>` | One user's memory profile, right now (no history), max 100 KB | Never |
 | `cmwgpt:memory_job:<guild>` | Nightly memory job progress (`processed_through`, last status) | Never |
+| `cmwgpt:day_summary:<channel>` | Today's running chat summary for a channel, so a restart doesn't re-read the day | 30 hours |
+| `cmwgpt:costs:<YYYY-MM-DD>` | That day's spending (America/Denver): one field per provider, per person and per channel, for `/cost` | 400 days |
 | `cmwgpt:cache:<name>:<key>` | Fetched content: articles, YouTube/TikTok/Facebook transcripts, tweets and Instagram posts (with base64 images), image data URLs, voice-note transcripts | 30 days after last use (images 7 days, failed fetches 1 hour) |
 
 If Redis is down the bot still replies: content caches fall back to memory and refetch, but `/memory` and the nightly job fail until it's back.

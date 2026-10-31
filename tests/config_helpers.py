@@ -22,3 +22,19 @@ _BASE: AppConfig = load_config(env={}, load_env_file=False)
 def cfg(**overrides) -> AppConfig:
     """Return the base test config with ``overrides`` applied."""
     return replace(_BASE, **overrides)
+
+
+class AsyncDictCache(dict):
+    """A dict with :class:`~src.utils.cache_utils.PersistentCache`'s async methods.
+
+    Patch it in for a module's cache; tests can still check it like a dict.
+    """
+
+    async def get(self, key, default=None):  # type: ignore[override]
+        return dict.get(self, key, default)
+
+    async def set(self, key, value):
+        self[key] = value
+
+    async def delete(self, key):
+        self.pop(key, None)

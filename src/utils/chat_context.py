@@ -73,7 +73,7 @@ async def build_chat_context(
     # Tag each entry with its Discord message so services can tell which came after the mention.
     return [
         {**entry, "message_id": msg.id}
-        for msg, entries in zip(messages, converted)
+        for msg, entries in zip(messages, converted, strict=True)
         for entry in entries
     ]
 

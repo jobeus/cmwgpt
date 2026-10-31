@@ -125,8 +125,6 @@ class TestRedisClient(unittest.TestCase):
 
         with patch("src.config._cached_config", cfg(is_testing=True)), self.assertRaises(RuntimeError):
             redis_client.get_async_redis()
-        with patch("src.config._cached_config", cfg(is_testing=True)), self.assertRaises(RuntimeError):
-            redis_client.get_sync_redis()
 
 
 

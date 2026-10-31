@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Union
 import discord
 import httpx
 
+from src.services.cost_service import GEMINI_DIRECT, record_cost
 from src.utils.message_utils import clean_openai_response, resolve_bot_id
 
 logger = logging.getLogger(__name__)
@@ -391,7 +392,7 @@ class GeminiService:
                         
                     output_type = item.get("type", "")
                     if output_type == "text" or ("text" in item and item["text"]):
-                        text_parts.append(item.get("text", ""))
+                        text_parts.append(item.get("text", ""))  # noqa: B023 - called in this same attempt
                     elif output_type == "image" and "data" in item:
                         try:
                             img_data = base64.b64decode(item["data"])
@@ -408,7 +409,7 @@ class GeminiService:
                                 io.BytesIO(img_data),
                                 filename=f"gemini_output.{ext}"
                             )
-                            image_files.append(file)
+                            image_files.append(file)  # noqa: B023 - called in this same attempt
                         except Exception as e:
                             logger.error(f"Failed to process image output: {e}")
                     elif output_type == "thought":
@@ -442,6 +443,7 @@ class GeminiService:
                 if usage:
                     cost = self._estimate_cost(usage)
                     logger.info(f"[gemini] Usage: {usage}, Estimated cost: ${cost:.4f}")
+                    await record_cost(GEMINI_DIRECT, cost)
 
                 # Log snippet
                 text_snippet = response_text.strip().replace("\n", " ")[:150] if response_text else "(empty)"
@@ -538,6 +540,7 @@ class GeminiService:
         for part in response.candidates[0].content.parts:
             if part.inline_data and part.inline_data.data:
                 cost = self._estimate_image_cost(getattr(response, 'usage_metadata', None), model)
+                await record_cost(GEMINI_DIRECT, cost)
                 return part.inline_data.data, cost
                 
         raise GeminiServiceError("No inline_data image returned from Gemini.")

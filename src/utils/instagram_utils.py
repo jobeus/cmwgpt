@@ -52,7 +52,7 @@ async def get_instagram_context(url: str, *, cache_only: bool = False) -> Option
 
     Returns ``(context, image_data_url)``, cached in Redis.
     """
-    cached = _instagram_cache.get(url)
+    cached = await _instagram_cache.get(url)
     if cached is not None:
         context, image_data_url = cached
         return context, image_data_url
@@ -95,7 +95,7 @@ async def get_instagram_context(url: str, *, cache_only: bool = False) -> Option
                 logger.warning(f"Failed to process video for Instagram {url}: {e}")
 
         image_data_url = await _image_to_data_url(image_url)
-        _instagram_cache[url] = (context, image_data_url)
+        await _instagram_cache.set(url, (context, image_data_url))
         return context, image_data_url
 
     except KeyError as ke:

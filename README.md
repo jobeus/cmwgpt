@@ -61,7 +61,7 @@ Redis isn't exposed on the host. The bot only listens for the deploy webhook, an
 
 | Group | Commands |
 | --- | --- |
-| General | `/help`, `/model`, `/restart`, `/wikicount` |
+| General | `/help`, `/model`, `/restart`, `/wikicount`, `/cost` |
 | Prompting | `/systemprompt set`, `/systemprompt view`, `/systemprompt reset` |
 | Images | `/draw`, `/drawmodel`, `/edit`, `/editmodel` |
 | Memory | `/memory show`, `/memory correct`, `/memory clear`, `/fillmemory`, `/fillsummaries`, `/botstate` |

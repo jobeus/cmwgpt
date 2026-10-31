@@ -109,12 +109,12 @@ def extract_target_urls(text: str) -> List[str]:
     return urls
 
 
-def inject_article_cache(url: str, text: str) -> None:
+async def inject_article_cache(url: str, text: str) -> None:
     """
     Directly inject text into the article cache for a given URL.
     Useful for immediately caching content we just generated (like from paste services).
     """
-    _article_cache[url] = text
+    await _article_cache.set(url, text)
     logger.debug(f"Directly injected cache for article: {url}")
 
 
@@ -165,7 +165,7 @@ async def get_article_text(url: str, *, cache_only: bool = False) -> Optional[st
     Fetch the readable text of a web page. Results are cached in Redis.
     Returns ``None`` on failure, or on a cache miss when ``cache_only`` is set.
     """
-    cached = _article_cache.get(url)
+    cached = await _article_cache.get(url)
     if cached is not None or cache_only:
         return cached
 
@@ -181,7 +181,7 @@ async def get_article_text(url: str, *, cache_only: bool = False) -> Optional[st
             try:
                 text = await _fetch_wikipedia(parsed)
                 if text:
-                    _article_cache[url] = text
+                    await _article_cache.set(url, text)
                     return text
             except Exception as e:
                 logger.warning(f"Failed to fetch Wikipedia via API for {url}, falling back to scraper: {e}")
@@ -203,7 +203,7 @@ async def get_article_text(url: str, *, cache_only: bool = False) -> Optional[st
             logger.warning(f"No article text could be extracted for {url}")
             return None
 
-        _article_cache[url] = text
+        await _article_cache.set(url, text)
         return text
 
     except Exception as e:

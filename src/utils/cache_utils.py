@@ -2,8 +2,8 @@
 Cache Utilities - content caches kept in Redis so they survive restarts
 """
 
+import asyncio
 import functools
-import inspect
 import json
 import logging
 import time
@@ -11,8 +11,9 @@ from collections import OrderedDict
 from typing import Any, Callable, Generic, Hashable, Optional, TypeVar, cast
 
 import redis
+import redis.asyncio as aioredis
 
-from src.db.redis_client import KEY_PREFIX, get_sync_redis
+from src.db.redis_client import KEY_PREFIX, get_async_redis
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,9 @@ FALLBACK_MAX_SIZE = 200
 
 # After a Redis error, use the in-memory fallback for this long before trying again.
 REDIS_RETRY_SECONDS = 30.0
+
+# Values at least this big are JSON-encoded and decoded in a worker thread.
+OFF_LOOP_JSON_BYTES = 256 * 1024
 
 F = TypeVar("F", bound=Callable[..., Any])
 V = TypeVar("V")
@@ -66,31 +70,32 @@ class LRUCache(Generic[V]):
 
 
 class PersistentCache:
-    """A dictionary-like cache stored in Redis as JSON, one key per entry.
+    """An async cache stored in Redis as JSON, one key per entry.
 
     Keys are ``cmwgpt:cache:<name>:<key>`` and expire ``ttl_seconds`` after their last
     use. If Redis can't be reached the cache quietly works from memory instead, so a
-    Redis outage costs refetches, never a failed reply.
+    Redis outage costs refetches, never a failed reply. Big values (base64 images) are
+    encoded and decoded off the event loop.
     """
 
     def __init__(
         self,
         cache_name: str,
         ttl_seconds: int = DEFAULT_TTL_SECONDS,
-        client_getter: Callable[[], redis.Redis] = get_sync_redis,
+        client_getter: Callable[[], aioredis.Redis] = get_async_redis,
     ):
         self.cache_name = cache_name
         self.ttl_seconds = ttl_seconds
         self._prefix = f"{KEY_PREFIX}cache:{cache_name}:"
         self._client_getter = client_getter
-        self._client: Optional[redis.Redis] = None
+        self._client: Optional[aioredis.Redis] = None
         self._down_until = 0.0
         self._fallback: LRUCache[Any] = LRUCache(FALLBACK_MAX_SIZE)
 
     def _key(self, key: Hashable) -> str:
         return f"{self._prefix}{key}"
 
-    def _redis(self) -> Optional[redis.Redis]:
+    def _redis(self) -> Optional[aioredis.Redis]:
         """The client, or ``None`` while Redis is unavailable."""
         if time.monotonic() < self._down_until:
             return None
@@ -108,56 +113,62 @@ class PersistentCache:
         logger.warning(f"Redis error in cache {self.cache_name}, using memory for now: {e}")
         self._down_until = time.monotonic() + REDIS_RETRY_SECONDS
 
-    def get(self, key: Hashable, default: Any = None) -> Any:
+    async def get(self, key: Hashable, default: Any = None) -> Any:
         client = self._redis()
         if client is not None:
             try:
-                raw = client.getex(self._key(key), ex=self.ttl_seconds)
+                raw = await client.getex(self._key(key), ex=self.ttl_seconds)
             except redis.RedisError as e:
                 self._redis_failed(e)
             else:
-                return default if raw is None else json.loads(raw)
+                if raw is None:
+                    return default
+                if len(raw) > OFF_LOOP_JSON_BYTES:
+                    return await asyncio.to_thread(json.loads, raw)
+                return json.loads(raw)
         value = self._fallback.get(key)
         return default if value is None else value
 
-    def __contains__(self, key: Hashable) -> bool:
-        client = self._redis()
-        if client is not None:
-            try:
-                return bool(client.exists(self._key(key)))
-            except redis.RedisError as e:
-                self._redis_failed(e)
-        return key in self._fallback
-
-    def __getitem__(self, key: Hashable) -> Any:
-        missing = object()
-        value = self.get(key, missing)
-        if value is missing:
-            raise KeyError(key)
-        return value
-
-    def __setitem__(self, key: Hashable, value: Any) -> None:
-        raw = json.dumps(value)
+    async def set(self, key: Hashable, value: Any) -> None:
+        raw = await _dumps(value)
         if len(raw) > MAX_VALUE_BYTES:
             logger.debug(f"Not caching {self.cache_name}:{key}: {len(raw)} bytes is too big")
             return
         client = self._redis()
         if client is not None:
             try:
-                client.set(self._key(key), raw, ex=self.ttl_seconds)
+                await client.set(self._key(key), raw, ex=self.ttl_seconds)
                 return
             except redis.RedisError as e:
                 self._redis_failed(e)
         self._fallback[key] = value
 
-    def delete(self, key: Hashable) -> None:
+    async def delete(self, key: Hashable) -> None:
         self._fallback.pop(key)
         client = self._redis()
         if client is not None:
             try:
-                client.delete(self._key(key))
+                await client.delete(self._key(key))
             except redis.RedisError as e:
                 self._redis_failed(e)
+
+
+async def _dumps(value: Any) -> str:
+    """JSON-encode ``value``, off the event loop when it holds big strings."""
+    if _rough_size(value) > OFF_LOOP_JSON_BYTES:
+        return await asyncio.to_thread(json.dumps, value)
+    return json.dumps(value)
+
+
+def _rough_size(value: Any) -> int:
+    """Total length of the strings in ``value``, which is most of its JSON size."""
+    if isinstance(value, str):
+        return len(value)
+    if isinstance(value, (list, tuple)):
+        return sum(_rough_size(v) for v in value)
+    if isinstance(value, dict):
+        return sum(_rough_size(v) for v in value.values())
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -183,62 +194,49 @@ def _failure_store() -> Optional[PersistentCache]:
     return _fetch_failures
 
 
-def _recently_failed(failure_key: str) -> bool:
+async def _recently_failed(failure_key: str) -> bool:
     store = _failure_store()
     if store is None:
         return False
-    failed_at = store.get(failure_key)
+    failed_at = await store.get(failure_key)
     if failed_at is None:
         return False
     if time.time() - failed_at < FETCH_FAILURE_TTL_SECONDS:
         return True
-    store.delete(failure_key)
+    await store.delete(failure_key)
     return False
 
 
-def _record_result(failure_key: str, result: Any) -> None:
+async def _record_result(failure_key: str, result: Any) -> None:
     store = _failure_store()
     if store is None:
         return
     if result is None:
-        store[failure_key] = time.time()
-    elif failure_key in store:
-        store.delete(failure_key)
+        await store.set(failure_key, time.time())
+    else:
+        # Deleting a key that isn't there is harmless, and saves a lookup first.
+        await store.delete(failure_key)
 
 
 def skip_recent_failures(kind: str) -> Callable[[F], F]:
-    """Decorate a fetcher ``fn(key, ...) -> result | None`` so a ``None`` (failure)
+    """Decorate an async fetcher ``fn(key, ...) -> result | None`` so a ``None`` (failure)
     is remembered for ``FETCH_FAILURE_TTL_SECONDS`` and returned straight away for
-    that key instead of fetching again. Works on sync and async functions.
+    that key instead of fetching again.
 
     A call with ``cache_only=True`` is a lookup, not a fetch, so its ``None``
     (a cache miss) is passed through without being recorded.
     """
     def decorator(fn: F) -> F:
-        if inspect.iscoroutinefunction(fn):
-            @functools.wraps(fn)
-            async def async_wrapper(key: str, *args: Any, **kwargs: Any) -> Any:
-                if kwargs.get("cache_only"):
-                    return await fn(key, *args, **kwargs)
-                failure_key = f"{kind}:{key}"
-                if _recently_failed(failure_key):
-                    logger.debug(f"Skipping {failure_key}: failed within the last hour")
-                    return None
-                result = await fn(key, *args, **kwargs)
-                _record_result(failure_key, result)
-                return result
-            return cast(F, async_wrapper)
-
         @functools.wraps(fn)
-        def sync_wrapper(key: str, *args: Any, **kwargs: Any) -> Any:
+        async def wrapper(key: str, *args: Any, **kwargs: Any) -> Any:
             if kwargs.get("cache_only"):
-                return fn(key, *args, **kwargs)
+                return await fn(key, *args, **kwargs)
             failure_key = f"{kind}:{key}"
-            if _recently_failed(failure_key):
+            if await _recently_failed(failure_key):
                 logger.debug(f"Skipping {failure_key}: failed within the last hour")
                 return None
-            result = fn(key, *args, **kwargs)
-            _record_result(failure_key, result)
+            result = await fn(key, *args, **kwargs)
+            await _record_result(failure_key, result)
             return result
-        return cast(F, sync_wrapper)
+        return cast(F, wrapper)
     return decorator

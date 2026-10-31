@@ -93,7 +93,7 @@ async def get_tweet_context(tweet_url: str, *, cache_only: bool = False) -> Opti
 
     Returns ``(context, image_data_urls)``, cached in Redis.
     """
-    cached = _twitter_cache.get(tweet_url)
+    cached = await _twitter_cache.get(tweet_url)
     if cached is not None:
         context, image_data_urls = cached
         return context, image_data_urls
@@ -158,7 +158,7 @@ async def get_tweet_context(tweet_url: str, *, cache_only: bool = False) -> Opti
             context += "\n\nTop replies:\n" + "\n".join(replies)
 
         image_data_urls = await _photos_to_data_urls(photo_urls)
-        _twitter_cache[tweet_url] = (context, image_data_urls)
+        await _twitter_cache.set(tweet_url, (context, image_data_urls))
         return context, image_data_urls
 
     except KeyError as ke:

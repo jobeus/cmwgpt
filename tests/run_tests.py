@@ -41,12 +41,12 @@ def run_all_tests():
 
     if result.failures:
         print(f"\nFAILURES ({len(result.failures)}):")
-        for test, traceback in result.failures:
+        for test, _traceback in result.failures:
             print(f"  - {test}")
 
     if result.errors:
         print(f"\nERRORS ({len(result.errors)}):")
-        for test, traceback in result.errors:
+        for test, _traceback in result.errors:
             print(f"  - {test}")
 
     if result.testsRun > 0:

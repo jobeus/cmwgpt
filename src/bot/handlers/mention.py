@@ -22,6 +22,7 @@ from src.services.gemini_service import GeminiServiceError, is_gemini_model
 from src.services.irc_log_service import IrcLog
 from src.services.quote_service import QuoteFile
 from src.services.completion_dispatch import dispatch_completion
+from src.services.cost_service import CostLedger, cost_scope
 from src.services.streaming_reply import StreamingReply
 from src.utils.chat_context import build_chat_context
 from src.utils.downloader_utils import fetch_all_url_content
@@ -233,6 +234,17 @@ class MentionHandler:
             bot_user: The bot user object
             model: The model to use for the response
         """
+        # Collects every cost recorded while answering: the model calls, the day summary,
+        # and whatever the tools spend (draws, transcripts, memory edits).
+        with cost_scope(user_id=message.author.id, channel_id=message.channel.id) as ledger:
+            await self._answer_mention(message, bot_user, model, ledger)
+
+    async def _answer_mention(
+            self,
+            message: discord.Message,
+            bot_user: discord.User,
+            model: str,
+            ledger: CostLedger) -> None:
         async with best_effort_typing(message.channel):
             try:
                 # Mark channel as active
@@ -242,8 +254,10 @@ class MentionHandler:
                 # version below.
                 streaming_reply = StreamingReply(message.channel, self._message_service)
                 try:
-                    recent_messages, system_prompt, summary_cost = await self._prepare_mention_context(
-                        message, bot_user, model=model, on_status=streaming_reply.status
+                    # Built once: the system prompt describes these same tools.
+                    tools = self._build_tools(message) if self._uses_tools(model) else None
+                    recent_messages, system_prompt, _summary_cost = await self._prepare_mention_context(
+                        message, bot_user, model=model, on_status=streaming_reply.status, tools=tools
                     )
                     logger.info(
                         f"Context prepared for mention by {message.author}, sending to {'Gemini' if is_gemini_model(model) else 'Claude API' if is_direct_anthropic_model(model) else 'OpenRouter'}...")
@@ -251,10 +265,9 @@ class MentionHandler:
 
                     # Identity threaded into every model call for this mention.
                     identity = {"channel_id": channel_id, "discord_user_id": message.author.id}
-                    tools = self._build_tools(message) if self._uses_tools(model) else None
 
                     streaming_reply.status(THINKING_STATUS)
-                    reply_content, cost = await dispatch_completion(
+                    reply_content, _cost = await dispatch_completion(
                         model=model,
                         messages=recent_messages,
                         system_prompt=system_prompt,
@@ -290,7 +303,7 @@ class MentionHandler:
                     reply_text = str(reply_content)
                     files_to_upload = []
 
-                cost += summary_cost
+                cost = ledger.total
                 if cost > 0:
                     reply_text = f"[${cost:.3f}] {reply_text}"
 
@@ -298,19 +311,8 @@ class MentionHandler:
 
             except (OpenAIServiceError, GeminiServiceError, AnthropicServiceError) as e:
                 logger.error(f"❌ API error in mention handler:\\n{e}")
-                error_message = f"Sorry, I encountered an error while processing your mention: {str(e)}"
-
-                try:
-                    await self._message_service.send_channel_reply(message.channel, error_message)
-                except Exception as discord_error:
-                    logger.error(f"⚠️ Failed to send error message to Discord: {discord_error}")
-                    # Try to send a simpler error message
-                    try:
-                        await message.channel.send(
-                            "Sorry, I encountered an error and couldn't respond to your mention. Please try again later."
-                        )
-                    except Exception:
-                        logger.error("Failed to send fallback error message")
+                await self._send_error(
+                    message.channel, f"Sorry, I encountered an error while processing your mention: {str(e)}")
 
             except discord.DiscordServerError as e:
                 # Discord's own API is erroring (Cloudflare HTML page). Log it
@@ -332,21 +334,23 @@ class MentionHandler:
 
             except Exception:
                 logger.exception("🚨 Unexpected error in mention handler")
-                error_message = (
-                    "Sorry, I encountered an unexpected error while processing your mention. Please try again later."
+                await self._send_error(
+                    message.channel,
+                    "Sorry, I encountered an unexpected error while processing your mention. Please try again later.",
                 )
 
-                try:
-                    await self._message_service.send_channel_reply(message.channel, error_message)
-                except Exception as discord_error:
-                    logger.error(f"⚠️ Failed to send error message to Discord: {discord_error}")
-                    # Try to send a simpler error message
-                    try:
-                        await message.channel.send(
-                            "Sorry, I encountered an error and couldn't respond to your mention. Please try again later."
-                        )
-                    except Exception:
-                        logger.error("Failed to send fallback error message")
+    async def _send_error(self, channel: Any, error_message: str) -> None:
+        """Tell the channel a mention failed, falling back to a plain message if that fails too."""
+        try:
+            await self._message_service.send_channel_reply(channel, error_message)
+        except Exception as discord_error:
+            logger.error(f"⚠️ Failed to send error message to Discord: {discord_error}")
+            try:
+                await channel.send(
+                    "Sorry, I encountered an error and couldn't respond to your mention. Please try again later."
+                )
+            except Exception:
+                logger.error("Failed to send fallback error message")
 
     async def queue_mention(
             self,
@@ -373,7 +377,7 @@ class MentionHandler:
 
     async def _prepare_mention_context(
         self, message: discord.Message, bot_user: discord.User, model: Optional[str] = None,
-        on_status: Optional[Callable[[str], None]] = None,
+        on_status: Optional[Callable[[str], None]] = None, tools: Optional[List[ChatTool]] = None,
     ) -> tuple[List[Dict[str, Any]], str, float]:
         """
         Prepares the message list and system prompt for a mention.
@@ -387,6 +391,7 @@ class MentionHandler:
             bot_user: The bot user object
             model: The channel's model; decides which of the above it gets
             on_status: Hears what's being done, for the reply preview
+            tools: The tools the reply will get, to describe in the prompt (built here if not given)
 
         Returns:
             Tuple of (OpenAI-style message list, system prompt string, cost of
@@ -553,7 +558,7 @@ class MentionHandler:
             if self._memory_index_provider and message.guild:
                 memory_index = await self._memory_index_provider(message.guild.id, message.channel.id)
             current_channel_system_prompt += self._tools_addon(
-                message, await self._history_ranges(message.channel), memory_index)
+                message, await self._history_ranges(message.channel), memory_index, tools)
         current_channel_system_prompt += f"{legend_section}\n\n"
         how_i_work = "" if uses_tools else _load_how_i_work()
         if how_i_work:
@@ -606,8 +611,7 @@ class MentionHandler:
         if start is None:
             first = None
             try:
-                async for first in channel.history(limit=1, oldest_first=True):
-                    break
+                first = await anext(aiter(channel.history(limit=1, oldest_first=True)), None)
             except Exception as e:
                 logger.warning(f"Couldn't fetch #{channel}'s first message: {concise_error(e)}")
             when = getattr(first, "created_at", None) or getattr(channel, "created_at", None)
@@ -651,9 +655,13 @@ class MentionHandler:
             )
         return note + "\n"
 
-    def _tools_addon(self, message: discord.Message, ranges: str = "", memory_index: str = "") -> str:
+    def _tools_addon(
+        self, message: discord.Message, ranges: str = "", memory_index: str = "",
+        tools: Optional[List[ChatTool]] = None,
+    ) -> str:
         """The system prompt section that tells the model which tools it has and when to use them."""
-        tools = self._build_tools(message)
+        if tools is None:
+            tools = self._build_tools(message)
         names = {tool.definition["name"] for tool in tools}
         section = (
             "## Your tools\n"

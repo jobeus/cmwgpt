@@ -120,7 +120,7 @@ async def fetch_all_url_content(
 
     sections: Dict[str, List[str]] = {}
     images: List[Dict[str, Any]] = []
-    for (source, key), rendered in zip(jobs, results):
+    for (source, key), rendered in zip(jobs, results, strict=True):
         if rendered is None:
             continue
         text, image_urls = rendered

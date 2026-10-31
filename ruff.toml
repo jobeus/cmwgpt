@@ -1,0 +1,7 @@
+# Lint config for `make lint` (ruff). Formatting stays with black.
+target-version = "py314"
+line-length = 120
+
+[lint]
+# Ruff's defaults (pyflakes and the error-level pycodestyle checks) plus bugbear.
+select = ["E4", "E7", "E9", "F", "B"]

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from src.utils import twitter_utils
-from tests.config_helpers import cfg
+from tests.config_helpers import AsyncDictCache, cfg
 
 _RealAsyncClient = httpx.AsyncClient
 
@@ -110,7 +110,7 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(twitter_utils.extract_media({}), [])
 
     async def test_get_tweet_context_returns_cached_tuple_without_fetching(self):
-        cache = {"https://x.com/a/status/1": ["cached context", ["data:image/png;base64,AAA"]]}
+        cache = AsyncDictCache({"https://x.com/a/status/1": ["cached context", ["data:image/png;base64,AAA"]]})
         self.use_api(lambda request: httpx.Response(500))
 
         with patch("src.utils.twitter_utils._twitter_cache", cache), patch(
@@ -124,21 +124,21 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_tweet_context_cache_only_miss_returns_none(self):
         self.use_api(lambda request: httpx.Response(500))
-        with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
+        with patch("src.utils.twitter_utils._twitter_cache", AsyncDictCache()), patch(
             "src.config._cached_config", cfg(rapidapi_key="rapid-key")
         ):
             self.assertIsNone(await twitter_utils.get_tweet_context("https://x.com/a/status/1", cache_only=True))
         self.assertEqual(self.requests, [])
 
     async def test_get_tweet_context_requires_api_key(self):
-        with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
+        with patch("src.utils.twitter_utils._twitter_cache", AsyncDictCache()), patch(
             "src.config._cached_config", cfg(rapidapi_key="")
         ):
             self.assertIsNone(await twitter_utils.get_tweet_context("https://x.com/a/status/1"))
 
     async def test_get_tweet_context_rejects_urls_without_status_id(self):
         self.use_api(lambda request: httpx.Response(200, json={}))
-        with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
+        with patch("src.utils.twitter_utils._twitter_cache", AsyncDictCache()), patch(
             "src.config._cached_config", cfg(rapidapi_key="rapid-key")
         ):
             result = await twitter_utils.get_tweet_context("https://x.com/elonmusk")
@@ -147,7 +147,7 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.requests, [])
 
     async def test_get_tweet_context_fetches_context_and_replies(self):
-        fake_cache = {}
+        fake_cache = AsyncDictCache()
         payload = tweet_payload(build_tweet_result("Alice", "Main post"), build_tweet_result("Bob", "Reply one"))
         self.use_api(lambda request: httpx.Response(200, json=payload))
 
@@ -173,7 +173,7 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         main["note_tweet"] = {"note_tweet_results": {"result": {"text": "The full long post"}}}
         self.use_api(lambda request: httpx.Response(200, json=tweet_payload(main)))
 
-        with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
+        with patch("src.utils.twitter_utils._twitter_cache", AsyncDictCache()), patch(
             "src.config._cached_config", cfg(rapidapi_key="rapid-key")
         ):
             context, _ = await twitter_utils.get_tweet_context("https://x.com/a/status/9")
@@ -182,7 +182,7 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Top replies", context)
 
     async def test_get_tweet_context_returns_none_on_parse_error(self):
-        fake_cache = {}
+        fake_cache = AsyncDictCache()
         self.use_api(lambda request: httpx.Response(200, json={"bad": "shape"}))
 
         with patch("src.utils.twitter_utils._twitter_cache", fake_cache), patch(
@@ -196,7 +196,7 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
     async def test_get_tweet_context_returns_none_on_http_error(self):
         self.use_api(lambda request: httpx.Response(429, text="rate limited"))
 
-        with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
+        with patch("src.utils.twitter_utils._twitter_cache", AsyncDictCache()), patch(
             "src.config._cached_config", cfg(rapidapi_key="rapid-key")
         ):
             self.assertIsNone(await twitter_utils.get_tweet_context("https://x.com/a/status/123"))
@@ -209,7 +209,7 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         payload = tweet_payload(build_tweet_result("Alice", "Main post"), media=media)
         self.use_api(lambda request: httpx.Response(200, json=payload))
 
-        with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
+        with patch("src.utils.twitter_utils._twitter_cache", AsyncDictCache()), patch(
             "src.config._cached_config", cfg(rapidapi_key="rapid-key")
         ), patch(
             "src.utils.twitter_utils.transcribe_video_url", new_callable=AsyncMock, return_value="video words"
@@ -225,7 +225,7 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         payload = tweet_payload(build_tweet_result("Alice", "Main post"), media=media)
         self.use_api(lambda request: httpx.Response(200, json=payload))
 
-        with patch("src.utils.twitter_utils._twitter_cache", {}), patch(
+        with patch("src.utils.twitter_utils._twitter_cache", AsyncDictCache()), patch(
             "src.config._cached_config", cfg(rapidapi_key="rapid-key")
         ), patch(
             "src.utils.twitter_utils.transcribe_video_url", new_callable=AsyncMock,
@@ -237,7 +237,7 @@ class TestTwitterUtils(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("transcript of video", context)
 
     async def test_get_tweet_context_caches_photos_as_base64_data_urls(self):
-        fake_cache = {}
+        fake_cache = AsyncDictCache()
         media = [
             {"type": "photo", "media_url_https": "https://pbs.twimg.com/1.jpg"},
             {"type": "photo", "media_url_https": "https://pbs.twimg.com/2.jpg"},

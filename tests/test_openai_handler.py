@@ -548,5 +548,23 @@ class TestOpenAIStreaming(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen, ["partial", "recovered"])
 
 
+
+class TestResponseCost(unittest.TestCase):
+    def cost(self, **model_extra):
+        from src.services.openai_service import _response_cost
+        return _response_cost(SimpleNamespace(usage=SimpleNamespace(model_extra=model_extra)))
+
+    def test_uses_what_openrouter_charged(self):
+        self.assertAlmostEqual(self.cost(cost=0.02, cost_details={"upstream_inference_cost": None}), 0.02)
+
+    def test_byok_adds_the_providers_bill_to_openrouters_fee(self):
+        self.assertAlmostEqual(
+            self.cost(cost=0.001, is_byok=True, cost_details={"upstream_inference_cost": 0.02}), 0.021)
+
+    def test_falls_back_to_the_upstream_cost(self):
+        self.assertAlmostEqual(self.cost(cost_details={"upstream_inference_cost": 0.03}), 0.03)
+        self.assertEqual(self.cost(), 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

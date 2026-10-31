@@ -41,18 +41,10 @@ check_git_repo() {
 install_dependencies() {
     print_status "Checking and installing hook dependencies..."
     
-    local deps=("flake8" "autopep8")
-    local missing_deps=()
-    
-    for dep in "${deps[@]}"; do
-        if ! command -v "$dep" &> /dev/null; then
-            missing_deps+=("$dep")
-        fi
-    done
-    
-    if [ ${#missing_deps[@]} -ne 0 ]; then
-        print_status "Installing missing dependencies: ${missing_deps[*]}"
-        pip install "${missing_deps[@]}"
+    # The pre-commit hook runs ruff from .venv.
+    if [ ! -x ".venv/bin/ruff" ]; then
+        print_status "Installing test dependencies (ruff) into .venv..."
+        .venv/bin/python -m pip install -r test_requirements.txt
         print_success "Dependencies installed"
     else
         print_success "All dependencies already installed"

@@ -10,6 +10,7 @@ from src.db.memory_store import MemoryStore
 from src.db.redis_client import close_redis
 from src.services.announcement_service import AnnouncementService
 from src.services.auto_update_service import AutoUpdateService
+from src.services.cost_service import CostStore, set_cost_store
 from src.services.death_service import DeathService
 from src.services.message_service import MessageService
 from src.services.openai_service import OpenAIService
@@ -46,10 +47,15 @@ class AppServices:
     anthropic_service: Any = None
     memory_store: Any = None
     memory_service: Any = None
+    cost_store: Any = None
 
 
 def create_services(config: Optional[AppConfig] = None) -> AppServices:
     app_config = config or load_config()
+
+    # Every paid call reports its cost here, for /cost. Under tests there's no Redis.
+    cost_store = None if app_config.is_testing else CostStore()
+    set_cost_store(cost_store)
 
     state_service = StateService()
     queue_service = QueueService()
@@ -92,6 +98,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         openai_service=openai_service,
         gemini_service=gemini_service,
         anthropic_service=anthropic_service,
+        store=memory_store,
     )
     mention_handler = MentionHandler(
         state_service=state_service,
@@ -134,6 +141,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         anthropic_service=anthropic_service,
         memory_store=memory_store,
         memory_service=memory_service,
+        cost_store=cost_store,
     )
 
 

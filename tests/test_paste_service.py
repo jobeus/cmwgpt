@@ -1,6 +1,7 @@
 """Tests for PasteService using injected client factories and cache hooks."""
 
 import unittest
+from unittest.mock import AsyncMock
 
 import httpx
 
@@ -36,7 +37,7 @@ class TestPasteService(unittest.IsolatedAsyncioTestCase):
 
         fake_client = FakeClient()
         service = PasteService(
-            cache_injector=lambda url, text: injected.append((url, text)),
+            cache_injector=AsyncMock(side_effect=lambda url, text: injected.append((url, text))),
             client_factory=lambda timeout: FakeClientContext(fake_client),
         )
 

@@ -6,6 +6,7 @@ import httpx
 import logging
 from typing import Optional
 from src.config import get_config
+from src.services.cost_service import RUNPOD, record_cost
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +191,7 @@ class RunpodService:
                 img_response = await client.get(image_url)
                 img_response.raise_for_status()
 
+                await record_cost(RUNPOD, cost)
                 return img_response.content, cost
             elif status == "FAILED":
                 error_msg = data.get("error", "Unknown error")
@@ -202,12 +204,12 @@ class RunpodService:
         except httpx.HTTPError as e:
             logger.error(f"HTTP error during Runpod API call: {e}")
             raise RunpodServiceError(
-                f"Failed to communicate with Runpod API: {str(e)}")
+                f"Failed to communicate with Runpod API: {str(e)}") from e
         except RunpodServiceError:
             raise
         except Exception as e:
             logger.error(f"Unexpected error in Runpod service: {e}")
-            raise RunpodServiceError(f"Unexpected error: {str(e)}")
+            raise RunpodServiceError(f"Unexpected error: {str(e)}") from e
 
     async def generate_image(
             self, prompt: str, model: str, discord_user_id: Optional[int] = None, discord_channel_id: Optional[int] = None) -> tuple[bytes, Optional[float]]:

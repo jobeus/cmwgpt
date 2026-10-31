@@ -221,7 +221,7 @@ sequenceDiagram
 
 ## Claude API tools
 
-The direct models (`sonnet-5.5-direct`, `opus-5.5-direct`) are offered client tools on top of server-side web search. `MentionHandler._build_tools` calls `build_mention_tools` (`src/services/chat_tools.py`) once per mention; the handlers are closures over that mention's guild, channel and asker, so per-reply limits (like 2 images) and permission checks need no shared state. `AnthropicService.get_chat_completion` runs the tool loop: each `tool_use` block is run, its `ToolResult` goes back as a `tool_result`, costs are added to the reply's cost and files are attached to the reply. After 6 rounds `tool_choice` is set to `none` so the model has to answer.
+The direct models (`sonnet-5.5-direct`, `opus-5.5-direct`) are offered client tools on top of server-side web search. `MentionHandler._build_tools` calls `build_mention_tools` (`src/services/chat_tools.py`) once per mention; the handlers are closures over that mention's guild, channel and asker, so per-reply limits (like 2 images) and permission checks need no shared state. `AnthropicService.get_chat_completion` runs the tool loop: a round's `tool_use` blocks run concurrently, each `ToolResult` goes back as a `tool_result` in the order the calls were made, costs are added to the reply's cost and files are attached to the reply. Limits that span calls (images, reactions) are counted before each tool's first `await`, so calls running side by side can't overshoot them. After 6 rounds `tool_choice` is set to `none` so the model has to answer.
 
 Requests with client tools also get Anthropic's server-side code execution (`code_execution_20260521`), besides web search. The reply reuses one container across its requests, and files the code saves (`bash_code_execution_output` blocks) are downloaded through the Files API and attached to the reply (`AnthropicService._download_code_files`).
 
@@ -329,7 +329,8 @@ flowchart LR
 | `src/services/discord_history.py` | Discord message search/read | Debug `search_messages` / `read_messages` |
 | `src/services/irc_log_service.py` | Old IRC log search/count | Debug the IRC tools or nick merging |
 | `src/services/quote_service.py` | Old quote bot file | Debug `old_quotes` |
-| `src/services/day_summary_service.py` | Today's chat summary | Understand the incremental day summary |
+| `src/services/day_summary_service.py` | Today's chat summary, saved to Redis so restarts keep it | Understand the incremental day summary |
+| `src/services/cost_service.py` | `record_cost`, per-reply cost scopes and the daily Redis tallies behind `/cost` | Add a paid API or change how costs are counted |
 | `src/services/image_service.py` | Image model routing | See which image models go to Gemini vs Runpod |
 | `src/services/streaming_reply.py` | Streamed reply preview | Debug status lines, edits and the final reply |
 | `src/services/openai_service.py` | Text-model integration | Understand OpenRouter calls |

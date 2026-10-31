@@ -10,6 +10,7 @@ import discord
 
 from src.services.openai_service import OpenAIServiceError
 from src.bot.handlers.mention import MentionHandler
+from src.services.cost_service import OPENROUTER, record_cost
 
 
 class AsyncTyping:
@@ -408,7 +409,9 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         async def streamed_completion(**kwargs):
             kwargs["on_text"]("hello")
             await asyncio.sleep(0)
-            return "hello there", 0.01
+            # The prefix is what was recorded while answering, not what the call returns.
+            await record_cost(OPENROUTER, 0.01)
+            return "hello there", 999.0
 
         openai_service.get_chat_completion = streamed_completion
         channel, preview = self.make_streaming_channel()

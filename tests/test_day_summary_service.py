@@ -5,9 +5,10 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import discord
+import fakeredis
 
 from src.bot.handlers.mention import MentionHandler
+from src.db.memory_store import MemoryStore
 from src.services.day_summary_service import DaySummaryService, day_start_for
 
 UTC = timezone.utc
@@ -131,6 +132,40 @@ class TestDaySummaryService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary, "today")
         self.assertIn("Summary so far:\n(none)", prompts[1])
         self.assertNotIn("message 2\n", prompts[1])
+
+    async def test_a_restart_picks_up_the_saved_summary(self):
+        fake = fakeredis.FakeAsyncRedis(decode_responses=True)
+        store = MemoryStore(redis_getter=lambda: fake)
+        messages = [make_msg(i) for i in range(10)]
+        channel = FakeChannel(messages)
+        dispatch, prompts = fake_dispatch(["first", "first plus more"])
+        now = DAY_START + timedelta(hours=12)
+
+        with patch("src.services.day_summary_service.dispatch_completion", side_effect=dispatch):
+            await DaySummaryService(openai_service=MagicMock(), store=store, now=lambda: now).get_summary(
+                channel, messages[3], BOT_ID, "model-x")
+            restarted = DaySummaryService(openai_service=MagicMock(), store=store, now=lambda: now)
+            same = await restarted.get_summary(channel, messages[3], BOT_ID, "model-x")
+            moved = await restarted.get_summary(channel, messages[7], BOT_ID, "model-x")
+
+        self.assertEqual(same, ("first", 0.0))
+        self.assertEqual(moved, ("first plus more", 0.01))
+        self.assertNotIn("message 2", prompts[1])
+        self.assertGreater(await fake.ttl(f"cmwgpt:day_summary:{channel.id}"), 0)
+
+    async def test_a_broken_store_only_costs_the_saved_copy(self):
+        store = MagicMock()
+        store.get_day_summary = AsyncMock(side_effect=RuntimeError("redis down"))
+        store.save_day_summary = AsyncMock(side_effect=RuntimeError("redis down"))
+        messages = [make_msg(i) for i in range(5)]
+        service = DaySummaryService(
+            openai_service=MagicMock(), store=store, now=lambda: DAY_START + timedelta(hours=12))
+        dispatch, _ = fake_dispatch(["talked about tacos"])
+
+        with patch("src.services.day_summary_service.dispatch_completion", side_effect=dispatch):
+            summary, _ = await service.get_summary(FakeChannel(messages), messages[3], BOT_ID, "model-x")
+
+        self.assertEqual(summary, "talked about tacos")
 
     async def test_nothing_before_window_today_skips_model(self):
         service = self.make_service()

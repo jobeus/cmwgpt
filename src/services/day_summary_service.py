@@ -13,7 +13,9 @@ between the two would be invisible to the bot, so this service summarizes it:
   existing summary.
 * At 02:00 the summary starts over, since the nightly memory job has caught up.
 
-Summaries live in memory only. Like the memory job, only message text, reply
+Summaries are kept in memory and, when a store is given, saved to Redis so a restart
+(every deploy is one) picks up where it left off instead of re-reading the day. Like
+the memory job, only message text, reply
 targets, embed titles/descriptions and attachment names are read: no URL fetching,
 transcription or images.
 """
@@ -65,11 +67,14 @@ class DaySummaryService:
         openai_service: Any,
         gemini_service: Any = None,
         anthropic_service: Any = None,
+        store: Any = None,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ):
         self._openai_service = openai_service
         self._gemini_service = gemini_service
         self._anthropic_service = anthropic_service
+        # A MemoryStore; without one, summaries only live until a restart.
+        self._store = store
         self._now = now
         # channel_id -> summary for the current day
         self._summaries: Dict[int, _ChannelSummary] = {}
@@ -87,6 +92,8 @@ class DaySummaryService:
             return "", 0.0
 
         entry = self._summaries.get(channel.id)
+        if entry is None:
+            entry = await self._load(channel.id)
         if entry is None or entry.day_start != day_start:
             entry = _ChannelSummary(day_start=day_start, until_id=None, text="")
             # Yesterday's summaries are stale for every channel, so drop them all.
@@ -114,12 +121,35 @@ class DaySummaryService:
             logger.warning(f"Couldn't update the day summary for channel {channel.id}: {e}")
             return entry.text, cost
         entry.text, entry.until_id = text, oldest_message.id
+        await self._save(channel.id, entry)
         if chunks:
             logger.info(
                 f"Day summary for #{getattr(channel, 'name', channel.id)}: folded in {len(messages)} "
                 f"messages (${cost:.4f})"
             )
         return entry.text, cost
+
+    async def _load(self, channel_id: int) -> Optional[_ChannelSummary]:
+        """The channel's saved summary, or ``None`` (no store, nothing saved, or Redis is down)."""
+        if self._store is None:
+            return None
+        try:
+            saved = await self._store.get_day_summary(channel_id)
+        except Exception as e:
+            logger.warning(f"Couldn't load the day summary for channel {channel_id}: {e}")
+            return None
+        if saved is None:
+            return None
+        day_start, until_id, text = saved
+        return _ChannelSummary(day_start=day_start, until_id=until_id, text=text)
+
+    async def _save(self, channel_id: int, entry: _ChannelSummary) -> None:
+        if self._store is None:
+            return
+        try:
+            await self._store.save_day_summary(channel_id, entry.day_start, entry.until_id, entry.text)
+        except Exception as e:
+            logger.warning(f"Couldn't save the day summary for channel {channel_id}: {e}")
 
     async def _fold(self, summary: str, transcript: str, speakers: Dict[int, str], model: str) -> Tuple[str, float]:
         reply, cost = await dispatch_completion(

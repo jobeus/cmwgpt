@@ -105,7 +105,7 @@ def render_post(post: Dict[str, Any]) -> str:
 @skip_recent_failures("reddit")
 async def get_reddit_post(url: str, *, cache_only: bool = False) -> Optional[Tuple[str, List[str]]]:
     """The Reddit post at ``url``: ``(text, image data URLs)``, cached in Redis."""
-    cached = _reddit_cache.get(url)
+    cached = await _reddit_cache.get(url)
     if cached is not None:
         cached_text, cached_images = cached
         return cached_text, list(cached_images or [])
@@ -142,5 +142,5 @@ async def get_reddit_post(url: str, *, cache_only: bool = False) -> Optional[Tup
         except Exception as e:
             logger.warning(f"Failed to fetch Reddit image {image_url}: {e}")
     text = render_post(post)
-    _reddit_cache[url] = (text, images)
+    await _reddit_cache.set(url, (text, images))
     return text, images

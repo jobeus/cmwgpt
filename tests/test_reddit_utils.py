@@ -8,7 +8,7 @@ import httpx
 from src.utils import reddit_utils
 from src.utils.downloader_utils import SOURCES
 from src.utils.url_utils import extract_target_urls
-from tests.config_helpers import cfg
+from tests.config_helpers import AsyncDictCache, cfg
 
 _RealAsyncClient = httpx.AsyncClient
 
@@ -103,7 +103,7 @@ class TestFetch(unittest.IsolatedAsyncioTestCase):
            return_value="data:image/jpeg;base64,QUFB")
     async def test_fetches_renders_and_caches_the_post(self, to_data_url):
         self.use_api(lambda request: httpx.Response(200, json={"success": True, "data": post()}))
-        cache = {}
+        cache = AsyncDictCache()
 
         with patch("src.utils.reddit_utils._reddit_cache", cache), patch(
             "src.config._cached_config", cfg(rapidapi_key="rapid-key")
@@ -121,12 +121,12 @@ class TestFetch(unittest.IsolatedAsyncioTestCase):
 
     async def test_failures_and_cache_only_misses_return_none(self):
         self.use_api(lambda request: httpx.Response(200, json={"success": False}))
-        with patch("src.utils.reddit_utils._reddit_cache", {}), patch(
+        with patch("src.utils.reddit_utils._reddit_cache", AsyncDictCache()), patch(
             "src.config._cached_config", cfg(rapidapi_key="rapid-key")
         ):
             self.assertIsNone(await reddit_utils.get_reddit_post(POST))
             self.assertIsNone(await reddit_utils.get_reddit_post(POST, cache_only=True))
-        with patch("src.utils.reddit_utils._reddit_cache", {}), patch(
+        with patch("src.utils.reddit_utils._reddit_cache", AsyncDictCache()), patch(
             "src.config._cached_config", cfg(rapidapi_key="")
         ):
             self.assertIsNone(await reddit_utils.get_reddit_post(POST + "x/"))

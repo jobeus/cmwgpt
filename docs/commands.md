@@ -36,6 +36,7 @@ The bot's main chat experience is **mention-based**:
 | `/fillsummaries` | Rebuilds every channel's "lately" summary from the last 7 days (admin only) | rewrites channel summaries |
 | `/botstate` | Privately shows the bot's own mood, interests, wonderings and follow-ups (admin only) | reads `cmwgpt:self:<guild>` in Redis |
 | `/wikicount` | Looks up a Wikipedia article's average monthly pageviews | runtime action |
+| `/cost` | Shows what the bot has spent today, in the last 7 days and this month, by provider | reads `cmwgpt:costs:<day>` in Redis |
 | `/restart` | Triggers restart flow and `git pull` | runtime action |
 
 ## Memory commands
@@ -179,6 +180,36 @@ deathwatch feature uses — for ad-hoc queries.
 | --- | --- |
 | `target` | Wikipedia URL or exact article title (e.g. `Daveigh Chase` or `Las Vegas`) |
 
+## Cost command
+
+### `/cost`
+
+Shows what the bot has spent today, over the last 7 days and so far this month
+(days run on America/Denver time), each broken down by provider: `openrouter`,
+`claude-direct`, `gemini-direct`, `runpod` and `groq`. Providers that cost nothing in a
+period are left out. It ends with this month's top spenders, named without pinging them.
+
+Every paid call reports its cost through `record_cost` in `src/services/cost_service.py`,
+in the service that made the call:
+
+| Provider | Where the cost comes from |
+| --- | --- |
+| `openrouter` | OpenRouter's usage accounting (`usage.cost`, plus the upstream bill under BYOK) |
+| `claude-direct` | Token usage and web searches priced at each model's rates, per request (including `think_harder` re-runs and tool rounds) |
+| `gemini-direct` | Token usage priced at Gemini's rates, for chat and for image models |
+| `runpod` | The cost Runpod reports for each image |
+| `groq` | The audio's duration at Whisper's per-hour price (at least 10 seconds per request) |
+
+Costs are tallied per day in a Redis hash, `cmwgpt:costs:<YYYY-MM-DD>`, with one field per
+provider, per person (`user:<id>`) and per channel (`channel:<id>`). They're kept about
+400 days. A mention's costs are charged to whoever mentioned the bot, and a slash command's
+to whoever ran it. Background work (the nightly memory job, the bot's self refresh,
+deathwatch posts) counts toward its provider only.
+
+A reply's `[$0.012]` prefix is the total of everything recorded while answering it: the
+model calls, the day summary, and whatever its tools spent (draws and edits, transcripts of
+linked videos and voice notes, memory edits).
+
 ## Persistence model
 
 Most command-driven settings are persisted through `StateService`, which means model choices, prompt overrides, and related service settings survive ordinary runtime operations.
@@ -191,3 +222,4 @@ Most command-driven settings are persisted through `StateService`, which means m
 | `src/bot/commands/image.py` | `/draw`, `/drawmodel`, `/edit`, `/editmodel` |
 | `src/bot/commands/death.py` | `/death ...` |
 | `src/bot/commands/wikicount.py` | `/wikicount` |
+| `src/bot/commands/cost.py` | `/cost` |

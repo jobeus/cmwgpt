@@ -1,13 +1,12 @@
-"""Redis connections: an async client for services, a sync one for the content caches.
+"""The Redis connection: one async client shared by the services and the content caches.
 
-Both are created lazily from ``REDIS_URL`` and refuse to start under tests.
+It is created lazily from ``REDIS_URL`` and refuses to start under tests.
 Every key the bot writes starts with ``KEY_PREFIX``.
 """
 
 import logging
 from typing import Optional
 
-import redis
 import redis.asyncio as aioredis
 
 from src.config import get_config
@@ -20,7 +19,6 @@ KEY_PREFIX = "cmwgpt:"
 SOCKET_TIMEOUT_SECONDS = 2.0
 
 _async_client: Optional[aioredis.Redis] = None
-_sync_client: Optional[redis.Redis] = None
 
 
 def _check_not_testing() -> None:
@@ -43,28 +41,10 @@ def get_async_redis() -> aioredis.Redis:
     return _async_client
 
 
-def get_sync_redis() -> redis.Redis:
-    """The shared sync client used by :class:`~src.utils.cache_utils.PersistentCache`."""
-    global _sync_client
-    _check_not_testing()
-    if _sync_client is None:
-        _sync_client = redis.Redis.from_url(
-            get_config().redis_url,
-            decode_responses=True,
-            socket_timeout=SOCKET_TIMEOUT_SECONDS,
-            socket_connect_timeout=SOCKET_TIMEOUT_SECONDS,
-            health_check_interval=30,
-        )
-    return _sync_client
-
-
 async def close_redis() -> None:
-    """Close both clients. Called on shutdown."""
-    global _async_client, _sync_client
+    """Close the client. Called on shutdown."""
+    global _async_client
     if _async_client is not None:
         await _async_client.aclose()
         _async_client = None
-    if _sync_client is not None:
-        _sync_client.close()
-        _sync_client = None
-    logger.info("Redis clients closed.")
+    logger.info("Redis client closed.")

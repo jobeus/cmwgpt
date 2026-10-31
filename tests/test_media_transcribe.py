@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from src.utils import media_transcribe
-from tests.config_helpers import cfg
+from src.services.cost_service import cost_scope
+from tests.config_helpers import AsyncDictCache, cfg
 
 _RealAsyncClient = httpx.AsyncClient
 
@@ -78,13 +79,15 @@ class TestTranscribeAudio(unittest.IsolatedAsyncioTestCase):
 
         def handler(request):
             seen.append(request)
-            return httpx.Response(200, text="  hello world \n")
+            return httpx.Response(200, json={"text": "  hello world \n", "duration": 90.0})
 
         self.use_handler(handler)
-        with patch("src.config._cached_config", cfg(groq_api_key="groq-key")):
+        with patch("src.config._cached_config", cfg(groq_api_key="groq-key")), \
+                cost_scope() as ledger:
             result = await media_transcribe.transcribe_audio(b"audio-bytes", "voice.ogg", "audio/ogg")
 
         self.assertEqual(result, "hello world")
+        self.assertAlmostEqual(ledger.by_provider["groq"], 90 / 3600 * media_transcribe.GROQ_PRICE_PER_HOUR)
         request = seen[0]
         self.assertEqual(str(request.url), media_transcribe.GROQ_TRANSCRIBE_URL)
         self.assertEqual(request.headers["authorization"], "Bearer groq-key")
@@ -94,9 +97,15 @@ class TestTranscribeAudio(unittest.IsolatedAsyncioTestCase):
         self.assertIn(media_transcribe.GROQ_MODEL.encode(), body)
 
     async def test_empty_transcript_returns_none(self):
-        self.use_handler(lambda request: httpx.Response(200, text="   "))
+        self.use_handler(lambda request: httpx.Response(200, json={"text": "   ", "duration": 1.0}))
         with patch("src.config._cached_config", cfg(groq_api_key="groq-key")):
             self.assertIsNone(await media_transcribe.transcribe_audio(b"a", "a.mp3", "audio/mpeg"))
+
+    def test_groq_cost_bills_at_least_the_minimum(self):
+        self.assertAlmostEqual(
+            media_transcribe.groq_cost(2.0), media_transcribe.groq_cost(media_transcribe.GROQ_MIN_BILLED_SECONDS))
+        self.assertAlmostEqual(media_transcribe.groq_cost(3600), media_transcribe.GROQ_PRICE_PER_HOUR)
+        self.assertGreater(media_transcribe.groq_cost(None), 0)
 
     async def test_http_error_raises(self):
         self.use_handler(lambda request: httpx.Response(500, text="boom"))
@@ -225,25 +234,25 @@ class TestDownloadAndTranscribeVideo(unittest.IsolatedAsyncioTestCase):
 
     async def test_returns_cached_transcript_without_downloading(self):
         with patch("src.utils.media_transcribe.yt_dlp.YoutubeDL") as mock_ydl:
-            self.assertEqual(await self.run_dl({self.URL: "cached"}), "cached")
+            self.assertEqual(await self.run_dl(AsyncDictCache({self.URL: "cached"})), "cached")
         mock_ydl.assert_not_called()
 
     async def test_cache_only_miss_returns_none_without_downloading(self):
         with patch("src.config._cached_config", cfg(groq_api_key="groq-key")), patch(
             "src.utils.media_transcribe.yt_dlp.YoutubeDL"
         ) as mock_ydl:
-            self.assertIsNone(await self.run_dl({}, cache_only=True))
+            self.assertIsNone(await self.run_dl(AsyncDictCache(), cache_only=True))
         mock_ydl.assert_not_called()
 
     async def test_requires_api_key(self):
         with patch("src.config._cached_config", cfg(groq_api_key="")), patch(
             "src.utils.media_transcribe.yt_dlp.YoutubeDL"
         ) as mock_ydl:
-            self.assertIsNone(await self.run_dl({}))
+            self.assertIsNone(await self.run_dl(AsyncDictCache()))
         mock_ydl.assert_not_called()
 
     async def test_downloads_transcribes_and_caches(self):
-        cache = {}
+        cache = AsyncDictCache()
         with patch("src.config._cached_config", cfg(groq_api_key="groq-key")), patch(
             "src.utils.media_transcribe.yt_dlp.YoutubeDL", side_effect=lambda opts: FakeYoutubeDL(opts)
         ), patch(
@@ -263,7 +272,7 @@ class TestDownloadAndTranscribeVideo(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(os.path.exists(os.path.dirname(ydl.opts["outtmpl"])))
 
     async def test_empty_transcript_is_not_cached(self):
-        cache = {}
+        cache = AsyncDictCache()
         with patch("src.config._cached_config", cfg(groq_api_key="groq-key")), patch(
             "src.utils.media_transcribe.yt_dlp.YoutubeDL", side_effect=lambda opts: FakeYoutubeDL(opts)
         ), patch("src.utils.media_transcribe.transcribe_audio", new_callable=AsyncMock, return_value=None):
@@ -275,11 +284,11 @@ class TestDownloadAndTranscribeVideo(unittest.IsolatedAsyncioTestCase):
             "src.utils.media_transcribe.yt_dlp.YoutubeDL",
             side_effect=lambda opts: FakeYoutubeDL(opts, error=RuntimeError("blocked")),
         ):
-            self.assertIsNone(await self.run_dl({}))
+            self.assertIsNone(await self.run_dl(AsyncDictCache()))
         self.assertEqual(len(FakeYoutubeDL.instances), 1)
 
     async def test_retries_with_proxy_after_direct_failure(self):
-        cache = {}
+        cache = AsyncDictCache()
         factory = ydl_sequence(
             lambda opts: FakeYoutubeDL(opts, error=RuntimeError("blocked")),
             lambda opts: FakeYoutubeDL(opts),
@@ -299,7 +308,7 @@ class TestDownloadAndTranscribeVideo(unittest.IsolatedAsyncioTestCase):
             side_effect=lambda opts: FakeYoutubeDL(
                 opts, error=media_transcribe.DownloadTimeout("download took longer than 180s")),
         ):
-            self.assertIsNone(await self.run_dl({}))
+            self.assertIsNone(await self.run_dl(AsyncDictCache()))
         self.assertEqual(len(FakeYoutubeDL.instances), 1)
 
     async def test_proxy_failure_returns_none(self):
@@ -307,7 +316,7 @@ class TestDownloadAndTranscribeVideo(unittest.IsolatedAsyncioTestCase):
             "src.utils.media_transcribe.yt_dlp.YoutubeDL",
             side_effect=lambda opts: FakeYoutubeDL(opts, error=RuntimeError("blocked")),
         ):
-            self.assertIsNone(await self.run_dl({}))
+            self.assertIsNone(await self.run_dl(AsyncDictCache()))
         self.assertEqual(len(FakeYoutubeDL.instances), 2)
 
     async def test_audio_codec_error_retries_with_h264_format(self):
@@ -318,7 +327,7 @@ class TestDownloadAndTranscribeVideo(unittest.IsolatedAsyncioTestCase):
         with patch("src.config._cached_config", cfg(groq_api_key="groq-key", transcript_proxy="")), patch(
             "src.utils.media_transcribe.yt_dlp.YoutubeDL", side_effect=factory
         ), patch("src.utils.media_transcribe.transcribe_audio", new_callable=AsyncMock, return_value="ok"):
-            self.assertEqual(await self.run_dl({}), "ok")
+            self.assertEqual(await self.run_dl(AsyncDictCache()), "ok")
         self.assertEqual(FakeYoutubeDL.instances[1].opts["format"], "best[vcodec=h264]")
 
     async def test_filtered_media_with_no_file_returns_none(self):
@@ -327,7 +336,7 @@ class TestDownloadAndTranscribeVideo(unittest.IsolatedAsyncioTestCase):
             "src.utils.media_transcribe.yt_dlp.YoutubeDL",
             side_effect=lambda opts: FakeYoutubeDL(opts, write_file=False),
         ), patch("src.utils.media_transcribe.transcribe_audio", new_callable=AsyncMock) as mock_transcribe:
-            self.assertIsNone(await self.run_dl({}))
+            self.assertIsNone(await self.run_dl(AsyncDictCache()))
         mock_transcribe.assert_not_called()
 
     async def test_transcription_error_returns_none(self):
@@ -337,7 +346,7 @@ class TestDownloadAndTranscribeVideo(unittest.IsolatedAsyncioTestCase):
             "src.utils.media_transcribe.transcribe_audio", new_callable=AsyncMock,
             side_effect=httpx.HTTPError("groq down"),
         ):
-            self.assertIsNone(await self.run_dl({}))
+            self.assertIsNone(await self.run_dl(AsyncDictCache()))
 
 
 if __name__ == "__main__":

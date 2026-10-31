@@ -5,6 +5,7 @@ Accepts the same OpenAI-style message array the rest of the bot builds
 (``text`` / ``image_url`` parts) and converts it to Messages API content blocks.
 """
 
+import asyncio
 import io
 import logging
 import os
@@ -17,6 +18,7 @@ import discord
 
 from src.config import get_config
 from src.services.chat_tools import ChatTool, ToolResult, text_result
+from src.services.cost_service import CLAUDE_DIRECT, record_cost
 from src.utils.message_utils import clean_openai_response, resolve_bot_id
 
 logger = logging.getLogger(__name__)
@@ -399,7 +401,9 @@ class AnthropicService:
                 response = await client.beta.messages.create(**request)
             # A safety fallback can serve the turn on another model; price it at that model's rates.
             served_by = _MODELS_BY_API_ID.get(getattr(response, "model", None) or "", direct_model)
-            cost += _usage_cost(getattr(response, "usage", None), served_by)
+            response_cost = _usage_cost(getattr(response, "usage", None), served_by)
+            cost += response_cost
+            await record_cost(CLAUDE_DIRECT, response_cost)
             _log_cache_diagnostics(api_model, channel_id, response)
             previous_message_id = getattr(response, "id", None) or previous_message_id
             if code_file_ids is not None:
@@ -433,28 +437,32 @@ class AnthropicService:
     async def _run_tool_calls(
         self, response: Any, client_tools: Dict[str, ChatTool], on_status: Callable[[str], None],
     ) -> Tuple[List[Dict[str, Any]], float, List[discord.File]]:
-        """Run ``response``'s client tool calls. Returns ``(tool_result blocks, cost, files)``."""
-        results: List[Dict[str, Any]] = []
-        cost = 0.0
-        files: List[discord.File] = []
-        for block in response.content:
-            if getattr(block, "type", None) != "tool_use":
-                continue
+        """Run ``response``'s client tool calls concurrently. Returns ``(tool_result blocks, cost, files)``.
+
+        Results, costs and files come back in the order the model made the calls.
+        """
+        async def run_one(block: Any) -> ToolResult:
             name = getattr(block, "name", "")
             args = getattr(block, "input", None) or {}
             tool = client_tools.get(name)
             if name == "think_harder":
-                result = text_result("You're already at high effort; answer directly.", is_error=True)
-            elif tool is None:
-                result = text_result(f"There's no tool named {name}.", is_error=True)
-            else:
-                on_status(tool.status)
-                logger.info(f"[tool] {name} {str(args)[:300]}")
-                try:
-                    result = await tool.run(args)
-                except Exception as e:
-                    logger.warning(f"[tool] {name} failed: {e}")
-                    result = text_result(f"{name} failed: {e}", is_error=True)
+                return text_result("You're already at high effort; answer directly.", is_error=True)
+            if tool is None:
+                return text_result(f"There's no tool named {name}.", is_error=True)
+            on_status(tool.status)
+            logger.info(f"[tool] {name} {str(args)[:300]}")
+            try:
+                return await tool.run(args)
+            except Exception as e:
+                logger.warning(f"[tool] {name} failed: {e}")
+                return text_result(f"{name} failed: {e}", is_error=True)
+
+        blocks = [block for block in response.content if getattr(block, "type", None) == "tool_use"]
+        outcomes = await asyncio.gather(*(run_one(block) for block in blocks))
+        results: List[Dict[str, Any]] = []
+        cost = 0.0
+        files: List[discord.File] = []
+        for block, result in zip(blocks, outcomes, strict=True):
             cost += result.cost
             files += result.files
             entry: Dict[str, Any] = {"type": "tool_result", "tool_use_id": block.id, "content": result.content}

@@ -3,7 +3,7 @@
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
-from tests.config_helpers import cfg
+from tests.config_helpers import AsyncDictCache, cfg
 
 from src.utils import youtube_utils
 
@@ -32,21 +32,21 @@ class TestYoutubeUtils(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(patcher.stop)
 
     async def test_get_transcript_returns_cached_value_without_fetching(self):
-        with patch("src.utils.youtube_utils._transcript_cache", {"abc": "cached"}), patch(
+        with patch("src.utils.youtube_utils._transcript_cache", AsyncDictCache({"abc": "cached"})), patch(
             "src.utils.youtube_utils.YouTubeTranscriptApi"
         ) as mock_api:
             self.assertEqual(await youtube_utils.get_transcript("abc"), "cached")
         mock_api.assert_not_called()
 
     async def test_get_transcript_cache_only_miss_returns_none_without_fetching(self):
-        with patch("src.utils.youtube_utils._transcript_cache", {}), patch(
+        with patch("src.utils.youtube_utils._transcript_cache", AsyncDictCache()), patch(
             "src.utils.youtube_utils.YouTubeTranscriptApi"
         ) as mock_api:
             self.assertIsNone(await youtube_utils.get_transcript("abc", cache_only=True))
         mock_api.assert_not_called()
 
     async def test_get_transcript_fetches_and_caches(self):
-        fake_cache = {}
+        fake_cache = AsyncDictCache()
 
         with patch("src.utils.youtube_utils._transcript_cache", fake_cache), patch(
             "src.config._cached_config", cfg(transcript_proxy="")
@@ -58,7 +58,7 @@ class TestYoutubeUtils(unittest.IsolatedAsyncioTestCase):
         mock_api.assert_called_once_with()
 
     async def test_get_transcript_uses_proxy_when_configured(self):
-        with patch("src.utils.youtube_utils._transcript_cache", {}), patch(
+        with patch("src.utils.youtube_utils._transcript_cache", AsyncDictCache()), patch(
             "src.config._cached_config", cfg(transcript_proxy="http://proxy:1")
         ), patch("src.utils.youtube_utils.YouTubeTranscriptApi", return_value=FakeYoutubeApi()) as mock_api:
             self.assertEqual(await youtube_utils.get_transcript("abcdefghijk"), "hello world")
@@ -67,7 +67,7 @@ class TestYoutubeUtils(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(proxy_config.https_url, "http://proxy:1")
 
     async def test_get_transcript_returns_none_on_failure(self):
-        fake_cache = {}
+        fake_cache = AsyncDictCache()
         with patch("src.utils.youtube_utils._transcript_cache", fake_cache), patch(
             "src.utils.youtube_utils.asyncio.to_thread", new=AsyncMock(side_effect=RuntimeError("boom"))
         ):

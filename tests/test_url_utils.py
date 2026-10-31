@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from src.utils import url_utils
-from tests.config_helpers import cfg
+from tests.config_helpers import AsyncDictCache, cfg
 
 _RealAsyncClient = httpx.AsyncClient
 
@@ -92,7 +92,7 @@ class TestExtractText(unittest.TestCase):
 
 class TestGetArticleText(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.cache = {}
+        self.cache = AsyncDictCache()
         self.requests = []
         self.routes = {}
 
@@ -265,12 +265,12 @@ class TestGetArticleText(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([r.url.host for r in self.requests], ["example.com"])
 
 
-class TestInjectArticleCache(unittest.TestCase):
-    def test_inject_article_cache_writes_directly(self):
-        fake_cache = {}
+class TestInjectArticleCache(unittest.IsolatedAsyncioTestCase):
+    async def test_inject_article_cache_writes_directly(self):
+        fake_cache = AsyncDictCache()
 
         with patch("src.utils.url_utils._article_cache", fake_cache):
-            url_utils.inject_article_cache("https://example.com", "hello")
+            await url_utils.inject_article_cache("https://example.com", "hello")
 
         self.assertEqual(fake_cache["https://example.com"], "hello")
 

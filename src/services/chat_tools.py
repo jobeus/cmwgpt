@@ -794,7 +794,9 @@ def build_mention_tools(
     guild = getattr(message, "guild", None)
     asker = getattr(message, "author", None)
 
-    def image_result(text: str, img_bytes: bytes, preview: bytes, cost: Optional[float]) -> ToolResult:
+    def image_result(
+        text: str, img_bytes: bytes, preview: bytes, cost: Optional[float], filename: str
+    ) -> ToolResult:
         return ToolResult(
             content=[
                 {"type": "text", "text": text},
@@ -808,7 +810,7 @@ def build_mention_tools(
                 },
             ],
             cost=cost or 0.0,
-            files=[discord.File(io.BytesIO(img_bytes), filename=f"image{draws}.png")],
+            files=[discord.File(io.BytesIO(img_bytes), filename=filename)],
         )
 
     async def draw(args: Dict[str, Any]) -> ToolResult:
@@ -819,7 +821,9 @@ def build_mention_tools(
         if draws >= MAX_DRAWS_PER_REPLY:
             return text_result(f"You've already drawn {draws} images for this reply; that's the limit.",
                                is_error=True)
+        # Counted before the await, so draws running side by side still respect the limit.
         draws += 1
+        filename = f"image{draws}.png"
         model = resolve_draw_model(state_service, channel_id, default_draw_model or "")
         logger.info(f"[draw tool] Channel {channel_id} Model: {model} Prompt: {prompt[:200]}")
         img_bytes, cost = await generate_image(
@@ -834,7 +838,7 @@ def build_mention_tools(
         return image_result(
             f"Drew it with {model}. The image is attached to your reply, so don't link or "
             "describe it as missing; here it is so you can comment on how it came out.",
-            img_bytes, preview, cost,
+            img_bytes, preview, cost, filename,
         )
 
     async def images_from(message_ids: List[int]) -> List[str]:
@@ -863,13 +867,17 @@ def build_mention_tools(
         if draws >= MAX_DRAWS_PER_REPLY:
             return text_result(f"You've already made {draws} images for this reply; that's the limit.",
                                is_error=True)
+        # Counted before the awaits, so edits running side by side still respect the limit.
+        draws += 1
+        filename = f"image{draws}.png"
         try:
             images = await images_from(message_ids)
         except discord.NotFound:
+            draws -= 1
             return text_result("One of those messages isn't in this channel.", is_error=True)
         if not images:
+            draws -= 1
             return text_result("Those messages have no images.", is_error=True)
-        draws += 1
         model = resolve_edit_model(state_service, channel_id, default_edit_model or "")
         logger.info(f"[edit tool] Channel {channel_id} Model: {model} Images: {len(images)} Prompt: {prompt[:200]}")
         img_bytes, cost = await edit_image(
@@ -884,7 +892,7 @@ def build_mention_tools(
         preview = await asyncio.to_thread(compress_image, img_bytes)
         return image_result(
             f"Edited it with {model}. The result is attached to your reply; here it is so you can comment on it.",
-            img_bytes, preview, cost,
+            img_bytes, preview, cost, filename,
         )
 
     async def recall_users(args: Dict[str, Any]) -> ToolResult:
@@ -1036,17 +1044,20 @@ def build_mention_tools(
             return text_result(f"You've already added {reactions} reactions for this reply; that's the limit.",
                                is_error=True)
         target = message if message_ids[0] == message.id else message.channel.get_partial_message(message_ids[0])
+        # Counted before the await, so reactions added side by side still respect the limit.
+        reactions += 1
         try:
             await target.add_reaction(emoji)
         except discord.NotFound:
+            reactions -= 1
             return text_result("That message isn't in this channel.", is_error=True)
         except discord.HTTPException as e:
+            reactions -= 1
             if e.code == UNKNOWN_EMOJI_CODE:
                 return text_result(
                     "Discord doesn't know that emoji. Use a Unicode emoji or one of this server's custom emoji.",
                     is_error=True)
             raise
-        reactions += 1
         logger.info(f"[react tool] Channel {channel_id} Message: {message_ids[0]} Emoji: {emoji}")
         return text_result("Reacted.")
 

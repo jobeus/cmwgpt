@@ -1,5 +1,6 @@
 """Tests for AnthropicService message conversion, cost, and response handling."""
 
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -24,6 +25,7 @@ from src.services.anthropic_service import (
 )
 from src.services.chat_tools import ChatTool, ToolResult, text_result
 from src.services.completion_dispatch import dispatch_completion
+from src.services.cost_service import cost_scope
 
 
 def _usage(input_tokens=1000, output_tokens=500, searches=0):
@@ -122,7 +124,7 @@ class TestHistoryBreakpoints(unittest.TestCase):
     def test_skips_messages_posted_after_the_mention(self):
         # The mention (id 3) waited while the bot replied (ids 4 and 5) to an earlier mention.
         messages = _history(5)
-        for message, message_id in zip(messages, [1, 2, 4, 5, 3]):
+        for message, message_id in zip(messages, [1, 2, 4, 5, 3], strict=True):
             message["message_id"] = message_id
         self.assertEqual(apply_history_breakpoints(messages, None), 1)
         self.assertEqual(_marked(messages), [1])
@@ -556,6 +558,46 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(reply, {"text": "On it.\n\nCame out great.", "files": [image]})
         self.assertAlmostEqual(cost, 0.5 + 2 * _usage_cost(_usage(), DIRECT_MODELS["sonnet-5.5-direct"]))
+
+    async def test_a_rounds_tool_calls_run_side_by_side_in_order(self):
+        calls = [
+            SimpleNamespace(type="tool_use", id="toolu_1", name="slow", input={}),
+            SimpleNamespace(type="tool_use", id="toolu_2", name="fast", input={}),
+        ]
+        first = _response(stop_reason="tool_use", content=calls)
+        service, client = self.make_service(first, _response("answer"))
+        fast_done = asyncio.Event()
+
+        async def slow(_args):
+            # Only finishes if "fast" runs while it waits, i.e. the calls run concurrently.
+            await asyncio.wait_for(fast_done.wait(), timeout=1)
+            return text_result("slow result")
+
+        async def fast(_args):
+            fast_done.set()
+            return text_result("fast result")
+
+        tools = [
+            ChatTool({"name": "slow", "input_schema": {"type": "object"}}, slow, "-# slow..."),
+            ChatTool({"name": "fast", "input_schema": {"type": "object"}}, fast, "-# fast..."),
+        ]
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=tools)
+
+        results = client.beta.messages.create.call_args_list[1].kwargs["messages"][-1]["content"]
+        self.assertEqual([r["tool_use_id"] for r in results], ["toolu_1", "toolu_2"])
+        self.assertEqual(results[0]["content"], [{"type": "text", "text": "slow result"}])
+
+    async def test_every_request_is_recorded_as_claude_direct(self):
+        call = SimpleNamespace(type="tool_use", id="toolu_1", name="recall_channel", input={})
+        first = _response(stop_reason="tool_use", content=[call])
+        service, _ = self.make_service(first, _response("answer"))
+
+        with cost_scope() as ledger:
+            _, cost = await service.get_chat_completion(
+                model="sonnet-5.5-direct", messages=USER, tools=[self.tool()])
+
+        self.assertAlmostEqual(ledger.by_provider["claude-direct"], cost)
+        self.assertAlmostEqual(cost, 2 * _usage_cost(_usage(), DIRECT_MODELS["sonnet-5.5-direct"]))
 
     async def test_a_failing_tool_becomes_an_error_result(self):
         call = SimpleNamespace(type="tool_use", id="toolu_1", name="recall_channel", input={})

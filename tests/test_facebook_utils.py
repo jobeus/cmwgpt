@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from src.utils import facebook_utils
+from tests.config_helpers import AsyncDictCache
 
 
 class TestFacebookUrlExtraction(unittest.TestCase):
@@ -48,7 +49,7 @@ class TestFacebookTranscript(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(mock_dl.await_args.kwargs["cache_only"])
 
     async def test_returns_cached_transcript_without_download(self):
-        with patch("src.utils.facebook_utils._facebook_cache", {self.URL: "cached"}), patch(
+        with patch("src.utils.facebook_utils._facebook_cache", AsyncDictCache({self.URL: "cached"})), patch(
             "src.utils.media_transcribe.yt_dlp.YoutubeDL"
         ) as mock_ydl:
             self.assertEqual(await facebook_utils.get_facebook_transcript(self.URL), "cached")

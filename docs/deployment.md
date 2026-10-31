@@ -31,7 +31,7 @@ What it does **not** currently try to be:
 
 | Requirement | Why it matters |
 | --- | --- |
-| Python 3.13 | Runtime used by CI and the Docker image |
+| Python 3.14 | Runtime used on the server, by CI and in the Docker image |
 | Reachable Redis | Per-user memory (`/memory`, nightly job) depends on it; the bot still replies without it (see `docs/redis_setup.md`) |
 | `DISCORD_BOT_TOKEN` | Discord authentication |
 | `OPENROUTER_API_KEY` | Text completions |
@@ -82,7 +82,7 @@ Recommended supervisors include:
 
 ## Full Docker stack
 
-`docker-compose.yml` defines the local full-stack environment (the bot image is `python:3.13-slim`):
+`docker-compose.yml` defines the local full-stack environment (the bot image is `python:3.14-slim`):
 
 | Service | Purpose |
 | --- | --- |
