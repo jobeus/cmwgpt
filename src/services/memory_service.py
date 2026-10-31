@@ -18,7 +18,10 @@ wondering about, plus follow-ups: things people mentioned that it should ask the
 later. A background loop keeps it going: when a server has none yet (first
 start with this feature, or after it's cleared) it's worked out from the last seven days
 of chat, and every ``SELF_REFRESH_INTERVAL`` after that it's rewritten from the last
-``SELF_REFRESH_LOOKBACK`` of chat. Both also web search for current events. The model can
+``SELF_REFRESH_LOOKBACK`` of chat. Both also web search for current events. When a
+channel has been quiet for ``IDLE_ASK_AFTER`` and someone who talks there has a
+follow-up, the loop asks them about it (pinging them) and drops it, but only once until
+someone talks again. The model can
 also change it while replying with the ``update_self`` tool.
 :meth:`MemoryService.get_self_block` returns it for the mention handler to add to the
 mention.
@@ -42,7 +45,7 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Seq
 import discord
 from zoneinfo import ZoneInfo
 
-from src.config import AppConfig
+from src.config import AppConfig, get_system_prompt
 from src.db.memory_store import MemoryStore
 from src.services.completion_dispatch import dispatch_completion
 from src.services.model_catalog import is_model_unavailable
@@ -179,6 +182,17 @@ MAX_FOLLOW_UPS = 12
 FOLLOW_UP_MAX_CHARS = 150
 MAX_NEW_FOLLOW_UPS = 3
 FOLLOW_UP_DAYS = 14
+# Asking a follow-up unprompted: after this long without chat in a channel, only during
+# these Denver hours, and only to someone with a message among the channel's last few.
+IDLE_ASK_AFTER = timedelta(hours=1)
+IDLE_ASK_HOURS = range(9, 22)
+IDLE_ASK_HISTORY = 100
+IDLE_ASK_MAX_CHARS = 400
+
+IDLE_ASK_INSTRUCTIONS = """
+
+## Right now
+The channel has gone quiet, and you're starting a conversation by checking in with someone about something they mentioned earlier. You get your current mood and interests, what they told you about, and when. Write one short, casual message, the way a friend would bring it up: start with their mention exactly as given, ask about the thing, and keep it to a sentence or two. Don't say you were reminded, have a list, or noticed the channel was quiet. Write only the message."""
 
 _SELF_STATE_RULES = f"""- Write in the first person, as the bot, casually, like a person thinking to themselves.
 - mood: one short sentence.
@@ -806,6 +820,7 @@ class MemoryService:
     async def _self_loop(self) -> None:
         while True:
             await self.tend_self_states()
+            await self.ask_idle_follow_ups()
             await asyncio.sleep(SELF_CHECK_SECONDS)
 
     async def tend_self_states(self) -> None:
@@ -880,6 +895,113 @@ class MemoryService:
             f"from {len(chunks)} chunks, ${cost:.4f}: {state}, {len(follow_ups)} follow-ups"
         )
         return state
+
+    async def ask_idle_follow_ups(self) -> None:
+        """In each server, ask one follow-up in a channel that's gone quiet, if one's due.
+
+        Failures are logged; that server is tried again on the next check.
+        """
+        if self._bot is None:
+            return
+        for guild in self._bot.guilds:
+            try:
+                await self.ask_idle_follow_up(guild)
+            except Exception:
+                logger.exception(f"Couldn't ask an idle follow-up in guild {guild.id}")
+
+    async def ask_idle_follow_up(self, guild: discord.Guild) -> Optional[discord.Message]:
+        """Ask one follow-up in the most recently active channel that's been quiet for ``IDLE_ASK_AFTER``.
+
+        It goes to someone who has a follow-up and spoke among the channel's last
+        ``IDLE_ASK_HISTORY`` messages, pings them, and the follow-up is dropped. Nothing is
+        asked outside ``IDLE_ASK_HOURS``, or until someone other than a bot has talked
+        since the last one. Returns the message sent, if any.
+        """
+        now = self._now()
+        local = now.astimezone(JOB_TIMEZONE)
+        if local.hour not in IDLE_ASK_HOURS:
+            return None
+        state = await self._store.get_self_state(guild.id)
+        follow_ups = load_follow_ups(state, local.date())
+        if not follow_ups:
+            return None
+
+        me = guild.me
+        candidates = []
+        for channel in guild.text_channels:
+            perms = channel.permissions_for(me)
+            if not (perms.view_channel and perms.read_message_history and perms.send_messages):
+                continue
+            last_id = channel.last_message_id
+            if not last_id:
+                continue
+            quiet_for = now - discord.utils.snowflake_time(last_id)
+            if IDLE_ASK_AFTER <= quiet_for <= timedelta(days=FOLLOW_UP_DAYS):
+                candidates.append(channel)
+        if not candidates or not await self._talked_since_last_idle_ask(guild, state):
+            return None
+
+        pending = {item["user_id"]: item for item in reversed(follow_ups)}  # oldest per person wins
+        for channel in sorted(candidates, key=lambda c: c.last_message_id, reverse=True):
+            try:
+                recent = [msg async for msg in channel.history(limit=IDLE_ASK_HISTORY)]
+            except (discord.Forbidden, discord.HTTPException) as e:
+                logger.warning(f"Couldn't read #{channel.name} for idle follow-ups: {e}")
+                continue
+            for msg in recent:
+                item = pending.get(msg.author.id)
+                if item is None or msg.author.bot:
+                    continue
+                return await self._send_idle_ask(guild, channel, item, state, follow_ups)
+        return None
+
+    async def _talked_since_last_idle_ask(self, guild: discord.Guild, state: Dict[str, str]) -> bool:
+        """Whether someone other than a bot has posted anywhere since the last idle follow-up."""
+        _channel_id, _, message_id = (state.get("idle_ask") or "").partition(":")
+        if not message_id.isdigit():
+            return True
+        after = discord.Object(id=int(message_id))
+        for channel in guild.text_channels:
+            if not channel.last_message_id or channel.last_message_id <= after.id:
+                continue
+            try:
+                async for msg in channel.history(limit=50, after=after):
+                    if not msg.author.bot:
+                        return True
+            except (discord.Forbidden, discord.HTTPException):
+                continue
+        return False
+
+    async def _send_idle_ask(
+        self,
+        guild: discord.Guild,
+        channel: Any,
+        item: Dict[str, Any],
+        state: Dict[str, str],
+        follow_ups: List[Dict[str, Any]],
+    ) -> discord.Message:
+        mention = f"<@{item['user_id']}>"
+        try:
+            persona = get_system_prompt(self._config.system_prompt_path)
+        except Exception:
+            persona = ""
+        reply, cost = await self._complete(
+            persona + IDLE_ASK_INSTRUCTIONS,
+            f"Your current state:\n{format_self_state(state) or '(none)'}\n\n"
+            f"Ask {mention} about: {item['about']} (they brought it up around {item['added']})",
+        )
+        text = " ".join(clean_profile(reply).split())[:IDLE_ASK_MAX_CHARS]
+        if not text:
+            raise ValueError("The model didn't write a follow-up message.")
+        if mention not in text:
+            text = f"{mention} {text}"
+        sent = await channel.send(
+            text, allowed_mentions=discord.AllowedMentions(users=[discord.Object(id=item["user_id"])])
+        )
+        await self._store.save_follow_ups(guild.id, [i for i in follow_ups if i["id"] != item["id"]])
+        await self._store.set_self_field(guild.id, "idle_ask", f"{channel.id}:{sent.id}")
+        logger.info(f"Asked follow-up #{item['id']} in #{channel.name} of guild {guild.id} (${cost:.4f}): {text}")
+        return sent
 
     async def update_self(self, guild_id: int, aspect: str, text: str) -> str:
         """Replace one aspect of the bot's state and return the whole state as text.

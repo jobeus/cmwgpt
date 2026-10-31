@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import discord
+
 from src.bot.commands.memory import MemoryCommands, build_self_embed, format_memory, resolve_target
 from src.bot.handlers.mention import MentionHandler
 from src.services.memory_service import (
@@ -92,6 +94,9 @@ class FakeStore:
                 self.self_state[f"{name}_updated"] = "2026-10-30T12:00:00"
             else:
                 self.self_state.pop(name, None)
+
+    async def set_self_field(self, guild_id, name, value):
+        self.self_state[name] = value
 
     async def save_follow_ups(self, guild_id, items):
         if items:
@@ -563,6 +568,105 @@ class TestSendMemory(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(kwargs["ephemeral"])
         self.assertEqual(kwargs["file"].filename, "memory.md")
         self.assertEqual(kwargs["file"].fp.read(), b"x" * 2500)
+
+
+class FakeChannel:
+    """A text channel with snowflake message IDs, history (newest first, or oldest first after an ID) and send."""
+
+    def __init__(self, channel_id, name, messages):
+        self.id, self.name, self.messages, self.sent = channel_id, name, list(messages), []
+
+    @property
+    def last_message_id(self):
+        return self.messages[-1].id if self.messages else None
+
+    def permissions_for(self, me):
+        return SimpleNamespace(view_channel=True, read_message_history=True, send_messages=True)
+
+    async def history(self, limit=100, after=None):
+        if after is not None:
+            for msg in [m for m in self.messages if m.id > after.id][:limit]:
+                yield msg
+        else:
+            for msg in list(reversed(self.messages))[:limit]:
+                yield msg
+
+    def post(self, author_id, when, *, bot=False, content="hi"):
+        msg = SimpleNamespace(
+            id=discord.utils.time_snowflake(when), author=SimpleNamespace(id=author_id, bot=bot), content=content
+        )
+        self.messages.append(msg)
+        return msg
+
+    async def send(self, content, allowed_mentions=None):
+        self.sent.append((content, allowed_mentions))
+        return self.post(BOT_ID, self.now, bot=True, content=content)
+
+
+class TestIdleFollowUps(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # 18:00 UTC is noon in Denver.
+        self.now = datetime(2026, 10, 30, 18, 0, tzinfo=UTC)
+        self.store = FakeStore()
+        self.store.self_state = {"mood": "chill", "follow_ups": json.dumps([
+            {"id": 1, "user_id": 1, "about": "how the interview went", "added": "2026-10-29"},
+            {"id": 2, "user_id": 2, "about": "the trip", "added": "2026-10-29"},
+            {"id": 3, "user_id": 5, "about": "not in this channel", "added": "2026-10-29"},
+        ])}
+        self.service = MemoryService(
+            store=self.store, config=cfg(anthropic_api_key="key"), openai_service=MagicMock(),
+            anthropic_service=MagicMock(), now=lambda: self.now,
+        )
+        self.channel = FakeChannel(5, "general", [])
+        self.channel.now = self.now
+        self.channel.post(1, self.now - timedelta(hours=3))
+        self.channel.post(2, self.now - timedelta(hours=2))  # most recent speaker
+        self.guild = SimpleNamespace(id=42, me=object(), text_channels=[self.channel])
+        self.dispatch = AsyncMock(return_value=("<@2> so how was the trip??", 0.001))
+
+    async def ask(self):
+        with patch("src.services.memory_service.dispatch_completion", self.dispatch):
+            return await self.service.ask_idle_follow_up(self.guild)
+
+    async def test_pings_the_most_recent_speaker_once_until_someone_talks(self):
+        sent = await self.ask()
+
+        self.assertIsNotNone(sent)
+        content, allowed = self.channel.sent[0]
+        self.assertEqual(content, "<@2> so how was the trip??")
+        self.assertEqual([u.id for u in allowed.users], [2])
+        self.assertIn("Ask <@2> about: the trip", self.dispatch.await_args.kwargs["messages"][0]["content"][0]["text"])
+        self.assertEqual([i["id"] for i in json.loads(self.store.self_state["follow_ups"])], [1, 3])
+        self.assertEqual(self.store.self_state["idle_ask"], f"5:{sent.id}")
+
+        # Nobody answered: still quiet hours later, but no second ask.
+        self.now += timedelta(hours=2)
+        self.channel.now = self.now
+        self.assertIsNone(await self.ask())
+        # Another bot talking doesn't count either.
+        self.channel.post(77, self.now - timedelta(hours=1, minutes=30), bot=True)
+        self.assertIsNone(await self.ask())
+
+        # Someone talks, the channel goes quiet again: the next one is asked.
+        self.channel.post(1, self.now - timedelta(hours=1, minutes=10))
+        self.dispatch.return_value = ("how'd the interview go?", 0.001)
+        await self.ask()
+        self.assertEqual(self.channel.sent[1][0], "<@1> how'd the interview go?")
+
+    async def test_waits_for_an_hour_of_quiet_and_daytime(self):
+        self.channel.post(9, self.now - timedelta(minutes=30))
+        self.assertIsNone(await self.ask())
+
+        self.channel.messages.pop()
+        self.now = datetime(2026, 10, 30, 9, 0, tzinfo=UTC)  # 03:00 in Denver
+        self.assertIsNone(await self.ask())
+        self.dispatch.assert_not_awaited()
+
+    async def test_nothing_without_follow_ups_for_people_here(self):
+        self.store.self_state["follow_ups"] = json.dumps(
+            [{"id": 3, "user_id": 5, "about": "not in this channel", "added": "2026-10-29"}])
+        self.assertIsNone(await self.ask())
+        self.assertEqual(self.channel.sent, [])
 
 
 class TestBotStateEmbed(unittest.TestCase):

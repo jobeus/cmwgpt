@@ -10,7 +10,8 @@ One key per user holds their current profile and nothing else (no history):
 - ``cmwgpt:self:<guild_id>`` - hash of the bot's own state in that server: one field per
   aspect (``mood``, ``interests``, ...) plus ``<aspect>_updated`` with when it last changed,
   ``refreshed_at`` with when the scheduled refresh last rewrote it, and ``follow_ups``, a
-  JSON list of things to ask people about later
+  JSON list of things to ask people about later, and ``idle_ask``, the last follow-up the
+  bot asked about unprompted as ``<channel_id>:<message_id>``
 
 None of these keys expire. All datetimes passed in and returned are naive UTC.
 """
@@ -152,6 +153,10 @@ class MemoryStore:
             await self._redis_getter().hset(_self_key(guild_id), "follow_ups", json.dumps(items))
         else:
             await self._redis_getter().hdel(_self_key(guild_id), "follow_ups")
+
+    async def set_self_field(self, guild_id: int, name: str, value: str) -> None:
+        """Set one bookkeeping field (like ``idle_ask``) in the bot's state."""
+        await self._redis_getter().hset(_self_key(guild_id), name, value)
 
     async def mark_self_refreshed(self, guild_id: int, when: datetime) -> None:
         await self._redis_getter().hset(_self_key(guild_id), "refreshed_at", when.isoformat())
