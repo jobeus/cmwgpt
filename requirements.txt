@@ -12,3 +12,6 @@ google-genai>=2.32.0
 redis>=8.1.0
 # 2.4+ needs an x86-64-v2 CPU (SSE4.2, POPCNT), which the server lacks; 2.3 only needs SSE3.
 numpy>=2.3.5,<2.4
+# The IRC log search runs the model's regexes with it: unlike re, it lets go of the GIL while
+# matching (so a slow pattern can't freeze the event loop) and can time a pattern out.
+regex>=2026.9.29

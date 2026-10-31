@@ -1,10 +1,14 @@
 """Tests for the IRC log search and day reader."""
 
+import asyncio
 import os
 import tempfile
+import time
 import unittest
 from datetime import date
+from unittest import mock
 
+from src.services import irc_log_service
 from src.services.irc_log_service import IrcLog, NickMap, load_irc_log
 
 LOG = """--- Log opened Tue May 19 20:00:00 2020
@@ -171,6 +175,45 @@ class TestIrcLog(unittest.TestCase):
     def test_invalid_regex_is_searched_literally(self):
         self.assertIn("No matches", self.log.search("[unclosed"))
         self.assertIn("1 matching lines", self.log.search("pretty good?"))
+
+    def test_a_too_slow_pattern_gives_up_instead_of_running_on(self):
+        # A backreference has no fast path, so on ~10MB it outlasts a 0.2s budget.
+        self.append("12:00 <someone> just chatting about nothing in particular lol\n" * 160_000)
+        slow = r"(\w+) \1 quantum"
+        with mock.patch.object(irc_log_service, "QUERY_TIMEOUT_SECONDS", 0.2):
+            self.assertIn("Gave up on", self.log.search(slow))
+            self.assertIn("Gave up on", self.log.count(slow))
+            self.assertIn("1 matching lines", self.log.search("gateway"))
+
+    def test_a_slow_search_leaves_the_event_loop_running(self):
+        # re held the GIL through a whole scan, so a slow pattern froze the bot's event loop
+        # (and Discord's heartbeat) even from a worker thread. The loop must keep ticking.
+        self.append("12:00 <someone> just chatting about nothing in particular lol\n" * 160_000)
+
+        async def run() -> float:
+            worst = 0.0
+            done = False
+
+            async def tick() -> None:
+                nonlocal worst
+                last = time.monotonic()
+                while not done:
+                    await asyncio.sleep(0.01)
+                    now = time.monotonic()
+                    worst = max(worst, now - last)
+                    last = now
+
+            ticker = asyncio.create_task(tick())
+            await asyncio.sleep(0.02)
+            started = time.monotonic()
+            with mock.patch.object(irc_log_service, "QUERY_TIMEOUT_SECONDS", 1.0):
+                await asyncio.to_thread(self.log.search, r"(\w+) \1 quantum")
+            self.assertGreater(time.monotonic() - started, 0.5)  # it really did run a while
+            done = True
+            await ticker
+            return worst
+
+        self.assertLess(asyncio.run(run()), 0.3)
 
     def test_context_includes_surrounding_lines(self):
         out = self.log.search("gateway", context=1)

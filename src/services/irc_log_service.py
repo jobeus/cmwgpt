@@ -5,6 +5,11 @@ The file is memory-mapped rather than read in, so a 100MB log costs no heap; the
 cache keeps it warm between searches. Lines look like ``22:58 <@nick> text`` and carry no
 date, so the offsets of the ``--- Day changed``/``--- Log opened`` markers are indexed once
 and each match is dated by the last marker before it.
+
+The model's queries run on the ``regex`` module, not ``re``: ``re`` holds the GIL for a whole
+scan, so a slow pattern (``.*``, a backreference) froze the event loop past Discord's heartbeat
+even from a worker thread. ``regex`` lets go of the GIL while it matches (``concurrent=True``)
+and gives up on a pattern that runs too long.
 """
 
 import bisect
@@ -13,11 +18,14 @@ import logging
 import mmap
 import re
 import threading
+import time
 from collections import Counter, deque
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Deque, Dict, List, Optional, Sequence, Tuple
+
+import regex
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +44,8 @@ MAX_DAY_LINES = 500
 MAX_TOP_NICKS = 50
 # A count stops after this many occurrences, so a pattern like '.' can't run for minutes.
 MAX_COUNTED = 3_000_000
+# How long one search or count may spend matching before it gives up on the pattern.
+QUERY_TIMEOUT_SECONDS = 60.0
 
 # A chat line's speaker: "12:00 <@nick> text" or an action, "12:00  * nick does". Joins, quits
 # and other "-!-" lines don't match, so they're never counted.
@@ -101,6 +111,20 @@ class _Match:
     end: int    # offset of its newline (or EOF)
 
 
+def _compile_query(query: str) -> "regex.Pattern":
+    """``query`` as a case-insensitive bytes pattern; taken literally when it isn't a valid regex."""
+    try:
+        return regex.compile(query.encode("utf-8"), regex.I)
+    except regex.error:
+        return regex.compile(regex.escape(query.encode("utf-8")), regex.I)
+
+
+def _too_slow(query: str) -> str:
+    return (f"Gave up on {query!r} after {QUERY_TIMEOUT_SECONDS:.0f}s: that pattern is too slow on a log "
+            "this size (backreferences and nested or stacked repeats like '.*' are the usual cause). "
+            "Try a simpler one, e.g. plain words or a short alternation.")
+
+
 class IrcLog:
     """A lazily opened, memory-mapped IRC log with a date index."""
 
@@ -126,7 +150,10 @@ class IrcLog:
                 offsets.append(m.start())
                 days.append(_parse_marker_day(m.group(1), m.group(2)))
             if self._data is not None:
-                self._data.close()
+                try:
+                    self._data.close()
+                except BufferError:
+                    pass  # a search in another thread still reads it; it unmaps once that's done
             self._data, self._mtime = data, mtime
             self._marker_offsets, self._marker_days = offsets, days
             logger.info(f"[irc log] Mapped {self.path} ({len(data) / 1e6:.1f}MB, {len(days)} date markers)")
@@ -175,10 +202,7 @@ class IrcLog:
         context = max(0, min(context, MAX_CONTEXT_LINES))
         skip = max(0, skip)
 
-        try:
-            body = re.compile(query.encode("utf-8"), re.I)
-        except re.error:
-            body = re.compile(re.escape(query.encode("utf-8")), re.I)
+        body = _compile_query(query)
         # A nick filter matches every alias of the nick (from the nicks file), case-insensitively.
         wanted = self._nick_key(nick) if nick else None
 
@@ -186,8 +210,12 @@ class IrcLog:
         kept: Deque[_Match] = deque(maxlen=skip + limit if newest_first else None)
         total = 0
         pos = 0
+        deadline = time.monotonic() + QUERY_TIMEOUT_SECONDS
         while pos < len(data):
-            m = body.search(data, pos)
+            try:
+                m = body.search(data, pos, concurrent=True, timeout=max(0.001, deadline - time.monotonic()))
+            except TimeoutError:
+                return _too_slow(query)
             if m is None:
                 break
             line_start = data.rfind(b"\n", 0, m.start()) + 1
@@ -260,10 +288,7 @@ class IrcLog:
         """
         data = self._load()
         top = max(1, min(top, MAX_TOP_NICKS))
-        try:
-            body = re.compile(query.encode("utf-8"), re.I)
-        except re.error:
-            body = re.compile(re.escape(query.encode("utf-8")), re.I)
+        body = _compile_query(query)
         if body.fullmatch(b""):
             return (f"{query!r} matches empty text, so it can't be counted. "
                     "Use a pattern that needs at least one character.")
@@ -282,35 +307,39 @@ class IrcLog:
         year: Optional[int] = None
         counted_line = False
         truncated = False
-        for m in body.finditer(data):
-            if m.start() >= line_end:
-                line_start = data.rfind(b"\n", 0, m.start()) + 1
-                line_end = data.find(b"\n", m.start())
-                if line_end < 0:
-                    line_end = len(data)
-                key, shown, text_start = self._speaker(data, line_start, line_end)
-                if nick and key != wanted:
-                    key = None
-                counted_line = False
-                if key is not None:
-                    day = self._day_at(line_start)
-                    year = day.year if day else None
-            if key is None or m.start() < text_start or m.end() > line_end or m.end() == m.start():
-                continue
-            if not counted_line:
-                lines += 1
-                counted_line = True
-            total += 1
-            names.setdefault(key, shown)
-            if "nick" in group_by:
-                by_nick[key] += 1
-            if "year" in group_by and year is not None:
-                by_year[year] += 1
+        matches = body.finditer(data, concurrent=True, timeout=QUERY_TIMEOUT_SECONDS)
+        try:
+            for m in matches:
+                if m.start() >= line_end:
+                    line_start = data.rfind(b"\n", 0, m.start()) + 1
+                    line_end = data.find(b"\n", m.start())
+                    if line_end < 0:
+                        line_end = len(data)
+                    key, shown, text_start = self._speaker(data, line_start, line_end)
+                    if nick and key != wanted:
+                        key = None
+                    counted_line = False
+                    if key is not None:
+                        day = self._day_at(line_start)
+                        year = day.year if day else None
+                if key is None or m.start() < text_start or m.end() > line_end or m.end() == m.start():
+                    continue
+                if not counted_line:
+                    lines += 1
+                    counted_line = True
+                total += 1
+                names.setdefault(key, shown)
                 if "nick" in group_by:
-                    by_year_nick.setdefault(year, Counter())[key] += 1
-            if total >= MAX_COUNTED:
-                truncated = True
-                break
+                    by_nick[key] += 1
+                if "year" in group_by and year is not None:
+                    by_year[year] += 1
+                    if "nick" in group_by:
+                        by_year_nick.setdefault(year, Counter())[key] += 1
+                if total >= MAX_COUNTED:
+                    truncated = True
+                    break
+        except TimeoutError:
+            return _too_slow(query)
 
         who = f" by {self._canonical(nick) or nick}" if nick else ""
         if not total:
