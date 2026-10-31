@@ -14,7 +14,9 @@ Only the embedding happens at Google; the vectors come back and are kept next to
 (``<IRC_LOG>.meaning.npz``, about 50MB for an 80MB log). It's built in the background
 when the bot starts, in batches, saving as it goes, so a restart picks up where it left
 off. It's rebuilt when the log or the nicks file changes. Building costs about $0.20 per million tokens
-(~$4 for an 80MB log); a search costs a fraction of a cent.
+(~$4 for an 80MB log); a search costs a fraction of a cent. Requests are paced under
+Gemini's per-minute token quota (``TOKENS_PER_MINUTE``), so an 80MB log takes about half an
+hour on the paid Tier 1.
 """
 
 from __future__ import annotations
@@ -24,9 +26,10 @@ import json
 import logging
 import os
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, Deque, List, Optional, Sequence, Tuple
 
 from src.services.cost_service import GEMINI_DIRECT, record_cost
 from src.services.irc_log_service import IrcLog
@@ -61,8 +64,35 @@ SAVE_EVERY_BATCHES = 20
 # How many of the closest conversations are looked at before filtering by nick or date.
 CANDIDATES = 400
 MAX_RESULTS = 10
-# Retry a failed batch this many times (rate limits), then stop the build until next start.
-BATCH_RETRIES = 4
+# Retry a failed batch this many times, then stop the build until next start.
+BATCH_RETRIES = 8
+# Gemini's embedding quota is per minute (1M tokens on the paid Tier 1); the build stays
+# under this many, counting tokens generously (chat has lots of short words and symbols).
+TOKENS_PER_MINUTE = 800_000
+CHARS_PER_BUDGET_TOKEN = 3
+
+
+class _TokenBudget:
+    """Holds requests back so no more than ``per_minute`` tokens go out in any 60 seconds."""
+
+    def __init__(self, per_minute: int, clock: Any = time.monotonic, sleep: Any = asyncio.sleep):
+        self._per_minute = per_minute
+        self._clock = clock
+        self._sleep = sleep
+        self._sent: Deque[Tuple[float, int]] = deque()
+        self._lock = asyncio.Lock()
+
+    async def spend(self, tokens: int) -> None:
+        tokens = min(tokens, self._per_minute)
+        async with self._lock:
+            while True:
+                now = self._clock()
+                while self._sent and now - self._sent[0][0] >= 60:
+                    self._sent.popleft()
+                if sum(n for _, n in self._sent) + tokens <= self._per_minute:
+                    self._sent.append((now, tokens))
+                    return
+                await self._sleep(60 - (now - self._sent[0][0]) + 0.1)
 
 
 def _document(label: str, lines: Sequence[str]) -> str:
@@ -92,6 +122,7 @@ class IrcMeaningIndex:
         self._vectors: Optional[np.ndarray] = None
         self._built = 0
         self._task: Optional[asyncio.Task] = None
+        self._budget = _TokenBudget(TOKENS_PER_MINUTE)
 
     # -- status -----------------------------------------------------------------
 
@@ -200,14 +231,18 @@ class IrcMeaningIndex:
 
         texts = await asyncio.to_thread(documents)
         for attempt in range(BATCH_RETRIES + 1):
+            await self._budget.spend(sum(len(t) for t in texts) // CHARS_PER_BUDGET_TOKEN)
             try:
                 vectors = await self._embed(texts)
                 break
             except Exception as e:
                 if attempt == BATCH_RETRIES:
                     raise
-                delay = 2 ** attempt * 5
-                logger.warning(f"[irc meaning] Embedding batch failed ({e}); retrying in {delay}s")
+                # Over the per-minute quota anyway: wait out the minute.
+                rate_limited = "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
+                delay = 60 if rate_limited else 2 ** attempt * 5
+                reason = "rate limited" if rate_limited else str(e)[:200]
+                logger.warning(f"[irc meaning] Embedding batch failed ({reason}); retrying in {delay}s")
                 await asyncio.sleep(delay)
         cost = sum(len(t) for t in texts) / CHARS_PER_TOKEN * PRICE_EMBED_PER_M / 1_000_000
         await record_cost(GEMINI_DIRECT, cost)

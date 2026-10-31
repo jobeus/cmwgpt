@@ -117,6 +117,27 @@ class TestIrcMeaningIndex(unittest.IsolatedAsyncioTestCase):
         self.assertIn("still being built", await index.search("anything"))
 
 
+class TestTokenBudget(unittest.IsolatedAsyncioTestCase):
+    async def test_holds_requests_past_the_per_minute_limit(self):
+        now = [0.0]
+        waits = []
+
+        async def sleep(seconds):
+            waits.append(seconds)
+            now[0] += seconds
+
+        budget = irc_meaning_index._TokenBudget(1000, clock=lambda: now[0], sleep=sleep)
+        await budget.spend(600)
+        now[0] = 10.0
+        await budget.spend(300)
+        self.assertEqual(waits, [])
+        await budget.spend(300)  # 1200 in a minute: wait until the first 600 age out
+        self.assertEqual(len(waits), 1)
+        self.assertGreaterEqual(now[0], 60.0)
+        # A request bigger than the whole budget still goes, alone.
+        await budget.spend(5000)
+
+
 class TestWithoutNumpy(unittest.TestCase):
     def test_the_bot_starts_without_the_tool_when_numpy_wont_load(self):
         from src.startup import create_services
