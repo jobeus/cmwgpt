@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 
-from src.services.openai_service import OpenAIServiceError
+from src.services.anthropic_service import AnthropicServiceError
 from src.bot.handlers.mention import MentionHandler
-from src.services.cost_service import OPENROUTER, record_cost
+from src.services.cost_service import CLAUDE_DIRECT, record_cost
 
 
 class AsyncTyping:
@@ -28,13 +28,12 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         queue_service.queue_mention = AsyncMock(return_value=True)
         state_service = MagicMock()
         state_service.get_system_prompt.return_value = None
-        openai_service = MagicMock()
+        anthropic_service = anthropic_service or MagicMock()
         message_service = MagicMock()
         message_service.send_channel_reply = AsyncMock()
         message_service.send_channel_reply_with_files = AsyncMock()
         handler = MentionHandler(
             state_service=state_service,
-            openai_service=openai_service,
             message_service=message_service,
             queue_service=queue_service,
             system_prompt_loader=lambda: "base system prompt",
@@ -46,7 +45,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             gemini_service=gemini_service,
             anthropic_service=anthropic_service,
         )
-        return handler, state_service, queue_service, openai_service, message_service
+        return handler, state_service, queue_service, anthropic_service, message_service
 
     async def test_queue_mention_delegates_to_queue_service(self):
         handler, _, queue_service, _, _ = self.make_handler()
@@ -376,9 +375,9 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[Empty Message]", context[0]["content"][0]["text"])
 
     async def test_handle_mention_sends_plain_text_reply(self):
-        handler, state_service, _, openai_service, message_service = self.make_handler()
+        handler, state_service, _, claude_service, message_service = self.make_handler()
         handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
-        openai_service.get_chat_completion = AsyncMock(return_value=("hello there", 0.0))
+        claude_service.get_chat_completion = AsyncMock(return_value=("hello there", 0.0))
         channel = MagicMock()
         channel.id = 1
         channel.typing.return_value = AsyncTyping()
@@ -401,7 +400,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         return channel, preview
 
     async def test_handle_mention_streams_then_edits_in_final_reply(self):
-        handler, _, _, openai_service, message_service = self.make_handler()
+        handler, _, _, claude_service, message_service = self.make_handler()
         message_service.DISCORD_MESSAGE_LIMIT = 2000
         message_service.fit_to_discord = AsyncMock(side_effect=lambda text: text)
         handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
@@ -410,10 +409,10 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             kwargs["on_text"]("hello")
             await asyncio.sleep(0)
             # The prefix is what was recorded while answering, not what the call returns.
-            await record_cost(OPENROUTER, 0.01)
+            await record_cost(CLAUDE_DIRECT, 0.01)
             return "hello there", 999.0
 
-        openai_service.get_chat_completion = streamed_completion
+        claude_service.get_chat_completion = streamed_completion
         channel, preview = self.make_streaming_channel()
         message = SimpleNamespace(author=SimpleNamespace(id=123), channel=channel)
 
@@ -424,16 +423,16 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         message_service.send_channel_reply.assert_not_awaited()
 
     async def test_handle_mention_deletes_partial_reply_when_stream_fails(self):
-        handler, _, _, openai_service, message_service = self.make_handler()
+        handler, _, _, claude_service, message_service = self.make_handler()
         message_service.DISCORD_MESSAGE_LIMIT = 2000
         handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
 
         async def failing_completion(**kwargs):
             kwargs["on_text"]("half an ans")
             await asyncio.sleep(0)
-            raise OpenAIServiceError("stream broke")
+            raise AnthropicServiceError("stream broke")
 
-        openai_service.get_chat_completion = failing_completion
+        claude_service.get_chat_completion = failing_completion
         channel, preview = self.make_streaming_channel()
         message = SimpleNamespace(author=SimpleNamespace(id=123), channel=channel)
 
@@ -443,9 +442,9 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIn("stream broke", message_service.send_channel_reply.await_args.args[1])
 
     async def test_handle_mention_sends_files_when_response_contains_them(self):
-        handler, _, _, openai_service, message_service = self.make_handler()
+        handler, _, _, claude_service, message_service = self.make_handler()
         handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
-        openai_service.get_chat_completion = AsyncMock(
+        claude_service.get_chat_completion = AsyncMock(
             return_value=({"text": "here you go", "files": ["file-a"]}, 0.0)
         )
         channel = MagicMock()
@@ -458,9 +457,9 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         message_service.send_channel_reply_with_files.assert_awaited_once_with(channel, "here you go", ["file-a"])
 
     async def test_handle_mention_sends_text_reply_when_response_dict_has_no_files(self):
-        handler, _, _, openai_service, message_service = self.make_handler()
+        handler, _, _, claude_service, message_service = self.make_handler()
         handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
-        openai_service.get_chat_completion = AsyncMock(return_value=({"text": "just text", "files": []}, 0.0))
+        claude_service.get_chat_completion = AsyncMock(return_value=({"text": "just text", "files": []}, 0.0))
         channel = MagicMock()
         channel.id = 6
         channel.typing.return_value = AsyncTyping()
@@ -471,9 +470,9 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         message_service.send_channel_reply.assert_awaited_once_with(channel, "just text")
 
     async def test_handle_mention_handles_none_response(self):
-        handler, _, _, openai_service, message_service = self.make_handler()
+        handler, _, _, claude_service, message_service = self.make_handler()
         handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
-        openai_service.get_chat_completion = AsyncMock(return_value=(None, 0.0))
+        claude_service.get_chat_completion = AsyncMock(return_value=(None, 0.0))
         channel = MagicMock()
         channel.id = 3
         channel.typing.return_value = AsyncTyping()
@@ -484,10 +483,10 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         sent_message = message_service.send_channel_reply.await_args.args[1]
         self.assertIn("failed to get a response", sent_message.lower())
 
-    async def test_handle_mention_handles_openai_errors_with_fallback_send(self):
-        handler, _, _, openai_service, message_service = self.make_handler()
+    async def test_handle_mention_handles_api_errors_with_fallback_send(self):
+        handler, _, _, claude_service, message_service = self.make_handler()
         handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
-        openai_service.get_chat_completion = AsyncMock(side_effect=OpenAIServiceError("bad upstream"))
+        claude_service.get_chat_completion = AsyncMock(side_effect=AnthropicServiceError("bad upstream"))
         message_service.send_channel_reply = AsyncMock(side_effect=RuntimeError("discord fail"))
         channel = MagicMock()
         channel.id = 4
@@ -500,10 +499,10 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         channel.send.assert_awaited_once()
         self.assertIn("couldn't respond", channel.send.await_args.args[0].lower())
 
-    async def test_handle_mention_logs_when_openai_fallback_send_also_fails(self):
-        handler, _, _, openai_service, message_service = self.make_handler()
+    async def test_handle_mention_logs_when_api_error_fallback_send_also_fails(self):
+        handler, _, _, claude_service, message_service = self.make_handler()
         handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
-        openai_service.get_chat_completion = AsyncMock(side_effect=OpenAIServiceError("bad upstream"))
+        claude_service.get_chat_completion = AsyncMock(side_effect=AnthropicServiceError("bad upstream"))
         message_service.send_channel_reply = AsyncMock(side_effect=RuntimeError("discord fail"))
         channel = MagicMock()
         channel.id = 7
@@ -517,9 +516,9 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("Failed to send fallback error message" in call.args[0] for call in mock_error.call_args_list))
 
     async def test_handle_mention_handles_unexpected_errors_with_fallback_send(self):
-        handler, _, _, openai_service, message_service = self.make_handler()
+        handler, _, _, claude_service, message_service = self.make_handler()
         handler._prepare_mention_context = AsyncMock(side_effect=RuntimeError("boom"))
-        openai_service.get_chat_completion = AsyncMock()
+        claude_service.get_chat_completion = AsyncMock()
         message_service.send_channel_reply = AsyncMock(side_effect=RuntimeError("discord fail"))
         channel = MagicMock()
         channel.id = 5
@@ -533,9 +532,9 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIn("couldn't respond", channel.send.await_args.args[0].lower())
 
     async def test_handle_mention_logs_when_unexpected_fallback_send_also_fails(self):
-        handler, _, _, openai_service, message_service = self.make_handler()
+        handler, _, _, claude_service, message_service = self.make_handler()
         handler._prepare_mention_context = AsyncMock(side_effect=RuntimeError("boom"))
-        openai_service.get_chat_completion = AsyncMock()
+        claude_service.get_chat_completion = AsyncMock()
         message_service.send_channel_reply = AsyncMock(side_effect=RuntimeError("discord fail"))
         channel = MagicMock()
         channel.id = 8
@@ -649,6 +648,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         channel.id = 44
         channel.name = "think"
         mention_msg = self._simple_msg(1, channel)
+        mention_msg.guild = None
 
         async def history(limit=None, after=None):
             yield mention_msg
@@ -841,18 +841,19 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
     async def test_handle_mention_passes_tools_only_to_direct_models(self):
         anthropic_service = MagicMock()
         anthropic_service.get_chat_completion = AsyncMock(return_value=("hi", 0.0))
-        handler, _, _, openai_service, _ = self.make_handler(anthropic_service=anthropic_service)
+        gemini_service = MagicMock()
+        gemini_service.get_chat_completion = AsyncMock(return_value=("hi", 0.0))
+        handler, _, _, _, _ = self.make_handler(anthropic_service=anthropic_service, gemini_service=gemini_service)
         handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
-        openai_service.get_chat_completion = AsyncMock(return_value=("hi", 0.0))
         channel, _ = self.make_streaming_channel()
         message = SimpleNamespace(author=SimpleNamespace(id=123), channel=channel, guild=None)
 
         await handler.handle_mention(message, SimpleNamespace(id=999), "sonnet-5.5-direct")
-        await handler.handle_mention(message, SimpleNamespace(id=999), "gpt-test")
+        await handler.handle_mention(message, SimpleNamespace(id=999), "google")
 
         tools = anthropic_service.get_chat_completion.await_args.kwargs["tools"]
         self.assertEqual([t.definition["name"] for t in tools], ["read_urls", "transcribe_youtube", "how_i_work"])
-        self.assertNotIn("tools", openai_service.get_chat_completion.await_args.kwargs)
+        self.assertNotIn("tools", gemini_service.get_chat_completion.await_args.kwargs)
 
     async def test_prepare_context_puts_queued_mention_after_replies_posted_while_waiting(self):
         handler, _, _, _, _ = self.make_handler()

@@ -20,10 +20,9 @@ The bot's main chat experience is **mention-based**:
 | `/systemprompt set` | Stores a custom system prompt | persisted per channel |
 | `/systemprompt view` | Shows the current channel system prompt | reads per-channel state |
 | `/systemprompt reset` | Clears the custom system prompt | persisted per channel |
-| `/draw` | Generates an image from a prompt | uses current draw model |
-| `/drawmodel` | Sets the draw model | persisted per channel |
-| `/edit` | Edits an uploaded image | uses current edit model |
-| `/editmodel` | Sets the edit model | persisted per channel |
+| `/draw` | Generates an image from a prompt | uses the channel's image model |
+| `/edit` | Edits an uploaded image | uses the channel's image model |
+| `/imagemodel` | Sets the image model for `/draw`, `/edit` and the draw tools | persisted per channel |
 | `/death set` | Configures deathwatch behavior | persisted service state |
 | `/death view` | Shows deathwatch settings | reads persisted state |
 | `/death reset` | Restores default deathwatch settings | persisted reset |
@@ -98,24 +97,19 @@ changes.
 Sets the active text model for the current channel.
 
 Choices come from `src/services/model_catalog.py`. A model only appears when its API key
-is set (`OPENROUTER_API_KEY`, `GEMINI_API_KEY`, or `ANTHROPIC_API_KEY`), and a channel set to
-a model whose key is missing falls back to `DEFAULT_MODEL`.
+is set (`GEMINI_API_KEY` or `ANTHROPIC_API_KEY`), and a channel set to a model whose key is
+missing, or to a model that no longer exists (such as the old OpenRouter ones), falls back to
+`DEFAULT_MODEL`.
 
 | Model | Notes |
 | --- | --- |
-| `google/gemini-2.5-flash` | via OpenRouter |
-| `bytedance-seed/seed-2.0-mini` | via OpenRouter |
-| `bytedance-seed/seed-1.6-flash` | via OpenRouter |
-| `qwen/qwen3.5-flash-02-23` | via OpenRouter |
-| `anthropic/claude-sonnet-5.5` | search / web aware (via OpenRouter) |
 | `sonnet-5.5-direct` | `claude-sonnet-5-5` straight from the Claude API (search / web aware, needs `ANTHROPIC_API_KEY`) |
 | `opus-5.5-direct` | `claude-opus-5-5` straight from the Claude API (search / web aware, needs `ANTHROPIC_API_KEY`; 2x Sonnet's price) |
 | `google` | native Gemini (`gemini-3.8-flash`, search) |
 | `google-high` | native Gemini (`gemini-3.8-flash`, search, thinking) |
 
-`google`/`google-high` route through `GeminiService`, `sonnet-5.5-direct`/`opus-5.5-direct` route through
-`AnthropicService`, and the rest route through `OpenAIService` → OpenRouter. The
-routing itself lives in `src/services/completion_dispatch.py`.
+`google`/`google-high` route through `GeminiService` and `sonnet-5.5-direct`/`opus-5.5-direct`
+through `AnthropicService`. The routing itself lives in `src/services/completion_dispatch.py`.
 
 ### `/systemprompt ...`
 
@@ -129,75 +123,43 @@ These commands control the per-channel system prompt layered on top of the defau
 
 ## Image commands
 
-These commands use `RunpodService` and channel-level state for model selection.
+These use Gemini's image models (`src/services/image_service.py`, `GeminiService.generate_image`)
+and need `GEMINI_API_KEY`.
 
 | Command | Purpose |
 | --- | --- |
-| `/draw` | Generate an image from a text prompt |
-| `/drawmodel` | Set the model used by `/draw` |
-| `/edit` | Edit an uploaded image using a prompt |
-| `/editmodel` | Set the model used by `/edit` |
+| `/draw` | Generate an image from a text prompt, optionally with reference images |
+| `/edit` | Edit an uploaded image (the first attachment) using a prompt; further attachments are references |
+| `/imagemodel` | View or set the channel's image model, used by `/draw`, `/edit` and the chat model's `draw`/`edit_image` tools |
 
-Current image model keys exposed by the bot (the `banana-*` keys use Gemini; the Runpod keys
-other than `seedream` appear only when Runpod models are enabled). The chat model's `draw` and
-`edit_image` tools use the channel's `/drawmodel` and `/editmodel`:
+| Model | ID | Aspect ratios | Sizes | Thinking | Search |
+| --- | --- | --- | --- | --- | --- |
+| `banana-2.1` (default) | `gemini-nano-banana-2.1` | standard + `1:4`, `4:1`, `1:8`, `8:1` | 1K, 2K, 4K | minimal, medium, high | web, web+image |
+| `banana-pro` | `gemini-3-pro-image` | standard | 1K, 2K, 4K | always on, not settable | web |
+| `banana-2-lite` | `gemini-3.1-flash-lite-image` | standard | 1K | minimal, high | none |
 
-| Command | Model keys |
-| --- | --- |
-| `/draw`, `/drawmodel` | `banana-pro`, `banana-2.1`, `seedream`, `z-image`, `wan-2.6`, `pruna`, `qwen`, `flux` |
-| `/edit`, `/editmodel` | `banana-pro`, `banana-2.1`, `seedream`, `qwen`, `pruna` |
-
-
-## Death commands
-
-The deathwatch feature polls Wikipedia's "Deaths in <year>" page and posts an RIP notice, with a limerick, into `DEATH_CHANNEL_ID` for anyone famous enough by average monthly pageviews.
-
-### `/death set`
-
-Current parameters:
-
-| Parameter | Meaning |
-| --- | --- |
-| `poll_interval` | Polling interval in seconds (default 15) |
-| `min_views` | Minimum average monthly views to announce (default 40000) |
-| `pageview_months` | How many months to average pageview data (default 3) |
-
-### Other death subcommands
-
-| Subcommand | Meaning |
-| --- | --- |
-| `view` | Show current settings |
-| `reset` | Restore defaults |
-
-## Wikicount command
-
-### `/wikicount`
-
-Looks up a Wikipedia article's average monthly pageviews — the same heuristic the
-deathwatch feature uses — for ad-hoc queries.
-
-| Parameter | Meaning |
-| --- | --- |
-| `target` | Wikipedia URL or exact article title (e.g. `Daveigh Chase` or `Las Vegas`) |
-
-## Cost command
+The standard aspect ratios are `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9` and
+`21:9`. `/draw` and `/edit` take every option as an optional argument (`aspect_ratio`, `size`,
+`model`, `thinking`, `search`) plus up to 8 images; an option the chosen model doesn't support is
+refused with a message naming what it takes. `/draw` defaults to 16:9; `/edit` keeps the edited
+image's shape. Any text the model writes with the image is posted under it. The `draw` and
+`edit_image` tools take the same options (and up to 14 images for `edit_image`), so the chat model
+can, for example, draw a 9:16 portrait.
 
 ### `/cost`
 
 Shows what the bot has spent today, over the last 7 days and so far this month
-(days run on America/Denver time), each broken down by provider: `openrouter`,
-`claude-direct`, `gemini-direct`, `runpod` and `groq`. Providers that cost nothing in a
-period are left out. It ends with this month's top spenders, named without pinging them.
+(days run on America/Denver time), each broken down by provider: `claude-direct`,
+`gemini-direct` and `groq` (older days may also show `openrouter` and `runpod`, from before those
+were removed). Providers that cost nothing in a period are left out. It ends with this month's top spenders, named without pinging them.
 
 Every paid call reports its cost through `record_cost` in `src/services/cost_service.py`,
 in the service that made the call:
 
 | Provider | Where the cost comes from |
 | --- | --- |
-| `openrouter` | OpenRouter's usage accounting (`usage.cost`, plus the upstream bill under BYOK) |
 | `claude-direct` | Token usage and web searches priced at each model's rates, per request (including `think_harder` re-runs and tool rounds) |
-| `gemini-direct` | Token usage priced at Gemini's rates, for chat and for image models |
-| `runpod` | The cost Runpod reports for each image |
+| `gemini-direct` | Token usage priced at Gemini's rates, for chat and for image models (image output tokens at the image rate; search grounding isn't priced, as the first 5,000 a month are free) |
 | `groq` | The audio's duration at Whisper's per-hour price (at least 10 seconds per request) |
 
 Costs are tallied per day in a Redis hash, `cmwgpt:costs:<YYYY-MM-DD>`, with one field per
@@ -219,7 +181,7 @@ Most command-driven settings are persisted through `StateService`, which means m
 | Path | Responsibility |
 | --- | --- |
 | `src/bot/commands/system.py` | `/help`, `/model`, `/systemprompt`, `/restart` |
-| `src/bot/commands/image.py` | `/draw`, `/drawmodel`, `/edit`, `/editmodel` |
+| `src/bot/commands/image.py` | `/draw`, `/edit`, `/imagemodel` |
 | `src/bot/commands/death.py` | `/death ...` |
 | `src/bot/commands/wikicount.py` | `/wikicount` |
 | `src/bot/commands/cost.py` | `/cost` |

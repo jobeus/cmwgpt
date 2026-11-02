@@ -569,7 +569,6 @@ class MemoryService:
         *,
         store: MemoryStore,
         config: AppConfig,
-        openai_service: Any,
         gemini_service: Any = None,
         anthropic_service: Any = None,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
@@ -577,7 +576,6 @@ class MemoryService:
         self._store = store
         self._config = config
         self._model = config.memory_model
-        self._openai_service = openai_service
         self._gemini_service = gemini_service
         self._anthropic_service = anthropic_service
         self._now = now
@@ -886,7 +884,6 @@ class MemoryService:
             model=self._model,
             messages=[{"role": "user", "content": [{"type": "text", "text": user_text}]}],
             system_prompt=system_prompt,
-            openai_service=self._openai_service,
             gemini_service=self._gemini_service,
             anthropic_service=self._anthropic_service,
             identity={},

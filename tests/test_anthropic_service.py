@@ -460,10 +460,10 @@ class TestThinkHarderStreaming(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(statuses, [THINKING_STATUS, THINKING_HARDER_STATUS, THINKING_STATUS])
 
 
-class TestDispatchRoutesDirect(unittest.IsolatedAsyncioTestCase):
+class TestDispatchRoutes(unittest.IsolatedAsyncioTestCase):
     async def test_direct_model_uses_anthropic_service(self):
-        openai_service = MagicMock()
-        openai_service.get_chat_completion = AsyncMock()
+        gemini_service = MagicMock()
+        gemini_service.get_chat_completion = AsyncMock()
         anthropic_service = MagicMock()
         anthropic_service.get_chat_completion = AsyncMock(return_value=("reply", 0.01))
 
@@ -471,14 +471,31 @@ class TestDispatchRoutesDirect(unittest.IsolatedAsyncioTestCase):
             model="sonnet-5.5-direct",
             messages=[{"role": "user", "content": "hi"}],
             system_prompt="sys",
-            openai_service=openai_service,
-            gemini_service=MagicMock(),
+            gemini_service=gemini_service,
             anthropic_service=anthropic_service,
             identity={"channel_id": 1},
         )
         self.assertEqual((reply, cost), ("reply", 0.01))
-        openai_service.get_chat_completion.assert_not_awaited()
+        gemini_service.get_chat_completion.assert_not_awaited()
         anthropic_service.get_chat_completion.assert_awaited_once()
+
+    async def test_gemini_model_uses_gemini_service(self):
+        gemini_service = MagicMock()
+        gemini_service.get_chat_completion = AsyncMock(return_value=("reply", 0.02))
+        anthropic_service = MagicMock()
+        anthropic_service.get_chat_completion = AsyncMock()
+
+        reply, cost = await dispatch_completion(
+            model="google-high",
+            messages=[{"role": "user", "content": "hi"}],
+            system_prompt="sys",
+            gemini_service=gemini_service,
+            anthropic_service=anthropic_service,
+            identity={"channel_id": 1},
+        )
+        self.assertEqual((reply, cost), ("reply", 0.02))
+        self.assertEqual(gemini_service.get_chat_completion.await_args.kwargs["thinking_level"], "high")
+        anthropic_service.get_chat_completion.assert_not_awaited()
 
 
 USER = [{"role": "user", "content": [{"type": "text", "text": "hello"}]}]

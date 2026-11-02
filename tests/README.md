@@ -21,7 +21,7 @@ This repository has a Python-heavy test suite that covers bot startup, commands,
 | --- | --- |
 | Startup and client wiring | `test_main.py`, `test_startup.py`, `test_bot_client.py` |
 | Slash commands | `test_system_commands.py`, `test_image_commands.py`, `test_death_commands.py` |
-| Core services | `test_queue_service.py`, `test_state_service.py`, `test_message_service.py`, `test_runpod_service.py` |
+| Core services | `test_queue_service.py`, `test_state_service.py`, `test_message_service.py`, `test_image_service.py` |
 | Background features | `test_death_service.py`, `test_auto_update.py` |
 | Mention/prompt handling | `test_mention_handler.py`, `test_openai_handler.py`, `test_message_utils.py`, `test_discord_helper.py` |
 | Downloader/media helpers | `test_downloader_utils.py`, `test_youtube_utils.py`, `test_tiktok_utils.py`, `test_twitter_utils.py`, `test_facebook_utils.py`, `test_url_utils.py` |

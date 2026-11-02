@@ -106,7 +106,7 @@ jobs:
           ## Requirements
           - Python 3.14+
           - Discord Bot Token
-          - OpenRouter API Key
+          - Anthropic API Key (and a Gemini API key for images)
         draft: false
         prerelease: false
 

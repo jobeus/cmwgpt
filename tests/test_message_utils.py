@@ -33,23 +33,23 @@ class TestMessageUtils(unittest.TestCase):
 
         self.assertEqual(formatted, "2024-01-01 05:00:00")
 
-    def test_clean_openai_response_handles_quotes_prefixes_mentions_and_escapes(self):
+    def test_clean_reply_handles_quotes_prefixes_mentions_and_escapes(self):
         raw = '"[2024-01-01 12:00:00] [123456] <@999>: assistant: Hello\\nworld"'
 
-        cleaned = message_utils.clean_openai_response(raw, bot_id=999)
+        cleaned = message_utils.clean_reply(raw, bot_id=999)
 
         self.assertEqual(cleaned, "Hello\nworld")
 
-    def test_clean_openai_response_fixes_broken_mentions_and_keeps_nonempty_original(self):
+    def test_clean_reply_fixes_broken_mentions_and_keeps_nonempty_original(self):
         raw = '<@1234: hi there'
 
-        cleaned = message_utils.clean_openai_response(raw)
+        cleaned = message_utils.clean_reply(raw)
 
         self.assertEqual(cleaned, 'hi there')
 
-    def test_clean_openai_response_returns_original_when_stripping_would_empty_it(self):
+    def test_clean_reply_returns_original_when_stripping_would_empty_it(self):
         raw = 'assistant: '
 
-        cleaned = message_utils.clean_openai_response(raw)
+        cleaned = message_utils.clean_reply(raw)
 
         self.assertEqual(cleaned, 'assistant:')

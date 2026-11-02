@@ -47,15 +47,13 @@ class TestStateService(unittest.TestCase):
         self.state_service.clear_system_prompt(channel_id)
         self.assertIsNone(self.state_service.get_system_prompt(channel_id))
 
-    def test_draw_edit_death_active_and_git_sha_management(self):
-        self.state_service.set_draw_model(1, "draw-model")
-        self.state_service.set_edit_model(1, "edit-model")
+    def test_image_model_death_active_and_git_sha_management(self):
+        self.state_service.set_image_model(1, "image-model")
         self.state_service.set_death_settings({"interval": 30})
         self.state_service.mark_channel_active(1)
         self.state_service.set_last_git_sha("abc123")
 
-        self.assertEqual(self.state_service.get_draw_model(1), "draw-model")
-        self.assertEqual(self.state_service.get_edit_model(1), "edit-model")
+        self.assertEqual(self.state_service.get_image_model(1), "image-model")
         self.assertEqual(self.state_service.get_death_settings(), {"interval": 30})
         self.assertEqual(self.state_service.get_active_channels(), {1})
         self.assertEqual(self.state_service.get_last_git_sha(), "abc123")
@@ -108,23 +106,20 @@ class TestStateService(unittest.TestCase):
 
     def test_settings_persist_to_file_and_reload(self):
         self.state_service.set_model(1, "gpt-test")
-        self.state_service.set_draw_model(1, "seedream")
-        self.state_service.set_edit_model(2, "qwen")
+        self.state_service.set_image_model(2, "gemini-3-pro-image")
         self.state_service.set_system_prompt(1, "be helpful")
         self.state_service.set_death_settings({"interval": 30})
 
         with open(self.temp_settings_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         self.assertEqual(data["models"], {"1": "gpt-test"})
-        self.assertEqual(data["draw_models"], {"1": "seedream"})
-        self.assertEqual(data["edit_models"], {"2": "qwen"})
+        self.assertEqual(data["image_models"], {"2": "gemini-3-pro-image"})
         self.assertEqual(data["system_prompts"], {"1": "be helpful"})
         self.assertEqual(data["death_settings"], {"interval": 30})
 
         reloaded = StateService()
         self.assertEqual(reloaded.get_model(1), "gpt-test")
-        self.assertEqual(reloaded.get_draw_model(1), "seedream")
-        self.assertEqual(reloaded.get_edit_model(2), "qwen")
+        self.assertEqual(reloaded.get_image_model(2), "gemini-3-pro-image")
         self.assertEqual(reloaded.get_system_prompt(1), "be helpful")
         self.assertEqual(reloaded.get_death_settings(), {"interval": 30})
 

@@ -39,11 +39,8 @@ class TestInteractionDefer(unittest.TestCase):
             self.mock_bot,
             state_service=MagicMock(),
             message_service=MagicMock(),
-            runpod_service=MagicMock(),
             gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=False,
+            default_image_model="gemini-nano-banana-2.1",
         )
 
     def tearDown(self):
@@ -110,7 +107,7 @@ class TestInteractionDefer(unittest.TestCase):
                 mock_safe_run.assert_awaited_once()
                 args = mock_safe_run.await_args.args
                 self.assertIs(args[0], mock_interaction)
-                self.assertEqual(args[1], self.image_commands._handle_draw_command)
+                self.assertEqual(args[1], self.image_commands._handle_image_command)
                 self.assertIs(args[2], mock_interaction)
                 self.assertEqual(args[3], "test prompt")
                 self.mock_queue_service.queue_command.assert_not_called()

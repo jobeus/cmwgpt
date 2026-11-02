@@ -64,13 +64,11 @@ class DaySummaryService:
     def __init__(
         self,
         *,
-        openai_service: Any,
         gemini_service: Any = None,
         anthropic_service: Any = None,
         store: Any = None,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ):
-        self._openai_service = openai_service
         self._gemini_service = gemini_service
         self._anthropic_service = anthropic_service
         # A MemoryStore; without one, summaries only live until a restart.
@@ -158,7 +156,6 @@ class DaySummaryService:
                 summary, transcript, speakers
             )}]}],
             system_prompt=DAY_SUMMARY_SYSTEM_PROMPT,
-            openai_service=self._openai_service,
             gemini_service=self._gemini_service,
             anthropic_service=self._anthropic_service,
             identity={},

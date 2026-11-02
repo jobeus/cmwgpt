@@ -16,15 +16,12 @@ These are loaded by `src/config.py`.
 | Variable | Default | Required | Notes |
 | --- | --- | --- | --- |
 | `DISCORD_BOT_TOKEN` | `test-token-for-ci` | Yes in real use | Discord authentication |
-| `OPENROUTER_API_KEY` | `test-key-for-ci` | Yes in real use | Text-model requests via OpenRouter |
-| `GEMINI_API_KEY` | empty | For `google`/`google-high` models | Native Gemini (`GeminiService`) requests |
-| `ANTHROPIC_API_KEY` | empty | For `sonnet-5.5-direct` / `opus-5.5-direct` | Direct Claude API (`AnthropicService`) requests, bypassing OpenRouter |
+| `GEMINI_API_KEY` | empty | For `google`/`google-high` and image commands | Native Gemini (`GeminiService`) requests and image generation |
+| `ANTHROPIC_API_KEY` | empty | Yes in real use (default model) | Claude API (`AnthropicService`) requests |
 | `GEMINI_TIMEOUT_SECONDS` | `120` | No | Client-side request timeout for Gemini calls |
-| `RUNPOD_IO_API_KEY` | empty | For image commands | Used by draw/edit flows |
-| `DEFAULT_MODEL` | `anthropic/claude-sonnet-5.5` | No | Fallback text model |
+| `DEFAULT_MODEL` | `sonnet-5.5-direct` | No | Fallback text model (one of the `/model` choices) |
 | `MEMORY_MODEL` | `sonnet-5.5-direct` | No | Model the nightly user-memory job uses; the job is off when this model's API key is missing |
-| `DEFAULT_DRAW_MODEL` | `seedream` | No | Default draw model key |
-| `DEFAULT_EDIT_MODEL` | `seedream` | No | Default edit model key |
+| `DEFAULT_IMAGE_MODEL` | `gemini-nano-banana-2.1` | No | Image model for `/draw`, `/edit` and the draw tools when a channel hasn't set one with `/imagemodel` |
 | `REPLY_TO_MENTIONS` | `true` | No | Enable mention replies |
 | `INCLUDE_NUM_CHATLINES` | `10` | No | Recent-history lines included in context |
 | `DISCORD_GUILD_ID` | empty | No | Guild-scoped sync/behavior |
@@ -58,13 +55,11 @@ These are loaded by `src/config.py`.
 Fill at least:
 
 - `DISCORD_BOT_TOKEN`
-- `OPENROUTER_API_KEY`
+- `ANTHROPIC_API_KEY`
 
 Add these as needed:
 
-- `GEMINI_API_KEY` for the `google`/`google-high` text models
-- `ANTHROPIC_API_KEY` for the `sonnet-5.5-direct` / `opus-5.5-direct` text models
-- `RUNPOD_IO_API_KEY` for image commands
+- `GEMINI_API_KEY` for the `google`/`google-high` text models and image commands
 - `GROQ_API_KEY` for transcription-heavy sources
 - `RAPIDAPI_KEY` for Twitter/X, Instagram and Reddit enrichment
 - `REDIS_URL` for per-user memory and persistent caches (the bot runs without Redis, but `/memory` and the nightly job will not work and caches only last until restart)

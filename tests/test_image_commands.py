@@ -1,11 +1,12 @@
 """Tests for ImageCommands with injected dependencies."""
 
+import base64
 import unittest
-from unittest.mock import ANY, AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.bot.commands.image import ImageCommands
-from src.services.openai_service import OpenAIServiceError
-from src.services.runpod_service import RunpodServiceError
+from src.bot.commands.image import DISCORD_MESSAGE_LIMIT, ImageCommands
+from src.services.gemini_service import GeminiServiceError
+from src.services.image_service import IMAGE_MODELS, ImageOptions, ImageResult
 
 
 class _AsyncTyping:
@@ -16,625 +17,200 @@ class _AsyncTyping:
         return False
 
 
-class TestImageCommandsInjection(unittest.IsolatedAsyncioTestCase):
-    def test_editmodel_choices_follow_injected_runpod_flag(self):
-        no_runpod_commands = ImageCommands(
-            MagicMock(),
-            state_service=MagicMock(),
-            message_service=MagicMock(),
-            runpod_service=MagicMock(), gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=False,
-        )
-        no_runpod_choices = [
-            choice.value
-            for choice in no_runpod_commands._create_editmodel_command().parameters[0].choices
-        ]
+def _attachment(data: bytes, url: str = "https://cdn.example/a.png"):
+    attachment = MagicMock()
+    attachment.read = AsyncMock(return_value=data)
+    attachment.url = url
+    return attachment
 
-        with_runpod_commands = ImageCommands(
-            MagicMock(),
-            state_service=MagicMock(),
-            message_service=MagicMock(),
-            runpod_service=MagicMock(), gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-        with_runpod_choices = [
-            choice.value
-            for choice in with_runpod_commands._create_editmodel_command().parameters[0].choices
-        ]
 
-        self.assertEqual(no_runpod_choices, ["gemini-3-pro-image", "gemini-nano-banana-2.1", "seedream"])
-        self.assertEqual(with_runpod_choices, ["gemini-3-pro-image", "gemini-nano-banana-2.1", "seedream", "qwen", "pruna"])
-
-    async def test_handle_draw_command_uses_injected_services(self):
+class TestImageCommands(unittest.IsolatedAsyncioTestCase):
+    def make_commands(self, *, saved_model=None, result=None, error=None):
         state_service = MagicMock()
-        state_service.get_draw_model.return_value = "wan-2.6"
-
+        state_service.get_image_model.return_value = saved_model
         message_service = MagicMock()
-        message_service.format_prompt_message.return_value = "> test prompt"
-
-        runpod_service = MagicMock()
-        runpod_service.has_model.return_value = True
-        runpod_service.generate_image = AsyncMock(return_value=(b"png-bytes", 0.1234))
-
+        message_service.format_prompt_message.side_effect = lambda text: f"> {text}"
+        message_service.format_attachment_message.side_effect = (
+            lambda attachments, text: "\n".join(f"> {a.url}" for a in attachments) + f"\n> {text}")
+        gemini_service = MagicMock()
+        gemini_service.generate_image = AsyncMock(
+            return_value=result or ImageResult(image=b"png-bytes", text="", cost=0.1234), side_effect=error)
         interaction = MagicMock()
         interaction.channel.id = 321
         interaction.channel.typing.return_value = _AsyncTyping()
         interaction.user.id = 654
         interaction.followup.send = AsyncMock()
-
         commands = ImageCommands(
             MagicMock(),
             state_service=state_service,
             message_service=message_service,
-            runpod_service=runpod_service, gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
+            gemini_service=gemini_service,
+            default_image_model="gemini-nano-banana-2.1",
         )
+        return commands, state_service, gemini_service, interaction
 
-        await commands._handle_draw_command(interaction, "test prompt")
+    async def test_draw_uses_channel_model_and_options(self):
+        commands, state_service, gemini_service, interaction = self.make_commands(saved_model="gemini-3-pro-image")
+        ref = _attachment(b"ref")
+
+        await commands._handle_image_command(
+            interaction, "a cat", [ref], None, ImageOptions(aspect_ratio="9:16", size="2K"), edit=False)
 
         state_service.mark_channel_active.assert_called_once_with(321)
-        runpod_service.generate_image.assert_awaited_once_with(
-            prompt="test prompt",
-            model="wan-2.6",
-            discord_user_id=654,
-            discord_channel_id=321,
+        gemini_service.generate_image.assert_awaited_once_with(
+            prompt="a cat",
+            model=IMAGE_MODELS["gemini-3-pro-image"],
+            images_b64=[base64.b64encode(b"ref").decode("ascii")],
+            options=ImageOptions(aspect_ratio="9:16", size="2K"),
         )
-        interaction.followup.send.assert_awaited_once_with(
-            content="> [$0.123 @ wan-2.6] test prompt",
-            file=ANY,
-        )
-
-    async def test_handle_drawmodel_command_reports_default_when_unset(self):
-        state_service = MagicMock()
-        state_service.get_draw_model.return_value = None
-        interaction = MagicMock()
-        interaction.channel.id = 123
-        interaction.followup.send = AsyncMock()
-
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=state_service,
-            message_service=MagicMock(),
-            runpod_service=MagicMock(), gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-
-        await commands._handle_drawmodel_command(interaction)
-
-        interaction.followup.send.assert_awaited_once_with(
-            "Default draw model is `seedream`.", ephemeral=True
-        )
-
-    async def test_handle_edit_command_uses_runpod_service_and_formats_attachments(self):
-        state_service = MagicMock()
-        state_service.get_edit_model.return_value = "qwen"
-
-        message_service = MagicMock()
-        message_service.format_attachment_message.return_value = "> edited prompt"
-
-        runpod_service = MagicMock()
-        runpod_service.has_edit_model.return_value = True
-        runpod_service.edit_image = AsyncMock(return_value=(b"edited-bytes", 0.4321))
-
-        interaction = MagicMock()
-        interaction.channel.id = 456
-        interaction.channel.typing.return_value = _AsyncTyping()
-        interaction.user.id = 789
-        interaction.followup.send = AsyncMock()
-
-        edit_image = MagicMock()
-        edit_image.filename = "original.png"
-        edit_image.read = AsyncMock(return_value=b"img-1")
-        second_image = MagicMock()
-        second_image.read = AsyncMock(return_value=b"img-2")
-
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=state_service,
-            message_service=message_service,
-            runpod_service=runpod_service, gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-
-        await commands._handle_edit_command(
-            interaction,
-            "edited prompt",
-            edit_image,
-            second_image,
-        )
-
-        runpod_service.edit_image.assert_awaited_once()
-        kwargs = runpod_service.edit_image.await_args.kwargs
-        self.assertEqual(kwargs["prompt"], "edited prompt")
-        self.assertEqual(kwargs["model"], "qwen")
-        self.assertEqual(len(kwargs["images"]), 2)
-        message_service.format_attachment_message.assert_called_once()
-        interaction.followup.send.assert_awaited_once_with(content="> edited prompt", file=ANY, embed=ANY)
-
-    async def test_handle_edit_command_rejects_unsupported_models(self):
-        state_service = MagicMock()
-        state_service.get_edit_model.return_value = "not-supported"
-        runpod_service = MagicMock()
-        runpod_service.has_edit_model.return_value = False
-
-        interaction = MagicMock()
-        interaction.channel.id = 456
-        interaction.channel.typing.return_value = _AsyncTyping()
-        interaction.followup.send = AsyncMock()
-
-        edit_image = MagicMock()
-        edit_image.filename = "original.png"
-
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=state_service,
-            message_service=MagicMock(),
-            runpod_service=runpod_service, gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-
-        await commands._handle_edit_command(interaction, "edited prompt", edit_image)
-
-        interaction.followup.send.assert_awaited_once_with(
-            content="Sorry, model not-supported does not support editing."
-        )
-
-    async def test_handle_editmodel_command_sets_model(self):
-        state_service = MagicMock()
-        interaction = MagicMock()
-        interaction.channel.id = 222
-        interaction.followup.send = AsyncMock()
-
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=state_service,
-            message_service=MagicMock(),
-            runpod_service=MagicMock(), gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-
-        await commands._handle_editmodel_command(interaction, "pruna")
-
-        state_service.set_edit_model.assert_called_once_with(222, "pruna")
-        interaction.followup.send.assert_awaited_once_with(
-            "Default edit model set to `pruna`.", ephemeral=True
-        )
-
-    async def test_handle_drawmodel_command_sets_model(self):
-        state_service = MagicMock()
-        interaction = MagicMock()
-        interaction.channel.id = 888
-        interaction.followup.send = AsyncMock()
-
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=state_service,
-            message_service=MagicMock(),
-            runpod_service=MagicMock(), gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-
-        await commands._handle_drawmodel_command(interaction, "wan-2.6")
-
-        state_service.set_draw_model.assert_called_once_with(888, "wan-2.6")
-        interaction.followup.send.assert_awaited_once_with(
-            "Default draw model set to `wan-2.6`.", ephemeral=True
-        )
-
-    async def test_handle_editmodel_command_reports_default_when_unset(self):
-        state_service = MagicMock()
-        state_service.get_edit_model.return_value = None
-        interaction = MagicMock()
-        interaction.channel.id = 999
-        interaction.followup.send = AsyncMock()
-
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=state_service,
-            message_service=MagicMock(),
-            runpod_service=MagicMock(), gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="default-edit",
-            enable_runpod_models=True,
-        )
-
-        await commands._handle_editmodel_command(interaction)
-
-        interaction.followup.send.assert_awaited_once_with(
-            "Default edit model is `default-edit`.", ephemeral=True
-        )
-
-    async def test_handle_draw_command_reports_runpod_errors(self):
-        state_service = MagicMock()
-        message_service = MagicMock()
-        message_service.format_prompt_message.return_value = "> prompt"
-        runpod_service = MagicMock()
-        runpod_service.has_model.return_value = True
-        runpod_service.generate_image = AsyncMock(side_effect=RunpodServiceError("bad model"))
-
-        interaction = MagicMock()
-        interaction.channel.id = 101
-        interaction.channel.typing.return_value = _AsyncTyping()
-        interaction.user.id = 202
-        interaction.followup.send = AsyncMock()
-
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=state_service,
-            message_service=message_service,
-            runpod_service=runpod_service, gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-
-        await commands._handle_draw_command(interaction, "prompt", "seedream")
-
-        sent_content = interaction.followup.send.await_args.kwargs["content"]
-        self.assertIn("bad model", sent_content)
-
-    async def test_handle_draw_command_runpod_error_uses_fallback_when_discord_send_fails(self):
-        state_service = MagicMock()
-        message_service = MagicMock()
-        message_service.format_prompt_message.return_value = "> prompt"
-        runpod_service = MagicMock()
-        runpod_service.has_model.return_value = True
-        runpod_service.generate_image = AsyncMock(side_effect=RunpodServiceError("bad model"))
-
-        interaction = MagicMock()
-        interaction.channel.id = 111
-        interaction.channel.typing.return_value = _AsyncTyping()
-        interaction.user.id = 222
-        interaction.followup.send = AsyncMock(side_effect=[RuntimeError("send failed"), RuntimeError("fallback failed")])
-
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=state_service,
-            message_service=message_service,
-            runpod_service=runpod_service, gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-
-        await commands._handle_draw_command(interaction, "prompt", "seedream")
-
-        self.assertEqual(interaction.followup.send.await_count, 2)
-
-    async def test_handle_draw_command_reports_unexpected_errors(self):
-        state_service = MagicMock()
-        message_service = MagicMock()
-        message_service.format_prompt_message.return_value = "> prompt"
-        runpod_service = MagicMock()
-        runpod_service.has_model.return_value = False
-
-        interaction = MagicMock()
-        interaction.channel.id = 103
-        interaction.channel.typing.return_value = _AsyncTyping()
-        interaction.followup.send = AsyncMock()
-
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=state_service,
-            message_service=message_service,
-            runpod_service=runpod_service, gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-
-        await commands._handle_draw_command(interaction, "prompt", "seedream")
-
-        sent_content = interaction.followup.send.await_args.kwargs["content"]
-        self.assertIn("unexpected error", sent_content.lower())
-
-    async def test_handle_draw_command_reports_openai_errors_with_fallback_send(self):
-        state_service = MagicMock()
-        message_service = MagicMock()
-        message_service.format_prompt_message.return_value = "> prompt"
-        runpod_service = MagicMock()
-        runpod_service.has_model.return_value = True
-        runpod_service.generate_image = AsyncMock(side_effect=OpenAIServiceError("oops"))
-
-        interaction = MagicMock()
-        interaction.channel.id = 112
-        interaction.channel.typing.return_value = _AsyncTyping()
-        interaction.user.id = 223
-        interaction.followup.send = AsyncMock(side_effect=[RuntimeError("send failed"), RuntimeError("fallback failed")])
-
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=state_service,
-            message_service=message_service,
-            runpod_service=runpod_service, gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-
-        await commands._handle_draw_command(interaction, "prompt", "seedream")
-
-        self.assertEqual(interaction.followup.send.await_count, 2)
-
-    async def test_handle_draw_command_reports_unexpected_errors_with_fallback_send(self):
-        state_service = MagicMock()
-        message_service = MagicMock()
-        message_service.format_prompt_message.return_value = "> prompt"
-        runpod_service = MagicMock()
-        runpod_service.has_model.return_value = False
-
-        interaction = MagicMock()
-        interaction.channel.id = 113
-        interaction.channel.typing.return_value = _AsyncTyping()
-        interaction.followup.send = AsyncMock(side_effect=[RuntimeError("send failed"), RuntimeError("fallback failed")])
-
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=state_service,
-            message_service=message_service,
-            runpod_service=runpod_service, gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-
-        await commands._handle_draw_command(interaction, "prompt", "seedream")
-
-        self.assertEqual(interaction.followup.send.await_count, 2)
-
-    async def test_handle_edit_command_reports_openai_errors(self):
-        state_service = MagicMock()
-        message_service = MagicMock()
-        message_service.format_prompt_message.return_value = "> prompt"
-        runpod_service = MagicMock()
-        runpod_service.has_edit_model.return_value = True
-        runpod_service.edit_image = AsyncMock(side_effect=OpenAIServiceError("oops"))
-
-        interaction = MagicMock()
-        interaction.channel.id = 104
-        interaction.channel.typing.return_value = _AsyncTyping()
-        interaction.user.id = 203
-        interaction.followup.send = AsyncMock()
-
-        edit_image = MagicMock()
-        edit_image.filename = "original.png"
-        edit_image.read = AsyncMock(return_value=b"img")
-
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=state_service,
-            message_service=message_service,
-            runpod_service=runpod_service, gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-
-        await commands._handle_edit_command(interaction, "prompt", edit_image)
-
-        sent_content = interaction.followup.send.await_args.kwargs["content"]
-        self.assertIn("error while editing", sent_content.lower())
-
-    async def test_handle_edit_command_openai_error_uses_fallback_when_discord_send_fails(self):
-        state_service = MagicMock()
-        message_service = MagicMock()
-        message_service.format_prompt_message.return_value = "> prompt"
-        runpod_service = MagicMock()
-        runpod_service.has_edit_model.return_value = True
-        runpod_service.edit_image = AsyncMock(side_effect=OpenAIServiceError("oops"))
-
-        interaction = MagicMock()
-        interaction.channel.id = 114
-        interaction.channel.typing.return_value = _AsyncTyping()
-        interaction.user.id = 224
-        interaction.followup.send = AsyncMock(side_effect=[RuntimeError("send failed"), RuntimeError("fallback failed")])
-
-        edit_image = MagicMock()
-        edit_image.filename = "original.png"
-        edit_image.read = AsyncMock(return_value=b"img")
-
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=state_service,
-            message_service=message_service,
-            runpod_service=runpod_service, gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-
-        await commands._handle_edit_command(interaction, "prompt", edit_image)
-
-        self.assertEqual(interaction.followup.send.await_count, 2)
-
-    async def test_handle_edit_command_reports_unexpected_errors(self):
-        state_service = MagicMock()
-        message_service = MagicMock()
-        message_service.format_prompt_message.return_value = "> prompt"
-        runpod_service = MagicMock()
-        runpod_service.has_edit_model.return_value = True
-        runpod_service.edit_image = AsyncMock(side_effect=RuntimeError("boom"))
-
-        interaction = MagicMock()
-        interaction.channel.id = 105
-        interaction.channel.typing.return_value = _AsyncTyping()
-        interaction.user.id = 204
-        interaction.followup.send = AsyncMock()
-
-        edit_image = MagicMock()
-        edit_image.filename = "original.png"
-        edit_image.read = AsyncMock(return_value=b"img")
-
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=state_service,
-            message_service=message_service,
-            runpod_service=runpod_service, gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-
-        await commands._handle_edit_command(interaction, "prompt", edit_image)
-
-        sent_content = interaction.followup.send.await_args.kwargs["content"]
-        self.assertIn("unexpected error editing", sent_content.lower())
-
-    async def test_handle_edit_command_reports_unexpected_errors_with_fallback_send(self):
-        state_service = MagicMock()
-        message_service = MagicMock()
-        message_service.format_prompt_message.return_value = "> prompt"
-        runpod_service = MagicMock()
-        runpod_service.has_edit_model.return_value = True
-        runpod_service.edit_image = AsyncMock(side_effect=RuntimeError("boom"))
-
-        interaction = MagicMock()
-        interaction.channel.id = 115
-        interaction.channel.typing.return_value = _AsyncTyping()
-        interaction.user.id = 225
-        interaction.followup.send = AsyncMock(side_effect=[RuntimeError("send failed"), RuntimeError("fallback failed")])
-
-        edit_image = MagicMock()
-        edit_image.filename = "original.png"
-        edit_image.read = AsyncMock(return_value=b"img")
-
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=state_service,
-            message_service=message_service,
-            runpod_service=runpod_service, gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-
-        await commands._handle_edit_command(interaction, "prompt", edit_image)
-
-        self.assertEqual(interaction.followup.send.await_count, 2)
-
-    async def test_setup_commands_registers_all_image_commands(self):
-        bot = MagicMock()
-        commands = ImageCommands(
-            bot,
-            state_service=MagicMock(),
-            message_service=MagicMock(),
-            runpod_service=MagicMock(), gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
+        kwargs = interaction.followup.send.await_args.kwargs
+        self.assertEqual(kwargs["content"], "> [$0.123 @ banana-pro, 9:16, 2K] a cat")
+        self.assertEqual(kwargs["file"].filename, "image.png")
+
+    async def test_draw_skips_unknown_saved_model(self):
+        commands, _, gemini_service, interaction = self.make_commands(saved_model="seedream")
+
+        await commands._handle_image_command(interaction, "a cat", [], None, ImageOptions(), edit=False)
+
+        self.assertEqual(gemini_service.generate_image.await_args.kwargs["model"].id, "gemini-nano-banana-2.1")
+
+    async def test_draw_posts_what_the_model_said(self):
+        commands, _, _, interaction = self.make_commands(
+            result=ImageResult(image=b"png", text="Here's your cat.", cost=0.05))
+
+        await commands._handle_image_command(interaction, "a cat", [], None, ImageOptions(), edit=False)
+
+        self.assertEqual(interaction.followup.send.await_args.kwargs["content"],
+                         "> [$0.050 @ banana-2.1] a cat\n\nHere's your cat.")
+
+    async def test_long_model_text_is_cut_to_fit(self):
+        commands, _, _, interaction = self.make_commands(
+            result=ImageResult(image=b"png", text="x" * 5000, cost=0.05))
+
+        await commands._handle_image_command(interaction, "a cat", [], None, ImageOptions(), edit=False)
+
+        content = interaction.followup.send.await_args.kwargs["content"]
+        self.assertEqual(len(content), DISCORD_MESSAGE_LIMIT)
+        self.assertTrue(content.endswith("…"))
+
+    async def test_edit_sends_every_image_with_the_edited_one_first(self):
+        commands, _, gemini_service, interaction = self.make_commands()
+        first, second = _attachment(b"one", "https://cdn.example/1.png"), _attachment(b"two", "https://cdn.example/2.png")
+
+        await commands._handle_image_command(
+            interaction, "make it red", [first, second], "gemini-3.1-flash-lite-image", ImageOptions(), edit=True)
+
+        kwargs = gemini_service.generate_image.await_args.kwargs
+        self.assertEqual(kwargs["model"].id, "gemini-3.1-flash-lite-image")
+        self.assertEqual(kwargs["images_b64"], [base64.b64encode(b"one").decode("ascii"),
+                                                base64.b64encode(b"two").decode("ascii")])
+        sent = interaction.followup.send.await_args.kwargs
+        self.assertEqual(sent["content"],
+                         "> https://cdn.example/1.png\n> https://cdn.example/2.png\n"
+                         "> [$0.123 @ banana-2-lite] make it red")
+        self.assertEqual(sent["file"].filename, "edited.png")
+
+    async def test_unsupported_option_is_reported_without_calling_the_model(self):
+        commands, _, gemini_service, interaction = self.make_commands()
+
+        await commands._handle_image_command(
+            interaction, "a cat", [], "gemini-3-pro-image", ImageOptions(thinking="high"), edit=False)
+
+        gemini_service.generate_image.assert_not_awaited()
+        self.assertEqual(interaction.followup.send.await_args.kwargs["content"],
+                         "> a cat\n\nSorry, I couldn't make that image: banana-pro doesn't take a thinking level.")
+
+    async def test_gemini_errors_are_reported(self):
+        commands, _, _, interaction = self.make_commands(error=GeminiServiceError("No image returned from Gemini."))
+
+        await commands._handle_image_command(interaction, "a cat", [], None, ImageOptions(), edit=False)
+
+        self.assertIn("No image returned from Gemini.", interaction.followup.send.await_args.kwargs["content"])
+
+    async def test_unexpected_errors_get_a_generic_message(self):
+        commands, _, _, interaction = self.make_commands(error=RuntimeError("secret internals"))
+
+        await commands._handle_image_command(interaction, "a cat", [], None, ImageOptions(), edit=False)
+
+        content = interaction.followup.send.await_args.kwargs["content"]
+        self.assertNotIn("secret internals", content)
+        self.assertIn("Something unexpected went wrong", content)
+
+    async def test_error_send_failure_is_swallowed(self):
+        commands, _, _, interaction = self.make_commands(error=GeminiServiceError("boom"))
+        interaction.followup.send.side_effect = RuntimeError("discord down")
+
+        await commands._handle_image_command(interaction, "a cat", [], None, ImageOptions(), edit=False)
+
+        interaction.followup.send.assert_awaited_once()
+
+    async def test_imagemodel_sets_model(self):
+        commands, state_service, _, interaction = self.make_commands()
+
+        await commands._handle_imagemodel_command(interaction, "gemini-3-pro-image")
+
+        state_service.set_image_model.assert_called_once_with(321, "gemini-3-pro-image")
+        interaction.followup.send.assert_awaited_once_with("Image model set to `banana-pro`.", ephemeral=True)
+
+    async def test_imagemodel_reports_current_model(self):
+        commands, state_service, _, interaction = self.make_commands(saved_model="qwen")
+
+        await commands._handle_imagemodel_command(interaction)
+
+        state_service.set_image_model.assert_not_called()
+        interaction.followup.send.assert_awaited_once_with("Image model is `banana-2.1`.", ephemeral=True)
+
+    def test_setup_commands_registers_all_image_commands(self):
+        commands, _, _, _ = self.make_commands()
 
         commands.setup_commands()
 
-        self.assertEqual(bot.tree.add_command.call_count, 4)
+        names = [c.args[0].name for c in commands.bot.tree.add_command.call_args_list]
+        self.assertEqual(names, ["draw", "edit", "imagemodel"])
 
-    async def test_draw_command_wrapper_defers_and_awaits_safe_run(self):
-        interaction = MagicMock()
+    def test_model_choices_are_the_gemini_models(self):
+        commands, _, _, _ = self.make_commands()
+        model = next(p for p in commands._create_draw_command().parameters if p.name == "model")
+
+        self.assertEqual([c.value for c in model.choices], list(IMAGE_MODELS))
+
+    async def test_draw_wrapper_defaults_to_widescreen_and_collects_images(self):
+        commands, _, _, interaction = self.make_commands()
         interaction.response.defer = AsyncMock()
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=MagicMock(),
-            message_service=MagicMock(),
-            runpod_service=MagicMock(), gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
+        image = MagicMock()
         draw = commands._create_draw_command()
 
         with patch("src.bot.commands.image.safe_run", new=AsyncMock()) as mock_safe_run:
-            await draw.callback(interaction, "a prompt", None, None, None, None, None)
+            await draw.callback(interaction, "a prompt", None, "4K", None, None, "web", None, image)
 
         interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
-        mock_safe_run.assert_called_once_with(interaction, commands._handle_draw_command, interaction, "a prompt", None, None, None, None, None)
-        mock_safe_run.assert_awaited_once()
+        mock_safe_run.assert_awaited_once_with(
+            interaction, commands._handle_image_command, interaction, "a prompt", [image], None,
+            ImageOptions(aspect_ratio="16:9", size="4K", search="web"), edit=False)
 
-    async def test_drawmodel_command_wrapper_defers_and_awaits_safe_run(self):
-        interaction = MagicMock()
+    async def test_edit_wrapper_keeps_the_image_shape(self):
+        commands, _, _, interaction = self.make_commands()
         interaction.response.defer = AsyncMock()
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=MagicMock(),
-            message_service=MagicMock(),
-            runpod_service=MagicMock(), gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-        drawmodel = commands._create_drawmodel_command()
-
-        with patch("src.bot.commands.image.safe_run", new=AsyncMock()) as mock_safe_run:
-            await drawmodel.callback(interaction, "seedream")
-
-        interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
-        mock_safe_run.assert_called_once_with(interaction, commands._handle_drawmodel_command, interaction, "seedream")
-        mock_safe_run.assert_awaited_once()
-
-    async def test_edit_command_wrapper_defers_and_awaits_safe_run(self):
-        interaction = MagicMock()
-        interaction.response.defer = AsyncMock()
-        edit_image = MagicMock()
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=MagicMock(),
-            message_service=MagicMock(),
-            runpod_service=MagicMock(), gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
+        edit_image, extra = MagicMock(), MagicMock()
         edit = commands._create_edit_command()
 
         with patch("src.bot.commands.image.safe_run", new=AsyncMock()) as mock_safe_run:
-            await edit.callback(interaction, "fix it", edit_image, None, None, None, "qwen")
+            await edit.callback(interaction, "fix it", edit_image, None, None, "gemini-3-pro-image", None, None, extra)
 
-        interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
-        mock_safe_run.assert_called_once_with(
-            interaction,
-            commands._handle_edit_command,
-            interaction,
-            "fix it",
-            edit_image,
-            None,
-            None,
-            None,
-            "qwen",
-        )
-        mock_safe_run.assert_awaited_once()
+        mock_safe_run.assert_awaited_once_with(
+            interaction, commands._handle_image_command, interaction, "fix it", [edit_image, extra],
+            "gemini-3-pro-image", ImageOptions(), edit=True)
 
-    async def test_editmodel_command_wrapper_defers_and_awaits_safe_run(self):
-        interaction = MagicMock()
+    async def test_imagemodel_wrapper_defers_and_awaits_safe_run(self):
+        commands, _, _, interaction = self.make_commands()
         interaction.response.defer = AsyncMock()
-        commands = ImageCommands(
-            MagicMock(),
-            state_service=MagicMock(),
-            message_service=MagicMock(),
-            runpod_service=MagicMock(), gemini_service=MagicMock(),
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            enable_runpod_models=True,
-        )
-        editmodel = commands._create_editmodel_command()
 
         with patch("src.bot.commands.image.safe_run", new=AsyncMock()) as mock_safe_run:
-            await editmodel.callback(interaction, "pruna")
+            await commands._create_imagemodel_command().callback(interaction, "gemini-3-pro-image")
 
-        interaction.response.defer.assert_awaited_once_with(ephemeral=False, thinking=True)
-        mock_safe_run.assert_called_once_with(interaction, commands._handle_editmodel_command, interaction, "pruna")
-        mock_safe_run.assert_awaited_once()
+        mock_safe_run.assert_awaited_once_with(
+            interaction, commands._handle_imagemodel_command, interaction, "gemini-3-pro-image")
+
+
+if __name__ == "__main__":
+    unittest.main()

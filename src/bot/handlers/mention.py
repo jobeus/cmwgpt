@@ -13,7 +13,6 @@ import discord
 
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url, transcribe_audio_attachment
 from src.utils.discord_error_utils import best_effort_typing, concise_error
-from src.services.openai_service import OpenAIServiceError
 from src.services.anthropic_service import (
     THINK_HARDER_MODELS, THINKING_STATUS, AnthropicServiceError, is_direct_anthropic_model,
 )
@@ -105,7 +104,6 @@ class MentionHandler:
         self,
         *,
         state_service: Any,
-        openai_service: Any,
         message_service: Any,
         queue_service: Any,
         system_prompt_loader: Callable[[], str],
@@ -121,10 +119,8 @@ class MentionHandler:
         day_summary_provider: Optional[
             Callable[[Any, discord.Message, int, str], Awaitable[tuple[str, float]]]
         ] = None,
-        runpod_service: Any = None,
-        default_draw_model: Optional[str] = None,
+        default_image_model: Optional[str] = None,
         irc_log: Optional[IrcLog] = None,
-        default_edit_model: Optional[str] = None,
         memory_corrector: Optional[Callable[[int, int, str, str], Awaitable[tuple[str, float]]]] = None,
         wiki_views: Optional[Callable[[str], Awaitable[Optional[int]]]] = None,
         quote_file: Optional[QuoteFile] = None,
@@ -139,7 +135,6 @@ class MentionHandler:
         irc_meaning_index: Any = None,
     ):
         self._state_service = state_service
-        self._openai_service = openai_service
         self._gemini_service = gemini_service
         self._anthropic_service = anthropic_service
         self._message_service = message_service
@@ -153,10 +148,8 @@ class MentionHandler:
         self._user_notes_provider = user_notes_provider
         self._channel_summary_provider = channel_summary_provider
         self._day_summary_provider = day_summary_provider
-        self._runpod_service = runpod_service
-        self._default_draw_model = default_draw_model
+        self._default_image_model = default_image_model
         self._irc_log = irc_log
-        self._default_edit_model = default_edit_model
         self._memory_corrector = memory_corrector
         self._wiki_views = wiki_views
         self._quote_file = quote_file
@@ -209,11 +202,9 @@ class MentionHandler:
             how_i_work_loader=_load_how_i_work,
             state_service=self._state_service,
             gemini_service=self._gemini_service,
-            runpod_service=self._runpod_service,
-            default_draw_model=self._default_draw_model,
+            default_image_model=self._default_image_model,
             irc_log=self._irc_log,
             message=message,
-            default_edit_model=self._default_edit_model,
             memory_corrector=self._memory_corrector,
             wiki_views=self._wiki_views,
             quote_file=self._quote_file,
@@ -283,7 +274,7 @@ class MentionHandler:
                         message, bot_user, model=model, on_status=streaming_reply.status, tools=tools
                     )
                     logger.info(
-                        f"Context prepared for mention by {message.author}, sending to {'Gemini' if is_gemini_model(model) else 'Claude API' if is_direct_anthropic_model(model) else 'OpenRouter'}...")
+                        f"Context prepared for mention by {message.author}, sending to {'Gemini' if is_gemini_model(model) else 'Claude API'}...")
                     channel_id = message.channel.id
 
                     # Identity threaded into every model call for this mention.
@@ -294,7 +285,6 @@ class MentionHandler:
                         model=model,
                         messages=recent_messages,
                         system_prompt=system_prompt,
-                        openai_service=self._openai_service,
                         gemini_service=self._gemini_service,
                         anthropic_service=self._anthropic_service,
                         identity=identity,
@@ -332,7 +322,7 @@ class MentionHandler:
 
                 await streaming_reply.finish(reply_text, files_to_upload)
 
-            except (OpenAIServiceError, GeminiServiceError, AnthropicServiceError) as e:
+            except (GeminiServiceError, AnthropicServiceError) as e:
                 logger.error(f"❌ API error in mention handler:\\n{e}")
                 await self._send_error(
                     message.channel, f"Sorry, I encountered an error while processing your mention: {str(e)}")

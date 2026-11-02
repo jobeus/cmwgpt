@@ -178,7 +178,6 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         service = MemoryService(
             store=store,
             config=cfg(anthropic_api_key="key"),
-            openai_service=MagicMock(),
             anthropic_service=MagicMock(),
             now=lambda: now,
         )
@@ -600,7 +599,7 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         )
 
     def test_unavailable_without_api_key(self):
-        service = MemoryService(store=FakeStore(), config=cfg(anthropic_api_key=""), openai_service=MagicMock())
+        service = MemoryService(store=FakeStore(), config=cfg(anthropic_api_key=""), )
         self.assertFalse(service.available)
 
 
@@ -685,7 +684,6 @@ class TestMentionNotes(unittest.IsolatedAsyncioTestCase):
         provider = AsyncMock(return_value="<user_notes>\nnotes\n</user_notes>")
         handler = MentionHandler(
             state_service=MagicMock(),
-            openai_service=MagicMock(),
             message_service=MagicMock(),
             queue_service=MagicMock(),
             system_prompt_loader=lambda: "base",
@@ -714,7 +712,6 @@ class TestMentionNotes(unittest.IsolatedAsyncioTestCase):
         provider = AsyncMock(return_value="<about_you>\nMood: fine\n</about_you>")
         handler = MentionHandler(
             state_service=MagicMock(),
-            openai_service=MagicMock(),
             message_service=MagicMock(),
             queue_service=MagicMock(),
             system_prompt_loader=lambda: "base",

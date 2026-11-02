@@ -51,12 +51,12 @@ def format_prompt_message(message: str) -> str:
     return f"> {message}"
 
 
-def clean_openai_response(response: str, bot_id: Optional[int] = None) -> str:
+def clean_reply(response: str, bot_id: Optional[int] = None) -> str:
     """
-    Clean OpenAI response by removing unwanted quote wrapping and fixing escaped characters.
+    Clean a model reply by removing unwanted quote wrapping and fixing escaped characters.
 
     Args:
-        response: Raw response from OpenAI
+        response: Raw model reply
         bot_id: The ID of the bot user (to strip specific bot mentions)
 
     Returns:
@@ -136,7 +136,7 @@ def clean_openai_response(response: str, bot_id: Optional[int] = None) -> str:
         cleaned = original_cleaned.strip()
 
     # Handle escaped characters that should be unescaped
-    # Only unescape common cases that OpenAI might escape unnecessarily
+    # Only unescape common cases that models might escape unnecessarily
     cleaned = cleaned.replace("\\n", "\n")
     cleaned = cleaned.replace("\\t", "\t")
     cleaned = cleaned.replace('\\"', '"')

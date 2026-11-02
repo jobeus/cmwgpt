@@ -97,6 +97,5 @@ def setup_logger():
     logging.getLogger("discord.gateway").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("openai._base_client").setLevel(logging.WARNING)
 
     return root

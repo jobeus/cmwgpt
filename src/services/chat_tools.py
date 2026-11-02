@@ -20,7 +20,19 @@ import discord
 from src.services.discord_history import (
     HAS_FILTERS, MAX_READ_MESSAGES, SORTS, read_around, readable_channels, search_messages,
 )
-from src.services.image_service import edit_image, generate_image, resolve_draw_model, resolve_edit_model
+from src.services.image_service import (
+    ASPECT_RATIOS,
+    DRAW_ASPECT_RATIO,
+    IMAGE_SIZES,
+    MAX_REFERENCE_IMAGES,
+    SEARCH_MODES,
+    THINKING_LEVELS,
+    ImageOptionError,
+    ImageOptions,
+    ImageResult,
+    generate_image,
+    resolve_image_model,
+)
 from src.services.irc_log_service import MAX_CONTEXT_LINES, MAX_DAY_LINES, MAX_TOP_NICKS, IrcLog
 from src.services.quote_service import MAX_RANDOM, QuoteFile
 from src.services.timezone_service import describe_zone, resolve_zone
@@ -35,8 +47,6 @@ logger = logging.getLogger(__name__)
 MAX_DRAWS_PER_REPLY = 2
 # Most user IDs one ``recall_users`` call looks up.
 MAX_RECALL_USERS = 8
-# Most images one ``edit_image`` call sends to the edit model.
-MAX_EDIT_IMAGES = 4
 # Most links one ``read_urls`` call fetches, and most images it returns.
 MAX_READ_URLS = 5
 MAX_URL_IMAGES = 8
@@ -81,13 +91,59 @@ def text_result(text: str, *, is_error: bool = False) -> ToolResult:
     return ToolResult(content=[{"type": "text", "text": text}], is_error=is_error)
 
 
+# Options the draw and edit_image tools share. Which ones work depends on the channel's image model; one it
+# can't do comes back as an error naming what it can.
+IMAGE_OPTION_PROPERTIES = {
+    "aspect_ratio": {
+        "type": "string",
+        "enum": list(ASPECT_RATIOS),
+        "description": (
+            "Shape of the image: e.g. 9:16 or 2:3 for a portrait or phone wallpaper, 1:1 for an avatar, 16:9 "
+            "or 21:9 for a landscape or banner. The extreme 1:4, 4:1, 1:8 and 8:1 work on banana-2.1 only. "
+            "draw defaults to 16:9; edit_image keeps the edited image's shape."
+        ),
+    },
+    "size": {
+        "type": "string",
+        "enum": list(IMAGE_SIZES),
+        "description": "Resolution, default 1K. 2K and 4K cost more; use them only when asked for a big or detailed image.",
+    },
+    "thinking": {
+        "type": "string",
+        "enum": list(THINKING_LEVELS),
+        "description": (
+            "How hard the model plans first (banana-2.1; banana-2-lite takes minimal or high). Use high for "
+            "complex scenes, diagrams, or lots of text in the image."
+        ),
+    },
+    "search": {
+        "type": "string",
+        "enum": list(SEARCH_MODES),
+        "description": (
+            "Ground the image in Google search (banana-2.1 and banana-pro): for real, current things such as "
+            "today's weather, a recent event, a real place or product. web+image (banana-2.1) also searches images."
+        ),
+    },
+}
+
+
+def _image_options(args: Dict[str, Any], default_aspect_ratio: Optional[str] = None) -> ImageOptions:
+    def arg(name: str) -> Optional[str]:
+        return str(args.get(name) or "").strip() or None
+
+    return ImageOptions(aspect_ratio=arg("aspect_ratio") or default_aspect_ratio, size=arg("size"),
+                        thinking=arg("thinking"), search=arg("search"))
+
+
 DRAW_TOOL = {
     "name": "draw",
     "description": (
         "Generate an image with this channel's image model and attach it to your reply. The image is "
         "returned to you so you can look at it and comment on it in your reply. Use it when someone asks "
         "you to draw, make, generate or show a picture of something, or when a picture is clearly the "
-        "best answer. Each call costs money and takes several seconds, so draw once unless asked for more."
+        "best answer. Pick the aspect ratio that fits (portrait, square, landscape) and the other options "
+        "only when they help. Each call costs money and takes several seconds, so draw once unless asked "
+        "for more."
     ),
     "input_schema": {
         "type": "object",
@@ -99,17 +155,19 @@ DRAW_TOOL = {
                     "text that should appear. Write it fresh from the request; don't include Discord IDs."
                 ),
             },
+            **IMAGE_OPTION_PROPERTIES,
         },
         "required": ["prompt"],
         "additionalProperties": False,
     },
-    "strict": True,
 }
 
 DRAW_GUIDANCE = (
-    "- `draw(prompt)`: makes an image with this channel's image model and attaches it to your "
-    "reply. You get the image back, so after drawing, write a short reply that comments on "
-    "what came out. Use it when someone asks you to draw or make a picture.\n"
+    "- `draw(prompt, aspect_ratio?, size?, thinking?, search?)`: makes an image with this channel's image "
+    "model and attaches it to your reply. Set aspect_ratio to fit the request (9:16 for a portrait, 1:1 "
+    "for an avatar); search grounds it in real, current things. You get the image back, so after drawing, "
+    "write a short reply that comments on what came out. Use it when someone asks you to draw or make a "
+    "picture.\n"
 )
 
 RECALL_USERS_TOOL = {
@@ -196,38 +254,40 @@ HOW_I_WORK_GUIDANCE = (
 EDIT_IMAGE_TOOL = {
     "name": "edit_image",
     "description": (
-        "Edit an image someone posted (or one you posted earlier) with this channel's image edit model, "
-        "and attach the result to your reply. The result is returned to you so you can comment on it. Use "
-        "it when someone asks you to change, fix, restyle or add to a picture in the chat. Costs money and "
-        "takes several seconds; it counts toward the same per-reply limit as draw."
+        "Edit an image someone posted (or one you posted earlier) with this channel's image model, or "
+        "combine several into a new one, and attach the result to your reply. The result is returned to you "
+        "so you can comment on it. Use it when someone asks you to change, fix, restyle, combine or add to "
+        "pictures in the chat. Costs money and takes several seconds; it counts toward the same per-reply "
+        "limit as draw."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "prompt": {
                 "type": "string",
-                "description": "What to change, written as an instruction to the edit model, e.g. 'make the hat red'.",
+                "description": "What to change, written as an instruction to the image model, e.g. 'make the hat red'.",
             },
             "message_ids": {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": (
                     "IDs of messages in this channel whose images to use (the [message ID] in a history "
-                    f"header). The first message's first image is the one edited; up to {MAX_EDIT_IMAGES} "
+                    f"header). The first message's first image is the one edited; up to {MAX_REFERENCE_IMAGES} "
                     "images in all, the rest as references."
                 ),
             },
+            **IMAGE_OPTION_PROPERTIES,
         },
         "required": ["prompt", "message_ids"],
         "additionalProperties": False,
     },
-    "strict": True,
 }
 
 EDIT_IMAGE_GUIDANCE = (
-    "- `edit_image(prompt, message_ids)`: edits an image from a message in this channel (use the "
-    "[message ID] from its header) with the channel's edit model and attaches the result. You "
-    "get it back to comment on. Use it when someone asks you to change or fix a picture.\n"
+    "- `edit_image(prompt, message_ids, aspect_ratio?, size?, thinking?, search?)`: edits an image from a "
+    "message in this channel (use the [message ID] from its header), or combines several, with the "
+    "channel's image model and attaches the result. You get it back to comment on. Use it when someone "
+    "asks you to change or fix a picture.\n"
 )
 
 REMEMBER_TOOL = {
@@ -979,11 +1039,9 @@ def build_mention_tools(
     how_i_work_loader: Callable[[], str],
     state_service: Any,
     gemini_service: Any,
-    runpod_service: Any,
-    default_draw_model: Optional[str],
+    default_image_model: Optional[str],
     irc_log: Optional[IrcLog] = None,
     message: Any = None,
-    default_edit_model: Optional[str] = None,
     memory_corrector: Optional[Callable[[int, int, str, str], Awaitable[Tuple[str, float]]]] = None,
     wiki_views: Optional[Callable[[str], Awaitable[Optional[int]]]] = None,
     quote_file: Optional[QuoteFile] = None,
@@ -1007,9 +1065,9 @@ def build_mention_tools(
     guild = getattr(message, "guild", None)
     asker = getattr(message, "author", None)
 
-    def image_result(
-        text: str, img_bytes: bytes, preview: bytes, cost: Optional[float], filename: str
-    ) -> ToolResult:
+    def image_result(text: str, result: ImageResult, preview: bytes, filename: str) -> ToolResult:
+        if result.text:
+            text += f"\n\nThe image model said: {result.text}"
         return ToolResult(
             content=[
                 {"type": "text", "text": text},
@@ -1022,8 +1080,8 @@ def build_mention_tools(
                     },
                 },
             ],
-            cost=cost or 0.0,
-            files=[discord.File(io.BytesIO(img_bytes), filename=filename)],
+            cost=result.cost,
+            files=[discord.File(io.BytesIO(result.image), filename=filename)],
         )
 
     async def draw(args: Dict[str, Any]) -> ToolResult:
@@ -1037,21 +1095,20 @@ def build_mention_tools(
         # Counted before the await, so draws running side by side still respect the limit.
         draws += 1
         filename = f"image{draws}.png"
-        model = resolve_draw_model(state_service, channel_id, default_draw_model or "")
-        logger.info(f"[draw tool] Channel {channel_id} Model: {model} Prompt: {prompt[:200]}")
-        img_bytes, cost = await generate_image(
-            prompt=prompt,
-            model=model,
-            gemini_service=gemini_service,
-            runpod_service=runpod_service,
-            discord_user_id=user_id,
-            discord_channel_id=channel_id,
-        )
-        preview = await asyncio.to_thread(compress_image, img_bytes)
+        model = resolve_image_model(state_service, channel_id, default_image_model)
+        options = _image_options(args, DRAW_ASPECT_RATIO)
+        logger.info(f"[draw tool] Channel {channel_id} Model: {model.id} Options: {options.describe()} "
+                    f"Prompt: {prompt[:200]}")
+        try:
+            result = await generate_image(prompt=prompt, model=model, gemini_service=gemini_service, options=options)
+        except ImageOptionError as e:
+            draws -= 1
+            return text_result(str(e), is_error=True)
+        preview = await asyncio.to_thread(compress_image, result.image)
         return image_result(
-            f"Drew it with {model}. The image is attached to your reply, so don't link or "
-            "describe it as missing; here it is so you can comment on how it came out.",
-            img_bytes, preview, cost, filename,
+            f"Drew it with {model.name} ({options.describe()}). The image is attached to your reply, so don't "
+            "link or describe it as missing; here it is so you can comment on how it came out.",
+            result, preview, filename,
         )
 
     async def images_from(message_ids: List[int]) -> List[str]:
@@ -1063,7 +1120,7 @@ def build_mention_tools(
                 images.append(base64.b64encode(await attachment.read()).decode("ascii"))
             for url in _embed_image_urls(source):
                 images.append((await url_to_base64_data_url(url)).split(",", 1)[1])
-        return images[:MAX_EDIT_IMAGES]
+        return images[:MAX_REFERENCE_IMAGES]
 
     def find_channel(args: Dict[str, Any]) -> Any:
         """The ``channel_id`` argument's channel (default this one), if the asker and the bot can read it."""
@@ -1091,21 +1148,20 @@ def build_mention_tools(
         if not images:
             draws -= 1
             return text_result("Those messages have no images.", is_error=True)
-        model = resolve_edit_model(state_service, channel_id, default_edit_model or "")
-        logger.info(f"[edit tool] Channel {channel_id} Model: {model} Images: {len(images)} Prompt: {prompt[:200]}")
-        img_bytes, cost = await edit_image(
-            prompt=prompt,
-            model=model,
-            images_b64=images,
-            gemini_service=gemini_service,
-            runpod_service=runpod_service,
-            discord_user_id=user_id,
-            discord_channel_id=channel_id,
-        )
-        preview = await asyncio.to_thread(compress_image, img_bytes)
+        model = resolve_image_model(state_service, channel_id, default_image_model)
+        options = _image_options(args)
+        logger.info(f"[edit tool] Channel {channel_id} Model: {model.id} Options: {options.describe()} "
+                    f"Images: {len(images)} Prompt: {prompt[:200]}")
+        try:
+            result = await generate_image(
+                prompt=prompt, model=model, gemini_service=gemini_service, images_b64=images, options=options)
+        except ImageOptionError as e:
+            draws -= 1
+            return text_result(str(e), is_error=True)
+        preview = await asyncio.to_thread(compress_image, result.image)
         return image_result(
-            f"Edited it with {model}. The result is attached to your reply; here it is so you can comment on it.",
-            img_bytes, preview, cost, filename,
+            f"Edited it with {model.name}. The result is attached to your reply; here it is so you can comment on it.",
+            result, preview, filename,
         )
 
     async def recall_users(args: Dict[str, Any]) -> ToolResult:
@@ -1467,9 +1523,9 @@ def build_mention_tools(
         text = await asyncio.to_thread(irc_log.read_day, day, start_line=_int_arg(args, "start_line"))
         return text_result(text)
 
-    if default_draw_model and state_service is not None and (gemini_service or runpod_service):
+    if default_image_model and state_service is not None and gemini_service:
         tools.append(ChatTool(DRAW_TOOL, draw, "drawing...", DRAW_GUIDANCE))
-    if default_edit_model and state_service is not None and (gemini_service or runpod_service) and message:
+    if default_image_model and state_service is not None and gemini_service and message:
         tools.append(ChatTool(EDIT_IMAGE_TOOL, edit, "editing...", EDIT_IMAGE_GUIDANCE))
     if user_notes_provider and guild_id:
         tools.append(ChatTool(RECALL_USERS_TOOL, recall_users, "remembering...", RECALL_USERS_GUIDANCE))

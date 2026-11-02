@@ -9,7 +9,7 @@ import fakeredis
 
 from src.services import cost_service
 from src.services.cost_service import (
-    CLAUDE_DIRECT, GROQ, RUNPOD, CostStore, cost_day, cost_scope, record_cost, set_cost_store,
+    CLAUDE_DIRECT, GEMINI_DIRECT, GROQ, CostStore, cost_day, cost_scope, record_cost, set_cost_store,
 )
 
 
@@ -24,12 +24,12 @@ class TestRecordCost(unittest.IsolatedAsyncioTestCase):
         with cost_scope(user_id=1, channel_id=2) as ledger:
             await record_cost(CLAUDE_DIRECT, 0.02)
             # A draw and a transcript running side by side, as tool calls do.
-            await asyncio.gather(record_cost(RUNPOD, 0.04), record_cost(GROQ, 0.001))
+            await asyncio.gather(record_cost(GEMINI_DIRECT, 0.04), record_cost(GROQ, 0.001))
             await record_cost(CLAUDE_DIRECT, 0.01)
 
         self.assertAlmostEqual(ledger.total, 0.071)
         self.assertAlmostEqual(ledger.by_provider[CLAUDE_DIRECT], 0.03)
-        self.assertAlmostEqual(ledger.by_provider[RUNPOD], 0.04)
+        self.assertAlmostEqual(ledger.by_provider[GEMINI_DIRECT], 0.04)
 
     async def test_saves_daily_totals_by_provider_user_and_channel(self):
         with cost_scope(user_id=1, channel_id=2):
@@ -44,15 +44,15 @@ class TestRecordCost(unittest.IsolatedAsyncioTestCase):
 
     async def test_zero_missing_and_junk_costs_are_ignored(self):
         with cost_scope() as ledger:
-            await record_cost(RUNPOD, 0)
-            await record_cost(RUNPOD, None)
-            await record_cost(RUNPOD, "lots")
+            await record_cost(GEMINI_DIRECT, 0)
+            await record_cost(GEMINI_DIRECT, None)
+            await record_cost(GEMINI_DIRECT, "lots")
         self.assertEqual(ledger.by_provider, {})
         self.assertEqual(await self.redis.keys("*"), [])
 
     async def test_string_costs_from_an_api_are_counted(self):
         with cost_scope() as ledger:
-            await record_cost(RUNPOD, "0.04")
+            await record_cost(GEMINI_DIRECT, "0.04")
         self.assertAlmostEqual(ledger.total, 0.04)
 
     async def test_a_broken_store_never_raises(self):
@@ -60,16 +60,16 @@ class TestRecordCost(unittest.IsolatedAsyncioTestCase):
         broken.add.side_effect = RuntimeError("redis down")
         set_cost_store(broken)
         with cost_scope() as ledger, self.assertLogs("src.services.cost_service", level="WARNING"):
-            await record_cost(RUNPOD, 0.04)
+            await record_cost(GEMINI_DIRECT, 0.04)
         self.assertAlmostEqual(ledger.total, 0.04)
 
     async def test_totals_add_up_a_range_of_days(self):
-        await self.store.add(date(2026, 10, 1), RUNPOD, 1.0, 5, None)
-        await self.store.add(date(2026, 10, 2), RUNPOD, 2.0, 5, None)
+        await self.store.add(date(2026, 10, 1), GEMINI_DIRECT, 1.0, 5, None)
+        await self.store.add(date(2026, 10, 2), GEMINI_DIRECT, 2.0, 5, None)
         await self.store.add(date(2026, 10, 3), GROQ, 4.0, 6, None)
 
         totals = await self.store.totals(date(2026, 10, 1), date(2026, 10, 2))
-        self.assertEqual(totals.providers, {RUNPOD: 3.0})
+        self.assertEqual(totals.providers, {GEMINI_DIRECT: 3.0})
         self.assertEqual(totals.top_users(5), [(5, 3.0)])
 
 

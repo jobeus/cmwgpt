@@ -10,15 +10,15 @@ from src.services.chat_tools import (
     MAX_DRAWS_PER_REPLY, MAX_REACTIONS_PER_REPLY, MAX_VIEW_IMAGES, UNKNOWN_EMOJI_CODE, build_mention_tools,
 )
 from src.services.discord_history import INDEX_NOT_READY_CODE
+from src.services.image_service import IMAGE_MODELS, ImageOptions, ImageResult
 from src.utils.url_utils import wiki_title_candidates
 
 
 def _tools(**overrides):
     state_service = MagicMock()
-    state_service.get_draw_model.return_value = None
-    runpod_service = MagicMock()
-    runpod_service.has_model.return_value = True
-    runpod_service.generate_image = AsyncMock(return_value=(b"png-bytes", 0.02))
+    state_service.get_image_model.return_value = None
+    gemini_service = MagicMock()
+    gemini_service.generate_image = AsyncMock(return_value=ImageResult(image=b"png-bytes", text="", cost=0.02))
     deps = dict(
         guild_id=10,
         channel_id=20,
@@ -27,9 +27,8 @@ def _tools(**overrides):
         channel_summary_provider=AsyncMock(return_value="lately"),
         how_i_work_loader=lambda: "architecture",
         state_service=state_service,
-        gemini_service=MagicMock(),
-        runpod_service=runpod_service,
-        default_draw_model="seedream",
+        gemini_service=gemini_service,
+        default_image_model="gemini-nano-banana-2.1",
     )
     deps.update(overrides)
     return {t.definition["name"]: t for t in build_mention_tools(**deps)}, deps
@@ -64,7 +63,6 @@ def _message(admin=False):
 def _full_tools(message=None, **overrides):
     deps = dict(
         message=message or _message(),
-        default_edit_model="qwen",
         memory_corrector=AsyncMock(return_value=("Stable: drives a Ranger", 0.01)),
         wiki_views=AsyncMock(return_value=None),
     )
@@ -105,23 +103,46 @@ class TestChatTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(tools), ["draw", "recall_users", "recall_channel", "transcribe_youtube", "how_i_work"])
 
     def test_leaves_out_tools_without_their_dependencies(self):
-        tools, _ = _tools(guild_id=None, default_draw_model=None)
+        tools, _ = _tools(guild_id=None, default_image_model=None)
         self.assertEqual(list(tools), ["transcribe_youtube", "how_i_work"])
 
     @patch("src.services.chat_tools.compress_image", return_value=b"jpeg")
     async def test_draw_uses_the_channel_model_and_returns_the_image(self, _compress):
         tools, deps = _tools()
-        deps["state_service"].get_draw_model.return_value = "flux"
+        deps["state_service"].get_image_model.return_value = "gemini-3-pro-image"
 
         result = await tools["draw"].run({"prompt": "a cat"})
 
-        deps["runpod_service"].generate_image.assert_awaited_once_with(
-            prompt="a cat", model="flux", discord_user_id=30, discord_channel_id=20)
+        deps["gemini_service"].generate_image.assert_awaited_once_with(
+            prompt="a cat", model=IMAGE_MODELS["gemini-3-pro-image"], images_b64=[],
+            options=ImageOptions(aspect_ratio="16:9"))
         self.assertAlmostEqual(result.cost, 0.02)
         self.assertEqual(len(result.files), 1)
         self.assertEqual(result.content[1]["type"], "image")
         self.assertEqual(result.content[1]["source"]["media_type"], "image/jpeg")
-        self.assertIn("flux", result.content[0]["text"])
+        self.assertIn("banana-pro", result.content[0]["text"])
+
+    @patch("src.services.chat_tools.compress_image", return_value=b"jpeg")
+    async def test_draw_passes_options_and_what_the_model_said(self, _compress):
+        tools, deps = _tools()
+        deps["gemini_service"].generate_image.return_value = ImageResult(image=b"png", text="A tall cat.", cost=0.05)
+
+        result = await tools["draw"].run(
+            {"prompt": "a cat", "aspect_ratio": "9:16", "size": "2K", "thinking": "high", "search": "web"})
+
+        self.assertEqual(deps["gemini_service"].generate_image.await_args.kwargs["options"],
+                         ImageOptions(aspect_ratio="9:16", size="2K", thinking="high", search="web"))
+        self.assertIn("The image model said: A tall cat.", result.content[0]["text"])
+
+    async def test_draw_reports_an_option_the_model_cant_do_without_using_up_a_draw(self):
+        tools, deps = _tools()
+        deps["state_service"].get_image_model.return_value = "gemini-3-pro-image"
+
+        for _ in range(MAX_DRAWS_PER_REPLY + 1):
+            result = await tools["draw"].run({"prompt": "a cat", "aspect_ratio": "8:1"})
+            self.assertTrue(result.is_error)
+            self.assertIn("banana-pro doesn't support aspect ratio 8:1", result.content[0]["text"])
+        deps["gemini_service"].generate_image.assert_not_awaited()
 
     @patch("src.services.chat_tools.compress_image", return_value=b"jpeg")
     async def test_draw_is_capped_per_reply(self, _compress):
@@ -130,7 +151,7 @@ class TestChatTools(unittest.IsolatedAsyncioTestCase):
             await tools["draw"].run({"prompt": "x"})
         result = await tools["draw"].run({"prompt": "x"})
         self.assertTrue(result.is_error)
-        self.assertEqual(deps["runpod_service"].generate_image.await_count, MAX_DRAWS_PER_REPLY)
+        self.assertEqual(deps["gemini_service"].generate_image.await_count, MAX_DRAWS_PER_REPLY)
 
     async def test_recall_users_accepts_mentions_and_bare_ids(self):
         tools, deps = _tools()
@@ -172,22 +193,22 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
             self.assertIn(f"`{name}(", guidance)
 
     @patch("src.services.chat_tools.compress_image", return_value=b"jpeg")
-    async def test_edit_image_sends_the_message_images_to_the_edit_model(self, _compress):
+    async def test_edit_image_sends_the_message_images_to_the_image_model(self, _compress):
         message = _message()
         image = MagicMock(content_type="image/png")
         image.read = AsyncMock(return_value=b"raw")
         message.channel.fetch_message = AsyncMock(return_value=SimpleNamespace(
             attachments=[image, MagicMock(content_type="text/plain")], embeds=[]))
         tools, deps = _full_tools(message)
-        deps["state_service"].get_edit_model.return_value = None
-        deps["runpod_service"].has_edit_model.return_value = True
-        deps["runpod_service"].edit_image = AsyncMock(return_value=(b"edited", 0.03))
+        deps["gemini_service"].generate_image.return_value = ImageResult(image=b"edited", text="", cost=0.03)
 
-        result = await tools["edit_image"].run({"prompt": "make it red", "message_ids": ["123456789"]})
+        result = await tools["edit_image"].run(
+            {"prompt": "make it red", "message_ids": ["123456789"], "size": "4K"})
 
         message.channel.fetch_message.assert_awaited_once_with(123456789)
-        kwargs = deps["runpod_service"].edit_image.await_args.kwargs
-        self.assertEqual((kwargs["model"], kwargs["images"]), ("qwen", ["cmF3"]))
+        kwargs = deps["gemini_service"].generate_image.await_args.kwargs
+        self.assertEqual((kwargs["model"].id, kwargs["images_b64"], kwargs["options"]),
+                         ("gemini-nano-banana-2.1", ["cmF3"], ImageOptions(size="4K")))
         self.assertEqual(len(result.files), 1)
         self.assertAlmostEqual(result.cost, 0.03)
 

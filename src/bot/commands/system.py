@@ -71,7 +71,7 @@ class SystemCommands:
         ]
 
         @app_commands.command(name="model",
-                              description="View or set OpenAI model")
+                              description="View or set the chat model")
         @app_commands.describe(model="Model name to use")
         @app_commands.choices(model=model_choices)
         async def model_command(
@@ -327,12 +327,11 @@ class SystemCommands:
             "**Chat & Conversations:**\n"
             "`@BotName [message]` - Mention the bot for context-aware responses in the channel\n\n"
             "**Image Generation & Editing:**\n"
-            "`/draw [prompt]` - Generate an image with the AI\n"
-            "`/edit [prompt] [edit_image]` - Edit an existing image (supports up to 4 images for seedream/qwen/pruna)\n"
-            "`/drawmodel [model]` - View or set the default image generation model\n"
-            "`/editmodel [model]` - View or set the default image editing model\n\n"
+            "`/draw [prompt]` - Generate an image (optional: aspect ratio, size, model, thinking, search, up to 8 reference images)\n"
+            "`/edit [prompt] [edit_image]` - Edit an image (same options; extra images are references)\n"
+            "`/imagemodel [model]` - View or set this channel's image model\n\n"
             "**System & Settings:**\n"
-            "`/model [model]` - View or set the AI language model (e.g., anthropic/claude-sonnet-5.5)\n"
+            "`/model [model]` - View or set the AI language model (e.g., sonnet-5.5-direct)\n"
             "`/systemprompt set [prompt]` - Set a custom AI personality for this channel\n"
             "`/systemprompt view` - View the current custom personality\n"
             "`/systemprompt reset` - Return to the default personality\n"

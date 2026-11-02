@@ -24,7 +24,7 @@ This page is meant to answer four questions quickly:
 What it shows:
 
 - the Python bot as the center of Discord interaction
-- OpenRouter/Gemini/Claude API, Runpod, and downloader work around the mention path
+- Gemini (chat and images), the Claude API, and downloader work around the mention path
 - Redis for per-user memory and content caches
 
 ```mermaid
@@ -43,13 +43,12 @@ flowchart LR
         Queue[QueueService]:::service
         State[StateService]:::service
         Dispatch[completion_dispatch<br/>model routing]:::service
-        OpenAI[OpenAIService<br/>OpenRouter text]:::service
-        Gemini[GeminiService<br/>native Gemini]:::service
+        Gemini[GeminiService<br/>native Gemini + images]:::service
         Anthropic[AnthropicService<br/>Claude API]:::service
         Tools[chat_tools<br/>per-mention client tools]:::service
         Memory[MemoryService<br/>nightly profiles]:::service
         DaySummary[DaySummaryService<br/>chat since 02:00]:::service
-        Runpod[RunpodService<br/>image draw/edit]:::service
+        Images[image_service<br/>Gemini image models]:::service
         Downloader[Downloader pipeline]:::service
         MsgSvc[MessageService]:::service
         Restart[Restart + update services]:::service
@@ -60,7 +59,6 @@ flowchart LR
     Client --> Commands
     Mention --> Queue
     Mention --> Dispatch
-    Dispatch --> OpenAI
     Dispatch --> Gemini
     Dispatch --> Anthropic
     Mention --> Memory
@@ -70,7 +68,8 @@ flowchart LR
     Mention --> State
     Mention --> MsgSvc
     Commands --> State
-    Commands --> Runpod
+    Commands --> Images
+    Images --> Gemini
     Commands --> MsgSvc
     Client --> Restart
 
@@ -79,7 +78,7 @@ flowchart LR
     Tools --> Memory
     Tools --> DaySummary
     Tools --> Downloader
-    Tools --> Runpod
+    Tools --> Images
 
     Cache[(Redis<br/>memory + URL caches)]:::data
     Files[(IRC log, nicks,<br/>quote file)]:::data
@@ -108,12 +107,10 @@ flowchart TB
     Startup --> Factory[create_services]:::core
     Factory --> State[StateService]:::svc
     Factory --> Queue[QueueService]:::svc
-    Factory --> OpenAI[OpenAIService]:::svc
     Factory --> Gemini[GeminiService]:::svc
     Factory --> Anthropic[AnthropicService]:::svc
     Factory --> Paste[PasteService]:::svc
     Factory --> Message[MessageService]:::svc
-    Factory --> Runpod[RunpodService]:::svc
     Factory --> Restart[RestartHandler]:::aux
     Factory --> AutoUpdate[AutoUpdateService]:::aux
     Factory --> Announce[AnnouncementService]:::aux
@@ -165,7 +162,6 @@ sequenceDiagram
     participant S as StateService
     participant D as downloader_utils
     participant DP as completion_dispatch
-    participant O as OpenAIService
     participant G as GeminiService
     participant A as AnthropicService
     participant MS as MessageService
@@ -180,7 +176,7 @@ sequenceDiagram
     M->>S: get_system_prompt(channel)
     alt model has tools (sonnet/opus-5.5-direct)
         M->>M: add "Your tools" section, build_mention_tools(message)
-    else other models
+    else google / google-high
         M->>D: fetch_all_url_content(text) per message, concurrently
         D-->>M: enrichment (newest 10 messages fetch; older ones use cache only)
         M->>MEM: get_notes_block(asker, mentioned users, recent speakers)
@@ -197,11 +193,8 @@ sequenceDiagram
             A->>A: run tool_use blocks (ChatTool.run), send tool_result back
         end
         A-->>DP: reply content (+ files from draw/edit_image)
-    else other models
-        DP->>O: get_chat_completion(...)
-        O-->>DP: reply content
     end
-    Note over A,O: streamed: on_text(text so far) posts, then edits, a preview
+    Note over DP,A: Claude API replies stream: on_text(text so far) posts, then edits, a preview
     DP-->>M: reply content
     M->>MS: StreamingReply.finish: edit preview into final reply (or send it)
     MS-->>U: Discord reply
@@ -211,12 +204,12 @@ sequenceDiagram
 
 - Mentions are **queued**, not processed in parallel ad hoc.
 - Prompt context is more than just the latest message: it includes recent history, reply metadata, embeds, and attachments. The multimodal context array is built by `src/utils/chat_context.py` (`build_chat_context`).
-- Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `sonnet-5.5-direct`/`opus-5.5-direct` go to `AnthropicService` (Claude API), and everything else goes to `OpenAIService`.
+- Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `sonnet-5.5-direct`/`opus-5.5-direct` go to `AnthropicService` (Claude API). There are no other chat models; a channel set to a retired one falls back to `DEFAULT_MODEL`.
 - URL enrichment happens **before** the LLM call and can materially change the prompt content. Only the newest 10 history messages fetch links; older messages use cached results only, and the fetches run concurrently.
 - Per-user memory profiles are appended to the end of the mention, so the cached system prompt and history stay unchanged.
 - So is the bot's own state (`<about_you>`: mood, emotion, emoji, interests, what it's wondering about, and follow-ups for the people in the conversation), on every model. It's per server in `cmwgpt:self:<guild_id>`, seeded from the last 7 days when missing and refreshed every 6 hours from the last 12 hours of chat, both with a web search for current events; the direct models can also change it with `update_self` and `follow_up`.
 - The Claude API direct models get none of the on-demand context filled in (links, memory notes, channel and day summaries, `how_i_work`). They get a "Your tools" section in the system prompt instead and fetch what they need with tools; see [Claude API tools](#claude-api-tools).
-- Claude API and OpenRouter replies stream: `StreamingReply` (`src/services/streaming_reply.py`) posts the reply as it arrives and edits it at most every 1.5 seconds, then edits in the final text with the cost. If the request fails, the partial message is deleted before the error reply. Gemini replies arrive whole.
+- Claude API replies stream: `StreamingReply` (`src/services/streaming_reply.py`) posts the reply as it arrives and edits it at most every 1.5 seconds, then edits in the final text with the cost. If the request fails, the partial message is deleted before the error reply. Gemini replies arrive whole.
 - There is no request/pipeline log table: the SDK clients use their default HTTP clients, and diagnostics go to the normal Python log (stdout and `logs/`).
 
 ## Claude API tools
@@ -229,7 +222,7 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 
 | Tool | Runs | Needs |
 | --- | --- | --- |
-| `draw`, `edit_image` | `src/services/image_service.py` (Gemini or Runpod) | a draw/edit model, Gemini or Runpod |
+| `draw`, `edit_image` | `src/services/image_service.py` (Gemini image models, with aspect ratio/size/thinking/search options) | `GEMINI_API_KEY` |
 | `recall_users`, `recall_channel`, `remember`, `update_self`, `follow_up` | `MemoryService` | Redis memory, a guild |
 | `recall_today` | `DaySummaryService` | — |
 | `search_messages`, `read_messages`, `view_images` | `src/services/discord_history.py` (Discord's message search) and message fetches | a guild |
@@ -328,7 +321,7 @@ flowchart LR
 | `src/bot/handlers/mention.py` | Main conversational path | Debug context assembly or mention behavior |
 | `src/bot/commands/` | Slash commands | Inspect user-facing command behavior |
 | `src/utils/chat_context.py` | Multimodal context builder | Change how history/embeds/attachments become the model input |
-| `src/services/completion_dispatch.py` | Model routing | Understand Gemini/Claude API/OpenRouter selection |
+| `src/services/completion_dispatch.py` | Model routing | Understand Gemini/Claude API selection |
 | `src/services/model_catalog.py` | `/model` options | Add a text model or see which key each one needs |
 | `src/services/anthropic_service.py` | Claude API integration | Debug prompt caching, the tool loop, `think_harder` or pricing |
 | `src/services/chat_tools.py` | Client tools for the direct models | Add or change a tool and its prompt guidance |
@@ -337,11 +330,9 @@ flowchart LR
 | `src/services/quote_service.py` | Old quote bot file | Debug `old_quotes` |
 | `src/services/day_summary_service.py` | Today's chat summary, saved to Redis so restarts keep it | Understand the incremental day summary |
 | `src/services/cost_service.py` | `record_cost`, per-reply cost scopes and the daily Redis tallies behind `/cost` | Add a paid API or change how costs are counted |
-| `src/services/image_service.py` | Image model routing | See which image models go to Gemini vs Runpod |
+| `src/services/image_service.py` | Image models and options | See each Gemini image model's aspect ratios, sizes, thinking and search |
 | `src/services/streaming_reply.py` | Streamed reply preview | Debug status lines, edits and the final reply |
-| `src/services/openai_service.py` | Text-model integration | Understand OpenRouter calls |
 | `src/services/gemini_service.py` | Native Gemini integration | Understand `google`/`google-high` calls and the Gemini timeout |
-| `src/services/runpod_service.py` | Image integration | Understand draw/edit requests |
 | `src/services/state_service.py` | Per-channel persistence | See where model/system-prompt/service settings live |
 | `src/services/queue_service.py` | FIFO work queue | Understand serialized mention processing |
 | `src/services/memory_service.py` | Per-user memory | Understand the nightly job, `/memory` edits, and the notes added to mentions |
@@ -364,8 +355,8 @@ flowchart LR
 2. `DiscordBotClient` chooses the active model for the channel and queues the work.
 3. `MentionHandler` gathers recent message history and reply context (via `build_chat_context`).
 4. For most models, the handler enriches user text with downloader output for supported URLs, appends the memory profiles of the people involved, and puts the channel and day summaries in the system prompt. The Claude API direct models get a tools section and the tools instead.
-5. `dispatch_completion` routes the assembled context to `OpenAIService` (OpenRouter), `GeminiService` (native Gemini), or `AnthropicService` (Claude API), based on the channel's model. `AnthropicService` runs any tool calls before the final answer.
-6. For Claude API and OpenRouter models the reply streams into a Discord message as it's written (`StreamingReply`); the final text, with its cost, is edited in at the end. Gemini replies are sent whole by `MessageService`.
+5. `dispatch_completion` routes the assembled context to `GeminiService` (native Gemini) or `AnthropicService` (Claude API), based on the channel's model. `AnthropicService` runs any tool calls before the final answer.
+6. For Claude API models the reply streams into a Discord message as it's written (`StreamingReply`); the final text, with its cost, is edited in at the end. Gemini replies are sent whole by `MessageService`.
 
 ### Memory
 

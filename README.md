@@ -28,7 +28,7 @@ Mention-first Discord bot with URL-aware prompt enrichment, image generation/edi
 | Context building | Recent channel history, reply context, embeds, and attachments are folded into the prompt |
 | URL enrichment | The bot can inject transcripts/context from YouTube, TikTok, Twitter/X, Facebook, Instagram, Reddit, and generic articles |
 | Tools | On the Claude API direct models, the model calls tools itself: draw/edit images, memory and summaries, Discord and old IRC log search, viewing posted images, reactions, the old quote bot, reading any URL, code execution, Wikipedia pageviews (`docs/architecture.md#claude-api-tools`) |
-| Images | Slash commands support image generation and image editing through Runpod or Gemini |
+| Images | `/draw` and `/edit` use Gemini's image models (banana-2.1, banana-pro, banana-2-lite) with aspect ratio, size, thinking, search grounding and up to 8 reference images |
 | Memory | A nightly job learns short per-user profiles (stored in Redis) and adds them to mentions; `/memory` shows and edits them |
 | Observability | Python logging goes to stdout and `logs/`; there is no request log table or log viewer |
 
@@ -63,7 +63,7 @@ Redis isn't exposed on the host. The bot only listens for the deploy webhook, an
 | --- | --- |
 | General | `/help`, `/model`, `/restart`, `/wikicount`, `/cost` |
 | Prompting | `/systemprompt set`, `/systemprompt view`, `/systemprompt reset` |
-| Images | `/draw`, `/drawmodel`, `/edit`, `/editmodel` |
+| Images | `/draw`, `/edit`, `/imagemodel` |
 | Memory | `/memory show`, `/memory correct`, `/memory clear`, `/fillmemory`, `/fillsummaries`, `/botstate` |
 | Deathwatch | `/death set`, `/death view`, `/death reset`, `/limerick`, `/forcedeath` |
 
@@ -76,10 +76,8 @@ Chat itself remains mention-based.
 | Variable | Required | Why |
 | --- | --- | --- |
 | `DISCORD_BOT_TOKEN` | Yes | Connects the bot to Discord |
-| `OPENROUTER_API_KEY` | Yes | Powers text-model completions via OpenRouter |
-| `GEMINI_API_KEY` | If using `google`/`google-high` models | Powers native Gemini completions |
-| `ANTHROPIC_API_KEY` | If using `sonnet-5.5-direct`/`opus-5.5-direct` or the memory job | Powers Claude API completions and their tools |
-| `RUNPOD_IO_API_KEY` | If using image commands | Powers draw/edit requests |
+| `GEMINI_API_KEY` | For `google`/`google-high` and image commands | Powers native Gemini completions and image generation |
+| `ANTHROPIC_API_KEY` | Yes (the default model and the memory job use it) | Powers Claude API completions and their tools |
 
 ### Downloader/provider essentials
 
@@ -101,7 +99,7 @@ For the full reference, see `docs/configuration.md`.
 
 ## Architecture in one paragraph
 
-`main.py` boots `src/startup.py`, which wires services like `StateService`, `QueueService`, `OpenAIService`, `GeminiService`, `RunpodService`, `DeathService`, `MemoryService`, and `MentionHandler` into `DiscordBotClient`. Mention replies are assembled by `src/bot/handlers/mention.py` (context built via `src/utils/chat_context.py`), enriched through `src/utils/downloader_utils.py`, then routed by `src/services/completion_dispatch.py` to OpenRouter, native Gemini, or the Claude API for text output. The Claude API models skip that enrichment and call the tools in `src/services/chat_tools.py` instead. Outbound URL fetches go through `src/utils/http_client.py`, which re-checks the SSRF guard on every redirect and caps body size and total time. Redis holds the per-user memory that `MemoryService` learns nightly and adds to mentions, plus the URL content caches.
+`main.py` boots `src/startup.py`, which wires services like `StateService`, `QueueService`, `GeminiService`, `AnthropicService`, `DeathService`, `MemoryService`, and `MentionHandler` into `DiscordBotClient`. Mention replies are assembled by `src/bot/handlers/mention.py` (context built via `src/utils/chat_context.py`), enriched through `src/utils/downloader_utils.py`, then routed by `src/services/completion_dispatch.py` to native Gemini or the Claude API for text output. The Claude API models skip that enrichment and call the tools in `src/services/chat_tools.py` instead. Outbound URL fetches go through `src/utils/http_client.py`, which re-checks the SSRF guard on every redirect and caps body size and total time. Redis holds the per-user memory that `MemoryService` learns nightly and adds to mentions, plus the URL content caches.
 
 For diagrams and a deeper walkthrough, see `docs/architecture.md`.
 

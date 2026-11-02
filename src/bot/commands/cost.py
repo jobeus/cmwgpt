@@ -25,7 +25,7 @@ def format_money(amount: float) -> str:
 
 
 def format_providers(totals: CostTotals) -> str:
-    """``claude-direct $1.200 · runpod $0.040``, biggest first, leaving out providers that cost nothing."""
+    """``claude-direct $1.200 · gemini-direct $0.040``, biggest first, leaving out providers that cost nothing."""
     spent = [(name, amount) for name, amount in totals.providers.items() if round(amount, 3) > 0]
     spent.sort(key=lambda item: item[1], reverse=True)
     return " · ".join(f"{name} {format_money(amount)}" for name, amount in spent)

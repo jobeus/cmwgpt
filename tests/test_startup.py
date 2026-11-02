@@ -18,17 +18,13 @@ def make_shutdown_services(**overrides):
         memory_service=MagicMock(),
         death_service=MagicMock(),
         queue_service=MagicMock(),
-        openai_service=MagicMock(),
         gemini_service=MagicMock(),
         anthropic_service=MagicMock(),
-        runpod_service=MagicMock(),
     )
     services.death_service.close = AsyncMock()
     services.queue_service.stop = AsyncMock()
-    services.openai_service.close = AsyncMock()
     services.gemini_service.close = AsyncMock()
     services.anthropic_service.close = AsyncMock()
-    services.runpod_service.close = AsyncMock()
     for name, value in overrides.items():
         setattr(services, name, value)
     return services
@@ -56,7 +52,6 @@ class TestStartupIntegration(unittest.TestCase):
         self.assertEqual(services.auto_update_service._port, 9999)
         self.assertIs(services.announcement_service._state_service, services.state_service)
         self.assertIs(services.death_service._state_service, services.state_service)
-        self.assertIs(services.death_service._openai_service, services.openai_service)
         self.assertIs(services.death_service._gemini_service, services.gemini_service)
         self.assertIs(services.death_service._anthropic_service, services.anthropic_service)
         self.assertIs(services.mention_handler._queue_service, services.queue_service)
@@ -100,10 +95,8 @@ class TestShutdownServices(unittest.TestCase):
         order.attach_mock(services.memory_service.stop, "memory_stop")
         order.attach_mock(services.death_service.close, "death_close")
         order.attach_mock(services.queue_service.stop, "queue_stop")
-        order.attach_mock(services.openai_service.close, "openai_close")
         order.attach_mock(services.gemini_service.close, "gemini_close")
         order.attach_mock(services.anthropic_service.close, "anthropic_close")
-        order.attach_mock(services.runpod_service.close, "runpod_close")
         close_redis = AsyncMock()
         order.attach_mock(close_redis, "close_redis")
 
@@ -113,7 +106,7 @@ class TestShutdownServices(unittest.TestCase):
             [c[0] for c in order.mock_calls],
             [
                 "auto_update_stop", "memory_stop", "death_close", "queue_stop",
-                "openai_close", "gemini_close", "anthropic_close", "runpod_close",
+                "gemini_close", "anthropic_close",
                 "close_redis",
             ],
         )
@@ -126,22 +119,20 @@ class TestShutdownServices(unittest.TestCase):
         services.memory_service.stop.side_effect = RuntimeError("b")
         services.death_service.close.side_effect = RuntimeError("c")
         services.queue_service.stop.side_effect = RuntimeError("d")
-        services.openai_service.close.side_effect = RuntimeError("e")
         services.gemini_service.close.side_effect = RuntimeError("f")
         services.anthropic_service.close.side_effect = RuntimeError("g")
-        services.runpod_service.close.side_effect = RuntimeError("h")
         close_redis = AsyncMock(side_effect=RuntimeError("i"))
 
         with self.assertLogs("src.startup", level="ERROR") as logs:
             self._run(services, close_redis)
 
-        self.assertEqual(len(logs.records), 9)
+        self.assertEqual(len(logs.records), 7)
         self.assertTrue(any("queue drain failed" in r.getMessage() for r in logs.records))
-        services.runpod_service.close.assert_awaited_once_with()
+        services.anthropic_service.close.assert_awaited_once_with()
         close_redis.assert_awaited_once_with()
 
     def test_optional_services_may_be_absent(self):
-        services = make_shutdown_services(memory_service=None, anthropic_service=None)
+        services = make_shutdown_services(memory_service=None)
         close_redis = self._run(services)
         services.queue_service.stop.assert_awaited_once_with()
         close_redis.assert_awaited_once_with()

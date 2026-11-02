@@ -41,10 +41,8 @@ class DiscordBotClient:
         intents.members = True
         self.bot = commands.Bot(command_prefix="/", intents=intents)
         self._shutdown_started = False
-        for service in (self.services.openai_service, self.services.gemini_service,
-                        getattr(self.services, "anthropic_service", None)):
-            if service is not None:
-                service.set_bot_id_loader(lambda: self.bot.user.id if self.bot.user else None)
+        for service in (self.services.gemini_service, self.services.anthropic_service):
+            service.set_bot_id_loader(lambda: self.bot.user.id if self.bot.user else None)
         self.services.restart_handler.set_shutdown_callback(self.shutdown)
 
         # Load any saved state from previous restart
@@ -243,11 +241,8 @@ class DiscordBotClient:
             self.bot,
             state_service=self.services.state_service,
             message_service=self.services.message_service,
-            runpod_service=self.services.runpod_service,
             gemini_service=self.services.gemini_service,
-            default_draw_model=self.config.default_draw_model,
-            default_edit_model=self.config.default_edit_model,
-            enable_runpod_models=bool(self.config.runpod_io_api_key),
+            default_image_model=self.config.default_image_model,
         )
         image_commands.setup_commands()
 

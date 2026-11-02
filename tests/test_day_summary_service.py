@@ -79,7 +79,7 @@ class TestDayStart(unittest.TestCase):
 
 class TestDaySummaryService(unittest.IsolatedAsyncioTestCase):
     def make_service(self, now=DAY_START + timedelta(hours=12)):
-        return DaySummaryService(openai_service=MagicMock(), now=lambda: now)
+        return DaySummaryService(now=lambda: now)
 
     async def test_summarizes_from_2am_up_to_the_history_window(self):
         messages = [make_msg(i) for i in range(5)]
@@ -118,7 +118,7 @@ class TestDaySummaryService(unittest.IsolatedAsyncioTestCase):
 
     async def test_starts_over_at_2am(self):
         now = [DAY_START + timedelta(hours=12)]
-        service = DaySummaryService(openai_service=MagicMock(), now=lambda: now[0])
+        service = DaySummaryService(now=lambda: now[0])
         yesterday = FakeChannel([make_msg(i) for i in range(5)])
         dispatch, prompts = fake_dispatch(["yesterday", "today"])
 
@@ -142,9 +142,9 @@ class TestDaySummaryService(unittest.IsolatedAsyncioTestCase):
         now = DAY_START + timedelta(hours=12)
 
         with patch("src.services.day_summary_service.dispatch_completion", side_effect=dispatch):
-            await DaySummaryService(openai_service=MagicMock(), store=store, now=lambda: now).get_summary(
+            await DaySummaryService(store=store, now=lambda: now).get_summary(
                 channel, messages[3], BOT_ID, "model-x")
-            restarted = DaySummaryService(openai_service=MagicMock(), store=store, now=lambda: now)
+            restarted = DaySummaryService(store=store, now=lambda: now)
             same = await restarted.get_summary(channel, messages[3], BOT_ID, "model-x")
             moved = await restarted.get_summary(channel, messages[7], BOT_ID, "model-x")
 
@@ -159,7 +159,7 @@ class TestDaySummaryService(unittest.IsolatedAsyncioTestCase):
         store.save_day_summary = AsyncMock(side_effect=RuntimeError("redis down"))
         messages = [make_msg(i) for i in range(5)]
         service = DaySummaryService(
-            openai_service=MagicMock(), store=store, now=lambda: DAY_START + timedelta(hours=12))
+            store=store, now=lambda: DAY_START + timedelta(hours=12))
         dispatch, _ = fake_dispatch(["talked about tacos"])
 
         with patch("src.services.day_summary_service.dispatch_completion", side_effect=dispatch):
@@ -210,7 +210,6 @@ class TestMentionDaySummary(unittest.IsolatedAsyncioTestCase):
         state_service.get_system_prompt.return_value = None
         handler = MentionHandler(
             state_service=state_service,
-            openai_service=MagicMock(),
             message_service=MagicMock(),
             queue_service=MagicMock(),
             system_prompt_loader=lambda: "base",

@@ -1,7 +1,7 @@
 """
 Thread-safe state for the Discord bot.
 
-- Per-channel settings (chat/draw/edit model, system prompt) and the global
+- Per-channel settings (chat model, image model, system prompt) and the global
   death settings persist in a JSON settings file.
 - Restart state (active channels, last git SHA, why we restarted) survives a
   restart through a temp file written just before exit.
@@ -23,8 +23,7 @@ STATE_FILE_PATTERN = "/tmp/cmwgpt_state_backup_*.json"
 # Per-channel settings and the key each is saved under in the settings file.
 _CHANNEL_SETTINGS = {
     "model": "models",
-    "draw_model": "draw_models",
-    "edit_model": "edit_models",
+    "image_model": "image_models",
     "system_prompt": "system_prompts",
 }
 
@@ -61,17 +60,11 @@ class StateService:
     def set_model(self, channel_id: int, model: str) -> None:
         self._set_channel_setting(channel_id, "model", model)
 
-    def get_draw_model(self, channel_id: int) -> Optional[str]:
-        return self._get_channel_setting(channel_id, "draw_model")
+    def get_image_model(self, channel_id: int) -> Optional[str]:
+        return self._get_channel_setting(channel_id, "image_model")
 
-    def set_draw_model(self, channel_id: int, model: str) -> None:
-        self._set_channel_setting(channel_id, "draw_model", model)
-
-    def get_edit_model(self, channel_id: int) -> Optional[str]:
-        return self._get_channel_setting(channel_id, "edit_model")
-
-    def set_edit_model(self, channel_id: int, model: str) -> None:
-        self._set_channel_setting(channel_id, "edit_model", model)
+    def set_image_model(self, channel_id: int, model: str) -> None:
+        self._set_channel_setting(channel_id, "image_model", model)
 
     def get_system_prompt(self, channel_id: int) -> Optional[str]:
         return self._get_channel_setting(channel_id, "system_prompt")

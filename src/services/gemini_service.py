@@ -2,7 +2,7 @@
 Gemini Service - Handles Google Gemini API interactions via the Interactions API.
 
 Uses the google-genai SDK's Interactions API (client.aio.interactions.create)
-to communicate directly with Google's Gemini models, bypassing OpenRouter.
+to talk to Google's Gemini models, and GenerateContent for the image models.
 """
 
 import asyncio
@@ -18,7 +18,8 @@ import discord
 import httpx
 
 from src.services.cost_service import GEMINI_DIRECT, record_cost
-from src.utils.message_utils import clean_openai_response, resolve_bot_id
+from src.services.image_service import ImageModel, ImageOptions, ImageResult
+from src.utils.message_utils import clean_reply, resolve_bot_id
 
 logger = logging.getLogger(__name__)
 
@@ -422,32 +423,29 @@ class GeminiService:
             (input_tokens - cached) * PRICE_INPUT_PER_M + cached * PRICE_CACHED_PER_M + output * PRICE_OUTPUT_PER_M
         ) / 1_000_000
 
-    def _estimate_image_cost(self, usage_metadata: Any, model: str) -> float:
-        """Estimate cost from GenerateContent API usage metadata for image models."""
+    @staticmethod
+    def _estimate_image_cost(usage_metadata: Any, model: ImageModel) -> float:
+        """Price an image call: output image tokens at the image rate, text and thinking at the text rate."""
         if not usage_metadata:
             return 0.0
-
-        try:
-            input_tokens = getattr(usage_metadata, 'prompt_token_count', 0) or 0
-            output_tokens = getattr(usage_metadata, 'candidates_token_count', 0) or 0
-
-            # Default rates for gemini-nano-banana-2.1
-            price_input = 0.25
-            price_output = 30.0
-
-            if model == "gemini-3-pro-image":
-                price_input = 2.00
-                price_output = 120.0
-
-            input_cost = input_tokens * price_input / 1_000_000
-            output_cost = output_tokens * price_output / 1_000_000
-
-            cost = input_cost + output_cost
-            logger.info(f"[gemini/image] Usage: {input_tokens} input, {output_tokens} output. Estimated cost: ${cost:.4f}")
-            return cost
-        except Exception as e:
-            logger.warning(f"Failed to estimate Gemini image cost: {e}")
-            return 0.0
+        input_tokens = getattr(usage_metadata, "prompt_token_count", 0) or 0
+        output_tokens = getattr(usage_metadata, "candidates_token_count", 0) or 0
+        thought_tokens = getattr(usage_metadata, "thoughts_token_count", 0) or 0
+        details = getattr(usage_metadata, "candidates_tokens_details", None) or []
+        image_tokens = sum(
+            d.token_count or 0 for d in details if str(getattr(d.modality, "value", d.modality)) == "IMAGE")
+        if not details:
+            # No breakdown: count the whole output as image.
+            image_tokens = output_tokens
+        text_tokens = max(output_tokens - image_tokens, 0) + thought_tokens
+        cost = (
+            input_tokens * model.price_input
+            + image_tokens * model.price_image_output
+            + text_tokens * model.price_text_output
+        ) / 1_000_000
+        logger.info(f"[gemini/image] Usage: {input_tokens} input, {image_tokens} image, {text_tokens} text/thinking. "
+                    f"Estimated cost: ${cost:.4f}")
+        return cost
 
     async def get_chat_completion(
         self,
@@ -584,7 +582,7 @@ class GeminiService:
                     raise ValueError("Gemini returned an empty response.")
 
                 if response_text:
-                    response_text = clean_openai_response(
+                    response_text = clean_reply(
                         response_text, bot_id=resolve_bot_id(bot_id, None, self._bot_id_loader))
 
                 # Calculate cost
@@ -647,67 +645,64 @@ class GeminiService:
     async def generate_image(
         self,
         prompt: str,
-        model: str,
+        model: ImageModel,
         images_b64: Optional[List[str]] = None,
-        discord_user_id: Optional[int] = None,
-        discord_channel_id: Optional[int] = None
-    ) -> tuple[bytes, Optional[float]]:
-        """
-        Generate an image using Gemini Models.
-        """
-        client = self._get_client()
-        
+        options: Optional[ImageOptions] = None,
+    ) -> ImageResult:
+        """Make an image with one of Gemini's image models; ``images_b64`` are reference images."""
         from google.genai import types
-        
-        parts = []
-        if images_b64:
-            for b64 in images_b64:
-                parts.append(
-                    types.Part.from_bytes(
-                        data=base64.b64decode(b64),
-                        mime_type="image/jpeg"
-                    )
-                )
-        
-        # Add the text prompt
-        parts.append(types.Part.from_text(text=prompt))
-        
-        # Gemini-3 image models expect aspect ratio in image_config
-        config = types.GenerateContentConfig(
-            image_config=types.ImageConfig(aspect_ratio="16:9")
-        )
-        
-        logger.info(f"[gemini/image] Generating image with model {model}, Prompt: {prompt[:50]}")
-        response = await client.aio.models.generate_content(
-            model=model,
-            contents=parts,
-            config=config
-        )
-        
-        if not response.candidates or not response.candidates[0].content.parts:
-            raise GeminiServiceError("No image returned from Gemini.")
-            
-        for part in response.candidates[0].content.parts:
-            if part.inline_data and part.inline_data.data:
-                cost = self._estimate_image_cost(getattr(response, 'usage_metadata', None), model)
-                await record_cost(GEMINI_DIRECT, cost)
-                return part.inline_data.data, cost
-                
-        raise GeminiServiceError("No inline_data image returned from Gemini.")
 
-    async def edit_image(
-        self,
-        prompt: str,
-        model: str,
-        images_b64: List[str],
-        discord_user_id: Optional[int] = None,
-        discord_channel_id: Optional[int] = None
-    ) -> tuple[bytes, Optional[float]]:
-        """
-        Edit an image using Gemini Models.
-        """
-        # For Gemini models, editing is just multimodal image + text generation.
-        return await self.generate_image(prompt, model, images_b64, discord_user_id, discord_channel_id)
+        options = options or ImageOptions()
+        client = self._get_client()
+        parts = [
+            types.Part.from_bytes(data=data, mime_type=_image_mime_type(data))
+            for data in (base64.b64decode(b64) for b64 in images_b64 or [])
+        ]
+        parts.append(types.Part.from_text(text=prompt))
+
+        tools = None
+        if options.search:
+            search_types = None
+            if options.search == "web+image":
+                search_types = types.SearchTypes(web_search=types.WebSearch(), image_search=types.ImageSearch())
+            # Grounding is free for the first 5,000 searches a month, so it isn't priced.
+            tools = [types.Tool(google_search=types.GoogleSearch(search_types=search_types))]
+        config = types.GenerateContentConfig(
+            response_modalities=["TEXT", "IMAGE"],
+            image_config=types.ImageConfig(aspect_ratio=options.aspect_ratio, image_size=options.size),
+            thinking_config=(
+                types.ThinkingConfig(thinking_level=types.ThinkingLevel(options.thinking.upper()))
+                if options.thinking else None
+            ),
+            tools=tools,
+        )
+
+        logger.info(f"[gemini/image] {model.id} ({options.describe() or 'defaults'}), "
+                    f"{len(parts) - 1} images, Prompt: {prompt[:50]}")
+        response = await client.aio.models.generate_content(model=model.id, contents=parts, config=config)
+
+        candidate_parts = (response.candidates[0].content.parts if response.candidates
+                           and response.candidates[0].content else None) or []
+        # Thinking can produce draft images; those are marked as thoughts, and the last real one is the result.
+        output = [p for p in candidate_parts if not p.thought]
+        images = [p.inline_data.data for p in output if p.inline_data and p.inline_data.data]
+        if not images:
+            raise GeminiServiceError("No image returned from Gemini.")
+        text = "\n".join(p.text.strip() for p in output if p.text and p.text.strip())
+        cost = self._estimate_image_cost(getattr(response, "usage_metadata", None), model)
+        await record_cost(GEMINI_DIRECT, cost)
+        return ImageResult(image=images[-1], text=text, cost=cost)
+
+
+def _image_mime_type(data: bytes) -> str:
+    """Tell PNG, GIF and WebP from JPEG by their first bytes."""
+    if data.startswith(b"\x89PNG"):
+        return "image/png"
+    if data.startswith(b"GIF8"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"
 
 
 # Helper to check if a model string should route to Gemini

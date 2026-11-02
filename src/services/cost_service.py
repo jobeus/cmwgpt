@@ -34,10 +34,8 @@ from src.db.redis_client import KEY_PREFIX, get_async_redis
 logger = logging.getLogger(__name__)
 
 # Provider names, as /cost shows them.
-OPENROUTER = "openrouter"
 CLAUDE_DIRECT = "claude-direct"
 GEMINI_DIRECT = "gemini-direct"
-RUNPOD = "runpod"
 GROQ = "groq"
 
 COST_TIMEZONE = ZoneInfo("America/Denver")

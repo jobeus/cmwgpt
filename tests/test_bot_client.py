@@ -27,10 +27,8 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         client.services = SimpleNamespace(
             state_service=MagicMock(),
             queue_service=MagicMock(),
-            openai_service=MagicMock(),
             message_service=MagicMock(),
             paste_service=MagicMock(),
-            runpod_service=MagicMock(),
             restart_handler=MagicMock(),
             auto_update_service=MagicMock(),
             announcement_service=MagicMock(),
@@ -93,7 +91,8 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
             mentions=[bot_user],
         )
 
-        with patch("src.bot.client.discord.TextChannel", FakeTextChannel):
+        with patch("src.bot.client.discord.TextChannel", FakeTextChannel), patch(
+                "src.bot.client.is_model_unavailable", return_value=False):
             await client._handle_message(message)
 
         client.mention_handler.queue_mention.assert_awaited_once_with(
@@ -246,9 +245,7 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         fake_bot.user = None
         fake_bot.event = lambda fn: fn
         config = SimpleNamespace(
-            default_draw_model="seedream",
-            default_edit_model="seedream",
-            runpod_io_api_key="runpod-key",
+            default_image_model="gemini-nano-banana-2.1",
             default_model="gpt-test",
             system_prompt_path="prompt.txt",
             death_channel_id="123",
@@ -258,7 +255,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         )
         services = SimpleNamespace(
             mention_handler=MagicMock(),
-            openai_service=MagicMock(),
             state_service=MagicMock(),
             queue_service=MagicMock(),
             restart_handler=MagicMock(),
@@ -267,7 +263,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
             death_service=MagicMock(),
             message_service=MagicMock(),
             paste_service=MagicMock(),
-            runpod_service=MagicMock(),
             gemini_service=MagicMock(),
             anthropic_service=MagicMock(),
         )
@@ -286,7 +281,7 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         self.assertIs(client.bot, fake_bot)
         self.assertTrue(intents.message_content)
         self.assertTrue(intents.members)
-        for service in (services.openai_service, services.gemini_service, services.anthropic_service):
+        for service in (services.gemini_service, services.anthropic_service):
             service.set_bot_id_loader.assert_called_once()
             self.assertIsNone(service.set_bot_id_loader.call_args.args[0]())
         fake_bot.user = SimpleNamespace(id=4242)

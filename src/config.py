@@ -50,10 +50,8 @@ def load_resolved_env_file(env: Optional[Mapping[str, str]] = None) -> Optional[
 
 @dataclass(frozen=True)
 class AppConfig:
-    openrouter_api_key: str
     gemini_api_key: str
     anthropic_api_key: str
-    runpod_io_api_key: str
     groq_api_key: str
     rapidapi_key: str
     discord_bot_token: str
@@ -62,8 +60,7 @@ class AppConfig:
     transcript_proxy: str
     redis_url: str
     default_model: str
-    default_draw_model: str
-    default_edit_model: str
+    default_image_model: str
     reply_to_mentions: bool
     quiet_updates: bool
     include_num_chatlines: int
@@ -94,10 +91,8 @@ def load_config(
 
     source = os.environ if env is None else env
     return AppConfig(
-        openrouter_api_key=source.get("OPENROUTER_API_KEY", "test-key-for-ci"),
         gemini_api_key=source.get("GEMINI_API_KEY", ""),
         anthropic_api_key=source.get("ANTHROPIC_API_KEY", ""),
-        runpod_io_api_key=source.get("RUNPOD_IO_API_KEY", ""),
         groq_api_key=source.get("GROQ_API_KEY", ""),
         rapidapi_key=source.get("RAPIDAPI_KEY", ""),
         discord_bot_token=source.get("DISCORD_BOT_TOKEN", "test-token-for-ci"),
@@ -105,9 +100,8 @@ def load_config(
         death_channel_id=source.get("DEATH_CHANNEL_ID", ""),
         transcript_proxy=source.get("TRANSCRIPT_PROXY", ""),
         redis_url=source.get("REDIS_URL", "redis://127.0.0.1:6379/0"),
-        default_model=source.get("DEFAULT_MODEL", "anthropic/claude-sonnet-5.5"),
-        default_draw_model=source.get("DEFAULT_DRAW_MODEL", "seedream"),
-        default_edit_model=source.get("DEFAULT_EDIT_MODEL", "seedream"),
+        default_model=source.get("DEFAULT_MODEL", "sonnet-5.5-direct"),
+        default_image_model=source.get("DEFAULT_IMAGE_MODEL", "gemini-nano-banana-2.1"),
         reply_to_mentions=_read_bool(source.get("REPLY_TO_MENTIONS"), True),
         quiet_updates=_read_bool(source.get("QUIET_UPDATES"), False),
         include_num_chatlines=_read_int(source.get("INCLUDE_NUM_CHATLINES"), 10),

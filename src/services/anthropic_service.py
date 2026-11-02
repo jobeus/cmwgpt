@@ -1,5 +1,5 @@
 """
-Anthropic Service - Talks to the Claude API directly (no OpenRouter).
+Anthropic Service - Talks to the Claude API directly.
 
 Accepts the same OpenAI-style message array the rest of the bot builds
 (``text`` / ``image_url`` parts) and converts it to Messages API content blocks.
@@ -19,7 +19,7 @@ import discord
 from src.config import get_config
 from src.services.chat_tools import ChatTool, ToolResult, text_result
 from src.services.cost_service import CLAUDE_DIRECT, record_cost
-from src.utils.message_utils import clean_openai_response, resolve_bot_id
+from src.utils.message_utils import clean_reply, resolve_bot_id
 
 logger = logging.getLogger(__name__)
 
@@ -401,7 +401,7 @@ class AnthropicService:
                     async for event in stream:
                         if event.type == "text":
                             streamed += event.text
-                            on_text(clean_openai_response(streamed, bot_id=resolved_bot_id))
+                            on_text(clean_reply(streamed, bot_id=resolved_bot_id))
                         elif event.type == "content_block_start" and on_status:
                             status = _block_status(getattr(event, "content_block", None), tool_statuses or {})
                             if status:
@@ -605,7 +605,7 @@ class AnthropicService:
                     break
                 text = _response_text(response)
                 if text:
-                    texts.append(clean_openai_response(text, bot_id=resolved_bot_id))
+                    texts.append(clean_reply(text, bot_id=resolved_bot_id))
                 results, cost, new_files = await self._run_tool_calls(response, client_tools, status)
                 total_cost += cost
                 files += new_files
@@ -653,7 +653,7 @@ class AnthropicService:
             f"tool_rounds={tool_rounds} "
             f"response snippet: {response_text.replace(chr(10), ' ')[:150]}"
         )
-        cleaned = "\n\n".join(texts + [clean_openai_response(response_text, bot_id=resolved_bot_id)]).strip()
+        cleaned = "\n\n".join(texts + [clean_reply(response_text, bot_id=resolved_bot_id)]).strip()
         if code_file_ids:
             files += await self._download_code_files(client, code_file_ids)
         if files:

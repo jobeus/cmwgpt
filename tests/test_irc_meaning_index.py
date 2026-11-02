@@ -164,7 +164,7 @@ class TestTool(unittest.IsolatedAsyncioTestCase):
         tools = {t.definition["name"]: t for t in build_mention_tools(
             guild_id=None, channel_id=20, user_id=30, user_notes_provider=None, channel_summary_provider=None,
             how_i_work_loader=lambda: "", state_service=MagicMock(), gemini_service=MagicMock(),
-            runpod_service=MagicMock(), default_draw_model=None, irc_log=MagicMock(), irc_meaning_index=index,
+            default_image_model=None, irc_log=MagicMock(), irc_meaning_index=index,
         )}
         tool = tools["search_irc_by_meaning"]
         result = await tool.run({"query": "truck towed", "nick": "@jobe", "after": "2020-01-01", "limit": 3})

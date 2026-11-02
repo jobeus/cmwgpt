@@ -13,7 +13,6 @@ from src.services.auto_update_service import AutoUpdateService
 from src.services.cost_service import CostStore, set_cost_store
 from src.services.death_service import DeathService
 from src.services.message_service import MessageService
-from src.services.openai_service import OpenAIService
 from src.services.anthropic_service import AnthropicService
 from src.services.gemini_service import GeminiService
 from src.services.irc_log_service import load_irc_log
@@ -27,7 +26,6 @@ from src.services.reminder_service import ReminderService
 from src.services.timezone_service import TimezoneStore
 from src.services.video_service import VideoWatcher
 from src.services.restart_handler import RestartHandler
-from src.services.runpod_service import RunpodService
 from src.services.state_service import StateService
 from src.utils.url_utils import inject_article_cache
 
@@ -38,17 +36,15 @@ logger = logging.getLogger(__name__)
 class AppServices:
     state_service: Any
     queue_service: Any
-    openai_service: Any
     gemini_service: Any
+    anthropic_service: Any
     message_service: Any
     paste_service: Any
-    runpod_service: Any
     restart_handler: RestartHandler
     auto_update_service: AutoUpdateService
     announcement_service: AnnouncementService
     death_service: DeathService
     mention_handler: MentionHandler
-    anthropic_service: Any = None
     memory_store: Any = None
     memory_service: Any = None
     cost_store: Any = None
@@ -64,12 +60,10 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
 
     state_service = StateService()
     queue_service = QueueService()
-    openai_service = OpenAIService()
     gemini_service = GeminiService(api_key=app_config.gemini_api_key)
     anthropic_service = AnthropicService(api_key=app_config.anthropic_api_key)
     paste_service = PasteService(cache_injector=inject_article_cache)
     message_service = MessageService(paste_service_instance=paste_service)
-    runpod_service = RunpodService()
 
     restart_handler = RestartHandler(state_service=state_service)
     auto_update_service = AutoUpdateService(
@@ -86,7 +80,6 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     death_service = DeathService(
         state_service=state_service,
         death_channel_id=app_config.death_channel_id,
-        openai_service=openai_service,
         gemini_service=gemini_service,
         anthropic_service=anthropic_service,
         model=app_config.default_model,
@@ -95,12 +88,10 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     memory_service = MemoryService(
         store=memory_store,
         config=app_config,
-        openai_service=openai_service,
         gemini_service=gemini_service,
         anthropic_service=anthropic_service,
     )
     day_summary_service = DaySummaryService(
-        openai_service=openai_service,
         gemini_service=gemini_service,
         anthropic_service=anthropic_service,
         store=memory_store,
@@ -114,7 +105,6 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     )
     mention_handler = MentionHandler(
         state_service=state_service,
-        openai_service=openai_service,
         gemini_service=gemini_service,
         anthropic_service=anthropic_service,
         message_service=message_service,
@@ -124,10 +114,8 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         user_notes_provider=memory_service.get_notes_block,
         channel_summary_provider=memory_service.get_channel_summary,
         day_summary_provider=day_summary_service.get_summary,
-        runpod_service=runpod_service,
-        default_draw_model=app_config.default_draw_model,
+        default_image_model=app_config.default_image_model,
         irc_log=irc_log,
-        default_edit_model=app_config.default_edit_model,
         memory_corrector=memory_service.correct if memory_service.available else None,
         wiki_views=death_service.get_avg_monthly_views,
         quote_file=load_quote_file(app_config.old_quote_bot_path),
@@ -145,11 +133,9 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     return AppServices(
         state_service=state_service,
         queue_service=queue_service,
-        openai_service=openai_service,
         gemini_service=gemini_service,
         message_service=message_service,
         paste_service=paste_service,
-        runpod_service=runpod_service,
         restart_handler=restart_handler,
         auto_update_service=auto_update_service,
         announcement_service=announcement_service,
@@ -185,11 +171,8 @@ async def shutdown_services(services: AppServices) -> None:
     await step("death service close", services.death_service.close)
     # Lets each channel finish the reply it is working on (bounded by a timeout).
     await step("queue drain", services.queue_service.stop)
-    await step("openai close", services.openai_service.close)
     await step("gemini close", services.gemini_service.close)
-    if services.anthropic_service is not None:
-        await step("anthropic close", services.anthropic_service.close)
-    await step("runpod close", services.runpod_service.close)
+    await step("anthropic close", services.anthropic_service.close)
     await step("redis close", close_redis)
 
 

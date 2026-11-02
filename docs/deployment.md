@@ -34,8 +34,8 @@ What it does **not** currently try to be:
 | Python 3.14 | Runtime used on the server, by CI and in the Docker image |
 | Reachable Redis | Per-user memory (`/memory`, nightly job) depends on it; the bot still replies without it (see `docs/redis_setup.md`) |
 | `DISCORD_BOT_TOKEN` | Discord authentication |
-| `OPENROUTER_API_KEY` | Text completions |
-| `RUNPOD_IO_API_KEY` | Needed if image commands are used |
+| `ANTHROPIC_API_KEY` | Text completions (the default model) and the memory job |
+| `GEMINI_API_KEY` | `google` models and image commands |
 | Optional `RAPIDAPI_KEY` / `GROQ_API_KEY` | Needed for some URL-enrichment providers |
 
 ### Core rollout steps

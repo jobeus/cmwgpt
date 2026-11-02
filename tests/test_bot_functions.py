@@ -95,7 +95,6 @@ class TestBotFunctions(unittest.TestCase):
 
             mention_handler = MentionHandler(
                 state_service=mock_state_service,
-                openai_service=MagicMock(),
                 message_service=MagicMock(),
                 queue_service=MagicMock(),
                 system_prompt_loader=lambda: "Default system prompt",

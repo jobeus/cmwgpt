@@ -95,7 +95,7 @@ class TestMessageBatcher(unittest.IsolatedAsyncioTestCase):
 class TestNightlyRunIsBatched(unittest.IsolatedAsyncioTestCase):
     def make_service(self):
         service = MemoryService(store=MagicMock(), config=cfg(anthropic_api_key="key"),
-                                openai_service=MagicMock(), anthropic_service=MagicMock(),
+                                anthropic_service=MagicMock(),
                                 now=lambda: datetime(2026, 10, 16, 8, 0, tzinfo=timezone.utc))
         return service
 

@@ -115,7 +115,6 @@ class DeathService:
         state_service,
         death_channel_id: str,
         state_file: str = STATE_FILE,
-        openai_service=None,
         model: Optional[str] = None,
         gemini_service=None,
         anthropic_service=None,
@@ -123,7 +122,6 @@ class DeathService:
         self._state_service = state_service
         self._death_channel_id = death_channel_id
         self._state_file = state_file
-        self._openai_service = openai_service
         self._gemini_service = gemini_service
         self._anthropic_service = anthropic_service
         self._model = model
@@ -475,7 +473,7 @@ class DeathService:
         (or an unconfigured model/service) just returns None and the plain RIP
         message is sent.
         """
-        if not self._openai_service or not self._model:
+        if not self._model:
             return None
 
         prompt = (
@@ -489,7 +487,6 @@ class DeathService:
                 model=self._model,
                 messages=[{"role": "user", "content": [{"type": "text", "text": prompt}]}],
                 system_prompt=None,
-                openai_service=self._openai_service,
                 gemini_service=self._gemini_service,
                 anthropic_service=self._anthropic_service,
                 identity={},
@@ -508,7 +505,7 @@ class DeathService:
         Accepts a name or Wikipedia URL. Returns ``(ok, message)`` where the
         message is the limerick itself on success.
         """
-        if not self._openai_service or not self._model:
+        if not self._model:
             return False, "No chat model is configured for limericks."
 
         article_title = parse_article_title(target)
