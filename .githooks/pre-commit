@@ -53,10 +53,22 @@ get_staged_python_files() {
     git diff --cached --name-only --diff-filter=ACM | grep -E '\.(py)$' || true
 }
 
+# Run mypy the way CI does (settings in the mypy config), so type errors don't reach GitHub
+run_typecheck() {
+    print_status "Running mypy type checks..."
+    if .venv/bin/python -m mypy; then
+        print_success "No type issues found"
+        return 0
+    else
+        print_error "Type check failed! Please fix the errors above before committing."
+        return 1
+    fi
+}
+
 # Run tests to ensure functionality isn't broken
 run_tests() {
     print_status "Running tests to ensure functionality..."
-    if python tests/run_tests.py > /dev/null 2>&1; then
+    if .venv/bin/python tests/run_tests.py > /dev/null 2>&1; then
         print_success "All tests passed"
         return 0
     else
@@ -160,6 +172,10 @@ main() {
         fi
     fi
     
+    if ! run_typecheck; then
+        exit 1
+    fi
+
     # Run tests to ensure nothing is broken
     if ! run_tests; then
         exit 1
