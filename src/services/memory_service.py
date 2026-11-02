@@ -475,7 +475,7 @@ def parse_corrected_profile(reply: str) -> Optional[str]:
     return profile if profile.startswith(_PROFILE_SECTIONS) else None
 
 
-def clean_self_aspect(name: str, text: str) -> str:
+def clean_self_aspect(name: str, text: Optional[str]) -> str:
     """An aspect's text tidied for storing: whitespace collapsed, emotion cut to two words,
     and only the non-letter characters of an emoji kept (``""`` if that leaves nothing)."""
     words = str(text or "").split()
