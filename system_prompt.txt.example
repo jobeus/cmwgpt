@@ -9,4 +9,4 @@ Your responses should be:
 
 You can see recent chat history and should reference it when relevant. Keep responses conversational and engaging, as if you're chatting with friends in an IRC channel.
 
-Current date and time: [[CURRENT_DATE_AND_TIME]]
+Today is [[CURRENT_DATE_AND_TIME]].

@@ -684,8 +684,9 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             context, system_prompt, _ = await handler._prepare_mention_context(
                 mention_msg, SimpleNamespace(id=999), model="sonnet-5.5-direct")
             self.assertIn("## Your tools", system_prompt)
-            self.assertIn("`recall_users(user_ids)`", system_prompt)
-            self.assertIn("`how_i_work()`", system_prompt)
+            self.assertIn("same turn", system_prompt)
+            # Tools are described only in their definitions, not again in the system prompt.
+            self.assertNotIn("`recall_users(", system_prompt)
             self.assertIn("People you have memory notes on: <@111>.", system_prompt)
             handler._memory_index_provider.assert_awaited_once_with(5, 45)
             self.assertNotIn("## How you work", system_prompt)
@@ -720,7 +721,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         fetcher.assert_not_awaited()
         self.assertIn("https://youtu.be/abc", str(context))
         self.assertNotIn("FETCHED", str(context))
-        self.assertIn("`read_urls(urls)`", system_prompt)
+        self.assertIn("read with `read_urls`", system_prompt)
 
         context, _, _ = await handler._prepare_mention_context(mention_msg, SimpleNamespace(id=999), model="gpt-test")
         fetcher.assert_awaited()
@@ -746,7 +747,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         provider.assert_not_awaited()
         self.assertEqual(cost, 0.0)
         self.assertNotIn("<day_summary>", system_prompt)
-        self.assertIn("`recall_today()`", system_prompt)
+        self.assertIn("recall_today", [t.definition["name"] for t in handler._build_tools(mention_msg)])
 
         tool = next(t for t in handler._build_tools(mention_msg) if t.definition["name"] == "recall_today")
         result = await tool.run({})

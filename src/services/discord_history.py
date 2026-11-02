@@ -9,8 +9,9 @@ tools never show someone messages from a channel they can't see.
 
 import logging
 import os
+from dataclasses import dataclass
 from datetime import date, datetime, time, tzinfo
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import discord
@@ -30,7 +31,14 @@ MAX_CONTENT_CHARS = 600
 # ``code`` in Discord's 202 reply when the server's messages aren't indexed yet.
 INDEX_NOT_READY_CODE = 110000
 
+# Discord's limit on most list filters (authors, mentions, hostnames, ...).
+MAX_FILTER_VALUES = 100
+MAX_SLOP = 100
+
+# ``snapshot`` is a forwarded message. Both lists take a leading ``-`` to exclude instead.
 HAS_FILTERS = ("image", "sound", "video", "file", "sticker", "embed", "link", "poll", "snapshot")
+AUTHOR_TYPES = ("user", "bot", "webhook")
+EMBED_TYPES = ("image", "video", "gif", "sound", "article")
 SORTS = {"newest": ("timestamp", "desc"), "oldest": ("timestamp", "asc"), "relevance": ("relevance", None)}
 
 
@@ -48,6 +56,74 @@ def _local_tz() -> Optional[tzinfo]:
 def day_snowflake(day: date) -> int:
     """The snowflake at local midnight starting ``day``."""
     return discord.utils.time_snowflake(datetime.combine(day, time(), tzinfo=_local_tz()))
+
+
+@dataclass(frozen=True)
+class SearchFilters:
+    """What a search matches; empty fields don't filter. ``after``/``before`` take a day or a message ID."""
+    query: str = ""
+    # Most words allowed between the query's words (Discord's default is 2; 0 keeps them together).
+    slop: Optional[int] = None
+    author_ids: Sequence[int] = ()
+    author_types: Sequence[str] = ()
+    mentions: Sequence[int] = ()
+    mention_role_ids: Sequence[int] = ()
+    mention_everyone: Optional[bool] = None
+    replied_to_user_ids: Sequence[int] = ()
+    replied_to_message_ids: Sequence[int] = ()
+    pinned: Optional[bool] = None
+    has: Sequence[str] = ()
+    embed_types: Sequence[str] = ()
+    embed_providers: Sequence[str] = ()
+    link_hostnames: Sequence[str] = ()
+    attachment_filenames: Sequence[str] = ()
+    attachment_extensions: Sequence[str] = ()
+    after: Optional[Union[date, int]] = None
+    before: Optional[Union[date, int]] = None
+    include_nsfw: bool = False
+
+    def params(self) -> List[Tuple[str, Any]]:
+        """The filters as Discord search query parameters (everything but channels, sort and paging)."""
+        params: List[Tuple[str, Any]] = []
+
+        def many(key: str, values: Sequence[Any], allowed: Sequence[str] = (), limit: int = 256) -> None:
+            for value in list(values)[:MAX_FILTER_VALUES]:
+                value = str(value).strip()[:limit]
+                if value and (not allowed or value.lstrip("-") in allowed):
+                    params.append((key, value))
+
+        def flag(key: str, value: Optional[bool]) -> None:
+            if value is not None:
+                params.append((key, "true" if value else "false"))
+
+        if self.query:
+            params.append(("content", self.query[:1024]))
+        if self.slop is not None:
+            params.append(("slop", max(0, min(self.slop, MAX_SLOP))))
+        many("author_id", self.author_ids)
+        many("author_type", self.author_types, AUTHOR_TYPES)
+        many("mentions", self.mentions)
+        many("mentions_role_id", self.mention_role_ids)
+        flag("mention_everyone", self.mention_everyone)
+        many("replied_to_user_id", self.replied_to_user_ids)
+        many("replied_to_message_id", self.replied_to_message_ids)
+        flag("pinned", self.pinned)
+        many("has", self.has, HAS_FILTERS)
+        many("embed_type", self.embed_types, EMBED_TYPES)
+        many("embed_provider", self.embed_providers)
+        many("link_hostname", self.link_hostnames)
+        many("attachment_filename", self.attachment_filenames, limit=1024)
+        many("attachment_extension", [e.lstrip(".") for e in self.attachment_extensions])
+        if self.after is not None:
+            params.append(("min_id", str(_snowflake(self.after))))
+        if self.before is not None:
+            params.append(("max_id", str(_snowflake(self.before))))
+        flag("include_nsfw", self.include_nsfw or None)
+        return params
+
+
+def _snowflake(value: Union[date, int]) -> int:
+    return value if isinstance(value, int) else day_snowflake(value)
 
 
 def readable_channels(guild: discord.Guild, member: Any) -> List[discord.TextChannel]:
@@ -80,7 +156,13 @@ def format_raw_message(message: Dict[str, Any], guild: discord.Guild) -> str:
     """One search hit (a raw message object) as a history-style line."""
     author = message.get("author") or {}
     channel = guild.get_channel(int(message.get("channel_id") or 0))
-    extras = [f"attachment: {a.get('filename')}" for a in message.get("attachments") or []]
+    extras = []
+    reference = (message.get("message_reference") or {}).get("message_id")
+    if reference and message.get("type") == 19:
+        extras.append(f"reply to [{reference}]")
+    if message.get("pinned"):
+        extras.append("pinned")
+    extras += [f"attachment: {a.get('filename')}" for a in message.get("attachments") or []]
     for embed in message.get("embeds") or []:
         label = embed.get("title") or embed.get("url") or (embed.get("provider") or {}).get("name")
         if label:
@@ -114,12 +196,8 @@ def format_message(message: discord.Message) -> str:
 async def search_messages(
     guild: discord.Guild,
     channels: Sequence[discord.abc.Snowflake],
+    filters: SearchFilters,
     *,
-    query: str = "",
-    author_ids: Sequence[int] = (),
-    has: Sequence[str] = (),
-    after: Optional[date] = None,
-    before: Optional[date] = None,
     sort: str = "newest",
     skip: int = 0,
 ) -> str:
@@ -131,15 +209,8 @@ async def search_messages(
     params: List[Tuple[str, Any]] = [("limit", SEARCH_PAGE_SIZE), ("offset", skip), ("sort_by", sort_by)]
     if sort_order:
         params.append(("sort_order", sort_order))
-    if query:
-        params.append(("content", query[:1024]))
     params += [("channel_id", str(c.id)) for c in channels[:MAX_SEARCH_CHANNELS]]
-    params += [("author_id", str(a)) for a in author_ids]
-    params += [("has", h) for h in has if h.lstrip("-") in HAS_FILTERS]
-    if after:
-        params.append(("min_id", str(day_snowflake(after))))
-    if before:
-        params.append(("max_id", str(day_snowflake(before))))
+    params += filters.params()
 
     route = discord.http.Route("GET", "/guilds/{guild_id}/messages/search", guild_id=guild.id)
     # ``_state.http`` is discord.py's authenticated client; it has no wrapper for this endpoint.

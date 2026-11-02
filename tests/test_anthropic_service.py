@@ -595,9 +595,26 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second_call["tools"], first_call["tools"])
         _, assistant, results = second_call["messages"]
         self.assertEqual(assistant, {"role": "assistant", "content": [call]})
+        # The tool results carry a cache breakpoint, so the next round reads them from cache.
         self.assertEqual(results["content"], [
-            {"type": "tool_result", "tool_use_id": "toolu_1", "content": [{"type": "text", "text": "the summary"}]},
+            {"type": "tool_result", "tool_use_id": "toolu_1", "content": [{"type": "text", "text": "the summary"}],
+             "cache_control": {"type": "ephemeral"}},
         ])
+
+    async def test_only_the_latest_tool_round_keeps_a_breakpoint(self):
+        calls = [SimpleNamespace(type="tool_use", id=f"toolu_{i}", name="recall_channel", input={}) for i in (1, 2)]
+        service, client = self.make_service(
+            _response(stop_reason="tool_use", content=[calls[0]], id="msg_1"),
+            _response(stop_reason="tool_use", content=[calls[1]], id="msg_2"),
+            _response("answer", id="msg_3"),
+        )
+
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[self.tool()])
+
+        third_call = client.beta.messages.create.call_args_list[2].kwargs
+        marked = [b for m in third_call["messages"] if isinstance(m["content"], list)
+                  for b in m["content"] if isinstance(b, dict) and "cache_control" in b]
+        self.assertEqual([b.get("tool_use_id") for b in marked], ["toolu_2"])
 
     async def test_files_and_costs_from_tools_reach_the_reply(self):
         call = SimpleNamespace(type="tool_use", id="toolu_1", name="draw", input={"prompt": "a cat"})

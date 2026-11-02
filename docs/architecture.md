@@ -208,7 +208,7 @@ sequenceDiagram
 - URL enrichment happens **before** the LLM call and can materially change the prompt content. Only the newest 10 history messages fetch links; older messages use cached results only, and the fetches run concurrently.
 - Per-user memory profiles are appended to the end of the mention, so the cached system prompt and history stay unchanged.
 - So is the bot's own state (`<about_you>`: mood, emotion, emoji, interests, what it's wondering about, and follow-ups for the people in the conversation), on every model. It's per server in `cmwgpt:self:<guild_id>`, seeded from the last 7 days when missing and refreshed every 6 hours from the last 12 hours of chat, both with a web search for current events; the direct models can also change it with `update_self` and `follow_up`.
-- The Claude API direct models get none of the on-demand context filled in (links, memory notes, channel and day summaries, `how_i_work`). They get a "Your tools" section in the system prompt instead and fetch what they need with tools; see [Claude API tools](#claude-api-tools).
+- The Claude API direct models get none of the on-demand context filled in (links, memory notes, channel and day summaries, `how_i_work`). They get a short "Your tools" section in the system prompt instead (general rules, such as making independent calls in one turn; each tool is described only in its own definition, so nothing is sent twice) and fetch what they need with tools; see [Claude API tools](#claude-api-tools).
 - Claude API replies stream: `StreamingReply` (`src/services/streaming_reply.py`) posts the reply as it arrives and edits it at most every 1.5 seconds, then edits in the final text with the cost. If the request fails, the partial message is deleted before the error reply. Gemini replies arrive whole.
 - There is no request/pipeline log table: the SDK clients use their default HTTP clients, and diagnostics go to the normal Python log (stdout and `logs/`).
 
@@ -225,10 +225,9 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | `draw`, `edit_image` | `src/services/image_service.py` (Gemini image models, with aspect ratio/size/thinking/search options) | `GEMINI_API_KEY` |
 | `recall_users`, `recall_channel`, `remember`, `update_self`, `follow_up` | `MemoryService` | Redis memory, a guild |
 | `recall_today` | `DaySummaryService` | — |
-| `search_messages`, `read_messages`, `view_images` | `src/services/discord_history.py` (Discord's message search) and message fetches | a guild |
+| `search_messages`, `read_messages`, `view_images` | `src/services/discord_history.py` (Discord's message search, limited to the channel the bot was asked in, with every filter it offers through `SearchFilters`) and message fetches | a guild |
 | `react` | `add_reaction` on a message in the mention's channel (5 per reply; the tools section lists the server's custom emoji) | a guild |
 | `search_irc_log`, `read_irc_log_day`, `count_irc_log` | `src/services/irc_log_service.py` (memory-mapped log) | `IRC_LOG` (`IRC_NICKS` optional) |
-| `search_irc_by_meaning` | `src/services/irc_meaning_index.py`: conversations from `IrcLog.conversations`, embedded with `gemini-embedding-2` (canonical nicks, bots left out), searched with numpy; the index is `<IRC_LOG>.meaning.npz`, built in the background at startup | `IRC_LOG`, `GEMINI_API_KEY` |
 | `old_quotes` | `src/services/quote_service.py` | `OLD_QUOTE_BOT` |
 | `remind`, `list_reminders`, `cancel_reminder` | `src/services/reminder_service.py` (Redis; posts due reminders every 15s) | a guild |
 | `set_timezone` | `src/services/timezone_service.py` (Redis; also feeds the `<time_zones>` block on every mention) | a guild, Redis |
@@ -242,11 +241,11 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 
 ### Adding a tool
 
-1. In `src/services/chat_tools.py`, add the `*_TOOL` definition (a JSON schema; mark it `"strict": True` unless it's trivial, since the API allows at most 20 strict tools and 24 optional strict parameters per request, which `TestStrictSchemaLimits` checks), a `*_GUIDANCE` bullet for the system prompt's "Your tools" section, and a handler inside `build_mention_tools`. Register it with `ChatTool(definition, handler, status, guidance)`; `status` is what the reply preview shows while it runs.
+1. In `src/services/chat_tools.py`, add the `*_TOOL` definition (a JSON schema; mark it `"strict": True` unless it's trivial, since the API allows at most 20 strict tools and 24 optional strict parameters per request, which `TestStrictSchemaLimits` checks) whose description says what it does and when to use it (it's the only place the model learns about the tool, so put every usage rule there rather than in the system prompt), and a handler inside `build_mention_tools`. Register it with `ChatTool(definition, handler, status)`; `status` is what the reply preview shows while it runs.
 2. Pass any new dependency through `MentionHandler.__init__` and `_build_tools`, and wire it in `src/startup.py`. Leave the tool out when the dependency is missing.
 3. Treat anything other people wrote (messages, pages, logs, quotes) as material, not instructions; if the tool returns such text, add its name to the set at the end of `MentionHandler._tools_addon` that adds the warning.
 4. Describe it in `src/prompts/how_i_work.txt` (see `.agents/rules/keep-how-i-work-current.md`) and in the table above.
-5. Test the handler in `tests/test_chat_tools.py`; `test_every_tool_is_named_in_the_prompt_guidance` fails if the tool has no guidance.
+5. Test the handler in `tests/test_chat_tools.py`; `test_every_tool_says_when_to_use_it` fails if its description is too thin to go on.
 
 ## Diagram: downloader enrichment flow
 
@@ -324,7 +323,7 @@ flowchart LR
 | `src/services/completion_dispatch.py` | Model routing | Understand Gemini/Claude API selection |
 | `src/services/model_catalog.py` | `/model` options | Add a text model or see which key each one needs |
 | `src/services/anthropic_service.py` | Claude API integration | Debug prompt caching, the tool loop, `think_harder` or pricing |
-| `src/services/chat_tools.py` | Client tools for the direct models | Add or change a tool and its prompt guidance |
+| `src/services/chat_tools.py` | Client tools for the direct models | Add or change a tool and its description |
 | `src/services/discord_history.py` | Discord message search/read | Debug `search_messages` / `read_messages` |
 | `src/services/irc_log_service.py` | Old IRC log search/count | Debug the IRC tools or nick merging |
 | `src/services/quote_service.py` | Old quote bot file | Debug `old_quotes` |

@@ -43,6 +43,7 @@ def _channel(channel_id, name, readable=True):
     channel.id = channel_id
     channel.name = name
     channel.permissions_for.side_effect = lambda who: _perms(readable or who == "bot")
+    channel.is_nsfw.return_value = False
     return channel
 
 
@@ -182,15 +183,15 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
             "how_i_work",
         ])
 
-    def test_every_tool_is_named_in_the_prompt_guidance(self):
+    def test_every_tool_says_when_to_use_it(self):
+        # The descriptions are the only place the model learns about each tool.
         tools, _ = _full_tools(
             irc_log=MagicMock(), quote_file=MagicMock(), url_content_fetcher=AsyncMock(),
             day_summary_loader=AsyncMock(), reminder_service=MagicMock(), timezone_store=MagicMock(),
-            video_summarizer=AsyncMock(), video_watcher=AsyncMock(), irc_meaning_index=MagicMock(),
+            video_summarizer=AsyncMock(), video_watcher=AsyncMock(),
         )
-        guidance = "".join(tool.guidance for tool in tools.values())
-        for name in tools:
-            self.assertIn(f"`{name}(", guidance)
+        for name, tool in tools.items():
+            self.assertGreater(len(tool.definition["description"]), 60, name)
 
     @patch("src.services.chat_tools.compress_image", return_value=b"jpeg")
     async def test_edit_image_sends_the_message_images_to_the_image_model(self, _compress):
@@ -236,7 +237,7 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
         await tools["remember"].run({"user_id": "987654321", "note": "x"})
         deps["memory_corrector"].assert_awaited_once()
 
-    async def test_search_covers_only_channels_the_asker_can_read(self):
+    async def test_search_covers_only_this_channel(self):
         message = _message()
         http = message.guild._state.http
         http.request.return_value = {"total_results": 1, "messages": [[{
@@ -247,16 +248,80 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
         }]]}
         tools, _ = _full_tools(message)
 
+        # An old all_channels argument is ignored.
         text = (await tools["search_messages"].run({"query": "tacoma", "all_channels": True})).content[0]["text"]
 
         params = http.request.await_args.kwargs["params"]
-        self.assertEqual([v for k, v in params if k == "channel_id"], ["20", "21"])
+        self.assertEqual([v for k, v in params if k == "channel_id"], ["20"])
         self.assertIn(("content", "tacoma"), params)
         self.assertIn("[555] #games <@123456789> (Bob): the tacoma is for sale", text)
 
-        await tools["search_messages"].run({"query": "tacoma"})
+    async def test_search_refuses_when_the_asker_cant_read_this_channel(self):
+        message = _message()
+        tools, _ = _full_tools(message, channel_id=222222222)  # a channel the asker can't read
+
+        result = await tools["search_messages"].run({"query": "x", "skip": 0})
+
+        self.assertTrue(result.is_error)
+        message.guild._state.http.request.assert_not_awaited()
+
+    async def test_search_includes_this_channel_when_it_is_age_restricted(self):
+        message = _message()
+        message.channel.is_nsfw.return_value = True
+        tools, _ = _full_tools(message)
+
+        await tools["search_messages"].run({"query": "x", "skip": 0})
+
+        self.assertIn(("include_nsfw", "true"), message.guild._state.http.request.await_args.kwargs["params"])
+
+    async def test_search_passes_every_filter_to_discord(self):
+        message = _message()
+        http = message.guild._state.http
+        http.request.return_value = {"total_results": 1, "messages": [[{
+            "id": "556", "channel_id": "20", "content": "this one", "type": 19, "pinned": True,
+            "message_reference": {"message_id": "444444444444444444"},
+            "timestamp": "2026-10-01T12:00:00+00:00", "author": {"id": "1", "username": "al"},
+            "attachments": [], "embeds": [],
+        }]]}
+        tools, _ = _full_tools(message)
+
+        text = (await tools["search_messages"].run({
+            "query": "red truck", "slop": 0, "skip": 0,
+            "author_ids": ["<@111111>"], "author_types": ["-bot", "robot"],
+            "mentions": ["222222"], "mention_role_ids": ["<@&333333>"], "mention_everyone": False,
+            "replied_to_user_ids": ["444444"], "replied_to_message_ids": ["555555"], "pinned": True,
+            "has": ["link", "-image", "nonsense"], "embed_types": ["gif"], "embed_providers": ["Tenor"],
+            "link_hostnames": ["youtube.com"], "attachment_filenames": ["notes.txt"],
+            "attachment_extensions": [".pdf"], "after": "2026-01-01", "before": "1430000000000000000",
+            "sort": "relevance",
+        })).content[0]["text"]
+
         params = http.request.await_args.kwargs["params"]
-        self.assertEqual([v for k, v in params if k == "channel_id"], ["20"])
+        for expected in [
+            ("content", "red truck"), ("slop", 0), ("author_id", "111111"), ("author_type", "-bot"),
+            ("mentions", "222222"), ("mentions_role_id", "333333"), ("mention_everyone", "false"),
+            ("replied_to_user_id", "444444"), ("replied_to_message_id", "555555"), ("pinned", "true"),
+            ("has", "link"), ("has", "-image"), ("embed_type", "gif"), ("embed_provider", "Tenor"),
+            ("link_hostname", "youtube.com"), ("attachment_filename", "notes.txt"),
+            ("attachment_extension", "pdf"), ("max_id", "1430000000000000000"),
+            ("sort_by", "relevance"),
+        ]:
+            self.assertIn(expected, params)
+        keys = [k for k, _ in params]
+        self.assertIn("min_id", keys)
+        self.assertNotIn(("author_type", "robot"), params)
+        self.assertNotIn(("has", "nonsense"), params)
+        self.assertIn("this one | reply to [444444444444444444]; pinned", text)
+
+    async def test_search_leaves_unset_filters_out(self):
+        message = _message()
+        http = message.guild._state.http
+        tools, _ = _full_tools(message)
+
+        await tools["search_messages"].run({"query": "x", "skip": 0})
+
+        keys = {k for k, _ in http.request.await_args.kwargs["params"]}
+        self.assertEqual(keys, {"limit", "offset", "sort_by", "sort_order", "content", "channel_id"})
 
     async def test_search_reports_an_unindexed_server_and_bad_dates(self):
         message = _message()
@@ -456,7 +521,6 @@ class TestStrictSchemaLimits(unittest.TestCase):
             timezone_store=MagicMock(),
             video_summarizer=AsyncMock(),
             video_watcher=AsyncMock(),
-            irc_meaning_index=MagicMock(),
         )
         every_tool = {v["name"] for k, v in vars(chat_tools).items() if k.endswith("_TOOL") and isinstance(v, dict)}
         self.assertEqual(set(tools), every_tool)  # so a new tool can't sneak past this test

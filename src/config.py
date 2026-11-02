@@ -123,10 +123,10 @@ def load_system_prompt(prompt_path: str = "system_prompt.txt") -> str:
         with open(prompt_path, "r", encoding="utf-8") as f:
             content = f.read().strip()
             if content:
-                current_datetime = datetime.now(
-                    ZoneInfo("America/Denver")
-                ).strftime("%Y-%m-%d %H:%M:%S %Z").strip()
-                return content.replace("[[CURRENT_DATE_AND_TIME]]", current_datetime)
+                # The date only: the system prompt is cached, and a clock time would change it on
+                # every request. The model gets the exact time from the mention's timestamp.
+                today = datetime.now(ZoneInfo("America/Denver")).strftime("%Y-%m-%d (%A)")
+                return content.replace("[[CURRENT_DATE_AND_TIME]]", today)
     except FileNotFoundError:
         if prompt_path not in _missing_prompt_files_warned:
             _missing_prompt_files_warned.add(prompt_path)

@@ -78,7 +78,8 @@ class TestConfig(unittest.TestCase):
             result = load_system_prompt()
 
         self.assertNotIn("[[CURRENT_DATE_AND_TIME]]", result)
-        self.assertRegex(result, r"\d{4}-\d{2}-\d{2}")
+        # The date only, so the cached system prompt stays the same all day.
+        self.assertRegex(result, r"^Today is \d{4}-\d{2}-\d{2} \(\w+day\)$")
 
     def test_load_system_prompt_falls_back_when_file_missing(self):
         with patch("builtins.open", side_effect=FileNotFoundError):

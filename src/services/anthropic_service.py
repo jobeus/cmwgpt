@@ -246,6 +246,33 @@ def _with_assistant_content(api_messages: List[Dict[str, Any]], content: List[An
     return api_messages + [{"role": "assistant", "content": list(content)}]
 
 
+def _with_tool_round_breakpoint(api_messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Copy ``api_messages`` with the one tool-round cache breakpoint on its last block.
+
+    Without it, every further round re-sends the mention and all earlier tool results at the
+    full input price. Earlier rounds' breakpoints are dropped, so a request keeps at most 4
+    (system, up to 2 in the history, this one); the next round still reads the previous
+    round's entry through the lookback window.
+    """
+    copied = []
+    for message in api_messages:
+        content = message["content"]
+        if isinstance(content, list) and any(_is_marked_tool_result(b) for b in content):
+            content = [
+                {k: v for k, v in b.items() if k != "cache_control"} if _is_marked_tool_result(b) else b
+                for b in content
+            ]
+            message = {**message, "content": content}
+        copied.append(message)
+    last = copied[-1]
+    copied[-1] = {**last, "content": list(last["content"][:-1]) + [{**last["content"][-1], "cache_control": _EPHEMERAL}]}
+    return copied
+
+
+def _is_marked_tool_result(block: Any) -> bool:
+    return isinstance(block, dict) and block.get("type") == "tool_result" and "cache_control" in block
+
+
 def _response_text(response: Any) -> str:
     return "".join(
         block.text for block in response.content if getattr(block, "type", None) == "text"
@@ -609,9 +636,9 @@ class AnthropicService:
                 results, cost, new_files = await self._run_tool_calls(response, client_tools, status)
                 total_cost += cost
                 files += new_files
-                api_messages = _with_assistant_content(sent_messages, response.content) + [
-                    {"role": "user", "content": results}
-                ]
+                api_messages = _with_tool_round_breakpoint(
+                    _with_assistant_content(sent_messages, response.content) + [{"role": "user", "content": results}]
+                )
                 tool_rounds += 1
                 if tool_rounds >= MAX_TOOL_ROUNDS:
                     kwargs["tool_choice"] = {"type": "none"}
