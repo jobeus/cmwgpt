@@ -72,18 +72,6 @@ def _full_tools(message=None, **overrides):
 
 
 class TestChatTools(unittest.IsolatedAsyncioTestCase):
-    async def test_follow_up_adds_and_marks_done(self):
-        updater = AsyncMock(return_value="#1 <@123456789> (from 2026-10-30): the trip")
-        tools, _ = _tools(follow_up_updater=updater)
-
-        result = await tools["follow_up"].run({"user_id": "<@123456789>", "about": "the trip", "done": [3]})
-        updater.assert_awaited_once_with(10, add=(123456789, "the trip"), done=[3])
-        self.assertIn("the trip", result.content[0]["text"])
-
-        for bad in ({"user_id": "123456789"}, {}, {"about": "no one"}):
-            self.assertTrue((await tools["follow_up"].run(bad)).is_error)
-        self.assertEqual(updater.await_count, 1)
-
     async def test_update_self_saves_and_reports_errors(self):
         updater = AsyncMock(return_value="Mood (since 2026-10-30): chipper")
         tools, _ = _tools(self_state_updater=updater)
@@ -516,7 +504,6 @@ class TestStrictSchemaLimits(unittest.TestCase):
             url_content_fetcher=AsyncMock(),
             day_summary_loader=AsyncMock(),
             self_state_updater=AsyncMock(),
-            follow_up_updater=AsyncMock(),
             reminder_service=MagicMock(),
             timezone_store=MagicMock(),
             video_summarizer=AsyncMock(),

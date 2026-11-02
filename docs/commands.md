@@ -33,7 +33,7 @@ The bot's main chat experience is **mention-based**:
 | `/memory clear` | Privately forgets everything about you | persisted per user, per server |
 | `/fillmemory` | Rebuilds everyone's learned memory from the last 7 days (admin only) | rewrites every memory key |
 | `/fillsummaries` | Rebuilds every channel's "lately" summary from the last 7 days (admin only) | rewrites channel summaries |
-| `/botstate` | Privately shows the bot's own mood, emotion, emoji, interests, wonderings and follow-ups | reads `cmwgpt:self:<guild>` in Redis |
+| `/botstate` | Privately shows the bot's own mood, emotion, emoji, interests and wonderings | reads `cmwgpt:self:<guild>` in Redis |
 | `/wikicount` | Looks up a Wikipedia article's average monthly pageviews | runtime action |
 | `/cost` | Shows what the bot has spent today, in the last 7 days and this month, by provider | reads `cmwgpt:costs:<day>` in Redis |
 | `/restart` | Triggers restart flow and `git pull` | runtime action |
@@ -86,9 +86,9 @@ and the nightly job's progress are left alone.
 
 Anyone can use it; the reply is visible only to them. Shows the bot's own state in this
 server as an embed: its mood, emotion (one or two words), feels emoji, interests and what it's wondering about (each with the date
-it last changed), every follow-up it has on anyone (number, person, what to ask, when it
-was added), and when the 6-hourly refresh last ran and runs next. It only reads; nothing
-changes.
+it last changed), and when the 6-hourly refresh last ran and runs next. It only reads;
+nothing changes. A part that's missing (say, one added in an update) is filled in by a
+refresh within the hour rather than waiting for the 6-hourly one.
 
 ## Model and prompt commands
 

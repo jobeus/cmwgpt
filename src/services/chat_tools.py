@@ -300,37 +300,6 @@ UPDATE_SELF_TOOL = {
     "strict": True,
 }
 
-FOLLOW_UP_TOOL = {
-    "name": "follow_up",
-    "description": (
-        "Keep your list of things to ask people about later (the follow-ups in <about_you>). Add one when "
-        "someone mentions something a friend would check in on later: an interview, a trip, a game, a "
-        "purchase, a problem they're dealing with. Whenever you're about to ask about a follow-up, mark it "
-        "done first, in the same reply, before writing the question; also mark ones they've already "
-        "told you about. A follow-up you ask about without marking done gets asked again later. "
-        "Follow-ups drop off on their own after two weeks."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "user_id": {"type": "string", "description": "To add one: the Discord user ID of the person."},
-            "about": {
-                "type": "string",
-                "description": "To add one: what to ask about, a short phrase under 150 characters, "
-                               "e.g. 'how the Tacoma test drive went'.",
-            },
-            "done": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "description": "Numbers of follow-ups you've asked about or that no longer apply.",
-            },
-        },
-        "required": [],
-        "additionalProperties": False,
-    },
-    "strict": True,
-}
-
 REMIND_TOOL = {
     "name": "remind",
     "description": (
@@ -932,7 +901,6 @@ def build_mention_tools(
     url_content_fetcher: Optional[Callable[..., Awaitable[Tuple[str, List[Dict[str, Any]]]]]] = None,
     day_summary_loader: Optional[Callable[[], Awaitable[Tuple[str, float]]]] = None,
     self_state_updater: Optional[Callable[[int, str, str], Awaitable[str]]] = None,
-    follow_up_updater: Optional[Callable[..., Awaitable[str]]] = None,
     reminder_service: Any = None,
     timezone_store: Any = None,
     video_summarizer: Optional[Callable[[str, str], Awaitable[Tuple[str, float]]]] = None,
@@ -1107,23 +1075,6 @@ def build_mention_tools(
             return text_result(str(e), is_error=True)
         logger.info(f"[update_self tool] Guild {guild_id} {aspect}: {text}")
         return text_result(f"Updated. You now have:\n{state}")
-
-    async def follow_up(args: Dict[str, Any]) -> ToolResult:
-        assert follow_up_updater is not None and guild_id is not None  # only offered when set
-        ids = _parse_ids([args.get("user_id")])
-        about = str(args.get("about") or "").strip()
-        done = [d for d in args.get("done") or [] if isinstance(d, int)]
-        if bool(ids) != bool(about):
-            return text_result("To add one, give both a user ID and what to ask about.", is_error=True)
-        if not about and not done:
-            return text_result("Nothing to change.", is_error=True)
-        add = (ids[0], about) if about else None
-        try:
-            follow_ups = await follow_up_updater(guild_id, add=add, done=done)
-        except ValueError as e:
-            return text_result(str(e), is_error=True)
-        logger.info(f"[follow_up tool] Guild {guild_id} add: {add} done: {done}")
-        return text_result(f"Updated. Your follow-ups:\n{follow_ups}")
 
     async def remind(args: Dict[str, Any]) -> ToolResult:
         assert reminder_service is not None and guild_id is not None and asker is not None
@@ -1430,8 +1381,6 @@ def build_mention_tools(
         tools.append(ChatTool(REMEMBER_TOOL, remember, "making a note..."))
     if self_state_updater and guild_id:
         tools.append(ChatTool(UPDATE_SELF_TOOL, update_self, "having feelings..."))
-    if follow_up_updater and guild_id:
-        tools.append(ChatTool(FOLLOW_UP_TOOL, follow_up, "making a mental note..."))
     if reminder_service is not None and guild_id and asker is not None:
         tools.append(ChatTool(REMIND_TOOL, remind, "setting a reminder..."))
         tools.append(ChatTool(LIST_REMINDERS_TOOL, list_reminders, "checking reminders..."))

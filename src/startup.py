@@ -117,7 +117,6 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         memory_index_provider=memory_service.get_memory_index,
         self_state_provider=memory_service.get_self_block,
         self_state_updater=memory_service.update_self,
-        follow_up_updater=memory_service.update_follow_ups,
         reminder_service=reminder_service,
         timezone_store=None if app_config.is_testing else TimezoneStore(),
         video_summarizer=video_watcher.summarize_youtube if video_watcher else None,

@@ -1,20 +1,20 @@
 """
 Memory Commands - /memory (view and edit your own memory), /fillmemory (rebuild from the
 last week), /fillsummaries (rebuild only the channel summaries) and /botstate (see the
-bot's own mood, emotion, emoji, interests, wonderings and follow-ups).
+bot's own mood, emotion, emoji, interests and wonderings).
 """
 
 import io
 import logging
 import re
-from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
 import discord
 from discord import app_commands
 
 from src.services.memory_service import (
-    FILL_DAYS, JOB_TIMEZONE, SELF_ASPECTS, SELF_REFRESH_INTERVAL, MemoryService, load_follow_ups,
+    FILL_DAYS, SELF_ASPECTS, SELF_REFRESH_INTERVAL, MemoryService,
 )
 from src.utils.async_utils import safe_run
 from src.utils.discord_error_utils import safe_defer
@@ -49,20 +49,8 @@ def _bullets(name: str, value: str) -> str:
     return "\n".join(f"• {part.strip()}" for part in parts if part.strip())
 
 
-def _chunk_lines(lines: List[str], limit: int = EMBED_FIELD_LIMIT) -> List[str]:
-    """Join lines into as few blocks as fit in an embed field each."""
-    blocks: List[str] = []
-    for line in lines:
-        line = line[:limit]
-        if blocks and len(blocks[-1]) + 1 + len(line) <= limit:
-            blocks[-1] += "\n" + line
-        else:
-            blocks.append(line)
-    return blocks
-
-
-def build_self_embed(guild_name: str, state: Dict[str, str], today: date) -> discord.Embed:
-    """The /botstate reply: each aspect as its own section, then the follow-ups, then refresh times."""
+def build_self_embed(guild_name: str, state: Dict[str, str]) -> discord.Embed:
+    """The /botstate reply: each aspect as its own section, then refresh times."""
     embed = discord.Embed(title=f"🧠 My inner life in {guild_name}", color=discord.Color.blurple())
     for name, (label, _limit) in SELF_ASPECTS.items():
         value = state.get(name)
@@ -73,12 +61,6 @@ def build_self_embed(guild_name: str, state: Dict[str, str], today: date) -> dis
         embed.add_field(
             name=heading, value=_bullets(name, value)[:EMBED_FIELD_LIMIT], inline=name in INLINE_SELF_ASPECTS
         )
-
-    follow_ups = load_follow_ups(state, today)
-    lines = [f"`#{i['id']}` <@{i['user_id']}>: {i['about']} · *{i['added']}*" for i in follow_ups]
-    for index, block in enumerate(_chunk_lines(lines)):
-        heading = f"📌 Follow-ups ({len(follow_ups)})" if index == 0 else "📌 Follow-ups (continued)"
-        embed.add_field(name=heading, value=block, inline=False)
 
     if not embed.fields:
         embed.description = "Nothing yet. It gets worked out from recent chat within a few minutes of starting."
@@ -204,7 +186,7 @@ class MemoryCommands:
     def _create_botstate_command(self) -> app_commands.Command:
         @app_commands.command(
             name="botstate",
-            description="Privately see the bot's own mood, emotion, emoji, interests, wonderings and follow-ups",
+            description="Privately see the bot's own mood, emotion, emoji, interests and wonderings",
         )
         async def botstate_command(interaction: discord.Interaction):
             if not await safe_defer(interaction, ephemeral=True, thinking=True):
@@ -215,8 +197,7 @@ class MemoryCommands:
 
     async def _handle_botstate(self, interaction: discord.Interaction) -> None:
         state = await self._store.get_self_state(interaction.guild_id)
-        today = datetime.now(timezone.utc).astimezone(JOB_TIMEZONE).date()
-        embed = build_self_embed(getattr(interaction.guild, "name", "this server"), state, today)
+        embed = build_self_embed(getattr(interaction.guild, "name", "this server"), state)
         await interaction.followup.send(embed=embed, ephemeral=True, allowed_mentions=NO_PINGS)
 
     async def _send_memory(self, interaction: discord.Interaction, text: str, *, updated: bool = False) -> None:

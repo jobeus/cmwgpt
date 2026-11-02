@@ -125,9 +125,8 @@ class MentionHandler:
         wiki_views: Optional[Callable[[str], Awaitable[Optional[int]]]] = None,
         quote_file: Optional[QuoteFile] = None,
         memory_index_provider: Optional[Callable[[int, int], Awaitable[str]]] = None,
-        self_state_provider: Optional[Callable[[int, Sequence[int]], Awaitable[str]]] = None,
+        self_state_provider: Optional[Callable[[int], Awaitable[str]]] = None,
         self_state_updater: Optional[Callable[[int, str, str], Awaitable[str]]] = None,
-        follow_up_updater: Optional[Callable[..., Awaitable[str]]] = None,
         reminder_service: Any = None,
         timezone_store: Any = None,
         video_summarizer: Optional[Callable[[str, str], Awaitable[tuple[str, float]]]] = None,
@@ -155,7 +154,6 @@ class MentionHandler:
         self._memory_index_provider = memory_index_provider
         self._self_state_provider = self_state_provider
         self._self_state_updater = self_state_updater
-        self._follow_up_updater = follow_up_updater
         self._reminder_service = reminder_service
         self._timezone_store = timezone_store
         self._video_summarizer = video_summarizer
@@ -209,7 +207,6 @@ class MentionHandler:
             url_content_fetcher=self._url_content_fetcher,
             day_summary_loader=day_summary_loader,
             self_state_updater=self._self_state_updater,
-            follow_up_updater=self._follow_up_updater,
             reminder_service=self._reminder_service,
             timezone_store=self._timezone_store,
             video_summarizer=self._video_summarizer,
@@ -543,15 +540,7 @@ class MentionHandler:
                 "not the sender. Let it color your replies the way a person's mood and interests do: bring "
                 "up an interest or a question when it fits the conversation, and let your mood show in your "
                 "tone. Don't announce your mood, recite the block, or steer every chat toward your interests. "
-                "If someone asks how you're doing or what you're into, answer from it. It may also list "
-                "follow-ups: things people here mentioned that you meant to ask them about. When one fits, "
-                "ask about it the way a friend catching up would, one at a time, and skip it if they're busy "
-                "with something else."
-                + (" Whenever you ask about one, first call `follow_up` with its number in `done`, then "
-                   "ask in your reply. Never ask about a follow-up without marking it done in that same "
-                   "reply, or you'll ask them the same thing again later. Do the same when someone tells "
-                   "you how it went before you ask." if uses_tools else "")
-                + "\n\n"
+                "If someone asks how you're doing or what you're into, answer from it.\n\n"
             )
         if model in THINK_HARDER_MODELS:
             current_channel_system_prompt += (
@@ -726,15 +715,14 @@ class MentionHandler:
         history_msgs: List[discord.Message],
         bot_user: discord.User,
     ) -> None:
-        """Add the bot's ``<about_you>`` block, with follow-ups for the people here, to the end of the mention.
+        """Add the bot's ``<about_you>`` block to the end of the mention.
 
         Like the user notes, it goes on the mention so the cached prefix stays the same
         when the bot's state changes.
         """
         if not self._self_state_provider or not message.guild or not chat_context:
             return
-        block = await self._self_state_provider(
-            message.guild.id, _conversation_user_ids(message, history_msgs, bot_user))
+        block = await self._self_state_provider(message.guild.id)
         if not block:
             return
         for entry in reversed(chat_context):

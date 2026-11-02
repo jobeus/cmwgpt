@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import fakeredis
 
-from src.db.memory_store import MAX_PROFILE_BYTES, MemoryStore, cap_profile
+from src.db.memory_store import MAX_PROFILE_BYTES, MemoryStore, _self_key, cap_profile
 from tests.config_helpers import cfg
 
 
@@ -68,10 +68,11 @@ class TestMemoryStore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["refreshed_at"], "2026-10-30T12:00:00")
         self.assertEqual(await self.store.get_self_state(43), {})
 
-        await self.store.save_follow_ups(42, [{"id": 1, "user_id": 2, "about": "trip", "added": "2026-10-30"}])
-        self.assertIn('"about": "trip"', (await self.store.get_self_state(42))["follow_ups"])
-        await self.store.save_follow_ups(42, [])
+        await self.store._redis_getter().hset(_self_key(42), "follow_ups", "[]")  # left from before
+        self.assertIn("follow_ups", await self.store.get_self_state(42))
+        await self.store.clear_follow_ups(42)
         self.assertNotIn("follow_ups", await self.store.get_self_state(42))
+        self.assertEqual((await self.store.get_self_state(42))["mood"], "chipper")
 
         await self.store.clear_self_state(42)
         self.assertEqual(await self.store.get_self_state(42), {})

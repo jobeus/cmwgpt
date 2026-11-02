@@ -207,7 +207,7 @@ sequenceDiagram
 - Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `sonnet-5.5-direct`/`opus-5.5-direct` go to `AnthropicService` (Claude API). There are no other chat models; a channel set to a retired one falls back to `DEFAULT_MODEL`.
 - URL enrichment happens **before** the LLM call and can materially change the prompt content. Only the newest 10 history messages fetch links; older messages use cached results only, and the fetches run concurrently.
 - Per-user memory profiles are appended to the end of the mention, so the cached system prompt and history stay unchanged.
-- So is the bot's own state (`<about_you>`: mood, emotion, emoji, interests, what it's wondering about, and follow-ups for the people in the conversation), on every model. It's per server in `cmwgpt:self:<guild_id>`, seeded from the last 7 days when missing and refreshed every 6 hours from the last 12 hours of chat, both with a web search for current events; the direct models can also change it with `update_self` and `follow_up`.
+- So is the bot's own state (`<about_you>`: mood, emotion, emoji, interests and what it's wondering about), on every model. It's per server in `cmwgpt:self:<guild_id>`, seeded from the last 7 days when missing and refreshed every 6 hours from the last 12 hours of chat (within the hour if a part is missing), both with a web search for current events; the direct models can also change it with `update_self`.
 - The Claude API direct models get none of the on-demand context filled in (links, memory notes, channel and day summaries, `how_i_work`). They get a short "Your tools" section in the system prompt instead (general rules, such as making independent calls in one turn; each tool is described only in its own definition, so nothing is sent twice) and fetch what they need with tools; see [Claude API tools](#claude-api-tools).
 - Claude API replies stream: `StreamingReply` (`src/services/streaming_reply.py`) posts the reply as it arrives and edits it at most every 1.5 seconds, then edits in the final text with the cost. If the request fails, the partial message is deleted before the error reply. Gemini replies arrive whole.
 - There is no request/pipeline log table: the SDK clients use their default HTTP clients, and diagnostics go to the normal Python log (stdout and `logs/`).
@@ -223,7 +223,7 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | Tool | Runs | Needs |
 | --- | --- | --- |
 | `draw`, `edit_image` | `src/services/image_service.py` (Gemini image models, with aspect ratio/size/thinking/search options) | `GEMINI_API_KEY` |
-| `recall_users`, `recall_channel`, `remember`, `update_self`, `follow_up` | `MemoryService` | Redis memory, a guild |
+| `recall_users`, `recall_channel`, `remember`, `update_self` | `MemoryService` | Redis memory, a guild |
 | `recall_today` | `DaySummaryService` | — |
 | `search_messages`, `read_messages`, `view_images` | `src/services/discord_history.py` (Discord's message search, limited to the channel the bot was asked in, with every filter it offers through `SearchFilters`) and message fetches | a guild |
 | `react` | `add_reaction` on a message in the mention's channel (5 per reply; the tools section lists the server's custom emoji) | a guild |

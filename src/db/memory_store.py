@@ -9,8 +9,7 @@ One key per user holds their current profile and nothing else (no history):
   ``last_run_at`` and ``last_status``
 - ``cmwgpt:self:<guild_id>`` - hash of the bot's own state in that server: one field per
   aspect (``mood``, ``interests``, ...) plus ``<aspect>_updated`` with when it last changed,
-  ``refreshed_at`` with when the scheduled refresh last rewrote it, and ``follow_ups``, a
-  JSON list of things to ask people about later
+  and ``refreshed_at`` with when the scheduled refresh last rewrote it
 - ``cmwgpt:day_summary:<channel_id>`` - hash with today's running chat summary for a
   channel (``text``), the ``day_start`` it covers from and the ``until_id`` it stops
   before, so a restart doesn't re-summarize the whole day. Expires after
@@ -19,10 +18,9 @@ One key per user holds their current profile and nothing else (no history):
 Only the day summaries expire. All datetimes passed in and returned are naive UTC.
 """
 
-import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import redis.asyncio as aioredis
 
@@ -181,12 +179,9 @@ class MemoryStore:
         if removed:
             await client.hdel(_self_key(guild_id), *removed, *(f"{name}_updated" for name in removed))
 
-    async def save_follow_ups(self, guild_id: int, items: List[Dict[str, Any]]) -> None:
-        """Replace the bot's follow-up list (an empty one removes it)."""
-        if items:
-            await self._redis_getter().hset(_self_key(guild_id), "follow_ups", json.dumps(items))
-        else:
-            await self._redis_getter().hdel(_self_key(guild_id), "follow_ups")
+    async def clear_follow_ups(self, guild_id: int) -> None:
+        """Remove the follow-up list the bot used to keep in its state."""
+        await self._redis_getter().hdel(_self_key(guild_id), "follow_ups")
 
     async def mark_self_refreshed(self, guild_id: int, when: datetime) -> None:
         await self._redis_getter().hset(_self_key(guild_id), "refreshed_at", when.isoformat())
