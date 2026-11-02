@@ -200,14 +200,9 @@ class MemoryCommands:
     def _create_botstate_command(self) -> app_commands.Command:
         @app_commands.command(
             name="botstate",
-            description="Privately see the bot's own mood, interests, wonderings and follow-ups (admin only)",
+            description="Privately see the bot's own mood, interests, wonderings and follow-ups",
         )
         async def botstate_command(interaction: discord.Interaction):
-            if not interaction.user.guild_permissions.administrator:
-                await interaction.response.send_message(
-                    "❌ You need administrator permissions to use this command.", ephemeral=True
-                )
-                return
             if not await safe_defer(interaction, ephemeral=True, thinking=True):
                 return
             await safe_run(interaction, self._handle_botstate, interaction)
