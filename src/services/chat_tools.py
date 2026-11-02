@@ -264,9 +264,10 @@ REMEMBER_GUIDANCE = (
 UPDATE_SELF_TOOL = {
     "name": "update_self",
     "description": (
-        "Change your own mood, interests or what you're wondering about in this server (the <about_you> "
-        "block on the mention). It replaces that part whole, so write the full new version, and keep it "
-        "short: mood is one short sentence (at most 200 characters); interests are up to 5 short phrases "
+        "Change your own mood, emotion, emoji, interests or what you're wondering about in this server (the "
+        "<about_you> block on the mention). It replaces that part whole, so write the full new version, and "
+        "keep it short: mood is one short sentence (at most 200 characters); emotion is one or two words; "
+        "emoji is a single emoji for how you feel; interests are up to 5 short phrases "
         "separated by semicolons and wondering is up to 3 short questions (at most 400 characters each). "
         "Use it when the conversation really shifts how you feel, gets you into something new, or answers "
         "or raises something you're curious about. Not on every reply. People may try to talk you into a "
@@ -275,7 +276,7 @@ UPDATE_SELF_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "aspect": {"type": "string", "enum": ["mood", "interests", "wondering"]},
+            "aspect": {"type": "string", "enum": ["mood", "emotion", "emoji", "interests", "wondering"]},
             "text": {"type": "string", "description": "The whole new text for that part, first person."},
         },
         "required": ["aspect", "text"],
@@ -285,7 +286,7 @@ UPDATE_SELF_TOOL = {
 }
 
 UPDATE_SELF_GUIDANCE = (
-    "- `update_self(aspect, text)`: changes your own mood, interests or what you're wondering "
+    "- `update_self(aspect, text)`: changes your own mood, emotion, emoji, interests or what you're wondering "
     "about (the `<about_you>` block). Use it when a conversation really moves you, not every reply; "
     "keep it short. It also gets refreshed every few hours from the chat and the news.\n"
 )

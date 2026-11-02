@@ -1,7 +1,7 @@
 """
 Memory Commands - /memory (view and edit your own memory), /fillmemory (rebuild from the
 last week), /fillsummaries (rebuild only the channel summaries) and /botstate (see the
-bot's own mood, interests, wonderings and follow-ups).
+bot's own mood, emotion, emoji, interests, wonderings and follow-ups).
 """
 
 import io
@@ -36,12 +36,14 @@ def format_memory(user_id: int, profile: str) -> str:
 
 # Discord's limit on one embed field's value.
 EMBED_FIELD_LIMIT = 1024
-SELF_ASPECT_EMOJI = {"mood": "🌤️", "interests": "✨", "wondering": "🤔"}
+SELF_ASPECT_EMOJI = {"mood": "🌤️", "emotion": "💭", "emoji": "🫥", "interests": "✨", "wondering": "🤔"}
+# Aspects short enough to sit side by side in the embed.
+INLINE_SELF_ASPECTS = {"emotion", "emoji"}
 
 
 def _bullets(name: str, value: str) -> str:
     """An aspect's text as a bullet list: interests split on semicolons, wonderings after each question."""
-    if name == "mood":
+    if name not in ("interests", "wondering"):
         return value
     parts = value.split(";") if name == "interests" else re.split(r"(?<=\?)\s+", value)
     return "\n".join(f"• {part.strip()}" for part in parts if part.strip())
@@ -68,7 +70,9 @@ def build_self_embed(guild_name: str, state: Dict[str, str], today: date) -> dis
             continue
         since = (state.get(f"{name}_updated") or "")[:10]
         heading = f"{SELF_ASPECT_EMOJI.get(name, '•')} {label}" + (f" · since {since}" if since else "")
-        embed.add_field(name=heading, value=_bullets(name, value)[:EMBED_FIELD_LIMIT], inline=False)
+        embed.add_field(
+            name=heading, value=_bullets(name, value)[:EMBED_FIELD_LIMIT], inline=name in INLINE_SELF_ASPECTS
+        )
 
     follow_ups = load_follow_ups(state, today)
     lines = [f"`#{i['id']}` <@{i['user_id']}>: {i['about']} · *{i['added']}*" for i in follow_ups]
@@ -200,7 +204,7 @@ class MemoryCommands:
     def _create_botstate_command(self) -> app_commands.Command:
         @app_commands.command(
             name="botstate",
-            description="Privately see the bot's own mood, interests, wonderings and follow-ups",
+            description="Privately see the bot's own mood, emotion, emoji, interests, wonderings and follow-ups",
         )
         async def botstate_command(interaction: discord.Interaction):
             if not await safe_defer(interaction, ephemeral=True, thinking=True):

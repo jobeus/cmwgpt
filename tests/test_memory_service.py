@@ -415,6 +415,8 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
     def test_bot_state_is_read_from_labeled_lines(self):
         reply = (
             'mood: wired after the "Dune" trailer\n'
+            "emotion: giddy\n"
+            "emoji: 🤩\n"
             "interests: frame rust; Dune\n"
             "wondering: is the Tacoma worth it?\n"
             "keep: 1, 3\n"
@@ -423,6 +425,8 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(parse_self_state_reply(reply), {
             "mood": 'wired after the "Dune" trailer',
+            "emotion": "giddy",
+            "emoji": "🤩",
             "interests": "frame rust; Dune",
             "wondering": "is the Tacoma worth it?",
             "follow_ups": {"keep": [1, 3], "add": [{"user_id": "123456789", "about": "how the test drive went"}]},
@@ -531,6 +535,17 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await service.update_self(42, "hunger", "starving")
 
+    async def test_update_self_trims_emotion_and_emoji(self):
+        store = FakeStore()
+        service, _ = self.make_service(store, datetime(2026, 10, 16, tzinfo=UTC))
+
+        await service.update_self(42, "emotion", "  quietly  smug about it ")
+        await service.update_self(42, "emoji", " 😏 smirk ")
+        self.assertEqual(store.self_state["emotion"], "quietly smug")
+        self.assertEqual(store.self_state["emoji"], "😏")
+        with self.assertRaises(ValueError):
+            await service.update_self(42, "emoji", "happy")
+
     async def test_self_block_wraps_state_and_swallows_errors(self):
         store = FakeStore()
         service, _ = self.make_service(store, datetime(2026, 10, 16, tzinfo=UTC))
@@ -616,6 +631,7 @@ class TestBotStateEmbed(unittest.TestCase):
     def test_outlines_aspects_follow_ups_and_refresh_times(self):
         state = {
             "mood": "pretty upbeat", "mood_updated": "2026-10-29T10:00:00",
+            "emotion": "restless", "emoji": "🏎️",
             "interests": "f1 title race; rust 2.0; the Tacoma saga",
             "wondering": "Will Max win again? Is rust 2.0 real?",
             "refreshed_at": "2026-10-30T12:00:00",
@@ -628,6 +644,9 @@ class TestBotStateEmbed(unittest.TestCase):
 
         fields = {f.name: f.value for f in embed.fields}
         self.assertEqual(fields["🌤️ Mood · since 2026-10-29"], "pretty upbeat")
+        self.assertEqual(fields["💭 Emotion"], "restless")
+        self.assertEqual(fields["🫥 Feels emoji"], "🏎️")
+        self.assertTrue(next(f for f in embed.fields if f.name == "💭 Emotion").inline)
         self.assertEqual(fields["✨ Interests"], "• f1 title race\n• rust 2.0\n• the Tacoma saga")
         self.assertEqual(fields["🤔 Wondering about"], "• Will Max win again?\n• Is rust 2.0 real?")
         self.assertIn("`#3` <@1>: how the interview went", fields["📌 Follow-ups (12)"])

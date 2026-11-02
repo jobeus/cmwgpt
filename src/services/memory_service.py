@@ -13,7 +13,7 @@ It also keeps a summary of what's been going on lately in each channel: the day'
 chat in that channel is summarized, then folded into the channel's running summary,
 dropping items that haven't come up in ``CHANNEL_SUMMARY_DAYS`` days.
 
-It also keeps the bot's own state per server: its mood, interests and what it's been
+It also keeps the bot's own state per server: its mood, emotion, emoji, interests and what it's been
 wondering about, plus follow-ups: things people mentioned that it should ask them about
 later. A background loop keeps it going: when a server has none yet (first
 start with this feature, or after it's cleared) it's worked out from the last seven days
@@ -182,6 +182,8 @@ NOTES_PREAMBLE = (
 # ``update_self`` tool in chat_tools lists the same aspects and limits.
 SELF_ASPECTS: Dict[str, Tuple[str, int]] = {
     "mood": ("Mood", 200),
+    "emotion": ("Emotion", 30),
+    "emoji": ("Feels emoji", 16),
     "interests": ("Interests", 400),
     "wondering": ("Wondering about", 400),
 }
@@ -198,6 +200,8 @@ MAX_NEW_FOLLOW_UPS = 3
 FOLLOW_UP_DAYS = 14
 _SELF_STATE_RULES = f"""- Write in the first person, as the bot, casually, like a person thinking to themselves.
 - mood: one short sentence.
+- emotion: the feeling underneath it, in one or two words ("restless", "quietly smug").
+- emoji: one emoji that matches how the bot feels right now.
 - interests: up to 5 short phrases separated by semicolons. Specific beats generic ("whether the Tacoma's frame rust is fixable", not "cars").
 - wondering: up to 3 short open questions the bot is curious about.
 - follow_ups: things people mentioned that a friend would ask them about later, like something coming up (an interview, a trip, a game, a test drive, a purchase), a problem they were dealing with, or a project. "keep" lists the numbers of current follow-ups still worth asking about; leave out ones the bot already asked about in the chat, ones the person already shared how it went, and stale ones. "add" lists new ones (at most {MAX_NEW_FOLLOW_UPS}), each with the person's user ID and a short phrase (under {FOLLOW_UP_MAX_CHARS} characters) saying what to ask about. Don't add one that's already there.
@@ -206,13 +210,15 @@ _SELF_STATE_RULES = f"""- Write in the first person, as the bot, casually, like 
 
 Reply with only these lines, each starting with its label, and nothing else:
 mood: ...
+emotion: ...
+emoji: ...
 interests: ...
 wondering: ...
 keep: the numbers of follow-ups to keep, separated by commas (leave it empty to keep none)
 add: <@123456789> how the Tacoma test drive went
 Write one "add:" line per new follow-up, or none."""
 
-SEED_SELF_SYSTEM_PROMPT = """You set up the inner life of a chat bot that's a regular in a private Discord server for a small group of friends: its current mood, its interests, what it's been wondering about, and things to follow up on with people. The bot reads these before every reply so it comes across as having a life of its own, and it changes them itself as it chats.
+SEED_SELF_SYSTEM_PROMPT = """You set up the inner life of a chat bot that's a regular in a private Discord server for a small group of friends: its current mood, emotion and emoji, its interests, what it's been wondering about, and things to follow up on with people. The bot reads these before every reply so it comes across as having a life of its own, and it changes them itself as it chats.
 
 You get a stretch of the server's recent chat and the state worked out so far (or none), with any follow-ups numbered. Each line is `[time] <@user_id>: message`; lines marked (the bot) are the bot's own replies. Write the updated state covering everything you've seen. The chat may come in several stretches; on the last one you also have web search.
 
@@ -223,14 +229,14 @@ Rules:
 - Interests are topics the bot would plausibly be into after this week; questions come from the chat or the news, or are sparked by them.
 """ + _SELF_STATE_RULES
 
-REFRESH_SELF_SYSTEM_PROMPT = """You keep the inner life of a chat bot that's a regular in a private Discord server for a small group of friends: its current mood, its interests, what it's been wondering about, and things to follow up on with people. The bot reads these before every reply so it comes across as having a life of its own. You refresh them every few hours.
+REFRESH_SELF_SYSTEM_PROMPT = """You keep the inner life of a chat bot that's a regular in a private Discord server for a small group of friends: its current mood, emotion and emoji, its interests, what it's been wondering about, and things to follow up on with people. The bot reads these before every reply so it comes across as having a life of its own. You refresh them every few hours.
 
 You get the current state (each part with the date it last changed, follow-ups numbered), the last several hours of the server's chat, and web search. Each chat line is `[time] <@user_id>: message`; lines marked (the bot) are the bot's own replies.
 
 First, search the web for a few things that happened in the last day or so that this bot would plausibly notice: news, sports, tech, games, releases or anything else tied to its interests or what the group talks about. Then write the updated state.
 
 Rules:
-- Change things the way a person's do over a few hours: mood shifts with what happened in chat and in the news, but not wildly without a reason. Keep interests that are still alive, drop stale ones, add new ones from the chat or the news. Replace questions that got answered or went stale.
+- Change things the way a person's do over a few hours: mood, emotion and emoji shift with what happened in chat and in the news, but not wildly without a reason. Keep interests that are still alive, drop stale ones, add new ones from the chat or the news. Replace questions that got answered or went stale.
 - If nothing much happened, small changes or none are fine.
 - Mention real current events only as the search showed them; don't invent news.
 """ + _SELF_STATE_RULES
@@ -392,11 +398,11 @@ def parse_extracted_facts(reply: str) -> Dict[int, List[str]]:
     return facts
 
 
-_STATE_LINE = re.compile(r"^[\s*-]*(mood|interests|wondering|keep|add)\s*:\s*(.*?)\s*$", re.IGNORECASE)
+_STATE_LINE = re.compile(r"^[\s*-]*(mood|emotion|emoji|interests|wondering|keep|add)\s*:\s*(.*?)\s*$", re.IGNORECASE)
 
 
 def parse_self_state_reply(reply: str) -> Dict[str, Any]:
-    """The bot-state reply as ``{mood, interests, wondering, follow_ups: {keep, add}}``.
+    """The bot-state reply as ``{mood, emotion, emoji, interests, wondering, follow_ups: {keep, add}}``.
 
     The reply is labeled lines (``mood: ...``, ``keep: 1, 3``, ``add: <@id> about``). An
     older JSON reply is still accepted. ``follow_ups.keep`` is only there if a ``keep``
@@ -467,6 +473,17 @@ def parse_corrected_profile(reply: str) -> Optional[str]:
     if not profile:
         return "" if text else None
     return profile if profile.startswith(_PROFILE_SECTIONS) else None
+
+
+def clean_self_aspect(name: str, text: str) -> str:
+    """An aspect's text tidied for storing: whitespace collapsed, emotion cut to two words,
+    and only the non-letter characters of an emoji kept (``""`` if that leaves nothing)."""
+    words = str(text or "").split()
+    if name == "emotion":
+        words = words[:2]
+    elif name == "emoji":
+        words = ["".join(c for c in "".join(words) if not c.isalnum())]
+    return " ".join(words)
 
 
 def format_self_state(state: Dict[str, str]) -> str:
@@ -996,8 +1013,8 @@ class MemoryService:
             cost += chunk_cost
             parsed = parse_self_state_reply(reply)
             state.update({
-                name: " ".join(str(parsed[name]).split())[:limit]
-                for name, (_label, limit) in SELF_ASPECTS.items() if str(parsed.get(name) or "").strip()
+                name: clean_self_aspect(name, parsed[name])[:limit]
+                for name, (_label, limit) in SELF_ASPECTS.items() if clean_self_aspect(name, parsed.get(name))
             })
             keep, add = _parse_follow_up_changes(parsed.get("follow_ups"), speakers)
             follow_ups = apply_follow_up_changes(follow_ups, today=today.date(), keep=keep, add=add)
@@ -1019,7 +1036,9 @@ class MemoryService:
         """
         if aspect not in SELF_ASPECTS:
             raise ValueError(f"Unknown aspect {aspect!r}; use one of {', '.join(SELF_ASPECTS)}.")
-        text = " ".join(text.split())
+        text = clean_self_aspect(aspect, text)
+        if not text:
+            raise ValueError("The emoji needs to be an actual emoji." if aspect == "emoji" else "Give the new text.")
         limit = SELF_ASPECTS[aspect][1]
         if len(text) > limit:
             raise ValueError(f"That's {len(text)} characters; {aspect} holds at most {limit}. Shorten it.")
