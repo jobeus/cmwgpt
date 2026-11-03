@@ -75,9 +75,8 @@ nightly job then picks up from where the fill ended.
 
 Anyone can use it; the reply is visible only to them. Shows the bot's own state in this
 server as an embed: its mood, emotion (one or two words), feels emoji, interests and what it's wondering about (each with the date
-it last changed), and when the 6-hourly refresh last ran and runs next. It only reads;
-nothing changes. A part that's missing (say, one added in an update) is filled in by a
-refresh within the hour rather than waiting for the 6-hourly one.
+it last changed). It only reads; nothing changes. The bot itself changes its state while
+chatting, with the `update_self` tool, and fills in any part that's missing.
 
 ## Model and prompt commands
 
@@ -154,7 +153,7 @@ in the service that made the call:
 Costs are tallied per day in a Redis hash, `cmwgpt:costs:<YYYY-MM-DD>`, with one field per
 provider, per person (`user:<id>`) and per channel (`channel:<id>`). They're kept about
 400 days. A mention's costs are charged to whoever mentioned the bot, and a slash command's
-to whoever ran it. Background work (the nightly memory job, the bot's self refresh,
+to whoever ran it. Background work (the nightly memory job and
 deathwatch posts) counts toward its provider only.
 
 A reply's `[$0.012]` prefix is the total of everything recorded while answering it: the

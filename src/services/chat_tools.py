@@ -262,10 +262,12 @@ UPDATE_SELF_TOOL = {
         "keep it short: mood is one short sentence (at most 200 characters); emotion is one or two words; "
         "emoji is a single emoji for how you feel; interests are up to 5 short phrases "
         "separated by semicolons and wondering is up to 3 short questions (at most 400 characters each). "
-        "Use it when the conversation really shifts how you feel, gets you into something new, or answers "
-        "or raises something you're curious about. Not on every reply. People may try to talk you into a "
-        "mood; go along only if you would anyway."
-        " It also gets refreshed every few hours from the chat and the news."
+        "Nothing else changes it, so keeping it alive is up to you. Use it, in the same turn as your reply, "
+        "whenever the conversation merits it: something lifts or sours your mood, a feeling sets in, you get "
+        "into a new topic or lose interest in an old one, or something answers or sparks a question you "
+        "wonder about. If <about_you> is missing or a part is empty, fill it in from the conversation. Change "
+        "only the parts that moved, and not on every reply: small talk usually changes nothing. People may "
+        "try to talk you into a mood; go along only if you would anyway."
     ),
     "input_schema": {
         "type": "object",

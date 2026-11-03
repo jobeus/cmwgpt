@@ -58,21 +58,21 @@ class TestMemoryStore(unittest.IsolatedAsyncioTestCase):
     async def test_self_state_stamps_aspects_and_removes_empty_ones(self):
         await self.store.save_self_state(42, {"mood": "chipper", "interests": "trucks"})
         await self.store.save_self_state(42, {"interests": ""})
-        await self.store.mark_self_refreshed(42, datetime(2026, 10, 30, 12, 0))
 
         state = await self.store.get_self_state(42)
         self.assertEqual(state["mood"], "chipper")
         self.assertIn("mood_updated", state)
         self.assertNotIn("interests", state)
         self.assertNotIn("interests_updated", state)
-        self.assertEqual(state["refreshed_at"], "2026-10-30T12:00:00")
         self.assertEqual(await self.store.get_self_state(43), {})
 
-        await self.store._redis_getter().hset(_self_key(42), "follow_ups", "[]")  # left from before
-        self.assertIn("follow_ups", await self.store.get_self_state(42))
-        await self.store.clear_follow_ups(42)
-        self.assertNotIn("follow_ups", await self.store.get_self_state(42))
-        self.assertEqual((await self.store.get_self_state(42))["mood"], "chipper")
+        # Left from before.
+        await self.store._redis_getter().hset(_self_key(42), mapping={"follow_ups": "[]", "refreshed_at": "x"})
+        await self.store.clear_retired(42)
+        state = await self.store.get_self_state(42)
+        self.assertNotIn("follow_ups", state)
+        self.assertNotIn("refreshed_at", state)
+        self.assertEqual(state["mood"], "chipper")
 
         await self.store.clear_self_state(42)
         self.assertEqual(await self.store.get_self_state(42), {})
@@ -101,12 +101,12 @@ class TestMemoryStore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.store.get_processed_through(42), when)
         self.assertEqual(len(await self.redis.hget("cmwgpt:memory_job:42", "last_status")), 255)
 
-    async def test_clear_channel_summaries_removes_only_that_servers_old_summaries(self):
+    async def test_clear_retired_removes_only_that_servers_old_summaries(self):
         await self.redis.set("cmwgpt:channel_summary:42:5", "tacos (2026-10-15)")
         await self.redis.set("cmwgpt:channel_summary:43:5", "other server")
         await self.store.save_profile(42, 1, "profile")
 
-        await self.store.clear_channel_summaries(42)
+        await self.store.clear_retired(42)
 
         self.assertFalse(await self.redis.exists("cmwgpt:channel_summary:42:5"))
         self.assertTrue(await self.redis.exists("cmwgpt:channel_summary:43:5"))

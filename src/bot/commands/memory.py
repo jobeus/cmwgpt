@@ -6,14 +6,13 @@ last week) and /botstate (see the bot's own mood, emotion, emoji, interests and 
 import io
 import logging
 import re
-from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import discord
 from discord import app_commands
 
 from src.services.memory_service import (
-    FILL_DAYS, SELF_ASPECTS, SELF_REFRESH_INTERVAL, MemoryService,
+    FILL_DAYS, SELF_ASPECTS, MemoryService,
 )
 from src.utils.async_utils import safe_run
 from src.utils.discord_error_utils import safe_defer
@@ -49,7 +48,7 @@ def _bullets(name: str, value: str) -> str:
 
 
 def build_self_embed(guild_name: str, state: Dict[str, str]) -> discord.Embed:
-    """The /botstate reply: each aspect as its own section, then refresh times."""
+    """The /botstate reply: each aspect as its own section."""
     embed = discord.Embed(title=f"🧠 My inner life in {guild_name}", color=discord.Color.blurple())
     for name, (label, _limit) in SELF_ASPECTS.items():
         value = state.get(name)
@@ -62,18 +61,8 @@ def build_self_embed(guild_name: str, state: Dict[str, str]) -> discord.Embed:
         )
 
     if not embed.fields:
-        embed.description = "Nothing yet. It gets worked out from recent chat within a few minutes of starting."
-
-    refreshed = state.get("refreshed_at")
-    if refreshed:
-        when = datetime.fromisoformat(refreshed).replace(tzinfo=timezone.utc)
-        next_at = when + SELF_REFRESH_INTERVAL
-        embed.add_field(
-            name="🔄 Refreshes",
-            value=f"Last <t:{int(when.timestamp())}:R>, next about <t:{int(next_at.timestamp())}:R>",
-            inline=False,
-        )
-    embed.set_footer(text="Refreshed every 6 hours from recent chat and the news; I can also change it myself.")
+        embed.description = "Nothing yet. I fill it in myself as conversations give me reason to."
+    embed.set_footer(text="Only I change it, while chatting.")
     return embed
 
 

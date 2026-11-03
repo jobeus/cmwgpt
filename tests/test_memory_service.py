@@ -12,9 +12,6 @@ from src.bot.handlers.mention import MentionHandler
 from src.services.memory_service import (
     parse_corrected_profile,
     parse_extracted_facts,
-    parse_self_state_reply,
-    REFRESH_SELF_SYSTEM_PROMPT,
-    SEED_SELF_SYSTEM_PROMPT,
     MemoryService,
     format_self_state,
     build_transcript_chunks,
@@ -49,9 +46,8 @@ class FakeStore:
         self.job_states = []
         self.cleared_guilds = []
         self.processed_through = None
-        self.cleared_channel_summaries = []
+        self.cleared_retired = []
         self.self_state = {}
-        self.self_refreshed = []
 
     async def get(self, guild_id, user_id):
         return self.rows.get(user_id, "")
@@ -70,8 +66,10 @@ class FakeStore:
     async def list_user_ids(self, guild_id):
         return sorted(uid for uid, profile in self.rows.items() if profile)
 
-    async def clear_channel_summaries(self, guild_id):
-        self.cleared_channel_summaries.append(guild_id)
+    async def clear_retired(self, guild_id):
+        self.cleared_retired.append(guild_id)
+        self.self_state.pop("follow_ups", None)
+        self.self_state.pop("refreshed_at", None)
 
     async def get_self_state(self, guild_id):
         return dict(self.self_state)
@@ -83,13 +81,6 @@ class FakeStore:
                 self.self_state[f"{name}_updated"] = "2026-10-30T12:00:00"
             else:
                 self.self_state.pop(name, None)
-
-    async def clear_follow_ups(self, guild_id):
-        self.self_state.pop("follow_ups", None)
-
-    async def mark_self_refreshed(self, guild_id, when):
-        self.self_state["refreshed_at"] = when.isoformat()
-        self.self_refreshed.append(when)
 
     async def get_processed_through(self, guild_id):
         return self.processed_through
@@ -241,6 +232,8 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         bot.guilds = [self.make_guild([])]
         await service.run_nightly()
         self.assertEqual(len(store.job_states), 7)
+        # What the bot no longer keeps is cleared out.
+        self.assertEqual(store.cleared_retired, [42])
 
     async def test_notes_block_orders_users_and_skips_empty(self):
         store = FakeStore({1: "Current: truck shopping", 2: "Style: likes short answers", 3: ""})
@@ -302,27 +295,6 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parse_extracted_facts("(none)"), {})
         self.assertEqual(parse_extracted_facts(json.dumps({"123": ["old style"]})), {123: ["old style"]})
 
-    def test_bot_state_is_read_from_labeled_lines(self):
-        reply = (
-            'mood: wired after the "Dune" trailer\n'
-            "emotion: giddy\n"
-            "emoji: 🤩\n"
-            "interests: frame rust; Dune\n"
-            "wondering: is the Tacoma worth it?\n"
-            "keep: 1, 3\n"
-        )
-        self.assertEqual(parse_self_state_reply(reply), {
-            "mood": 'wired after the "Dune" trailer',
-            "emotion": "giddy",
-            "emoji": "🤩",
-            "interests": "frame rust; Dune",
-            "wondering": "is the Tacoma worth it?",
-        })
-        # Markdown around the labels is tolerated.
-        self.assertEqual(parse_self_state_reply("**Emotion:** smug\n- __emoji__: 😏"), {"emotion": "smug", "emoji": "😏"})
-        old = json.dumps({"mood": "ok"})
-        self.assertEqual(parse_self_state_reply(old + "\n\nNotes: {kept everything}")["mood"], "ok")
-
     def test_correction_replies_are_read_as_plain_text_or_old_json(self):
         self.assertEqual(parse_corrected_profile("```\nStable: bald\nStyle: brief\n```"), "Stable: bald\nStyle: brief")
         self.assertEqual(parse_corrected_profile("(none)"), "")
@@ -339,88 +311,6 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
                 await service.correct(42, 1, "Jobe", "whatever")
         self.assertEqual(store.rows[1], "keep me")
         self.assertEqual(store.saved, [])
-
-    async def test_tend_seeds_from_the_week_when_there_is_no_state(self):
-        store = FakeStore()
-        now = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
-        service, bot = self.make_service(store, now)
-        guild = self.make_guild([
-            make_msg(1, "anyone watching the f1 race", minutes=-6 * 24 * 60),
-            make_msg(BOT_ID, "verstappen again lol", minutes=-6 * 24 * 60 + 1, bot=True),
-        ])
-        bot.guilds = [guild]
-        calls = []
-
-        async def fake_dispatch(**kwargs):
-            calls.append(kwargs)
-            return json.dumps({
-                "mood": "pretty good", "interests": "f1 " * 500, "wondering": "",
-            }), 0.01
-
-        with patch("src.services.memory_service.dispatch_completion", side_effect=fake_dispatch):
-            await service.tend_self_states()
-
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["system_prompt"], SEED_SELF_SYSTEM_PROMPT)
-        self.assertTrue(calls[0]["search"])
-        prompt = calls[0]["messages"][0]["content"][0]["text"]
-        self.assertIn("f1 race", prompt)
-        self.assertIn("(the bot)", prompt)
-        self.assertEqual(store.self_state["mood"], "pretty good")
-        self.assertEqual(len(store.self_state["interests"]), 400)  # capped
-        self.assertNotIn("wondering", store.self_state)
-        self.assertEqual(store.self_refreshed, [now.replace(tzinfo=None)])
-
-    async def test_tend_refreshes_with_search_only_when_due(self):
-        now = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
-        store = FakeStore()
-        full = {name: "x" for name in ("emotion", "emoji", "interests", "wondering")}
-        store.self_state = {"mood": "meh", "mood_updated": "2026-10-15T00:00:00", **full,
-                            "refreshed_at": "2026-10-16T03:00:00", "follow_ups": "[]"}
-        service, bot = self.make_service(store, now)
-        bot.guilds = [self.make_guild([
-            make_msg(1, "old news", minutes=-60),  # 15 hours before now
-            make_msg(2, "new rust release dropped", minutes=13 * 60),
-        ])]
-        dispatch = AsyncMock(return_value=(json.dumps({
-            "mood": "excited about rust",
-        }), 0.02))
-
-        with patch("src.services.memory_service.dispatch_completion", dispatch):
-            await service.tend_self_states()  # refreshed 5 hours ago: not due
-            dispatch.assert_not_awaited()
-            store.self_state["refreshed_at"] = "2026-10-16T01:00:00"
-            await service.tend_self_states()
-
-        kwargs = dispatch.await_args.kwargs
-        self.assertEqual(kwargs["system_prompt"], REFRESH_SELF_SYSTEM_PROMPT)
-        self.assertTrue(kwargs["search"])
-        prompt = kwargs["messages"][0]["content"][0]["text"]
-        self.assertIn("rust release", prompt)
-        self.assertNotIn("old news", prompt)  # older than 12 hours
-        self.assertIn("Mood (since 2026-10-15): meh", prompt)
-        self.assertEqual(store.self_state["mood"], "excited about rust")
-        # The old follow-up list and channel summaries are dropped.
-        self.assertNotIn("follow_ups", store.self_state)
-        self.assertEqual(store.cleared_channel_summaries, [42])
-
-    async def test_tend_fills_in_a_missing_aspect_within_the_hour(self):
-        now = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
-        store = FakeStore()
-        # Refreshed before emotion and emoji existed.
-        store.self_state = {"mood": "meh", "interests": "f1", "wondering": "why?",
-                            "refreshed_at": "2026-10-16T07:30:00"}
-        service, bot = self.make_service(store, now)
-        bot.guilds = [self.make_guild([])]
-        dispatch = AsyncMock(return_value=("mood: meh\nemotion: bored\nemoji: 🥱", 0.02))
-
-        with patch("src.services.memory_service.dispatch_completion", dispatch):
-            await service.tend_self_states()  # refreshed 30 minutes ago: waits for the hour
-            dispatch.assert_not_awaited()
-            store.self_state["refreshed_at"] = "2026-10-16T06:30:00"
-            await service.tend_self_states()
-
-        self.assertEqual((store.self_state["emotion"], store.self_state["emoji"]), ("bored", "🥱"))
 
     async def test_update_self_checks_aspect_and_length(self):
         store = FakeStore()
@@ -492,7 +382,7 @@ class TestSendMemory(unittest.IsolatedAsyncioTestCase):
 
 
 class TestBotStateEmbed(unittest.TestCase):
-    def test_outlines_aspects_and_refresh_times(self):
+    def test_outlines_each_aspect(self):
         state = {
             "mood": "pretty upbeat", "mood_updated": "2026-10-29T10:00:00",
             "emotion": "restless", "emoji": "🏎️",
@@ -512,7 +402,7 @@ class TestBotStateEmbed(unittest.TestCase):
         self.assertEqual(fields["🤔 Wondering about"], "• Will Max win again?\n• Is rust 2.0 real?")
         self.assertFalse(any("Follow-ups" in name for name in fields))
         self.assertTrue(all(len(f.value) <= 1024 for f in embed.fields))
-        self.assertIn("<t:1793361600:R>", fields["🔄 Refreshes"])
+        self.assertFalse(any("Refresh" in name for name in fields))
 
     def test_empty_state_says_so(self):
         embed = build_self_embed("cmw", {})

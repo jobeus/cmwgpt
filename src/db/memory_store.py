@@ -6,8 +6,7 @@ One key per user holds their current profile and nothing else (no history):
 - ``cmwgpt:memory_job:<guild_id>`` - hash with the nightly job's ``processed_through``,
   ``last_run_at`` and ``last_status``
 - ``cmwgpt:self:<guild_id>`` - hash of the bot's own state in that server: one field per
-  aspect (``mood``, ``interests``, ...) plus ``<aspect>_updated`` with when it last changed,
-  and ``refreshed_at`` with when the scheduled refresh last rewrote it
+  aspect (``mood``, ``interests``, ...) plus ``<aspect>_updated`` with when it last changed
 
 All datetimes passed in and returned are naive UTC.
 """
@@ -98,13 +97,15 @@ class MemoryStore:
         if keys:
             await client.delete(*keys)
 
-    async def clear_channel_summaries(self, guild_id: int) -> None:
-        """Remove the channel summaries the bot used to keep for a server."""
+    async def clear_retired(self, guild_id: int) -> None:
+        """Remove what the bot no longer keeps for a server: channel summaries, and the
+        follow-up list and refresh time in its own state."""
         client = self._redis_getter()
         match = f"{KEY_PREFIX}channel_summary:{guild_id}:*"
         keys = [key async for key in client.scan_iter(match=match, count=500)]
         if keys:
             await client.delete(*keys)
+        await client.hdel(_self_key(guild_id), "follow_ups", "refreshed_at")
 
     async def get_self_state(self, guild_id: int) -> Dict[str, str]:
         """The bot's own state in a server (aspects and their ``_updated`` stamps), or ``{}``."""
@@ -125,13 +126,6 @@ class MemoryStore:
             await client.hset(_self_key(guild_id), mapping=mapping)
         if removed:
             await client.hdel(_self_key(guild_id), *removed, *(f"{name}_updated" for name in removed))
-
-    async def clear_follow_ups(self, guild_id: int) -> None:
-        """Remove the follow-up list the bot used to keep in its state."""
-        await self._redis_getter().hdel(_self_key(guild_id), "follow_ups")
-
-    async def mark_self_refreshed(self, guild_id: int, when: datetime) -> None:
-        await self._redis_getter().hset(_self_key(guild_id), "refreshed_at", when.isoformat())
 
     async def clear_self_state(self, guild_id: int) -> None:
         await self._redis_getter().delete(_self_key(guild_id))

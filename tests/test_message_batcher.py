@@ -124,19 +124,6 @@ class TestNightlyRunIsBatched(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake_batcher.complete.await_count, 1)
         self.assertEqual(dispatch.await_count, 2)
 
-    async def test_search_calls_are_never_batched(self):
-        service = self.make_service()
-        fake_batcher = MagicMock()
-        fake_batcher.complete = AsyncMock()
-        from src.services import memory_service
-        token = memory_service._batcher.set(fake_batcher)
-        try:
-            with patch("src.services.memory_service.dispatch_completion", new=AsyncMock(return_value=("x", 0.0))):
-                await service._complete("sys", "news", search=True)
-        finally:
-            memory_service._batcher.reset(token)
-        fake_batcher.complete.assert_not_awaited()
-
 
 if __name__ == "__main__":
     unittest.main()
