@@ -47,7 +47,6 @@ flowchart LR
         Anthropic[AnthropicService<br/>Claude API]:::service
         Tools[chat_tools<br/>per-mention client tools]:::service
         Memory[MemoryService<br/>nightly profiles]:::service
-        DaySummary[DaySummaryService<br/>chat since 02:00]:::service
         Images[image_service<br/>Gemini image models]:::service
         Downloader[Downloader pipeline]:::service
         MsgSvc[MessageService]:::service
@@ -62,8 +61,6 @@ flowchart LR
     Dispatch --> Gemini
     Dispatch --> Anthropic
     Mention --> Memory
-    Mention --> DaySummary
-    DaySummary --> Dispatch
     Mention --> Downloader
     Mention --> State
     Mention --> MsgSvc
@@ -76,7 +73,6 @@ flowchart LR
     Commands --> Memory
     Anthropic --> Tools
     Tools --> Memory
-    Tools --> DaySummary
     Tools --> Downloader
     Tools --> Images
 
@@ -118,14 +114,12 @@ flowchart TB
     Factory --> Death[DeathService]:::aux
     Factory --> MemStore[MemoryStore]:::aux
     Factory --> Memory[MemoryService]:::aux
-    Factory --> DaySummary[DaySummaryService]:::aux
     Factory --> Mention[MentionHandler]:::svc
     Factory --> IrcLog[load_irc_log / load_quote_file]:::aux
     IrcLog -->|IRC log, quotes| Mention
 
     MemStore --> Memory
-    Memory -->|user notes, channel summary| Mention
-    DaySummary -->|day summary| Mention
+    Memory -->|user notes| Mention
 
 
     State --> Death
@@ -181,7 +175,7 @@ sequenceDiagram
         D-->>M: enrichment (newest 10 messages fetch; older ones use cache only)
         M->>MEM: get_notes_block(asker, mentioned users, recent speakers)
         MEM-->>M: profiles appended to the mention
-        Note over M: channel summary, day summary and how_i_work go in the system prompt
+        Note over M: how_i_work goes in the system prompt
     end
     M->>DP: dispatch_completion(messages, model, system_prompt, tools)
     alt model is google / google-high
@@ -208,7 +202,7 @@ sequenceDiagram
 - URL enrichment happens **before** the LLM call and can materially change the prompt content. Only the newest 10 history messages fetch links; older messages use cached results only, and the fetches run concurrently.
 - Per-user memory profiles are appended to the end of the mention, so the cached system prompt and history stay unchanged.
 - So is the bot's own state (`<about_you>`: mood, emotion, emoji, interests and what it's wondering about), on every model. It's per server in `cmwgpt:self:<guild_id>`, seeded from the last 7 days when missing and refreshed every 6 hours from the last 12 hours of chat (within the hour if a part is missing), both with a web search for current events; the direct models can also change it with `update_self`.
-- The Claude API direct models get none of the on-demand context filled in (links, memory notes, channel and day summaries, `how_i_work`). They get a short "Your tools" section in the system prompt instead (general rules, such as making independent calls in one turn; each tool is described only in its own definition, so nothing is sent twice) and fetch what they need with tools; see [Claude API tools](#claude-api-tools).
+- The Claude API direct models get none of the on-demand context filled in (links, memory notes, `how_i_work`). They get a short "Your tools" section in the system prompt instead (general rules, such as making independent calls in one turn; each tool is described only in its own definition, so nothing is sent twice) and fetch what they need with tools; see [Claude API tools](#claude-api-tools).
 - Claude API replies stream: `StreamingReply` (`src/services/streaming_reply.py`) posts the reply as it arrives and edits it at most every 1.5 seconds, then edits in the final text with the cost. If the request fails, the partial message is deleted before the error reply. Gemini replies arrive whole.
 - There is no request/pipeline log table: the SDK clients use their default HTTP clients, and diagnostics go to the normal Python log (stdout and `logs/`).
 
@@ -223,8 +217,7 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | Tool | Runs | Needs |
 | --- | --- | --- |
 | `draw`, `edit_image` | `src/services/image_service.py` (Gemini image models, with aspect ratio/size/thinking/search options) | `GEMINI_API_KEY` |
-| `recall_users`, `recall_channel`, `remember`, `update_self` | `MemoryService` | Redis memory, a guild |
-| `recall_today` | `DaySummaryService` | — |
+| `recall_users`, `remember`, `update_self` | `MemoryService` | Redis memory, a guild |
 | `search_messages`, `read_messages`, `view_images` | `src/services/discord_history.py` (Discord's message search, limited to the channel the bot was asked in, with every filter it offers through `SearchFilters`) and message fetches | a guild |
 | `react` | `add_reaction` on a message in the mention's channel (5 per reply; the tools section lists the server's custom emoji) | a guild |
 | `search_irc_log`, `read_irc_log_day`, `count_irc_log` | `src/services/irc_log_service.py` (memory-mapped log) | `IRC_LOG` (`IRC_NICKS` optional) |
@@ -327,7 +320,6 @@ flowchart LR
 | `src/services/discord_history.py` | Discord message search/read | Debug `search_messages` / `read_messages` |
 | `src/services/irc_log_service.py` | Old IRC log search/count | Debug the IRC tools or nick merging |
 | `src/services/quote_service.py` | Old quote bot file | Debug `old_quotes` |
-| `src/services/day_summary_service.py` | Today's chat summary, saved to Redis so restarts keep it | Understand the incremental day summary |
 | `src/services/cost_service.py` | `record_cost`, per-reply cost scopes and the daily Redis tallies behind `/cost` | Add a paid API or change how costs are counted |
 | `src/services/image_service.py` | Image models and options | See each Gemini image model's aspect ratios, sizes, thinking and search |
 | `src/services/streaming_reply.py` | Streamed reply preview | Debug status lines, edits and the final reply |
@@ -353,7 +345,7 @@ flowchart LR
 1. A user mentions the bot.
 2. `DiscordBotClient` chooses the active model for the channel and queues the work.
 3. `MentionHandler` gathers recent message history and reply context (via `build_chat_context`).
-4. For most models, the handler enriches user text with downloader output for supported URLs, appends the memory profiles of the people involved, and puts the channel and day summaries in the system prompt. The Claude API direct models get a tools section and the tools instead.
+4. For most models, the handler enriches user text with downloader output for supported URLs, and appends the memory profiles of the people involved. The Claude API direct models get a tools section and the tools instead.
 5. `dispatch_completion` routes the assembled context to `GeminiService` (native Gemini) or `AnthropicService` (Claude API), based on the channel's model. `AnthropicService` runs any tool calls before the final answer.
 6. For Claude API models the reply streams into a Discord message as it's written (`StreamingReply`); the final text, with its cost, is edited in at the end. Gemini replies are sent whole by `MessageService`.
 
@@ -361,7 +353,7 @@ flowchart LR
 
 1. Every night, `MemoryService` reads the chat since its last run and replaces each person's profile at `cmwgpt:memory:<guild>:<user>` in Redis (one key per user, no history, max 100 KB).
 2. `cmwgpt:memory_job:<guild>` tracks how far each server has been processed.
-3. `/memory`, `/fillmemory`, `/fillsummaries` and `/botstate` read and change the same keys (see `docs/commands.md`).
+3. `/memory`, `/fillmemory` and `/botstate` read and change the same keys (see `docs/commands.md`).
 
 ### Shutdown and restart
 

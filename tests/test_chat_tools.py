@@ -24,7 +24,6 @@ def _tools(**overrides):
         channel_id=20,
         user_id=30,
         user_notes_provider=AsyncMock(return_value="<user_notes>notes</user_notes>"),
-        channel_summary_provider=AsyncMock(return_value="lately"),
         how_i_work_loader=lambda: "architecture",
         state_service=state_service,
         gemini_service=gemini_service,
@@ -75,7 +74,7 @@ class TestChatTools(unittest.IsolatedAsyncioTestCase):
     async def test_update_self_saves_and_reports_errors(self):
         updater = AsyncMock(return_value="Mood (since 2026-10-30): chipper")
         tools, _ = _tools(self_state_updater=updater)
-        self.assertEqual(list(tools)[3], "update_self")
+        self.assertEqual(list(tools)[2], "update_self")
 
         result = await tools["update_self"].run({"aspect": "mood", "text": "chipper"})
         updater.assert_awaited_once_with(10, "mood", "chipper")
@@ -89,7 +88,7 @@ class TestChatTools(unittest.IsolatedAsyncioTestCase):
 
     def test_offers_all_tools_in_a_fixed_order(self):
         tools, _ = _tools()
-        self.assertEqual(list(tools), ["draw", "recall_users", "recall_channel", "transcribe_youtube", "how_i_work"])
+        self.assertEqual(list(tools), ["draw", "recall_users", "transcribe_youtube", "how_i_work"])
 
     def test_leaves_out_tools_without_their_dependencies(self):
         tools, _ = _tools(guild_id=None, default_image_model=None)
@@ -155,10 +154,8 @@ class TestChatTools(unittest.IsolatedAsyncioTestCase):
         self.assertIn("No memory notes", result.content[0]["text"])
         self.assertTrue((await tools["recall_users"].run({"user_ids": []})).is_error)
 
-    async def test_recall_channel_and_how_i_work(self):
-        tools, deps = _tools()
-        self.assertEqual((await tools["recall_channel"].run({})).content[0]["text"], "lately")
-        deps["channel_summary_provider"].assert_awaited_once_with(10, 20)
+    async def test_how_i_work(self):
+        tools, _ = _tools()
         self.assertEqual((await tools["how_i_work"].run({})).content[0]["text"], "architecture")
 
 
@@ -166,7 +163,7 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
     def test_offers_every_tool_when_it_has_a_message(self):
         tools, _ = _full_tools()
         self.assertEqual(list(tools), [
-            "draw", "edit_image", "recall_users", "recall_channel", "remember",
+            "draw", "edit_image", "recall_users", "remember",
             "search_messages", "read_messages", "view_images", "react", "transcribe_youtube", "wiki_pageviews",
             "how_i_work",
         ])
@@ -175,7 +172,7 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
         # The descriptions are the only place the model learns about each tool.
         tools, _ = _full_tools(
             irc_log=MagicMock(), quote_file=MagicMock(), url_content_fetcher=AsyncMock(),
-            day_summary_loader=AsyncMock(), reminder_service=MagicMock(), timezone_store=MagicMock(),
+            reminder_service=MagicMock(), timezone_store=MagicMock(),
             video_summarizer=AsyncMock(), video_watcher=AsyncMock(),
         )
         for name, tool in tools.items():
@@ -377,15 +374,6 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
         self.assertTrue((await tools["read_urls"].run({"urls": ["https://nope.example"]})).is_error)
         self.assertTrue((await tools["read_urls"].run({"urls": []})).is_error)
 
-    async def test_recall_today_returns_the_summary_and_its_cost(self):
-        loader = AsyncMock(return_value=("they argued about trucks", 0.04))
-        tools, _ = _tools(day_summary_loader=loader)
-        result = await tools["recall_today"].run({})
-        self.assertIn("<day_summary>\nthey argued about trucks\n</day_summary>", result.content[0]["text"])
-        self.assertAlmostEqual(result.cost, 0.04)
-        loader.return_value = ("", 0.0)
-        self.assertIn("Nothing was said", (await tools["recall_today"].run({})).content[0]["text"])
-
     async def test_count_irc_log_passes_the_grouping_through(self):
         irc_log = MagicMock()
         irc_log.count.return_value = "42 occurrences"
@@ -502,7 +490,6 @@ class TestStrictSchemaLimits(unittest.TestCase):
             irc_log=MagicMock(),
             quote_file=MagicMock(),
             url_content_fetcher=AsyncMock(),
-            day_summary_loader=AsyncMock(),
             self_state_updater=AsyncMock(),
             reminder_service=MagicMock(),
             timezone_store=MagicMock(),

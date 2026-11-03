@@ -6,7 +6,6 @@ Redis holds everything the bot keeps between restarts:
 | --- | --- | --- |
 | `cmwgpt:memory:<guild>:<user>` | One user's memory profile, right now (no history), max 100 KB | Never |
 | `cmwgpt:memory_job:<guild>` | Nightly memory job progress (`processed_through`, last status) | Never |
-| `cmwgpt:day_summary:<channel>` | Today's running chat summary for a channel, so a restart doesn't re-read the day | 30 hours |
 | `cmwgpt:costs:<YYYY-MM-DD>` | That day's spending (America/Denver): one field per provider, per person and per channel, for `/cost` | 400 days |
 | `cmwgpt:reminders:due`, `cmwgpt:reminder:<id>`, `cmwgpt:reminders:next_id` | Pending reminders (a sorted set by due time, one hash each) and the ID counter | Removed once posted |
 | `cmwgpt:timezones:<guild>` | Each person's saved time zone (IANA name) | Never |

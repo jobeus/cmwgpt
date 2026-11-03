@@ -1,26 +1,20 @@
-"""Redis storage for per-user memory and per-channel summaries.
+"""Redis storage for per-user memory and the bot's own state.
 
 One key per user holds their current profile and nothing else (no history):
 
 - ``cmwgpt:memory:<guild_id>:<user_id>`` - the profile text, at most ``MAX_PROFILE_BYTES``
-- ``cmwgpt:channel_summary:<guild_id>:<channel_id>`` - what's been going on lately in a
-  channel, at most ``MAX_PROFILE_BYTES``
 - ``cmwgpt:memory_job:<guild_id>`` - hash with the nightly job's ``processed_through``,
   ``last_run_at`` and ``last_status``
 - ``cmwgpt:self:<guild_id>`` - hash of the bot's own state in that server: one field per
   aspect (``mood``, ``interests``, ...) plus ``<aspect>_updated`` with when it last changed,
   and ``refreshed_at`` with when the scheduled refresh last rewrote it
-- ``cmwgpt:day_summary:<channel_id>`` - hash with today's running chat summary for a
-  channel (``text``), the ``day_start`` it covers from and the ``until_id`` it stops
-  before, so a restart doesn't re-summarize the whole day. Expires after
-  ``DAY_SUMMARY_TTL_SECONDS``.
 
-Only the day summaries expire. All datetimes passed in and returned are naive UTC.
+All datetimes passed in and returned are naive UTC.
 """
 
 import logging
 from datetime import datetime, timezone
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional
 
 import redis.asyncio as aioredis
 
@@ -31,16 +25,9 @@ logger = logging.getLogger(__name__)
 # One user's profile may not grow past this; the merge prompts keep them far smaller.
 MAX_PROFILE_BYTES = 100 * 1024
 
-# A day summary is only used until the next 02:00, so it can go a little after that.
-DAY_SUMMARY_TTL_SECONDS = 30 * 3600
-
 
 def _profile_key(guild_id: int, user_id: int) -> str:
     return f"{KEY_PREFIX}memory:{guild_id}:{user_id}"
-
-
-def _channel_summary_key(guild_id: int, channel_id: int) -> str:
-    return f"{KEY_PREFIX}channel_summary:{guild_id}:{channel_id}"
 
 
 def _job_key(guild_id: int) -> str:
@@ -49,10 +36,6 @@ def _job_key(guild_id: int) -> str:
 
 def _self_key(guild_id: int) -> str:
     return f"{KEY_PREFIX}self:{guild_id}"
-
-
-def _day_summary_key(channel_id: int) -> str:
-    return f"{KEY_PREFIX}day_summary:{channel_id}"
 
 
 def cap_profile(profile: str) -> str:
@@ -115,49 +98,13 @@ class MemoryStore:
         if keys:
             await client.delete(*keys)
 
-    async def get_channel_summary(self, guild_id: int, channel_id: int) -> str:
-        """Return a channel's summary, or an empty string if none."""
-        return await self._redis_getter().get(_channel_summary_key(guild_id, channel_id)) or ""
-
-    async def save_channel_summary(self, guild_id: int, channel_id: int, summary: str) -> None:
-        """Replace a channel's summary (an empty one removes it)."""
-        key = _channel_summary_key(guild_id, channel_id)
-        if not summary:
-            await self._redis_getter().delete(key)
-            return
-        await self._redis_getter().set(key, cap_profile(summary))
-
     async def clear_channel_summaries(self, guild_id: int) -> None:
-        """Wipe every channel summary in a server (used by /fillmemory)."""
+        """Remove the channel summaries the bot used to keep for a server."""
         client = self._redis_getter()
         match = f"{KEY_PREFIX}channel_summary:{guild_id}:*"
         keys = [key async for key in client.scan_iter(match=match, count=500)]
         if keys:
             await client.delete(*keys)
-
-    async def get_day_summary(self, channel_id: int) -> Optional[Tuple[datetime, Optional[int], str]]:
-        """A channel's saved day summary as ``(day_start, until_id, text)``, or ``None``.
-
-        ``day_start`` is the aware datetime the summary was saved with.
-        """
-        fields = await self._redis_getter().hgetall(_day_summary_key(channel_id))
-        if not fields or not fields.get("day_start"):
-            return None
-        until_id = fields.get("until_id")
-        return datetime.fromisoformat(fields["day_start"]), int(until_id) if until_id else None, fields.get("text", "")
-
-    async def save_day_summary(
-        self, channel_id: int, day_start: datetime, until_id: Optional[int], text: str
-    ) -> None:
-        """Replace a channel's day summary."""
-        key = _day_summary_key(channel_id)
-        client = self._redis_getter()
-        await client.hset(key, mapping={
-            "day_start": day_start.isoformat(),
-            "until_id": str(until_id or ""),
-            "text": cap_profile(text),
-        })
-        await client.expire(key, DAY_SUMMARY_TTL_SECONDS)
 
     async def get_self_state(self, guild_id: int) -> Dict[str, str]:
         """The bot's own state in a server (aspects and their ``_updated`` stamps), or ``{}``."""

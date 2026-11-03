@@ -13,8 +13,6 @@ from src.services.memory_service import (
     parse_corrected_profile,
     parse_extracted_facts,
     parse_self_state_reply,
-    CHANNEL_SUMMARY_SYSTEM_PROMPT,
-    DAY_SUMMARY_SYSTEM_PROMPT,
     REFRESH_SELF_SYSTEM_PROMPT,
     SEED_SELF_SYSTEM_PROMPT,
     MemoryService,
@@ -51,7 +49,6 @@ class FakeStore:
         self.job_states = []
         self.cleared_guilds = []
         self.processed_through = None
-        self.channel_summaries = {}
         self.cleared_channel_summaries = []
         self.self_state = {}
         self.self_refreshed = []
@@ -70,18 +67,11 @@ class FakeStore:
         self.cleared_guilds.append(guild_id)
         self.rows = {uid: "" for uid in self.rows}
 
-    async def get_channel_summary(self, guild_id, channel_id):
-        return self.channel_summaries.get(channel_id, "")
-
     async def list_user_ids(self, guild_id):
         return sorted(uid for uid, profile in self.rows.items() if profile)
 
-    async def save_channel_summary(self, guild_id, channel_id, summary):
-        self.channel_summaries[channel_id] = summary
-
     async def clear_channel_summaries(self, guild_id):
         self.cleared_channel_summaries.append(guild_id)
-        self.channel_summaries = {}
 
     async def get_self_state(self, guild_id):
         return dict(self.self_state)
@@ -201,8 +191,6 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
 
         async def fake_dispatch(**kwargs):
             assert kwargs["search"] is False
-            if kwargs["system_prompt"] in (DAY_SUMMARY_SYSTEM_PROMPT, CHANNEL_SUMMARY_SYSTEM_PROMPT):
-                return "(none)", 0.0
             calls.append(kwargs)
             if "Chat:" in kwargs["messages"][0]["content"][0]["text"]:
                 # Unknown IDs (not a speaker) are dropped.
@@ -223,64 +211,6 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(user_id, 1)
         self.assertIn("Tacoma", profile)
 
-    async def test_process_window_summarizes_day_then_folds_into_channel_summary(self):
-        store = FakeStore()
-        store.channel_summaries[5] = "truck shopping, <@1> (2026-10-10)"
-        now = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
-        service, _ = self.make_service(store, now)
-        guild = self.make_guild([make_msg(1, "bought the tacoma!", name="Jobe")])
-        prompts = {}
-
-        async def fake_dispatch(**kwargs):
-            assert kwargs["effort"] == "medium"
-            prompts[kwargs["system_prompt"]] = kwargs["messages"][0]["content"][0]["text"]
-            if kwargs["system_prompt"] == DAY_SUMMARY_SYSTEM_PROMPT:
-                return "<@1> bought the Tacoma", 0.01
-            if kwargs["system_prompt"] == CHANNEL_SUMMARY_SYSTEM_PROMPT:
-                return "<@1> bought a Tacoma after shopping around (2026-10-15)", 0.02
-            return "{}", 0.0
-
-        with patch("src.services.memory_service.dispatch_completion", side_effect=fake_dispatch):
-            stats = await service.process_window(guild, now - timedelta(days=1), now)
-
-        self.assertIn("bought the tacoma!", prompts[DAY_SUMMARY_SYSTEM_PROMPT])
-        merge = prompts[CHANNEL_SUMMARY_SYSTEM_PROMPT]
-        self.assertIn("Day being added: 2026-10-15", merge)
-        self.assertIn("Current summary:\ntruck shopping, <@1> (2026-10-10)", merge)
-        self.assertIn("Summary of 2026-10-15:\n<@1> bought the Tacoma", merge)
-        self.assertEqual(store.channel_summaries[5], "<@1> bought a Tacoma after shopping around (2026-10-15)")
-        self.assertAlmostEqual(stats["cost"], 0.03)
-
-    async def test_channel_summary_failure_does_not_fail_the_window(self):
-        store = FakeStore({1: "old"})
-        now = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
-        service, _ = self.make_service(store, now)
-        guild = self.make_guild([make_msg(1, "hello", name="Jobe")])
-
-        async def fake_dispatch(**kwargs):
-            if kwargs["system_prompt"] == DAY_SUMMARY_SYSTEM_PROMPT:
-                raise RuntimeError("api down")
-            if "Chat:" in kwargs["messages"][0]["content"][0]["text"]:
-                return json.dumps({"1": ["says hello"]}), 0.0
-            return "Current: says hello (2026-10-15)", 0.0
-
-        with patch("src.services.memory_service.dispatch_completion", side_effect=fake_dispatch):
-            stats = await service.process_window(guild, now - timedelta(days=1), now)
-
-        self.assertEqual(stats["users_updated"], [1])
-        self.assertEqual(store.channel_summaries, {})
-
-    async def test_channel_summary_block_wraps_summary_and_swallows_errors(self):
-        store = FakeStore()
-        store.channel_summaries[5] = "tacos (2026-10-15)"
-        service, _ = self.make_service(store, datetime.now(UTC))
-        block = await service.get_channel_summary(42, 5)
-        self.assertTrue(block.startswith("## Lately in this channel"))
-        self.assertIn("<channel_summary>\ntacos (2026-10-15)\n</channel_summary>", block)
-        self.assertEqual(await service.get_channel_summary(42, 6), "")
-        store.get_channel_summary = AsyncMock(side_effect=RuntimeError("redis down"))
-        self.assertEqual(await service.get_channel_summary(42, 5), "")
-
     async def test_process_window_with_no_messages_makes_no_calls(self):
         store = FakeStore()
         now = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
@@ -298,38 +228,10 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         with patch("src.services.memory_service.dispatch_completion", new=AsyncMock(return_value=("{}", 0.0))):
             totals = await service.fill(self.make_guild([]), progress=progress)
         self.assertEqual(store.cleared_guilds, [42])
-        self.assertEqual(store.cleared_channel_summaries, [42])
         self.assertEqual(store.rows[1], "")
         self.assertEqual(totals["days"], 7)
         self.assertEqual(progress.await_count, 7)
         self.assertEqual(store.job_states[-1][0], now.replace(tzinfo=None))
-
-    async def test_fill_channel_summaries_leaves_profiles_and_job_state_alone(self):
-        store = FakeStore({1: "Stable: drives a Ranger"})
-        store.channel_summaries[5] = "stale"
-        now = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
-        service, _ = self.make_service(store, now)
-        guild = self.make_guild([make_msg(1, "bought the tacoma!", name="Jobe")])
-        progress = AsyncMock()
-
-        async def fake_dispatch(**kwargs):
-            self.assertIn(kwargs["system_prompt"], (DAY_SUMMARY_SYSTEM_PROMPT, CHANNEL_SUMMARY_SYSTEM_PROMPT))
-            if kwargs["system_prompt"] == DAY_SUMMARY_SYSTEM_PROMPT:
-                return "<@1> bought the Tacoma", 0.01
-            self.assertIn("Current summary:\n(none)", kwargs["messages"][0]["content"][0]["text"])
-            return "<@1> bought a Tacoma (2026-10-15)", 0.02
-
-        with patch("src.services.memory_service.dispatch_completion", side_effect=fake_dispatch):
-            totals = await service.fill_channel_summaries(guild, progress=progress)
-
-        self.assertEqual(store.cleared_channel_summaries, [42])
-        self.assertEqual(store.channel_summaries[5], "<@1> bought a Tacoma (2026-10-15)")
-        self.assertEqual(store.rows, {1: "Stable: drives a Ranger"})
-        self.assertEqual(store.cleared_guilds, [])
-        self.assertEqual(store.job_states, [])
-        self.assertEqual((totals["days"], totals["messages"], totals["channels"]), (7, 1, 1))
-        self.assertAlmostEqual(totals["cost"], 0.03)
-        self.assertEqual(progress.await_count, 7)
 
     async def test_nightly_resumes_from_stored_state_and_caps_catchup(self):
         store = FakeStore()
@@ -350,23 +252,18 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("<@2>:\nStyle: likes short answers", block)
         self.assertEqual(await service.get_notes_block(42, [3]), "")
 
-    async def test_memory_index_lists_people_and_the_channel_summary_range(self):
+    async def test_memory_index_lists_people_and_points_to_search(self):
         store = FakeStore({2: "Style: short", 1: "Current: trucks"})
-        store.channel_summaries[5] = "tacos"
-        # The last window ended 02:00 Denver on Oct 30, so Oct 29 is the last day covered.
-        store.processed_through = datetime(2026, 10, 30, 8, 0)
         service, _ = self.make_service(store, datetime.now(UTC))
 
-        index = await service.get_memory_index(42, 5)
+        index = await service.get_memory_index(42)
 
         self.assertIn("memory notes on: <@1>, <@2>.", index)
-        self.assertIn("covers about 2026-10-15 to 2026-10-29", index)
-        self.assertIn("search the chat", index)
-        self.assertIn("no memory summary yet", await service.get_memory_index(42, 6))
+        self.assertIn("search it", index)
         store.rows = {}
-        self.assertIn("no memory notes on anyone", await service.get_memory_index(42, 5))
+        self.assertIn("no memory notes on anyone", await service.get_memory_index(42))
         store.list_user_ids = AsyncMock(side_effect=RuntimeError("redis down"))
-        self.assertEqual(await service.get_memory_index(42, 5), "")
+        self.assertEqual(await service.get_memory_index(42), "")
 
     async def test_notes_block_swallows_store_errors(self):
         store = FakeStore()
@@ -503,8 +400,9 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("old news", prompt)  # older than 12 hours
         self.assertIn("Mood (since 2026-10-15): meh", prompt)
         self.assertEqual(store.self_state["mood"], "excited about rust")
-        # The old follow-up list is dropped.
+        # The old follow-up list and channel summaries are dropped.
         self.assertNotIn("follow_ups", store.self_state)
+        self.assertEqual(store.cleared_channel_summaries, [42])
 
     async def test_tend_fills_in_a_missing_aspect_within_the_hour(self):
         now = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)

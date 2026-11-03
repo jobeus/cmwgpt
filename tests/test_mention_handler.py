@@ -123,7 +123,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         channel.history = history
 
         with patch.dict("os.environ", {"TZ": "America/Denver"}, clear=False):
-            context, system_prompt, _ = await handler._prepare_mention_context(mention_msg, bot_user)
+            context, system_prompt = await handler._prepare_mention_context(mention_msg, bot_user)
 
         self.assertEqual(len(context), 4)
         self.assertEqual(context[1]["role"], "assistant")
@@ -165,7 +165,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         channel.history = history
 
-        context, _, _ = await handler._prepare_mention_context(mention_msg, bot_user)
+        context, _ = await handler._prepare_mention_context(mention_msg, bot_user)
 
         self.assertEqual(len(context), 1)
         self.assertEqual(context[0]["role"], "user")
@@ -205,7 +205,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         channel.history = history
 
-        context, _, _ = await handler._prepare_mention_context(mention_msg, bot_user)
+        context, _ = await handler._prepare_mention_context(mention_msg, bot_user)
 
         self.assertIn("[Embeds:", context[0]["content"][0]["text"])
         self.assertIn("[Attached file:", context[0]["content"][0]["text"])
@@ -258,9 +258,9 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         # Patch the mention module's reference to the time module (not
         # time.time globally, which logging handlers may also call).
         with patch("src.bot.handlers.mention.time", MagicMock(time=MagicMock(side_effect=[1000, 1005]))):
-            context, system_prompt, _ = await handler._prepare_mention_context(mention_msg, bot_user)
+            context, system_prompt = await handler._prepare_mention_context(mention_msg, bot_user)
             channel.history = second_history
-            cached_context, _, _ = await handler._prepare_mention_context(mention_msg, bot_user)
+            cached_context, _ = await handler._prepare_mention_context(mention_msg, bot_user)
 
         self.assertTrue(system_prompt.startswith("channel prompt\n\n## How this chat reaches you\nYou are <@"))
         self.assertIn("## How you work (your own architecture)", system_prompt)
@@ -303,7 +303,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         channel.history = history
 
         with patch("src.bot.handlers.mention.transcribe_audio_attachment", AsyncMock(return_value="Mocked Groq Transcript")):
-            context, _, _ = await handler._prepare_mention_context(mention_msg, bot_user)
+            context, _ = await handler._prepare_mention_context(mention_msg, bot_user)
 
         self.assertEqual(len(context), 1)
         self.assertEqual(context[0]["role"], "user")
@@ -349,7 +349,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         channel.history = history
 
         with patch("src.utils.chat_context.logger.warning") as mock_warning:
-            context, _, _ = await handler._prepare_mention_context(empty_msg, bot_user)
+            context, _ = await handler._prepare_mention_context(empty_msg, bot_user)
 
         self.assertIn("[Embeds:", context[0]["content"][0]["text"])
         self.assertEqual(len(context[0]["content"]), 1)
@@ -371,12 +371,12 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         handler._history_cache = {}
         channel.history = empty_history
-        context, _, _ = await handler._prepare_mention_context(truly_empty, bot_user)
+        context, _ = await handler._prepare_mention_context(truly_empty, bot_user)
         self.assertIn("[Empty Message]", context[0]["content"][0]["text"])
 
     async def test_handle_mention_sends_plain_text_reply(self):
         handler, state_service, _, claude_service, message_service = self.make_handler()
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
         claude_service.get_chat_completion = AsyncMock(return_value=("hello there", 0.0))
         channel = MagicMock()
         channel.id = 1
@@ -403,7 +403,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         handler, _, _, claude_service, message_service = self.make_handler()
         message_service.DISCORD_MESSAGE_LIMIT = 2000
         message_service.fit_to_discord = AsyncMock(side_effect=lambda text: text)
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
 
         async def streamed_completion(**kwargs):
             kwargs["on_text"]("hello")
@@ -425,7 +425,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
     async def test_handle_mention_deletes_partial_reply_when_stream_fails(self):
         handler, _, _, claude_service, message_service = self.make_handler()
         message_service.DISCORD_MESSAGE_LIMIT = 2000
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
 
         async def failing_completion(**kwargs):
             kwargs["on_text"]("half an ans")
@@ -443,7 +443,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_mention_sends_files_when_response_contains_them(self):
         handler, _, _, claude_service, message_service = self.make_handler()
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
         claude_service.get_chat_completion = AsyncMock(
             return_value=({"text": "here you go", "files": ["file-a"]}, 0.0)
         )
@@ -458,7 +458,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_mention_sends_text_reply_when_response_dict_has_no_files(self):
         handler, _, _, claude_service, message_service = self.make_handler()
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
         claude_service.get_chat_completion = AsyncMock(return_value=({"text": "just text", "files": []}, 0.0))
         channel = MagicMock()
         channel.id = 6
@@ -471,7 +471,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_mention_handles_none_response(self):
         handler, _, _, claude_service, message_service = self.make_handler()
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
         claude_service.get_chat_completion = AsyncMock(return_value=(None, 0.0))
         channel = MagicMock()
         channel.id = 3
@@ -485,7 +485,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_mention_handles_api_errors_with_fallback_send(self):
         handler, _, _, claude_service, message_service = self.make_handler()
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
         claude_service.get_chat_completion = AsyncMock(side_effect=AnthropicServiceError("bad upstream"))
         message_service.send_channel_reply = AsyncMock(side_effect=RuntimeError("discord fail"))
         channel = MagicMock()
@@ -501,7 +501,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_mention_logs_when_api_error_fallback_send_also_fails(self):
         handler, _, _, claude_service, message_service = self.make_handler()
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
         claude_service.get_chat_completion = AsyncMock(side_effect=AnthropicServiceError("bad upstream"))
         message_service.send_channel_reply = AsyncMock(side_effect=RuntimeError("discord fail"))
         channel = MagicMock()
@@ -575,7 +575,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             yield mention
 
         channel.history = history
-        context, _, _ = await handler._prepare_mention_context(mention, SimpleNamespace(id=999))
+        context, _ = await handler._prepare_mention_context(mention, SimpleNamespace(id=999))
 
         block = context[-1]["content"][-1]["text"]
         self.assertTrue(block.startswith("<reply_thread>"))
@@ -597,7 +597,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
                 yield msg
 
         channel.history = history
-        context, _, _ = await handler._prepare_mention_context(mention, SimpleNamespace(id=999))
+        context, _ = await handler._prepare_mention_context(mention, SimpleNamespace(id=999))
 
         channel.fetch_message.assert_not_awaited()
         self.assertFalse(any("<reply_thread>" in p.get("text", "") for p in context[-1]["content"]))
@@ -618,7 +618,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             yield mention
 
         channel.history = history
-        context, _, _ = await handler._prepare_mention_context(mention, SimpleNamespace(id=999))
+        context, _ = await handler._prepare_mention_context(mention, SimpleNamespace(id=999))
 
         handler._timezone_store.time_zones_block.assert_awaited_once_with(10, [111])
         self.assertIn("America/Denver", context[-1]["content"][-1]["text"])
@@ -656,7 +656,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         channel.history = history
 
         for model, expected in (("opus-5.5-direct", True), ("sonnet-5.5-direct", False), (None, False)):
-            _, system_prompt, _ = await handler._prepare_mention_context(
+            _, system_prompt = await handler._prepare_mention_context(
                 mention_msg, SimpleNamespace(id=999), model=model)
             self.assertEqual("## Thinking harder" in system_prompt, expected, model)
             if expected:
@@ -665,7 +665,6 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
     async def test_direct_models_get_tools_instead_of_injected_memory(self):
         handler, _, _, _, _ = self.make_handler(anthropic_service=MagicMock())
         handler._user_notes_provider = AsyncMock(return_value="<user_notes>n</user_notes>")
-        handler._channel_summary_provider = AsyncMock(return_value="## Lately in this channel")
         handler._memory_index_provider = AsyncMock(return_value="People you have memory notes on: <@111>.")
         channel = MagicMock()
         channel.id = 45
@@ -681,25 +680,22 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         channel.history = history
 
         with patch("src.bot.handlers.mention._load_how_i_work", return_value="## How you work"):
-            context, system_prompt, _ = await handler._prepare_mention_context(
+            context, system_prompt = await handler._prepare_mention_context(
                 mention_msg, SimpleNamespace(id=999), model="sonnet-5.5-direct")
             self.assertIn("## Your tools", system_prompt)
             self.assertIn("same turn", system_prompt)
             # Tools are described only in their definitions, not again in the system prompt.
             self.assertNotIn("`recall_users(", system_prompt)
             self.assertIn("People you have memory notes on: <@111>.", system_prompt)
-            handler._memory_index_provider.assert_awaited_once_with(5, 45)
+            handler._memory_index_provider.assert_awaited_once_with(5)
             self.assertNotIn("## How you work", system_prompt)
-            self.assertNotIn("## Lately in this channel", system_prompt)
             self.assertNotIn("user_notes", str(context))
             handler._user_notes_provider.assert_not_awaited()
-            handler._channel_summary_provider.assert_not_awaited()
 
-            context, system_prompt, _ = await handler._prepare_mention_context(
+            context, system_prompt = await handler._prepare_mention_context(
                 mention_msg, SimpleNamespace(id=999), model="gpt-test")
             self.assertNotIn("## Your tools", system_prompt)
             self.assertIn("## How you work", system_prompt)
-            self.assertIn("## Lately in this channel", system_prompt)
             self.assertIn("<user_notes>n</user_notes>", str(context))
 
     async def test_direct_models_get_raw_links_instead_of_fetched_content(self):
@@ -716,53 +712,20 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         channel.history = history
 
-        context, system_prompt, _ = await handler._prepare_mention_context(
+        context, system_prompt = await handler._prepare_mention_context(
             mention_msg, SimpleNamespace(id=999), model="sonnet-5.5-direct")
         fetcher.assert_not_awaited()
         self.assertIn("https://youtu.be/abc", str(context))
         self.assertNotIn("FETCHED", str(context))
         self.assertIn("read with `read_urls`", system_prompt)
 
-        context, _, _ = await handler._prepare_mention_context(mention_msg, SimpleNamespace(id=999), model="gpt-test")
+        context, _ = await handler._prepare_mention_context(mention_msg, SimpleNamespace(id=999), model="gpt-test")
         fetcher.assert_awaited()
         self.assertIn("FETCHED", str(context))
-
-    async def test_direct_models_get_the_day_summary_only_through_recall_today(self):
-        handler, _, _, _, _ = self.make_handler(anthropic_service=MagicMock())
-        provider = AsyncMock(return_value=("earlier: trucks", 0.05))
-        handler._day_summary_provider = provider
-        channel = MagicMock()
-        channel.id = 49
-        channel.name = "today"
-        mention_msg = self._simple_msg(1, channel)
-        mention_msg.guild = None
-
-        async def history(limit=None, after=None):
-            yield mention_msg
-
-        channel.history = history
-
-        _, system_prompt, cost = await handler._prepare_mention_context(
-            mention_msg, SimpleNamespace(id=999), model="sonnet-5.5-direct")
-        provider.assert_not_awaited()
-        self.assertEqual(cost, 0.0)
-        self.assertNotIn("<day_summary>", system_prompt)
-        self.assertIn("recall_today", [t.definition["name"] for t in handler._build_tools(mention_msg)])
-
-        tool = next(t for t in handler._build_tools(mention_msg) if t.definition["name"] == "recall_today")
-        result = await tool.run({})
-        provider.assert_awaited_once_with(channel, mention_msg, 999, "sonnet-5.5-direct")
-        self.assertAlmostEqual(result.cost, 0.05)
-
-        _, system_prompt, cost = await handler._prepare_mention_context(
-            mention_msg, SimpleNamespace(id=999), model="gpt-test")
-        self.assertIn("<day_summary>\nearlier: trucks", system_prompt)
-        self.assertAlmostEqual(cost, 0.05)
 
     async def test_prepare_context_reports_what_it_is_doing(self):
         fetcher = AsyncMock(return_value=("", []))
         handler, _, _, _, _ = self.make_handler(url_content_fetcher=fetcher)
-        handler._day_summary_provider = AsyncMock(return_value=("", 0.0))
         channel = MagicMock()
         channel.id = 50
         channel.name = "status"
@@ -779,8 +742,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         await handler._prepare_mention_context(linked, SimpleNamespace(id=999), model="gpt-test",
                                                on_status=statuses.append)
 
-        self.assertEqual(statuses, ["reading the chat...", "catching up on today...", "reading the chat...",
-                                    "reading links..."])
+        self.assertEqual(statuses, ["reading the chat...", "reading the chat...", "reading links..."])
 
     async def test_history_ranges_end_the_irc_log_where_discord_starts(self):
         handler, _, _, _, _ = self.make_handler()
@@ -845,7 +807,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         gemini_service = MagicMock()
         gemini_service.get_chat_completion = AsyncMock(return_value=("hi", 0.0))
         handler, _, _, _, _ = self.make_handler(anthropic_service=anthropic_service, gemini_service=gemini_service)
-        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system", 0.0))
+        handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
         channel, _ = self.make_streaming_channel()
         message = SimpleNamespace(author=SimpleNamespace(id=123), channel=channel, guild=None)
 
@@ -871,7 +833,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         channel.history = history
 
-        context, _, _ = await handler._prepare_mention_context(second_q, SimpleNamespace(id=999))
+        context, _ = await handler._prepare_mention_context(second_q, SimpleNamespace(id=999))
 
         self.assertEqual([c["role"] for c in context], ["user", "assistant", "user"])
         self.assertEqual([c["message_id"] for c in context], [1, 3, 2])

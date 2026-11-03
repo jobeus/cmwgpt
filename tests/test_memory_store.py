@@ -31,7 +31,7 @@ class TestMemoryStore(unittest.IsolatedAsyncioTestCase):
         await self.store.save_profile(42, 7, "a")
         await self.store.save_profile(42, 3, "b")
         await self.store.save_profile(43, 9, "c")
-        await self.store.save_channel_summary(42, 5, "not a profile")
+        await self.redis.set("cmwgpt:channel_summary:42:5", "not a profile")
         self.assertEqual(await self.store.list_user_ids(42), [3, 7])
 
     async def test_saving_again_replaces_the_profile(self):
@@ -101,23 +101,16 @@ class TestMemoryStore(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.store.get_processed_through(42), when)
         self.assertEqual(len(await self.redis.hget("cmwgpt:memory_job:42", "last_status")), 255)
 
-    async def test_channel_summaries_round_trip_and_clear_per_guild(self):
-        await self.store.save_channel_summary(42, 5, "tacos (2026-10-15)")
-        await self.store.save_channel_summary(43, 5, "other server")
+    async def test_clear_channel_summaries_removes_only_that_servers_old_summaries(self):
+        await self.redis.set("cmwgpt:channel_summary:42:5", "tacos (2026-10-15)")
+        await self.redis.set("cmwgpt:channel_summary:43:5", "other server")
         await self.store.save_profile(42, 1, "profile")
-        self.assertEqual(await self.store.get_channel_summary(42, 5), "tacos (2026-10-15)")
-        self.assertEqual(await self.store.get_channel_summary(42, 6), "")
-
-        await self.store.clear_learned_profiles(42)
-        self.assertEqual(await self.store.get_channel_summary(42, 5), "tacos (2026-10-15)")
 
         await self.store.clear_channel_summaries(42)
-        self.assertEqual(await self.store.get_channel_summary(42, 5), "")
-        self.assertEqual(await self.store.get_channel_summary(43, 5), "other server")
-        self.assertEqual(await self.store.get(42, 1), "")
 
-        await self.store.save_channel_summary(43, 5, "")
-        self.assertFalse(await self.redis.exists("cmwgpt:channel_summary:43:5"))
+        self.assertFalse(await self.redis.exists("cmwgpt:channel_summary:42:5"))
+        self.assertTrue(await self.redis.exists("cmwgpt:channel_summary:43:5"))
+        self.assertEqual(await self.store.get(42, 1), "profile")
 
 
 class TestRedisClient(unittest.TestCase):

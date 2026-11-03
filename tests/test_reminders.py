@@ -172,7 +172,7 @@ class TestReminderTools(unittest.IsolatedAsyncioTestCase):
         guild.id = 10
         message = SimpleNamespace(id=99, guild=guild, channel=MagicMock(id=20), author=SimpleNamespace(id=111111111))
         self.tools = {t.definition["name"]: t for t in build_mention_tools(
-            guild_id=10, channel_id=20, user_id=111111111, user_notes_provider=None, channel_summary_provider=None,
+            guild_id=10, channel_id=20, user_id=111111111, user_notes_provider=None,
             how_i_work_loader=lambda: "", state_service=MagicMock(), gemini_service=MagicMock(),
             default_image_model=None, message=message,
             reminder_service=self.reminders, timezone_store=self.zones,

@@ -1,7 +1,6 @@
 """
 Memory Commands - /memory (view and edit your own memory), /fillmemory (rebuild from the
-last week), /fillsummaries (rebuild only the channel summaries) and /botstate (see the
-bot's own mood, emotion, emoji, interests and wonderings).
+last week) and /botstate (see the bot's own mood, emotion, emoji, interests and wonderings).
 """
 
 import io
@@ -97,7 +96,7 @@ async def resolve_target(
 
 
 class MemoryCommands:
-    """Handles the /memory group, /fillmemory and /fillsummaries."""
+    """Handles the /memory group, /fillmemory and /botstate."""
 
     def __init__(
         self,
@@ -113,7 +112,6 @@ class MemoryCommands:
     def setup_commands(self) -> None:
         self.bot.tree.add_command(self._create_memory_group())
         self.bot.tree.add_command(self._create_fillmemory_command())
-        self.bot.tree.add_command(self._create_fillsummaries_command())
         self.bot.tree.add_command(self._create_botstate_command())
 
     def _create_memory_group(self) -> app_commands.Group:
@@ -165,23 +163,6 @@ class MemoryCommands:
             await safe_run(interaction, self._handle_fill, interaction)
 
         return fillmemory_command
-
-    def _create_fillsummaries_command(self) -> app_commands.Command:
-        @app_commands.command(
-            name="fillsummaries",
-            description=f"Rebuild every channel's 'lately' summary from the last {FILL_DAYS} days (admin only)",
-        )
-        async def fillsummaries_command(interaction: discord.Interaction):
-            if not interaction.user.guild_permissions.administrator:
-                await interaction.response.send_message(
-                    "❌ You need administrator permissions to use this command.", ephemeral=True
-                )
-                return
-            if not await safe_defer(interaction, ephemeral=False, thinking=True):
-                return
-            await safe_run(interaction, self._handle_fill_summaries, interaction)
-
-        return fillsummaries_command
 
     def _create_botstate_command(self) -> app_commands.Command:
         @app_commands.command(
@@ -265,20 +246,6 @@ class MemoryCommands:
             await interaction.channel.send(
                 f"Memory rebuilt: read {totals['messages']} messages over {totals['days']} days and "
                 f"updated {len(totals['users_updated'])} people (${totals['cost']:.3f})."
-            )
-
-    async def _handle_fill_summaries(self, interaction: discord.Interaction) -> None:
-        totals = await self._run_fill(
-            interaction,
-            "/fillsummaries",
-            f"Rebuilding every channel's summary from the last {FILL_DAYS} days of chat. "
-            f"People's memories aren't touched. I'll post progress here.",
-            self._memory_service.fill_channel_summaries,
-        )
-        if totals:
-            await interaction.channel.send(
-                f"Channel summaries rebuilt: read {totals['messages']} messages over {totals['days']} days "
-                f"in {totals['channels']} channels (${totals['cost']:.3f})."
             )
 
     async def _run_fill(

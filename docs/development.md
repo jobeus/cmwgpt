@@ -65,7 +65,7 @@ This starts:
 
 | Service | Purpose |
 | --- | --- |
-| `redis` | Redis 8 for per-user memory, channel summaries and content caches (data kept in the `redis-data` volume) |
+| `redis` | Redis 8 for per-user memory, the bot's own state and content caches (data kept in the `redis-data` volume) |
 | `bot` | Python Discord bot (`python:3.14-slim` image) |
 
 The checkout is mounted at `/app`, so code changes only need a restart

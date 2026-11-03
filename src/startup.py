@@ -18,7 +18,6 @@ from src.services.gemini_service import GeminiService
 from src.services.irc_log_service import load_irc_log
 from src.services.quote_service import load_quote_file
 from src.services.memory_service import MemoryService
-from src.services.day_summary_service import DaySummaryService
 from src.services.paste_service import PasteService
 from src.services.queue_service import QueueService
 from src.services.reminder_service import ReminderService
@@ -90,11 +89,6 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         gemini_service=gemini_service,
         anthropic_service=anthropic_service,
     )
-    day_summary_service = DaySummaryService(
-        gemini_service=gemini_service,
-        anthropic_service=anthropic_service,
-        store=memory_store,
-    )
     reminder_service = ReminderService(is_testing=app_config.is_testing)
     video_watcher = VideoWatcher(gemini_service) if app_config.gemini_api_key else None
     irc_log = load_irc_log(app_config.irc_log_path, app_config.irc_nicks_path)
@@ -107,8 +101,6 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         system_prompt_loader=lambda: get_system_prompt(app_config.system_prompt_path),
         include_num_chatlines=app_config.include_num_chatlines,
         user_notes_provider=memory_service.get_notes_block,
-        channel_summary_provider=memory_service.get_channel_summary,
-        day_summary_provider=day_summary_service.get_summary,
         default_image_model=app_config.default_image_model,
         irc_log=irc_log,
         memory_corrector=memory_service.correct if memory_service.available else None,

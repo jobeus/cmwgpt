@@ -176,7 +176,7 @@ class TestDownloadVideo(unittest.IsolatedAsyncioTestCase):
 class TestWatchVideoTool(unittest.IsolatedAsyncioTestCase):
     def tools(self, watcher, message):
         return {t.definition["name"]: t for t in build_mention_tools(
-            guild_id=None, channel_id=20, user_id=30, user_notes_provider=None, channel_summary_provider=None,
+            guild_id=None, channel_id=20, user_id=30, user_notes_provider=None,
             how_i_work_loader=lambda: "", state_service=MagicMock(), gemini_service=MagicMock(),
             default_image_model=None, message=message, video_watcher=watcher,
         )}

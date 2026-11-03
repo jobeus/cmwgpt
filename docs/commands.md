@@ -32,7 +32,6 @@ The bot's main chat experience is **mention-based**:
 | `/memory correct` | Privately has the memory model fix or add to your memory | persisted per user, per server |
 | `/memory clear` | Privately forgets everything about you | persisted per user, per server |
 | `/fillmemory` | Rebuilds everyone's learned memory from the last 7 days (admin only) | rewrites every memory key |
-| `/fillsummaries` | Rebuilds every channel's "lately" summary from the last 7 days (admin only) | rewrites channel summaries |
 | `/botstate` | Privately shows the bot's own mood, emotion, emoji, interests and wonderings | reads `cmwgpt:self:<guild>` in Redis |
 | `/wikicount` | Looks up a Wikipedia article's average monthly pageviews | runtime action |
 | `/cost` | Shows what the bot has spent today, in the last 7 days and this month, by provider | reads `cmwgpt:costs:<day>` in Redis |
@@ -51,16 +50,12 @@ it adds the profiles of the asker, anyone they @mentioned and the
 recent speakers (up to 8 people) to the end of the mention. The cached system prompt and
 history stay unchanged.
 
-The same nightly run also keeps a summary of what's been going on lately in each channel
-(`cmwgpt:channel_summary:<guild>:<channel>`). It summarizes each channel's day, then folds
-that into the channel's running summary, which is organized by topic and drops items that
-haven't come up in 14 days. All memory calls, including `/memory correct`, use medium effort on Claude API models.
+All memory calls, including `/memory correct`, use medium effort on Claude API models.
 
-A mention's prompt carries, in order: the channel's lately summary and a summary of the
-channel's chat since 02:00 from before the recent history (both in the system prompt), the
-last `INCLUDE_NUM_CHATLINES` messages, then the people's profiles on the mention. The
-since-02:00 summary uses the mention's model, is kept in memory, and only reads new messages
-as the history window moves forward.
+Nothing is summarized per channel or per day. A mention's prompt carries the recent history
+window (the last `INCLUDE_NUM_CHATLINES` messages, growing while mentions keep coming within
+an hour), then the people's profiles on the mention. For anything older, the model searches
+the chat with its tools.
 
 Every `/memory` command replies only to you. `correct` sends your correction and the current
 profile to `MEMORY_MODEL`, which changes, removes or adds only what the correction covers, and
@@ -73,14 +68,8 @@ there is no history of earlier versions.
 ### `/fillmemory`
 
 Requires the same administrator permission as `/restart`. It wipes every learned profile
-and channel summary in the server and rebuilds them from the last 7 days, posting progress after each day. The
+in the server and rebuilds them from the last 7 days, posting progress after each day. The
 nightly job then picks up from where the fill ended.
-
-### `/fillsummaries`
-
-Same permission as `/fillmemory`. It wipes and rebuilds only the channel "lately" summaries
-from the last 7 days, posting progress after each day. People's profiles, their corrections
-and the nightly job's progress are left alone.
 
 ### `/botstate`
 
@@ -169,7 +158,7 @@ to whoever ran it. Background work (the nightly memory job, the bot's self refre
 deathwatch posts) counts toward its provider only.
 
 A reply's `[$0.012]` prefix is the total of everything recorded while answering it: the
-model calls, the day summary, and whatever its tools spent (draws and edits, transcripts of
+model calls and whatever its tools spent (draws and edits, transcripts of
 linked videos and voice notes, memory edits).
 
 ## Persistence model
