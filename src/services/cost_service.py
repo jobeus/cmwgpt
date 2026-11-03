@@ -10,7 +10,8 @@ Two things hear about each cost:
 
 * the open :func:`cost_scope`, if any: the running total for one mention or command,
   shown as the reply's cost prefix. Tasks started inside a scope (``asyncio.gather``)
-  share it.
+  share it. The scope also collects usage stats (:func:`note_stat`: tokens, tools,
+  searches) for the mention log.
 * Redis, one hash per day (America/Denver) for ``/cost``:
   ``cmwgpt:costs:<YYYY-MM-DD>`` with fields ``provider:<name>``, ``user:<id>`` and
   ``channel:<id>``. Costs outside a scope (the nightly memory job, scheduled posts)
@@ -24,7 +25,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
-from typing import Callable, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import redis.asyncio as aioredis
@@ -49,6 +50,8 @@ class CostLedger:
     user_id: Optional[int] = None
     channel_id: Optional[int] = None
     by_provider: Dict[str, float] = field(default_factory=dict)
+    # Usage while answering, for the mention log: numbers add up, strings collect in a list.
+    stats: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def total(self) -> float:
@@ -74,6 +77,17 @@ def cost_scope(*, user_id: Optional[int] = None, channel_id: Optional[int] = Non
 
 def current_ledger() -> Optional[CostLedger]:
     return _current.get()
+
+
+def note_stat(name: str, value: Any) -> None:
+    """Add ``value`` to the open scope's ``name`` stat: a number adds up, anything else is appended."""
+    ledger = _current.get()
+    if ledger is None or value is None:
+        return
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        ledger.stats[name] = ledger.stats.get(name, 0) + value
+    else:
+        ledger.stats.setdefault(name, []).append(value)
 
 
 def _cost_key(day: date) -> str:

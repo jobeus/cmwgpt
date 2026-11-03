@@ -21,6 +21,7 @@ from src.services.gemini_service import GeminiServiceError, is_gemini_model
 from src.services.irc_log_service import IrcLog
 from src.services.quote_service import QuoteFile
 from src.services.completion_dispatch import dispatch_completion
+from src.services.mention_log import log_mention, mention_record
 from src.services.cost_service import CostLedger, cost_scope
 from src.services.streaming_reply import StreamingReply
 from src.utils.chat_context import COST_PREFIX_PATTERN, build_chat_context
@@ -216,7 +217,8 @@ class MentionHandler:
             message: discord.Message,
             bot_user: discord.User,
             model: str,
-            note: str = "") -> None:
+            note: str = "",
+            task: str = "") -> None:
         """
         Handle a bot mention by preparing context and sending a reply.
 
@@ -228,11 +230,19 @@ class MentionHandler:
             bot_user: The bot user object
             model: The model to use for the response
             note: Added to the end of the mention for the model (a due reminder's task)
+            task: The due reminder's task, for the mention log
         """
         # Collects every cost recorded while answering: the model calls,
         # and whatever the tools spend (draws, transcripts, memory edits).
+        started = time.monotonic()
         with cost_scope(user_id=message.author.id, channel_id=message.channel.id) as ledger:
-            await self._answer_mention(message, bot_user, model, ledger, note)
+            try:
+                await self._answer_mention(message, bot_user, model, ledger, note)
+            finally:
+                log_mention(mention_record(
+                    message, bot_user.id, model, ledger, seconds=time.monotonic() - started,
+                    task=task,
+                ))
 
     async def _answer_mention(
             self,
@@ -282,6 +292,7 @@ class MentionHandler:
 
                 if reply_content is None:
                     await streaming_reply.discard()
+                    ledger.stats["error"] = "empty response"
                     logger.error(f"❌ Received None from get_chat_completion for model {model}.")
                     await self._message_service.send_channel_reply(
                         message.channel,
@@ -305,13 +316,16 @@ class MentionHandler:
                     reply_text = f"[${cost:.3f}] {reply_text}"
 
                 await streaming_reply.finish(reply_text, files_to_upload)
+                ledger.stats["reply_chars"] = len(reply_text)
 
             except (GeminiServiceError, AnthropicServiceError) as e:
+                ledger.stats["error"] = str(e)[:500]
                 logger.error(f"❌ API error in mention handler:\\n{e}")
                 await self._send_error(
                     message.channel, f"Sorry, I encountered an error while processing your mention: {str(e)}")
 
             except discord.DiscordServerError as e:
+                ledger.stats["error"] = f"Discord server error: {concise_error(e)}"[:500]
                 # Discord's own API is erroring (Cloudflare HTML page). Log it
                 # concisely instead of dumping the page, and reassure that the
                 # bot itself is fine.
@@ -329,7 +343,8 @@ class MentionHandler:
                         f"⚠️ Couldn't notify the channel about the Discord outage either: {concise_error(discord_error)}"
                     )
 
-            except Exception:
+            except Exception as e:
+                ledger.stats["error"] = f"{type(e).__name__}: {e}"[:500]
                 logger.exception("🚨 Unexpected error in mention handler")
                 await self._send_error(
                     message.channel,
@@ -354,7 +369,7 @@ class MentionHandler:
         )
 
         async def handler(message: discord.Message, bot_user: discord.User, model: str) -> None:
-            await self.handle_mention(message, bot_user, model, note)
+            await self.handle_mention(message, bot_user, model, note, task=reminder.task)
 
         return await self._queue_service.queue_mention(
             message=request, bot_user=bot_user, model=model, handler=handler

@@ -30,7 +30,7 @@ Mention-first Discord bot with URL-aware prompt enrichment, image generation/edi
 | Tools | On the Claude API direct models, the model calls tools itself: draw/edit images, memory and summaries, Discord and old IRC log search, viewing posted images, reactions, the old quote bot, reading any URL, code execution, Wikipedia pageviews (`docs/architecture.md#claude-api-tools`) |
 | Images | `/draw` and `/edit` use Gemini's image models (banana-2.1, banana-pro, banana-2-lite) with aspect ratio, size, thinking, search grounding and up to 8 reference images |
 | Memory | A nightly job learns short per-user profiles (stored in Redis) and adds them to mentions; `/memory` shows and edits them |
-| Observability | Python logging goes to stdout and `logs/`; there is no request log table or log viewer |
+| Observability | Python logging goes to stdout and `logs/`; every answered mention also gets one JSON line in `logs/mentions.jsonl` (its whole text, model, cost, tokens, tools, web searches, time, errors). There is no request log table or log viewer |
 
 ## Choose a workflow
 

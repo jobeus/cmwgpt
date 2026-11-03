@@ -18,7 +18,7 @@ import discord
 
 from src.config import get_config
 from src.services.chat_tools import ChatTool, ToolResult, text_result
-from src.services.cost_service import CLAUDE_DIRECT, record_cost
+from src.services.cost_service import CLAUDE_DIRECT, note_stat, record_cost
 from src.utils.message_utils import clean_reply, resolve_bot_id
 
 logger = logging.getLogger(__name__)
@@ -335,6 +335,20 @@ def _usage_cost(usage: Any, model: DirectModel) -> float:
     return cost + searches * PRICE_WEB_SEARCH
 
 
+def _note_usage(response: Any) -> None:
+    """Add one response's tokens and web searches to the open cost scope's stats."""
+    usage = getattr(response, "usage", None)
+    note_stat("requests", 1)
+    if getattr(response, "model", None):
+        note_stat("served_by", response.model)
+    if usage is None:
+        return
+    for name in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
+        note_stat(name, getattr(usage, name, 0) or 0)
+    server_tool_use = getattr(usage, "server_tool_use", None)
+    note_stat("web_searches", (getattr(server_tool_use, "web_search_requests", 0) or 0) if server_tool_use else 0)
+
+
 def _log_cache_diagnostics(api_model: str, channel_id: Optional[int], response: Any) -> None:
     """Log why the prompt cache missed, from the response's cache diagnostics."""
     diagnostics = getattr(response, "diagnostics", None)
@@ -453,6 +467,7 @@ class AnthropicService:
             response_cost = _usage_cost(getattr(response, "usage", None), served_by)
             cost += response_cost
             await record_cost(CLAUDE_DIRECT, response_cost)
+            _note_usage(response)
             _log_cache_diagnostics(api_model, channel_id, response)
             previous_message_id = getattr(response, "id", None) or previous_message_id
             if code_file_ids is not None:
@@ -499,6 +514,7 @@ class AnthropicService:
             if tool is None:
                 return text_result(f"There's no tool named {name}.", is_error=True)
             on_status(tool.status)
+            note_stat("tools", name)
             logger.info(f"[tool] {name} {str(args)[:300]}")
             try:
                 return await tool.run(args)
@@ -632,6 +648,7 @@ class AnthropicService:
                 if reason is not None:
                     # Throw this response away and ask again at high effort.
                     escalated = True
+                    note_stat("think_harder", 1)
                     logger.info(f"[{api_model}] think_harder requested: {reason[:300]}")
                     # Clear any draft it wrote before the call.
                     show("")
@@ -655,6 +672,7 @@ class AnthropicService:
                     _with_assistant_content(sent_messages, response.content) + [{"role": "user", "content": results}]
                 )
                 tool_rounds += 1
+                note_stat("tool_rounds", 1)
                 if tool_rounds >= MAX_TOOL_ROUNDS:
                     kwargs["tool_choice"] = {"type": "none"}
         except anthropic.AuthenticationError as e:

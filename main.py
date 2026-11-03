@@ -5,6 +5,7 @@ import logging
 import signal
 import sys
 
+from src.services.mention_log import setup_mention_log
 from src.startup import create_bot_client
 from src.utils.logger import setup_logger
 
@@ -71,4 +72,5 @@ def main() -> None:
 if __name__ == "__main__":
     # Configured here rather than on import so tests never write to logs/.
     setup_logger()
+    setup_mention_log()
     main()
