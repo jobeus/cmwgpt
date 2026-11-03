@@ -99,6 +99,12 @@ class TestHelpers(unittest.TestCase):
         self.assertAlmostEqual(_usage_cost(usage, DIRECT_MODELS["sonnet-5.5-direct"]), 2.00 + 1.00 + 0.02)
         self.assertAlmostEqual(_usage_cost(usage, DIRECT_MODELS["opus-5.5-direct"]), 4.00 + 2.00 + 0.02)
 
+    def test_usage_cost_prices_1h_cache_writes_at_twice_input(self):
+        usage = _usage(input_tokens=0, output_tokens=0)
+        usage.cache_creation_input_tokens = 3_000_000
+        usage.cache_creation = SimpleNamespace(ephemeral_5m_input_tokens=1_000_000, ephemeral_1h_input_tokens=2_000_000)
+        self.assertAlmostEqual(_usage_cost(usage, DIRECT_MODELS["sonnet-5.5-direct"]), 2.50 + 2 * 4.00)
+
 
 def _history(n):
     return [{"role": "user", "content": [{"type": "text", "text": f"m{i}"}]} for i in range(n)]
@@ -164,9 +170,26 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         kwargs = client.beta.messages.create.call_args.kwargs
         self.assertEqual(kwargs["model"], "claude-sonnet-5-5")
         self.assertEqual(kwargs["system"][0]["text"], "be nice")
-        self.assertIn("cache_control", kwargs["system"][0])
+        self.assertEqual(kwargs["system"][0]["cache_control"], {"type": "ephemeral"})
         self.assertEqual(kwargs["tools"][0]["type"], "web_search_20260209")
         self.assertEqual(kwargs["fallbacks"], "default")
+
+    async def test_mention_replies_cache_system_and_history_for_an_hour(self):
+        service, client = self.make_service(_response("hi"))
+        await service.get_chat_completion(
+            model="sonnet-5.5-direct",
+            messages=[
+                {"role": "user", "content": [{"type": "text", "text": "earlier"}]},
+                {"role": "user", "content": [{"type": "text", "text": "hello"}]},
+            ],
+            system_prompt="be nice",
+            channel_id=42,
+        )
+        kwargs = client.beta.messages.create.call_args.kwargs
+        one_hour = {"type": "ephemeral", "ttl": "1h"}
+        self.assertEqual(kwargs["system"][0]["cache_control"], one_hour)
+        marked = [b["cache_control"] for m in kwargs["messages"] for b in m["content"] if "cache_control" in b]
+        self.assertEqual(marked, [one_hour])
 
     async def test_opus_uses_its_model_effort_and_price(self):
         usage = _usage(input_tokens=1_000_000, output_tokens=0)

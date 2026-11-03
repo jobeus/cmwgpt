@@ -33,6 +33,11 @@ class DirectModel:
     price_cache_read: float
     effort: str
 
+    @property
+    def price_cache_write_1h(self) -> float:
+        """1-hour cache writes cost twice the input price (5-minute ones 1.25x)."""
+        return self.price_input * 2
+
 
 # Bot-facing model alias -> Claude API model.
 DIRECT_MODELS: Dict[str, DirectModel] = {
@@ -166,10 +171,14 @@ def build_anthropic_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, A
 
 
 _EPHEMERAL = {"type": "ephemeral"}
+# Mention replies keep their channel's history window for an hour (HISTORY_WINDOW_SECONDS in
+# the mention handler), so their system prompt and history are cached that long too.
+_EPHEMERAL_1H = {"type": "ephemeral", "ttl": "1h"}
 
 
 def apply_history_breakpoints(
-    api_messages: List[Dict[str, Any]], previous_index: Optional[int]
+    api_messages: List[Dict[str, Any]], previous_index: Optional[int],
+    cache_control: Dict[str, str] = _EPHEMERAL,
 ) -> Optional[int]:
     """Mark cache breakpoints on the history and return this request's history index.
 
@@ -198,7 +207,7 @@ def apply_history_breakpoints(
         marked.add(previous_index)
     for index in marked:
         blocks = api_messages[index]["content"]
-        blocks[-1] = {**blocks[-1], "cache_control": _EPHEMERAL}
+        blocks[-1] = {**blocks[-1], "cache_control": cache_control}
     return current_index
 
 
@@ -312,10 +321,13 @@ def _usage_cost(usage: Any, model: DirectModel) -> float:
     """Price a response's ``usage`` block in USD at ``model``'s rates."""
     if usage is None:
         return 0.0
+    written = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    written_1h = getattr(getattr(usage, "cache_creation", None), "ephemeral_1h_input_tokens", 0) or 0
     cost = (
         (getattr(usage, "input_tokens", 0) or 0) * model.price_input
         + (getattr(usage, "output_tokens", 0) or 0) * model.price_output
-        + (getattr(usage, "cache_creation_input_tokens", 0) or 0) * model.price_cache_write
+        + (written - written_1h) * model.price_cache_write
+        + written_1h * model.price_cache_write_1h
         + (getattr(usage, "cache_read_input_tokens", 0) or 0) * model.price_cache_read
     ) / 1_000_000
     server_tool_use = getattr(usage, "server_tool_use", None)
@@ -549,11 +561,14 @@ class AnthropicService:
             "betas": ["server-side-fallback-2026-07-01", CACHE_DIAGNOSIS_BETA],
             "fallbacks": "default",
         }
+        # Only mention replies pass a channel; background jobs run hours apart, so they keep
+        # the cheaper 5-minute writes.
+        cache_control = _EPHEMERAL_1H if channel_id else _EPHEMERAL
         if system_prompt:
             # Its own breakpoint, so the system prompt still reads from cache when the history doesn't.
-            kwargs["system"] = [{"type": "text", "text": system_prompt, "cache_control": _EPHEMERAL}]
+            kwargs["system"] = [{"type": "text", "text": system_prompt, "cache_control": cache_control}]
         previous_index = self._history_breakpoints.get(channel_id) if channel_id else None
-        history_index = apply_history_breakpoints(api_messages, previous_index)
+        history_index = apply_history_breakpoints(api_messages, previous_index, cache_control)
         if search:
             kwargs["tools"] = [{
                 "type": "web_search_20260209",

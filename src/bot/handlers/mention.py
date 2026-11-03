@@ -30,8 +30,8 @@ from src.utils.downloader_utils import fetch_all_url_content
 logger = logging.getLogger(__name__)
 
 # How long after a mention the next one keeps extending the same history window
-# instead of starting over. Matches the Claude API's 5-minute prompt cache lifetime.
-HISTORY_WINDOW_SECONDS = 300
+# instead of starting over. Matches the 1-hour prompt cache the Claude API route asks for.
+HISTORY_WINDOW_SECONDS = 3600
 
 # What the reply preview says while the mention's context is put together.
 READING_CHAT_STATUS = "reading the chat..."
