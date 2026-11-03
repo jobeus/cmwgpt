@@ -284,7 +284,9 @@ REMIND_TOOL = {
     "description": (
         "Set a reminder that the bot posts in this channel when it's due, pinging the people it's for, as a "
         "reply to the message that asked. Use it whenever someone asks to be reminded, or asks you to remind "
-        "someone else. It fires within a minute of the time, any time of day, however far ahead."
+        "someone else. It fires within a minute of the time, any time of day, however far ahead. When something "
+        "should be done at that time, like looking up a result or checking on something, give it a `task`: "
+        "right after the ping you get the asking message again, with the task, and answer it with all your tools."
         " A clock time like '8pm' means the asker's time: pass their zone from <time_zones>, and if it isn't saved, ask them or work it out from their memory, then save it with set_timezone. When you confirm, give the time with its zone, e.g. '8:00 PM Mountain'. To move a reminder, cancel it and set it again."
     ),
     "input_schema": {
@@ -307,6 +309,13 @@ REMIND_TOOL = {
                 "items": {"type": "string"},
                 "description": "Discord user IDs of the people to ping. Empty means the person asking.",
             },
+            "task": {
+                "type": "string",
+                "description": (
+                    "What you should do when it fires, written to yourself, e.g. 'look up the final score of "
+                    "the Broncos game and post it'. Empty for a plain reminder."
+                ),
+            },
             "timezone": {
                 "type": "string",
                 "description": (
@@ -316,7 +325,7 @@ REMIND_TOOL = {
                 ),
             },
         },
-        "required": ["when", "about", "user_ids", "timezone"],
+        "required": ["when", "about", "user_ids", "task", "timezone"],
         "additionalProperties": False,
     },
     "strict": True,
@@ -1051,6 +1060,7 @@ def build_mention_tools(
                 text=str(args.get("about") or ""),
                 when=str(args.get("when") or ""),
                 zone=zone,
+                task=str(args.get("task") or ""),
             )
         except ValueError as e:
             return text_result(str(e), is_error=True)

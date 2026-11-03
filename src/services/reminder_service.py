@@ -6,13 +6,18 @@ server. Each is posted in the channel it was set in, pinging the people it's for
 reply to the message that asked for it. They're checked every ``POLL_SECONDS``, so one
 fires within a minute of its time, and there's no limit on how far ahead one can be.
 
+A reminder can also carry a ``task`` for the bot: once its ping is posted, the task runner
+(the mention handler) answers the message that asked for it again, with the task added,
+so the bot can look something up or act when the time comes.
+
 Redis keys:
 
 - ``cmwgpt:reminders:due`` - sorted set of reminder IDs, scored by when they're due
   (Unix seconds)
 - ``cmwgpt:reminder:<id>`` - hash with the reminder: ``guild_id``, ``channel_id``,
   ``message_id`` (the message that asked), ``user_ids`` (comma-separated), ``set_by``,
-  ``text``, ``due_at`` and ``tz`` (the zone its time was given in, for showing it)
+  ``text``, ``due_at``, ``tz`` (the zone its time was given in, for showing it) and
+  ``task`` (what the bot should do when it fires, or empty)
 - ``cmwgpt:reminders:next_id`` - counter for new IDs
 
 A reminder is removed once it's posted, or if its channel is gone. If posting fails
@@ -25,7 +30,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Set
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import discord
@@ -103,6 +108,7 @@ class Reminder:
     text: str
     due_at: datetime
     tz: str = ""
+    task: str = ""
 
     @property
     def zone(self) -> Optional[ZoneInfo]:
@@ -114,7 +120,8 @@ class Reminder:
     def describe(self) -> str:
         """One line for the model: ``#3 Sat 2026-10-31 8:00 PM MDT for <@1> (set by <@2>): trash``."""
         people = ", ".join(f"<@{uid}>" for uid in self.user_ids)
-        return f"#{self.id} {format_when(self.due_at, self.zone)} for {people} (set by <@{self.set_by}>): {self.text}"
+        line = f"#{self.id} {format_when(self.due_at, self.zone)} for {people} (set by <@{self.set_by}>): {self.text}"
+        return f"{line} (then you: {self.task})" if self.task else line
 
 
 def _from_hash(reminder_id: int, fields: Dict[str, str]) -> Optional[Reminder]:
@@ -129,6 +136,7 @@ def _from_hash(reminder_id: int, fields: Dict[str, str]) -> Optional[Reminder]:
             text=fields.get("text", ""),
             due_at=datetime.fromtimestamp(float(fields["due_at"]), timezone.utc),
             tz=fields.get("tz", ""),
+            task=fields.get("task", ""),
         )
     except (KeyError, ValueError):
         logger.warning(f"Skipping malformed reminder {reminder_id}: {fields}")
@@ -143,11 +151,12 @@ class ReminderStore:
 
     async def add(
         self, *, guild_id: int, channel_id: int, message_id: Optional[int], user_ids: Sequence[int],
-        set_by: int, text: str, due_at: datetime, tz: str = "",
+        set_by: int, text: str, due_at: datetime, tz: str = "", task: str = "",
     ) -> Reminder:
         client = self._redis_getter()
         reminder_id = int(await client.incr(_NEXT_ID_KEY))
-        reminder = Reminder(reminder_id, guild_id, channel_id, message_id, list(user_ids), set_by, text, due_at, tz)
+        reminder = Reminder(
+            reminder_id, guild_id, channel_id, message_id, list(user_ids), set_by, text, due_at, tz, task)
         await client.hset(_reminder_key(reminder_id), mapping={
             "guild_id": str(guild_id),
             "channel_id": str(channel_id),
@@ -157,6 +166,7 @@ class ReminderStore:
             "text": text,
             "due_at": str(due_at.timestamp()),
             "tz": tz,
+            "task": task,
         })
         await client.zadd(_DUE_KEY, {str(reminder_id): due_at.timestamp()})
         return reminder
@@ -212,6 +222,9 @@ def reminder_message(reminder: Reminder, now: datetime) -> str:
     return "\n".join(lines)
 
 
+TaskRunner = Callable[[Reminder, discord.Message], Awaitable[Any]]
+
+
 class ReminderService:
     """Sets, lists and cancels reminders, and posts them when they're due."""
 
@@ -227,9 +240,16 @@ class ReminderService:
         self._now = now
         self._bot: Optional[discord.Client] = None
         self._task: Optional[asyncio.Task] = None
+        self._task_runner: Optional[TaskRunner] = None
+        # Reminder tasks being handed to the runner, kept so they aren't garbage collected.
+        self._running: Set[asyncio.Task] = set()
 
     def set_bot(self, bot: discord.Client) -> None:
         self._bot = bot
+
+    def set_task_runner(self, runner: "TaskRunner") -> None:
+        """Set what answers a reminder's task: it gets the reminder and the message that asked for it."""
+        self._task_runner = runner
 
     def start(self) -> None:
         if self._is_testing or (self._task and not self._task.done()):
@@ -255,22 +275,27 @@ class ReminderService:
 
     async def add(
         self, *, guild_id: int, channel_id: int, message_id: Optional[int], user_ids: Sequence[int],
-        set_by: int, text: str, when: str, zone: Optional[ZoneInfo] = None,
+        set_by: int, text: str, when: str, zone: Optional[ZoneInfo] = None, task: str = "",
     ) -> Reminder:
         """Set a reminder. ``zone`` is what an absolute ``when`` is in (default: the chat's).
 
-        Raises ``ValueError`` with a reason the model can act on.
+        ``task`` is what the bot should do when it fires; it needs ``message_id``, since
+        that message is answered again then. Raises ``ValueError`` with a reason the model
+        can act on.
         """
         text = " ".join(text.split())
+        task = " ".join(task.split())
         if not text:
             raise ValueError("Say what the reminder is about.")
-        if len(text) > MAX_REMINDER_CHARS:
-            raise ValueError(f"Keep the reminder under {MAX_REMINDER_CHARS} characters.")
+        if len(text) > MAX_REMINDER_CHARS or len(task) > MAX_REMINDER_CHARS:
+            raise ValueError(f"Keep the reminder and its task under {MAX_REMINDER_CHARS} characters each.")
+        if task and not message_id:
+            raise ValueError("A reminder with a task has to be set from a message.")
         due_at = parse_when(when, self._now(), zone)
         reminder = await self._store.add(
             guild_id=guild_id, channel_id=channel_id, message_id=message_id,
             user_ids=list(dict.fromkeys(user_ids or [set_by])), set_by=set_by, text=text, due_at=due_at,
-            tz=zone.key if zone else "",
+            tz=zone.key if zone else "", task=task,
         )
         logger.info(f"[reminder] Set {reminder.describe()}")
         return reminder
@@ -329,4 +354,25 @@ class ReminderService:
             return False
         await self._store.remove(reminder.id)
         logger.info(f"[reminder] Posted {reminder.describe()}")
+        if reminder.task and self._task_runner:
+            # Its own task, so a long answer doesn't hold up other reminders.
+            running = asyncio.create_task(self._run_task(reminder, channel))
+            self._running.add(running)
+            running.add_done_callback(self._running.discard)
         return True
+
+    async def _run_task(self, reminder: Reminder, channel: Any) -> None:
+        """Hand a posted reminder's task to the runner, with the message that asked for it."""
+        assert self._task_runner is not None and reminder.message_id
+        try:
+            request = await channel.fetch_message(reminder.message_id)
+        except (discord.NotFound, discord.Forbidden):
+            logger.warning(f"[reminder] Skipping the task of #{reminder.id}: the message that set it is gone")
+            return
+        except discord.HTTPException as e:
+            logger.warning(f"[reminder] Couldn't fetch the message for #{reminder.id}'s task: {concise_error(e)}")
+            return
+        try:
+            await self._task_runner(reminder, request)
+        except Exception:
+            logger.exception(f"[reminder] Task of #{reminder.id} failed")

@@ -389,6 +389,28 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         state_service.mark_channel_active.assert_called_once_with(1)
         message_service.send_channel_reply.assert_awaited_once_with(channel, "hello there")
 
+    async def test_a_reminder_task_answers_the_asking_message_with_the_task_added(self):
+        handler, _, queue_service, claude_service, _ = self.make_handler()
+        handler._prepare_mention_context = AsyncMock(return_value=(
+            [{"role": "user", "content": [{"type": "text", "text": "remind us after the game"}]}], "system"))
+        claude_service.get_chat_completion = AsyncMock(return_value=("Broncos won 24-17", 0.0))
+        channel = MagicMock()
+        channel.id = 1
+        channel.typing.return_value = AsyncTyping()
+        request = SimpleNamespace(author=SimpleNamespace(id=123), channel=channel)
+        reminder = SimpleNamespace(id=7, task="look up the final score and post it")
+
+        self.assertTrue(await handler.queue_reminder_task(reminder, request, SimpleNamespace(id=999), "gpt-test"))
+        kwargs = queue_service.queue_mention.await_args.kwargs
+        self.assertIs(kwargs["message"], request)
+        await kwargs["handler"](request, SimpleNamespace(id=999), "gpt-test")
+
+        sent = claude_service.get_chat_completion.await_args.kwargs["messages"]
+        texts = [block["text"] for block in sent[-1]["content"]]
+        self.assertEqual(texts[0], "remind us after the game")
+        self.assertIn("Reminder #7", texts[1])
+        self.assertIn("look up the final score and post it", texts[1])
+
     def make_streaming_channel(self):
         preview = MagicMock()
         preview.edit = AsyncMock()

@@ -64,9 +64,10 @@ class DiscordBotClient:
         if getattr(self.services, "memory_service", None) is not None:
             self.services.memory_service.set_bot(self.bot)
 
-        # Reminders post themselves when due
+        # Reminders post themselves when due, then hand any task to the mention handler
         if getattr(self.services, "reminder_service", None) is not None:
             self.services.reminder_service.set_bot(self.bot)
+            self.services.reminder_service.set_task_runner(self._run_reminder_task)
 
         # Set up event handlers
         self._setup_events()
@@ -290,6 +291,23 @@ class DiscordBotClient:
         if getattr(self.services, "anthropic_service", None) is not None:
             self.services.anthropic_service.clear_channel_cache(channel_id)
 
+    def _channel_model(self, channel: Any) -> str:
+        """The model a channel answers with: its ``/model``, or the default if that's unset or unavailable."""
+        model = self.services.state_service.get_model(channel.id) or self.config.default_model
+        if is_model_unavailable(model, self.config):
+            logger.info(f"Model {model} for #{channel} is unavailable; using {self.config.default_model}")
+            model = self.config.default_model
+        return model
+
+    async def _run_reminder_task(self, reminder: Any, request: discord.Message) -> None:
+        """Answer a due reminder's task in its channel, queued like a mention."""
+        if self.bot.user is None:
+            return
+        queued = await self.mention_handler.queue_reminder_task(
+            reminder, request, self.bot.user, self._channel_model(request.channel))
+        if not queued:
+            logger.warning(f"[reminder] Couldn't queue the task of #{reminder.id}: the channel's queue is full")
+
     async def _handle_message(self, message: discord.Message) -> None:
         """
         Handle incoming Discord messages.
@@ -304,12 +322,7 @@ class DiscordBotClient:
 
         # Handle bot mentions
         if self.bot.user and self.bot.user in message.mentions and self.config.reply_to_mentions:
-            model = self.services.state_service.get_model(
-                message.channel.id) or self.config.default_model
-            if is_model_unavailable(model, self.config):
-                logger.info(
-                    f"Model {model} for #{message.channel} is unavailable; using {self.config.default_model}")
-                model = self.config.default_model
+            model = self._channel_model(message.channel)
 
             # Queue the mention for FIFO processing
             queued = await self.mention_handler.queue_mention(message, self.bot.user, model)

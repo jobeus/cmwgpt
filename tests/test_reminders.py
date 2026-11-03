@@ -1,5 +1,6 @@
 """Tests for reminders, people's time zones, and the tools that set them."""
 
+import asyncio
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -156,6 +157,43 @@ class TestReminderService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("8:00 PM MDT", saved.describe())
         self.assertEqual(saved.due_at, reminder.due_at)
 
+    async def test_a_task_runs_after_the_ping_with_the_asking_message(self):
+        bot, channel = _bot_with_channel()
+        request = SimpleNamespace(id=99)
+        channel.fetch_message = AsyncMock(return_value=request)
+        runner = AsyncMock()
+        self.service.set_bot(bot)
+        self.service.set_task_runner(runner)
+        reminder = await self.add(text="the game's over", task="look up the final score and post it")
+        self.assertIn("(then you: look up the final score and post it)", reminder.describe())
+
+        self.now[0] = NOW + timedelta(minutes=30)
+        self.assertEqual(await self.service.deliver_due(), 1)
+        await asyncio.gather(*self.service._running)
+
+        channel.send.assert_awaited_once()
+        channel.fetch_message.assert_awaited_once_with(99)
+        ran, asked = runner.await_args.args
+        self.assertEqual((ran.id, ran.task, asked), (reminder.id, "look up the final score and post it", request))
+
+    async def test_a_plain_reminder_or_a_deleted_request_runs_no_task(self):
+        bot, channel = _bot_with_channel()
+        channel.fetch_message = AsyncMock(side_effect=discord.NotFound(SimpleNamespace(status=404, reason="gone"), "gone"))
+        runner = AsyncMock()
+        self.service.set_bot(bot)
+        self.service.set_task_runner(runner)
+        await self.add()
+        await self.add(task="check the listing again")
+        self.now[0] = NOW + timedelta(minutes=30)
+        self.assertEqual(await self.service.deliver_due(), 2)
+        await asyncio.gather(*self.service._running)
+        runner.assert_not_awaited()
+        self.assertEqual(channel.fetch_message.await_count, 1)
+
+    async def test_a_task_needs_the_asking_message(self):
+        with self.assertRaises(ValueError):
+            await self.add(message_id=None, task="look it up")
+
     async def test_text_is_required_and_capped(self):
         with self.assertRaises(ValueError):
             await self.add(text="  ")
@@ -195,6 +233,13 @@ class TestReminderTools(unittest.IsolatedAsyncioTestCase):
         [reminder] = await self.reminders.pending(20)
         self.assertEqual(reminder.user_ids, [222222222])
         self.assertEqual(reminder.due_at, datetime(2026, 10, 31, 0, 0, tzinfo=UTC))
+
+    async def test_remind_saves_the_task(self):
+        await self.tools["remind"].run({
+            "when": "in 2 hours", "about": "the game's over", "user_ids": [],
+            "task": "look up the final score and post it", "timezone": ""})
+        [reminder] = await self.reminders.pending(20)
+        self.assertEqual((reminder.message_id, reminder.task), (99, "look up the final score and post it"))
 
     async def test_list_and_cancel(self):
         await self.tools["remind"].run({"when": "in 5 minutes", "about": "stretch", "user_ids": [], "timezone": ""})

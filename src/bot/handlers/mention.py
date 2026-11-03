@@ -86,6 +86,15 @@ def _mention_last(
     return others + [message]
 
 
+def _append_to_mention(chat_context: List[Dict[str, Any]], text: str) -> None:
+    """Add ``text`` to the last user turn (the mention)."""
+    for entry in reversed(chat_context):
+        if entry.get("role") == "user" and isinstance(entry.get("content"), list):
+            entry["content"].append({"type": "text", "text": text})
+            return
+    chat_context.append({"role": "user", "content": [{"type": "text", "text": text}]})
+
+
 def _conversation_user_ids(
     message: discord.Message, history_msgs: List[discord.Message], bot_user: discord.User
 ) -> List[int]:
@@ -206,7 +215,8 @@ class MentionHandler:
             self,
             message: discord.Message,
             bot_user: discord.User,
-            model: str) -> None:
+            model: str,
+            note: str = "") -> None:
         """
         Handle a bot mention by preparing context and sending a reply.
 
@@ -217,18 +227,20 @@ class MentionHandler:
             message: The Discord message containing the mention
             bot_user: The bot user object
             model: The model to use for the response
+            note: Added to the end of the mention for the model (a due reminder's task)
         """
         # Collects every cost recorded while answering: the model calls,
         # and whatever the tools spend (draws, transcripts, memory edits).
         with cost_scope(user_id=message.author.id, channel_id=message.channel.id) as ledger:
-            await self._answer_mention(message, bot_user, model, ledger)
+            await self._answer_mention(message, bot_user, model, ledger, note)
 
     async def _answer_mention(
             self,
             message: discord.Message,
             bot_user: discord.User,
             model: str,
-            ledger: CostLedger) -> None:
+            ledger: CostLedger,
+            note: str = "") -> None:
         async with best_effort_typing(message.channel):
             try:
                 # Mark channel as active
@@ -243,6 +255,8 @@ class MentionHandler:
                     recent_messages, system_prompt = await self._prepare_mention_context(
                         message, bot_user, model=model, on_status=streaming_reply.status, tools=tools
                     )
+                    if note:
+                        _append_to_mention(recent_messages, note)
                     logger.info(
                         f"Context prepared for mention by {message.author}, sending to {'Gemini' if is_gemini_model(model) else 'Claude API'}...")
                     channel_id = message.channel.id
@@ -321,6 +335,30 @@ class MentionHandler:
                     message.channel,
                     "Sorry, I encountered an unexpected error while processing your mention. Please try again later.",
                 )
+
+    async def queue_reminder_task(
+            self,
+            reminder: Any,
+            request: discord.Message,
+            bot_user: discord.User,
+            model: str) -> bool:
+        """Queue a due reminder's task: ``request`` (the message that set it) is answered again with the task.
+
+        The ping has already been posted. Returns False if the channel's queue is full.
+        """
+        note = (
+            f"<reminder_task>\nReminder #{reminder.id}, which you set from the message above, is due now and "
+            f"you've just posted its ping. When you set it, you gave yourself this task for when it fired: "
+            f"{reminder.task}\nDo it now and reply with the result. Don't set the same reminder again.\n"
+            "</reminder_task>"
+        )
+
+        async def handler(message: discord.Message, bot_user: discord.User, model: str) -> None:
+            await self.handle_mention(message, bot_user, model, note)
+
+        return await self._queue_service.queue_mention(
+            message=request, bot_user=bot_user, model=model, handler=handler
+        )
 
     async def _send_error(self, channel: Any, error_message: str) -> None:
         """Tell the channel a mention failed, falling back to a plain message if that fails too."""

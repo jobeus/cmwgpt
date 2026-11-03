@@ -222,7 +222,7 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | `react` | `add_reaction` on a message in the mention's channel (5 per reply; the tools section lists the server's custom emoji) | a guild |
 | `search_irc_log`, `read_irc_log_day`, `count_irc_log` | `src/services/irc_log_service.py` (memory-mapped log) | `IRC_LOG` (`IRC_NICKS` optional) |
 | `old_quotes` | `src/services/quote_service.py` | `OLD_QUOTE_BOT` |
-| `remind`, `list_reminders`, `cancel_reminder` | `src/services/reminder_service.py` (Redis; posts due reminders every 15s) | a guild |
+| `remind`, `list_reminders`, `cancel_reminder` | `src/services/reminder_service.py` (Redis; posts due reminders every 15s, then queues any `task` through `MentionHandler.queue_reminder_task`) | a guild |
 | `set_timezone` | `src/services/timezone_service.py` (Redis; also feeds the `<time_zones>` block on every mention) | a guild, Redis |
 | `summarize_youtube` | `VideoWatcher.summarize_youtube`: agentic through the Interactions API from 5 minutes (length from yt-dlp's metadata), else `GeminiService.summarize_youtube` (static), cached in `cmwgpt:cache:youtube_summaries` | `GEMINI_API_KEY` |
 | `transcribe_youtube` | `youtube_utils.get_transcript` (captions) | — |
