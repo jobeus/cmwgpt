@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import httpx
 
+from src.utils.market_format import amount, get_json, num, pct
+
 logger = logging.getLogger(__name__)
 
 GAMMA_URL = "https://gamma-api.polymarket.com"
@@ -35,23 +37,8 @@ _EVENT_URL_RE = re.compile(r"polymarket\.com/(?:[a-z]{2}/)?(?:event|market)/(?P<
 _SLUG_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)+")
 
 
-class PolymarketError(Exception):
-    """Polymarket couldn't be reached or answered with an error."""
-
-
 async def _get(client: httpx.AsyncClient, url: str, params: Optional[Dict[str, Any]] = None) -> Any:
-    try:
-        response = await client.get(url, params=params)
-    except httpx.HTTPError as e:
-        raise PolymarketError(f"Couldn't reach Polymarket: {e.__class__.__name__}") from e
-    if response.status_code == 404:
-        return None
-    if response.status_code >= 400:
-        raise PolymarketError(f"Polymarket answered HTTP {response.status_code}.")
-    try:
-        return response.json()
-    except ValueError as e:
-        raise PolymarketError("Polymarket sent something that isn't JSON.") from e
+    return await get_json(client, url, params, "Polymarket")
 
 
 def _json_list(value: Any) -> List[Any]:
@@ -67,26 +54,8 @@ def _json_list(value: Any) -> List[Any]:
     return []
 
 
-def _num(value: Any) -> Optional[float]:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
 def _money(value: Any) -> str:
-    n = _num(value) or 0.0
-    if n >= 1_000_000_000:
-        return f"${n / 1_000_000_000:.2f}B"
-    if n >= 1_000_000:
-        return f"${n / 1_000_000:.1f}M"
-    if n >= 10_000:
-        return f"${n / 1000:.0f}k"
-    return f"${n:,.0f}"
-
-
-def _pct(p: float) -> str:
-    return f"{p * 100:.1f}%"
+    return amount(value)
 
 
 def _day(value: Any) -> Optional[str]:
@@ -94,7 +63,7 @@ def _day(value: Any) -> Optional[str]:
 
 
 def _prices(market: Dict[str, Any]) -> List[Optional[float]]:
-    return [_num(p) for p in _json_list(market.get("outcomePrices"))]
+    return [num(p) for p in _json_list(market.get("outcomePrices"))]
 
 
 def _yes_price(market: Dict[str, Any]) -> float:
@@ -111,20 +80,20 @@ def _market_line(market: Dict[str, Any], *, multi: bool) -> str:
     if closed and prices:
         winner = next((o for o, p in zip(outcomes, prices, strict=False) if p is not None and p >= 0.99), None)
         odds = f"closed, resolved {winner}" if winner else "closed, " + " · ".join(
-            f"{o} {_pct(p)}" for o, p in zip(outcomes, prices, strict=False) if p is not None)
+            f"{o} {pct(p)}" for o, p in zip(outcomes, prices, strict=False) if p is not None)
     elif outcomes[:2] == ["Yes", "No"] and prices and prices[0] is not None:
-        odds = f"Yes {_pct(prices[0])}"
+        odds = f"Yes {pct(prices[0])}"
     else:
-        odds = " · ".join(f"{o} {_pct(p)}" for o, p in zip(outcomes, prices, strict=False) if p is not None) or "no price"
+        odds = " · ".join(f"{o} {pct(p)}" for o, p in zip(outcomes, prices, strict=False) if p is not None) or "no price"
 
     parts = [odds]
-    change = _num(market.get("oneDayPriceChange"))
+    change = num(market.get("oneDayPriceChange"))
     if not closed and change:
         parts.append(f"24h {change * 100:+.1f}pts")
-    bid, ask = _num(market.get("bestBid")), _num(market.get("bestAsk"))
+    bid, ask = num(market.get("bestBid")), num(market.get("bestAsk"))
     if not closed and bid is not None and ask is not None and ask - bid > 0.05:
-        parts.append(f"bid {_pct(bid)}/ask {_pct(ask)}")
-    volume = _num(market.get("volumeNum")) or _num(market.get("volume"))
+        parts.append(f"bid {pct(bid)}/ask {pct(ask)}")
+    volume = num(market.get("volumeNum")) or num(market.get("volume"))
     if volume:
         parts.append(f"vol {_money(volume)}")
     if not multi and market.get("question"):
@@ -135,11 +104,11 @@ def _market_line(market: Dict[str, Any], *, multi: bool) -> str:
 def _event_header(event: Dict[str, Any]) -> str:
     title = event.get("title") or event.get("slug") or "?"
     bits = [f"volume {_money(event.get('volume'))}"]
-    if not event.get("closed") and _num(event.get("volume24hr")):
+    if not event.get("closed") and num(event.get("volume24hr")):
         bits.append(f"24h {_money(event.get('volume24hr'))}")
-    if _num(event.get("liquidity")):
+    if num(event.get("liquidity")):
         bits.append(f"liquidity {_money(event.get('liquidity'))}")
-    if _num(event.get("openInterest")):
+    if num(event.get("openInterest")):
         bits.append(f"open interest {_money(event.get('openInterest'))}")
     end = _day(event.get("endDate"))
     if event.get("closed"):
@@ -154,7 +123,7 @@ def _sorted_markets(event: Dict[str, Any]) -> List[Dict[str, Any]]:
     (placeholder outcomes like "Person A" sitting at 50%) are left out."""
     markets = [
         m for m in event.get("markets") or []
-        if isinstance(m, dict) and (m.get("closed") or _num(m.get("volumeNum")) or _num(m.get("volume")))
+        if isinstance(m, dict) and (m.get("closed") or num(m.get("volumeNum")) or num(m.get("volume")))
     ]
     return sorted(markets, key=lambda m: (bool(m.get("closed")), -_yes_price(m)))
 
@@ -178,21 +147,21 @@ async def _trend(client: httpx.AsyncClient, market: Dict[str, Any]) -> Optional[
                       {"market": str(tokens[0]), "interval": "1m", "fidelity": 360})
     history: List[Tuple[float, float]] = []
     for point in (data or {}).get("history") or []:
-        t, p = (_num(point.get("t")), _num(point.get("p"))) if isinstance(point, dict) else (None, None)
+        t, p = (num(point.get("t")), num(point.get("p"))) if isinstance(point, dict) else (None, None)
         if t is not None and p is not None:
             history.append((t, p))
     if len(history) < 2:
         return None
     week_ago = history[-1][0] - 7 * 86400
     start = datetime.fromtimestamp(history[0][0], tz=timezone.utc).strftime("%Y-%m-%d")
-    steps = [f"{_pct(history[0][1])} on {start}"]
+    steps = [f"{pct(history[0][1])} on {start}"]
     if history[0][0] < week_ago - 86400:
-        steps.append(f"{_pct(next(p for t, p in history if t >= week_ago))} a week ago")
-    steps.append(f"{_pct(history[-1][1])} now")
+        steps.append(f"{pct(next(p for t, p in history if t >= week_ago))} a week ago")
+    steps.append(f"{pct(history[-1][1])} now")
     values = [p for _, p in history]
     outcome = (_json_list(market.get("outcomes")) or ["Yes"])[0]
     label = market.get("groupItemTitle") or market.get("question") or "?"
-    return f"{label} ({outcome}): " + " → ".join(steps) + f" (range {_pct(min(values))}–{_pct(max(values))})"
+    return f"{label} ({outcome}): " + " → ".join(steps) + f" (range {pct(min(values))}–{pct(max(values))})"
 
 
 async def _event_by_slug(client: httpx.AsyncClient, slug: str) -> Optional[Dict[str, Any]]:
@@ -248,7 +217,7 @@ async def _search(client: httpx.AsyncClient, query: str, status: str) -> str:
 async def polymarket_lookup(query: str, status: str = "active") -> str:
     """Search Polymarket, or describe one event when ``query`` is a polymarket.com link or an event slug.
 
-    Returns "" when nothing matches. Raises ``PolymarketError`` when Polymarket can't be reached.
+    Returns "" when nothing matches. Raises ``MarketDataError`` when Polymarket can't be reached.
     """
     query = query.strip()
     status = status if status in STATUSES else "active"

@@ -37,10 +37,12 @@ from src.services.image_service import (
 from src.services.irc_log_service import MAX_CONTEXT_LINES, MAX_DAY_LINES, MAX_TOP_NICKS, IrcLog
 from src.services.quote_service import MAX_RANDOM, QuoteFile
 from src.services.timezone_service import describe_zone, resolve_zone
-from src.services.polymarket_service import STATUSES as POLYMARKET_STATUSES, PolymarketError, polymarket_lookup
+from src.services.kalshi_service import kalshi_lookup
+from src.services.polymarket_service import STATUSES as MARKET_STATUSES, polymarket_lookup
 from src.services.video_service import looks_like_message_id, video_attachment_url
 from src.utils.discord_helper import attachment_to_base64_data_url, compress_image, url_to_base64_data_url
 from src.utils.url_utils import wiki_title_candidates
+from src.utils.market_format import MarketDataError
 from src.utils.youtube_utils import extract_video_ids, get_transcript, get_video_summary, video_url
 
 logger = logging.getLogger(__name__)
@@ -526,7 +528,8 @@ POLYMARKET_TOOL = {
         "trend for the top 3 and the resolution rules. Searches match words in event titles, so use short keyword "
         "queries (\"2028 election\", \"bitcoin\", \"fed rates\") and try another wording if nothing matches. Prices "
         "are probabilities (Yes 62% means the market gives it 62%). Polymarket is a market, not a poll; cite the "
-        "event link when you quote odds."
+        "event link when you quote odds. For Kalshi use `kalshi`; when someone asks about prediction-market odds "
+        "without naming a site, check both and compare."
     ),
     "strict": True,
     "input_schema": {
@@ -538,8 +541,40 @@ POLYMARKET_TOOL = {
             },
             "status": {
                 "type": "string",
-                "enum": list(POLYMARKET_STATUSES),
+                "enum": list(MARKET_STATUSES),
                 "description": "active for open markets (the usual), closed for resolved ones, or all. Ignored for links.",
+            },
+        },
+        "required": ["query", "status"],
+        "additionalProperties": False,
+    },
+}
+
+KALSHI_TOOL = {
+    "name": "kalshi",
+    "description": (
+        "Look up live Kalshi prediction-market odds and stats. Use it whenever someone asks about Kalshi, posts a "
+        "kalshi.com link, or asks about prediction-market odds without naming a site (then also check `polymarket` "
+        "and compare). A search returns the 5 best-matching events (Kalshi's own relevance order), each with its total volume and up to "
+        "8 outcomes with their current probability and 24h change. A kalshi.com link, or an event or market ticker "
+        "like KXPRESPERSON-28, returns that one event in full: up to 30 outcomes with volume, 24h volume, open "
+        "interest, a 30-day trend of daily closing prices for the top 3 and the resolution rules; a link to a "
+        "series page lists that series' events. Use short keyword queries (\"2028 election\", \"fed rate\", "
+        "\"super bowl\") and try another wording if nothing matches. Prices are probabilities (Yes 62% means the "
+        "market gives it 62%); volume is in contracts, each paying $1. Cite the link when you quote odds."
+    ),
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Keywords to search for, a kalshi.com link, or an event or market ticker.",
+            },
+            "status": {
+                "type": "string",
+                "enum": list(MARKET_STATUSES),
+                "description": "active for open markets (the usual), closed for settled ones, or all. Ignored for links and tickers.",
             },
         },
         "required": ["query", "status"],
@@ -1253,20 +1288,25 @@ def build_mention_tools(
                 return text_result(f"{title.replace('_', ' ')}: {views:,} average monthly pageviews.")
         return text_result(f"No pageviews found for {candidates[0]}; the title must be exact.", is_error=True)
 
-    async def polymarket(args: Dict[str, Any]) -> ToolResult:
-        query = str(args.get("query") or "").strip()
-        if not query:
-            return text_result("Give keywords, a polymarket.com link or an event slug.", is_error=True)
-        status = str(args.get("status") or "active")
-        logger.info(f"[polymarket tool] Channel {channel_id} Query: {query[:200]} Status: {status}")
-        try:
-            text = await polymarket_lookup(query, status)
-        except PolymarketError as e:
-            return text_result(str(e), is_error=True)
-        if not text:
-            return text_result(
-                f"No {status} Polymarket events match \"{query}\". Try other keywords or another status.", is_error=True)
-        return text_result(text)
+    def market_lookup(
+        name: str, site: str, lookup: Callable[[str, str], Awaitable[str]],
+    ) -> Callable[[Dict[str, Any]], Awaitable[ToolResult]]:
+        async def run(args: Dict[str, Any]) -> ToolResult:
+            query = str(args.get("query") or "").strip()
+            if not query:
+                return text_result(f"Give keywords, a {site} link or a ticker/slug.", is_error=True)
+            status = str(args.get("status") or "active")
+            logger.info(f"[{name} tool] Channel {channel_id} Query: {query[:200]} Status: {status}")
+            try:
+                text = await lookup(query, status)
+            except MarketDataError as e:
+                return text_result(str(e), is_error=True)
+            if not text:
+                return text_result(
+                    f"No {status} {name.capitalize()} events match \"{query}\". Try other keywords or another status.",
+                    is_error=True)
+            return text_result(text)
+        return run
 
     async def read_urls(args: Dict[str, Any]) -> ToolResult:
         assert url_content_fetcher is not None  # only offered when set
@@ -1423,6 +1463,10 @@ def build_mention_tools(
         tools.append(ChatTool(OLD_QUOTES_TOOL, old_quotes, "digging up old quotes..."))
     if wiki_views:
         tools.append(ChatTool(WIKI_PAGEVIEWS_TOOL, wiki_pageviews, "checking wikipedia..."))
-    tools.append(ChatTool(POLYMARKET_TOOL, polymarket, "checking the odds..."))
+    # Looked up through the module so tests can patch the lookups.
+    tools.append(ChatTool(POLYMARKET_TOOL, market_lookup(
+        "polymarket", "polymarket.com", lambda q, st: polymarket_lookup(q, st)), "checking the odds..."))
+    tools.append(ChatTool(KALSHI_TOOL, market_lookup(
+        "kalshi", "kalshi.com", lambda q, st: kalshi_lookup(q, st)), "checking the odds..."))
     tools.append(ChatTool(HOW_I_WORK_TOOL, how_i_work, "checking how I work..."))
     return tools

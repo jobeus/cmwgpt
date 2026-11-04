@@ -837,7 +837,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         await handler.handle_mention(message, SimpleNamespace(id=999), "google")
 
         tools = anthropic_service.get_chat_completion.await_args.kwargs["tools"]
-        self.assertEqual([t.definition["name"] for t in tools], ["read_urls", "transcribe_youtube", "polymarket", "how_i_work"])
+        self.assertEqual([t.definition["name"] for t in tools], ["read_urls", "transcribe_youtube", "polymarket", "kalshi", "how_i_work"])
         self.assertNotIn("tools", gemini_service.get_chat_completion.await_args.kwargs)
 
     async def test_prepare_context_puts_queued_mention_after_replies_posted_while_waiting(self):

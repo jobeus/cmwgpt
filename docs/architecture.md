@@ -230,6 +230,7 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | `read_urls` | `fetch_all_url_content` (same fetchers and cache as enrichment), for any URL, including web search results; used instead of the API's `web_fetch` so links go through the site-specific fetchers | — |
 | `wiki_pageviews` | `DeathService.get_avg_monthly_views` | — |
 | `polymarket` | `src/services/polymarket_service.py` (Polymarket's public Gamma search/event API and CLOB price history, no key, no cache) | — |
+| `kalshi` | `src/services/kalshi_service.py` (kalshi.com's keyless `/v1/search/series` for search, the public Trade API v2 for events, markets and candlesticks, no key, no cache); formatting and fetch helpers shared with `polymarket` in `src/utils/market_format.py` | — |
 | `how_i_work` | `src/prompts/how_i_work.txt` | — |
 | `think_harder` (opus only) | handled inside `AnthropicService`: discards the reply and re-asks at high effort | — |
 

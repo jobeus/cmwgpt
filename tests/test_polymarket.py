@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from src.services import polymarket_service as pm
 from src.services.chat_tools import build_mention_tools
+from src.utils.market_format import MarketDataError
 
 
 def _market(label: str, yes: float, *, volume: float = 1000.0, closed: bool = False, **extra: Any) -> Dict[str, Any]:
@@ -143,7 +144,7 @@ class TestPolymarketTool(unittest.IsolatedAsyncioTestCase):
         result = await self._tool().run({"query": "zzqq", "status": "active"})
         self.assertTrue(result.is_error)
 
-    @patch("src.services.chat_tools.polymarket_lookup", side_effect=pm.PolymarketError("down"))
+    @patch("src.services.chat_tools.polymarket_lookup", side_effect=MarketDataError("down"))
     async def test_api_failure_is_an_error(self, _lookup):
         result = await self._tool().run({"query": "bitcoin", "status": "active"})
         self.assertTrue(result.is_error)
