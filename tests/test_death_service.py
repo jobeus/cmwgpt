@@ -110,6 +110,9 @@ class TestDeathService(unittest.TestCase):
         self.mock_bot.user = MagicMock()
         self.mock_bot.user.id = 99999
         self.service.set_bot(self.mock_bot)
+        # Polling tests assume every name is a person; the person check itself
+        # is tested through DeathService.is_person directly.
+        self.service.is_person = AsyncMock(return_value=True)
 
     def tearDown(self):
         self.loop.close()
@@ -645,6 +648,87 @@ class TestDeathService(unittest.TestCase):
             from src.services.death_service import parse_deaths_html
             mock_to_thread.assert_called_once_with(parse_deaths_html, SAMPLE_HTML)
             self.assertEqual(len(self.service._known_names), 4)
+
+        self.loop.run_until_complete(run_test())
+
+    # ----- Person check -----
+
+    def _real_is_person(self, title):
+        from src.services.death_service import DeathService
+        return DeathService.is_person(self.service, title)
+
+    @staticmethod
+    def _pageprops(item):
+        page = {"title": "X", "pageprops": {"wikibase_item": item}} if item else {"title": "X"}
+        return httpx.Response(200, json={"query": {"pages": [page]}})
+
+    @staticmethod
+    def _instance_of(*ids):
+        return httpx.Response(200, json={"claims": {"P31": [
+            {"mainsnak": {"datavalue": {"value": {"id": i}}}} for i in ids
+        ]}})
+
+    def test_is_person_true_for_human(self):
+        async def run_test():
+            http = self._fake_http(self._pageprops("Q133151"), self._instance_of("Q5"))
+            self.assertTrue(await self._real_is_person("Ozzy_Osbourne"))
+            self.assertEqual(http.get.await_args_list[1].kwargs["params"]["entity"], "Q133151")
+
+        self.loop.run_until_complete(run_test())
+
+    def test_is_person_false_for_football_club(self):
+        async def run_test():
+            self._fake_http(self._pageprops("Q221525"), self._instance_of("Q476028"))
+            self.assertFalse(await self._real_is_person("FC_Metz"))
+
+        self.loop.run_until_complete(run_test())
+
+    def test_is_person_gives_benefit_of_doubt_without_wikidata(self):
+        async def run_test():
+            self._fake_http(self._pageprops(None))
+            self.assertTrue(await self._real_is_person("Brand_New_Article"))
+            self._fake_http(self._pageprops("Q1"), httpx.Response(200, json={"claims": {}}))
+            self.assertTrue(await self._real_is_person("No_Claims"))
+
+        self.loop.run_until_complete(run_test())
+
+    def test_is_person_none_on_failure(self):
+        async def run_test():
+            self._fake_http(httpx.Response(503))
+            self.assertIsNone(await self._real_is_person("A"))
+            self._fake_http(self._pageprops("Q1"), httpx.Response(500))
+            self.assertIsNone(await self._real_is_person("B"))
+            self._fake_http(httpx.ConnectError("down"))
+            self.assertIsNone(await self._real_is_person("C"))
+
+        self.loop.run_until_complete(run_test())
+
+    def test_non_person_is_not_announced_and_failed_check_is_retried(self):
+        async def run_test():
+            self.service._first_poll = False
+            self.service._known_names = set()
+            self.service.is_person = AsyncMock(side_effect=[False, None, True])
+            self._fake_http(httpx.Response(200, text=SAMPLE_HTML))
+
+            with patch.object(self.service, "_save_state"), \
+                patch.object(self.service, "get_avg_monthly_views", AsyncMock(return_value=5_000_000)), \
+                patch.object(self.service, "_announce", AsyncMock()) as mock_announce, \
+                patch(
+                    "src.services.death_service.parse_deaths_html",
+                    return_value=[("FC Metz", "FC_Metz")],
+                ):
+                # Not a person: skipped, but remembered so it isn't re-checked.
+                await self.service._poll_once()
+                mock_announce.assert_not_awaited()
+                self.assertEqual(self.service._known_names, {("FC Metz", "FC_Metz")})
+
+                # A failed check leaves the name unseen so the next poll retries it.
+                self.service._known_names = set()
+                await self.service._poll_once()
+                mock_announce.assert_not_awaited()
+                self.assertEqual(self.service._known_names, set())
+                await self.service._poll_once()
+                mock_announce.assert_awaited_once()
 
         self.loop.run_until_complete(run_test())
 

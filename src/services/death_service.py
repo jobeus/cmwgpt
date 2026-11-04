@@ -3,7 +3,9 @@ Death Service — Monitor notable deaths via Wikipedia.
 
 Polls the Wikipedia "Deaths in <YEAR>" page every 15 seconds, detects newly-added
 names, checks their average monthly pageviews, and announces notable deaths
-(≥ MIN_AVG_MONTHLY_VIEWS) to a configured Discord channel.
+(≥ MIN_AVG_MONTHLY_VIEWS) to a configured Discord channel. Before announcing,
+Wikidata must confirm the article is about a human, so vandal entries such as
+a football club added to the page are skipped.
 
 State (the set of known names, plus the set of names that have already been
 announced) is persisted to a temp file on shutdown and reloaded on startup so
@@ -45,6 +47,10 @@ PAGEVIEW_MONTHS = 3
 
 # User-Agent per Wikimedia policy
 USER_AGENT = "cmwgpt-bot/1.0 (jobeus@gmail.com)"
+
+# Wikidata "instance of" property and the "human" item it must point at.
+WIKIDATA_INSTANCE_OF = "P31"
+WIKIDATA_HUMAN = "Q5"
 
 # Temp file for persisting known-names across restarts
 STATE_FILE = ".cache/cmwgpt_death_names.json"
@@ -320,6 +326,22 @@ class DeathService:
                     continue
 
                 if avg_views >= min_views:
+                    # The deaths page is open to anyone, so vandal entries
+                    # (football clubs, bands, ...) do turn up. Only announce
+                    # articles Wikidata confirms are about a human.
+                    person = await self.is_person(article_title)
+                    if person is None:
+                        logger.warning(
+                            f"Could not confirm {display_name} ({article_title}) is a person "
+                            f"— not marking as seen, will retry next poll"
+                        )
+                        unchecked.add((display_name, article_title))
+                        continue
+                    if not person:
+                        logger.info(
+                            f"Skipped: {display_name} ({article_title}) is not a person per Wikidata"
+                        )
+                        continue
                     logger.info(
                         f"Met threshold: {display_name} ({avg_views:,} avg monthly views) -> ANNOUNCING"
                     )
@@ -340,6 +362,62 @@ class DeathService:
         # could not check — those stay "new" so the next poll retries them.
         self._known_names = current - unchecked
         self._save_state()
+
+    # -- person check -------------------------------------------------------
+
+    async def is_person(self, article_title: str) -> Optional[bool]:
+        """Whether Wikidata says *article_title* is about a human.
+
+        Looks up the article's Wikidata item (following redirects), then checks
+        its "instance of" (P31) claims for "human" (Q5). Returns True when it
+        is, False when the item says it is something else, and None when the
+        lookup failed and should be retried. An article with no Wikidata item
+        yet (brand-new pages) or no P31 claims is given the benefit of the doubt.
+        """
+        try:
+            resp = await self._client().get(
+                "https://en.wikipedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "prop": "pageprops",
+                    "ppprop": "wikibase_item",
+                    "redirects": 1,
+                    "titles": article_title.replace("_", " "),
+                    "format": "json",
+                    "formatversion": 2,
+                },
+            )
+            if resp.status_code != 200:
+                logger.warning(f"Wikipedia pageprops returned {resp.status_code} for {article_title}")
+                return None
+            pages = resp.json().get("query", {}).get("pages", [])
+            item = pages[0].get("pageprops", {}).get("wikibase_item") if pages else None
+            if not item:
+                return True
+
+            resp = await self._client().get(
+                "https://www.wikidata.org/w/api.php",
+                params={
+                    "action": "wbgetclaims",
+                    "entity": item,
+                    "property": WIKIDATA_INSTANCE_OF,
+                    "format": "json",
+                },
+            )
+            if resp.status_code != 200:
+                logger.warning(f"Wikidata returned {resp.status_code} for {item} ({article_title})")
+                return None
+            claims = resp.json().get("claims", {}).get(WIKIDATA_INSTANCE_OF, [])
+            if not claims:
+                return True
+            kinds = {
+                c.get("mainsnak", {}).get("datavalue", {}).get("value", {}).get("id")
+                for c in claims
+            }
+            return WIKIDATA_HUMAN in kinds
+        except (httpx.HTTPError, asyncio.TimeoutError, ValueError) as exc:
+            logger.warning(f"Person check failed for {article_title}: {exc}")
+            return None
 
     # -- pageviews ----------------------------------------------------------
 
