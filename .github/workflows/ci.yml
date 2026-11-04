@@ -5,6 +5,8 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  # dependabot-automerge.yml dispatches this after merging, since its merge fires no push run.
+  workflow_dispatch:
 
 jobs:
   python:
@@ -45,7 +47,7 @@ jobs:
   deploy:
     # Tell the running bot about the new commit once tests pass on main.
     needs: python
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency:
       group: deploy

@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # Raises the >= floors in requirements.txt / test_requirements.txt. All bumps land in one
+  # PR so the bot restarts once per day at most; dependabot-automerge.yml merges it once CI passes.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: daily
+    versioning-strategy: increase
+    groups:
+      pip:
+        patterns: ["*"]
+        update-types: [major, minor, patch]
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(ci)"
