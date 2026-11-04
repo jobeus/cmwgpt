@@ -37,6 +37,7 @@ from src.services.image_service import (
 from src.services.irc_log_service import MAX_CONTEXT_LINES, MAX_DAY_LINES, MAX_TOP_NICKS, IrcLog
 from src.services.quote_service import MAX_RANDOM, QuoteFile
 from src.services.timezone_service import describe_zone, resolve_zone
+from src.services.polymarket_service import STATUSES as POLYMARKET_STATUSES, PolymarketError, polymarket_lookup
 from src.services.video_service import looks_like_message_id, video_attachment_url
 from src.utils.discord_helper import attachment_to_base64_data_url, compress_image, url_to_base64_data_url
 from src.utils.url_utils import wiki_title_candidates
@@ -510,6 +511,38 @@ WIKI_PAGEVIEWS_TOOL = {
             "title": {"type": "string", "description": "The article's exact title or its Wikipedia URL."},
         },
         "required": ["title"],
+        "additionalProperties": False,
+    },
+}
+
+POLYMARKET_TOOL = {
+    "name": "polymarket",
+    "description": (
+        "Look up live Polymarket prediction-market odds and stats. Use it whenever someone asks about "
+        "Polymarket, betting or prediction-market odds on something, what the market thinks will happen, or posts a "
+        "polymarket.com link. A search returns the 5 highest-volume matching events, each with total and 24h volume, "
+        "liquidity, end date and up to 8 outcomes with their current probability, 24h change and volume. A "
+        "polymarket.com link or an event slug returns that one event in full: up to 30 outcomes, a 30-day price "
+        "trend for the top 3 and the resolution rules. Searches match words in event titles, so use short keyword "
+        "queries (\"2028 election\", \"bitcoin\", \"fed rates\") and try another wording if nothing matches. Prices "
+        "are probabilities (Yes 62% means the market gives it 62%). Polymarket is a market, not a poll; cite the "
+        "event link when you quote odds."
+    ),
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Keywords to search for, a polymarket.com event link, or an event slug.",
+            },
+            "status": {
+                "type": "string",
+                "enum": list(POLYMARKET_STATUSES),
+                "description": "active for open markets (the usual), closed for resolved ones, or all. Ignored for links.",
+            },
+        },
+        "required": ["query", "status"],
         "additionalProperties": False,
     },
 }
@@ -1220,6 +1253,21 @@ def build_mention_tools(
                 return text_result(f"{title.replace('_', ' ')}: {views:,} average monthly pageviews.")
         return text_result(f"No pageviews found for {candidates[0]}; the title must be exact.", is_error=True)
 
+    async def polymarket(args: Dict[str, Any]) -> ToolResult:
+        query = str(args.get("query") or "").strip()
+        if not query:
+            return text_result("Give keywords, a polymarket.com link or an event slug.", is_error=True)
+        status = str(args.get("status") or "active")
+        logger.info(f"[polymarket tool] Channel {channel_id} Query: {query[:200]} Status: {status}")
+        try:
+            text = await polymarket_lookup(query, status)
+        except PolymarketError as e:
+            return text_result(str(e), is_error=True)
+        if not text:
+            return text_result(
+                f"No {status} Polymarket events match \"{query}\". Try other keywords or another status.", is_error=True)
+        return text_result(text)
+
     async def read_urls(args: Dict[str, Any]) -> ToolResult:
         assert url_content_fetcher is not None  # only offered when set
         urls = [str(u).strip() for u in args.get("urls") or [] if str(u).strip()]
@@ -1375,5 +1423,6 @@ def build_mention_tools(
         tools.append(ChatTool(OLD_QUOTES_TOOL, old_quotes, "digging up old quotes..."))
     if wiki_views:
         tools.append(ChatTool(WIKI_PAGEVIEWS_TOOL, wiki_pageviews, "checking wikipedia..."))
+    tools.append(ChatTool(POLYMARKET_TOOL, polymarket, "checking the odds..."))
     tools.append(ChatTool(HOW_I_WORK_TOOL, how_i_work, "checking how I work..."))
     return tools
