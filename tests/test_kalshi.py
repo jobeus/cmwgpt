@@ -5,8 +5,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import patch
 
 from src.services import kalshi_service as ks
-from src.services.chat_tools import build_mention_tools
-from src.utils.market_format import MarketDataError
 
 
 def _search_market(name: str, cents: int, *, result: str = "", volume: int = 1000, delta: int = 0) -> Dict[str, Any]:
@@ -123,7 +121,7 @@ class TestKalshiLookup(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(ks, "_get", get):
             text = await ks.kalshi_lookup("kxpresperson-28-jvan")
-        self.assertTrue(text.startswith("2028 U.S. Presidential Election winner? (In 2028)"))
+        self.assertTrue(text.startswith("Kalshi event: 2028 U.S. Presidential Election winner? (In 2028)"))
 
     async def test_series_link_lists_only_that_series(self):
         other = dict(SEARCH_EVENT, series_ticker="KXSBUXCC", event_title="Starbucks spend")
@@ -133,32 +131,6 @@ class TestKalshiLookup(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Kalshi series KXSB", text)
         self.assertIn("2027 NFL Champion", text)
         self.assertNotIn("Starbucks", text)
-
-
-class TestKalshiTool(unittest.IsolatedAsyncioTestCase):
-    def _tool(self):
-        tools = build_mention_tools(
-            guild_id=None, channel_id=1, user_id=2, user_notes_provider=None, how_i_work_loader=lambda: "",
-            state_service=None, gemini_service=None, default_image_model=None,
-        )
-        return {t.definition["name"]: t for t in tools}["kalshi"]
-
-    @patch("src.services.chat_tools.kalshi_lookup", return_value="odds")
-    async def test_passes_query_and_status(self, lookup):
-        result = await self._tool().run({"query": " fed ", "status": "closed"})
-        lookup.assert_awaited_once_with("fed", "closed")
-        self.assertEqual(result.content[0]["text"], "odds")
-
-    @patch("src.services.chat_tools.kalshi_lookup", return_value="")
-    async def test_no_match_is_an_error(self, _lookup):
-        result = await self._tool().run({"query": "zzqq", "status": "active"})
-        self.assertTrue(result.is_error)
-        self.assertIn("Kalshi", result.content[0]["text"])
-
-    @patch("src.services.chat_tools.kalshi_lookup", side_effect=MarketDataError("down"))
-    async def test_api_failure_is_an_error(self, _lookup):
-        result = await self._tool().run({"query": "fed", "status": "active"})
-        self.assertTrue(result.is_error)
 
 
 if __name__ == "__main__":

@@ -88,11 +88,11 @@ class TestChatTools(unittest.IsolatedAsyncioTestCase):
 
     def test_offers_all_tools_in_a_fixed_order(self):
         tools, _ = _tools()
-        self.assertEqual(list(tools), ["draw", "recall_users", "transcribe_youtube", "polymarket", "kalshi", "how_i_work"])
+        self.assertEqual(list(tools), ["draw", "recall_users", "transcribe_youtube", "prediction_markets", "how_i_work"])
 
     def test_leaves_out_tools_without_their_dependencies(self):
         tools, _ = _tools(guild_id=None, default_image_model=None)
-        self.assertEqual(list(tools), ["transcribe_youtube", "polymarket", "kalshi", "how_i_work"])
+        self.assertEqual(list(tools), ["transcribe_youtube", "prediction_markets", "how_i_work"])
 
     @patch("src.services.chat_tools.compress_image", return_value=b"jpeg")
     async def test_draw_uses_the_channel_model_and_returns_the_image(self, _compress):
@@ -165,7 +165,7 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(tools), [
             "draw", "edit_image", "recall_users", "remember",
             "search_messages", "read_messages", "view_images", "react", "transcribe_youtube", "wiki_pageviews",
-            "polymarket", "kalshi", "how_i_work",
+            "prediction_markets", "how_i_work",
         ])
 
     def test_every_tool_says_when_to_use_it(self):
@@ -349,7 +349,7 @@ class TestNewTools(unittest.IsolatedAsyncioTestCase):
         quote_file = MagicMock()
         quote_file.get.return_value = "quotes"
         tools, _ = _full_tools(quote_file=quote_file)
-        self.assertEqual(list(tools)[-5:], ["old_quotes", "wiki_pageviews", "polymarket", "kalshi", "how_i_work"])
+        self.assertEqual(list(tools)[-4:], ["old_quotes", "wiki_pageviews", "prediction_markets", "how_i_work"])
         result = await tools["old_quotes"].run({"query": "rogan", "random_count": 3})
         quote_file.get.assert_called_once_with(query="rogan", random_count=3, skip=0)
         self.assertEqual(result.content[0]["text"], "quotes")

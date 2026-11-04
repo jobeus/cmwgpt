@@ -183,7 +183,7 @@ async def _describe_event(client: httpx.AsyncClient, event: Dict[str, Any]) -> s
         bits.append("settled")
     elif expires:
         bits.append(f"expected to resolve {expires}")
-    lines = [title, f"   {_site_link(event.get('series_ticker'))} · event {event.get('event_ticker')}",
+    lines = [f"Kalshi event: {title}", f"   {_site_link(event.get('series_ticker'))} · event {event.get('event_ticker')}",
              "   " + " · ".join(bits)]
     for m in markets[:MAX_EVENT_MARKETS]:
         line = _price_line(
@@ -200,7 +200,7 @@ async def _describe_event(client: httpx.AsyncClient, event: Dict[str, Any]) -> s
         trends = await asyncio.gather(*(_trend(client, series, m) for m in open_markets), return_exceptions=True)
         trend_lines = [t for t in trends if isinstance(t, str)]
         if trend_lines:
-            lines.append("Daily closing price over the last 30 days:")
+            lines.append("Price trend over the last 30 days (daily closes):")
             lines.extend(f"   - {t}" for t in trend_lines)
     rules = str((markets or all_markets or [{}])[0].get("rules_primary") or "").strip()
     if rules:

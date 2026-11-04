@@ -178,11 +178,12 @@ async def _event_by_slug(client: httpx.AsyncClient, slug: str) -> Optional[Dict[
 
 async def _describe_event(client: httpx.AsyncClient, event: Dict[str, Any]) -> str:
     lines = _event_block(event, MAX_EVENT_MARKETS)
+    lines[0] = f"Polymarket event: {lines[0]}"
     open_markets = [m for m in _sorted_markets(event) if not m.get("closed")][:MAX_TRENDS]
     trends = await asyncio.gather(*(_trend(client, m) for m in open_markets), return_exceptions=True)
     trend_lines = [t for t in trends if isinstance(t, str)]
     if trend_lines:
-        lines.append("Price over the last 30 days:")
+        lines.append("Price trend over the last 30 days:")
         lines.extend(f"   - {t}" for t in trend_lines)
     rules = str(event.get("description") or "").strip()
     if rules:

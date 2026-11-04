@@ -6,8 +6,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import patch
 
 from src.services import polymarket_service as pm
-from src.services.chat_tools import build_mention_tools
-from src.utils.market_format import MarketDataError
 
 
 def _market(label: str, yes: float, *, volume: float = 1000.0, closed: bool = False, **extra: Any) -> Dict[str, Any]:
@@ -96,7 +94,7 @@ class TestPolymarketLookup(unittest.IsolatedAsyncioTestCase):
         routes = {"/events/slug/presidential-election-winner-2028": ELECTION, "/prices-history": history}
         text, api = await self._lookup(
             routes, "what are the odds https://polymarket.com/event/presidential-election-winner-2028?tid=1")
-        self.assertIn("Price over the last 30 days:", text)
+        self.assertIn("Price trend over the last 30 days:", text)
         self.assertIn("JD Vance (Yes): 10.0% on", text)
         self.assertIn("15.0% a week ago → 17.5% now (range 10.0%–17.5%)", text)
         self.assertIn("Resolution rules: Resolves to the winner", text)
@@ -109,7 +107,7 @@ class TestPolymarketLookup(unittest.IsolatedAsyncioTestCase):
             "/markets/slug/will-jd-vance-win-2028": {"events": [{"slug": "presidential-election-winner-2028"}]},
         }
         text, _ = await self._lookup(routes, "will-jd-vance-win-2028")
-        self.assertTrue(text.startswith("Presidential Election Winner 2028"))
+        self.assertTrue(text.startswith("Polymarket event: Presidential Election Winner 2028"))
 
     async def test_unknown_slug_falls_back_to_search(self):
         routes = {"/public-search": {"events": [ELECTION]}}
@@ -123,32 +121,6 @@ class TestPolymarketLookup(unittest.IsolatedAsyncioTestCase):
         ]}
         text, _ = await self._lookup({"/public-search": {"events": [game]}}, "lakers")
         self.assertIn("Lakers vs Celtics: Lakers 55.0% · Celtics 45.0%", text)
-
-
-class TestPolymarketTool(unittest.IsolatedAsyncioTestCase):
-    def _tool(self):
-        tools = build_mention_tools(
-            guild_id=None, channel_id=1, user_id=2, user_notes_provider=None, how_i_work_loader=lambda: "",
-            state_service=None, gemini_service=None, default_image_model=None,
-        )
-        return {t.definition["name"]: t for t in tools}["polymarket"]
-
-    @patch("src.services.chat_tools.polymarket_lookup", return_value="odds")
-    async def test_passes_query_and_status(self, lookup):
-        result = await self._tool().run({"query": " bitcoin ", "status": "closed"})
-        lookup.assert_awaited_once_with("bitcoin", "closed")
-        self.assertEqual(result.content[0]["text"], "odds")
-
-    @patch("src.services.chat_tools.polymarket_lookup", return_value="")
-    async def test_no_match_is_an_error(self, _lookup):
-        result = await self._tool().run({"query": "zzqq", "status": "active"})
-        self.assertTrue(result.is_error)
-
-    @patch("src.services.chat_tools.polymarket_lookup", side_effect=MarketDataError("down"))
-    async def test_api_failure_is_an_error(self, _lookup):
-        result = await self._tool().run({"query": "bitcoin", "status": "active"})
-        self.assertTrue(result.is_error)
-        self.assertEqual(result.content[0]["text"], "down")
 
 
 if __name__ == "__main__":
