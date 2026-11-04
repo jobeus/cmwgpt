@@ -65,7 +65,7 @@ class DeathCommands:
             await safe_followup_send(interaction, "The limerick service is not available.")
             return
 
-        ok, message = await self._death_service.write_limerick(person)
+        ok, message = await self._death_service.write_limerick(person, interaction.channel_id)
         logger.info(f"[/limerick] {interaction.user} requested '{person}' -> ok={ok}")
         await safe_followup_send(interaction, message if ok else f"❌ {message}")
 

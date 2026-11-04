@@ -455,7 +455,7 @@ class DeathService:
             logger.error(f"Failed to send death announcement: {exc}")
             return
 
-        summary = await self._summarize_person(display_name, wiki_link)
+        summary = await self._summarize_person(display_name, wiki_link, channel.id)
         if not summary:
             return
 
@@ -464,16 +464,25 @@ class DeathService:
         except discord.HTTPException as exc:
             logger.error(f"Failed to send death summary follow-up: {exc}")
 
+    def _channel_model(self, channel_id: Optional[int]) -> Optional[str]:
+        """The model set for ``channel_id``, or the default model when it has none."""
+        if channel_id is not None:
+            model = self._state_service.get_model(channel_id)
+            if model:
+                return model
+        return self._model
+
     async def _summarize_person(
-        self, display_name: str, wiki_link: str
+        self, display_name: str, wiki_link: str, channel_id: Optional[int] = None
     ) -> Optional[str]:
         """Ask the chat model for a limerick about the deceased.
 
-        Uses the same model the mention handler uses. Best-effort: any failure
-        (or an unconfigured model/service) just returns None and the plain RIP
-        message is sent.
+        Uses the model set for the channel it's posted in, like a mention there would.
+        Best-effort: any failure (or an unconfigured model/service) just returns None
+        and the plain RIP message is sent.
         """
-        if not self._model:
+        model = self._channel_model(channel_id)
+        if not model:
             return None
 
         prompt = (
@@ -484,7 +493,7 @@ class DeathService:
         )
         try:
             reply, _cost = await dispatch_completion(
-                model=self._model,
+                model=model,
                 messages=[{"role": "user", "content": [{"type": "text", "text": prompt}]}],
                 system_prompt=None,
                 gemini_service=self._gemini_service,
@@ -499,13 +508,13 @@ class DeathService:
             logger.exception(f"Failed to summarize {display_name} for death announcement")
             return None
 
-    async def write_limerick(self, target: str) -> Tuple[bool, str]:
+    async def write_limerick(self, target: str, channel_id: Optional[int] = None) -> Tuple[bool, str]:
         """Write a limerick about any person, with no announcement attached.
 
-        Accepts a name or Wikipedia URL. Returns ``(ok, message)`` where the
-        message is the limerick itself on success.
+        Accepts a name or Wikipedia URL, and uses the model set for ``channel_id``.
+        Returns ``(ok, message)`` where the message is the limerick itself on success.
         """
-        if not self._model:
+        if not self._channel_model(channel_id):
             return False, "No chat model is configured for limericks."
 
         article_title = parse_article_title(target)
@@ -515,7 +524,7 @@ class DeathService:
         display_name = article_title.replace("_", " ")
         wiki_link = f"https://en.wikipedia.org/wiki/{article_title}"
 
-        limerick = await self._summarize_person(display_name, wiki_link)
+        limerick = await self._summarize_person(display_name, wiki_link, channel_id)
         if not limerick:
             return False, f"The model failed to produce a limerick for **{display_name}**."
         return True, limerick

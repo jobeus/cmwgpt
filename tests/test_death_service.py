@@ -99,6 +99,7 @@ class TestDeathService(unittest.TestCase):
         from src.services.death_service import DeathService
         self.state_service = MagicMock()
         self.state_service.get_death_settings.return_value = None
+        self.state_service.get_model.return_value = None
         self.service = DeathService(
             state_service=self.state_service,
             state_file="/tmp/_test_death_names.json",
@@ -800,6 +801,37 @@ class TestDeathService(unittest.TestCase):
             self.assertIn("https://en.wikipedia.org/wiki/Kevin_Keegan", prompt)
             self.assertIn("limerick", prompt.lower())
             self.assertFalse(kwargs["search"])
+
+        self.loop.run_until_complete(run_test())
+
+    def test_write_limerick_uses_the_channels_model(self):
+        """A channel with its own model gets it; one without falls back to the default."""
+        async def run_test():
+            mock_claude = MagicMock()
+            mock_claude.get_chat_completion = AsyncMock(return_value=("verse", 0.0))
+            self.service._anthropic_service = mock_claude
+            self.service._model = "sonnet-5.5-direct"
+            self.state_service.get_model.side_effect = (
+                lambda channel_id: "opus-5.5-direct" if channel_id == 42 else None)
+
+            await self.service.write_limerick("Kevin Keegan", 42)
+            self.assertEqual(mock_claude.get_chat_completion.call_args.kwargs["model"], "opus-5.5-direct")
+            await self.service.write_limerick("Kevin Keegan", 7)
+            self.assertEqual(mock_claude.get_chat_completion.call_args.kwargs["model"], "sonnet-5.5-direct")
+
+        self.loop.run_until_complete(run_test())
+
+    def test_write_limerick_with_only_a_channel_model(self):
+        """No default model is fine when the channel has one set."""
+        async def run_test():
+            mock_claude = MagicMock()
+            mock_claude.get_chat_completion = AsyncMock(return_value=("verse", 0.0))
+            self.service._anthropic_service = mock_claude
+            self.state_service.get_model.return_value = "sonnet-5.5-direct"
+
+            ok, message = await self.service.write_limerick("Kevin Keegan", 42)
+            self.assertTrue(ok)
+            self.state_service.get_model.assert_called_with(42)
 
         self.loop.run_until_complete(run_test())
 

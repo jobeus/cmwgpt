@@ -157,7 +157,7 @@ class TestDeathCommands(unittest.IsolatedAsyncioTestCase):
 
         await commands._handle_limerick(interaction, "Kevin Keegan")
 
-        death_service.write_limerick.assert_awaited_once_with("Kevin Keegan")
+        death_service.write_limerick.assert_awaited_once_with("Kevin Keegan", 123)
         interaction.followup.send.assert_awaited_once_with(
             content="There once was a keeper named Kev...", ephemeral=False
         )
