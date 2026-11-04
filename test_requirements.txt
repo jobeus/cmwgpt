@@ -11,4 +11,4 @@ fakeredis>=2.40.0
 # Code quality and linting tools
 ruff>=0.17.3
 black>=26.10.1
-mypy>=2.4.0
+mypy>=2.4.1
