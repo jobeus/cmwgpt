@@ -18,6 +18,7 @@ from src.bot.commands.death import DeathCommands
 from src.bot.commands.memory import MemoryCommands
 from src.bot.commands.wikicount import WikiCountCommands
 from src.services.model_catalog import is_model_unavailable
+from src.telemetry import instrument_command_tree
 
 logger = logging.getLogger("discord_bot")
 
@@ -40,6 +41,7 @@ class DiscordBotClient:
         intents.message_content = True
         intents.members = True
         self.bot = commands.Bot(command_prefix="/", intents=intents)
+        instrument_command_tree(self.bot.tree)
         self._shutdown_started = False
         for service in (self.services.gemini_service, self.services.anthropic_service):
             service.set_bot_id_loader(lambda: self.bot.user.id if self.bot.user else None)

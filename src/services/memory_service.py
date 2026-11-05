@@ -38,6 +38,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import discord
+import logfire
 from zoneinfo import ZoneInfo
 
 from src.config import AppConfig
@@ -412,7 +413,8 @@ class MemoryService:
             run_at = next_run_after(now)
             await asyncio.sleep(max(0.0, (run_at - now).total_seconds()))
             try:
-                await self.run_nightly()
+                with logfire.span("nightly memory job"):
+                    await self.run_nightly()
             except Exception:
                 logger.exception("Nightly memory job failed")
 

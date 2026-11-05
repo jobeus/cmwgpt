@@ -48,6 +48,15 @@ These are loaded by `src/config.py`.
 | --- | --- | --- |
 | `REDIS_URL` | `redis://127.0.0.1:6379/0` | Per-user memory and content caches; use `redis://redis:6379/0` in the Docker dev stack. See `docs/redis_setup.md` |
 
+## Tracing (Pydantic Logfire)
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `LOGFIRE_TOKEN` | empty | Logfire project write token (`LOGFIRE_API_KEY` is read too). Set it and the bot sends traces and INFO+ logs; leave it empty and nothing is sent |
+| `LOGFIRE_ENVIRONMENT` | `development` for `.env.development`, else `production` | The environment Logfire files the traces under |
+
+Each mention is one trace: the context building, every Claude/Gemini call (prompt, reply, tool calls, tokens), every tool call, HTTP fetches and Redis commands, with the mention's cost and usage stats on the root span. Slash commands, the nightly memory job, death announcements and delivered reminders get their own traces. Images in prompts and tool results show up as a `[image/png, 412 KB]` note instead of base64. The 15-second reminder and death-page polls only keep a trace when the poll does something. The code is in `src/telemetry.py`.
+
 ## Recommended minimal setups
 
 ### Minimal bot-only local setup

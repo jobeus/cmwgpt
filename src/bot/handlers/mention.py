@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 import discord
+import logfire
 
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url, transcribe_audio_attachment
 from src.utils.discord_error_utils import best_effort_typing, concise_error
@@ -235,14 +236,23 @@ class MentionHandler:
         # Collects every cost recorded while answering: the model calls,
         # and whatever the tools spend (draws, transcripts, memory edits).
         started = time.monotonic()
-        with cost_scope(user_id=message.author.id, channel_id=message.channel.id) as ledger:
+        with logfire.span(
+            "mention by {user} in #{channel}",
+            user=getattr(message.author, "name", None),
+            channel=getattr(message.channel, "name", None),
+            model=model,
+        ) as span, cost_scope(user_id=message.author.id, channel_id=message.channel.id) as ledger:
             try:
                 await self._answer_mention(message, bot_user, model, ledger, note)
             finally:
-                log_mention(mention_record(
+                record = mention_record(
                     message, bot_user.id, model, ledger, seconds=time.monotonic() - started,
                     task=task,
-                ))
+                )
+                log_mention(record)
+                span.set_attributes(record)
+                if record.get("error"):
+                    span.set_level("error")
 
     async def _answer_mention(
             self,

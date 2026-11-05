@@ -30,6 +30,7 @@ from bs4 import BeautifulSoup
 from discord.ext import commands
 
 from src.services.completion_dispatch import dispatch_completion
+from src.telemetry import routine_span
 
 logger = logging.getLogger(__name__)
 
@@ -251,7 +252,8 @@ class DeathService:
         try:
             while self._running:
                 try:
-                    await self._poll_once()
+                    with routine_span("death page poll"):
+                        await self._poll_once()
                 except asyncio.CancelledError:
                     raise
                 except (httpx.HTTPError, asyncio.TimeoutError) as exc:

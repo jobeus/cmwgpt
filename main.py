@@ -5,8 +5,10 @@ import logging
 import signal
 import sys
 
+from src.config import load_resolved_env_file
 from src.services.mention_log import setup_mention_log
 from src.startup import create_bot_client
+from src.telemetry import setup_telemetry
 from src.utils.logger import setup_logger
 
 logger = logging.getLogger(__name__)
@@ -73,4 +75,6 @@ if __name__ == "__main__":
     # Configured here rather than on import so tests never write to logs/.
     setup_logger()
     setup_mention_log()
+    # Before the clients exist: it patches the Anthropic, Gemini, httpx and Redis libraries.
+    setup_telemetry(load_resolved_env_file())
     main()

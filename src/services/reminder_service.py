@@ -37,6 +37,7 @@ import discord
 import redis.asyncio as aioredis
 
 from src.db.redis_client import KEY_PREFIX, get_async_redis
+from src.telemetry import routine_span
 from src.utils.discord_error_utils import concise_error
 from src.utils.message_utils import prompt_timezone
 
@@ -266,7 +267,8 @@ class ReminderService:
         while True:
             started = time.monotonic()
             try:
-                await self.deliver_due()
+                with routine_span("reminder poll"):
+                    await self.deliver_due()
             except Exception as e:
                 logger.warning(f"Couldn't check reminders: {concise_error(e)}")
             await asyncio.sleep(max(1.0, POLL_SECONDS - (time.monotonic() - started)))

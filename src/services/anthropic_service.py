@@ -15,10 +15,12 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import anthropic
 import discord
+import logfire
 
 from src.config import get_config
 from src.services.chat_tools import ChatTool, ToolResult, text_result
 from src.services.cost_service import CLAUDE_DIRECT, note_stat, record_cost
+from src.telemetry import without_blobs
 from src.utils.message_utils import clean_reply, resolve_bot_id
 
 logger = logging.getLogger(__name__)
@@ -516,11 +518,22 @@ class AnthropicService:
             on_status(tool.status)
             note_stat("tools", name)
             logger.info(f"[tool] {name} {str(args)[:300]}")
-            try:
-                return await tool.run(args)
-            except Exception as e:
-                logger.warning(f"[tool] {name} failed: {e}")
-                return text_result(f"{name} failed: {e}", is_error=True)
+            with logfire.span("tool {tool_name}", tool_name=name, args=args) as span:
+                try:
+                    result = await tool.run(args)
+                except Exception as e:
+                    logger.warning(f"[tool] {name} failed: {e}")
+                    span.set_level("error")
+                    return text_result(f"{name} failed: {e}", is_error=True)
+                span.set_attributes({
+                    "is_error": result.is_error,
+                    "cost": result.cost,
+                    "files": len(result.files),
+                    "result": without_blobs(result.content),
+                })
+                if result.is_error:
+                    span.set_level("warn")
+                return result
 
         blocks = [block for block in response.content if getattr(block, "type", None) == "tool_use"]
         outcomes = await asyncio.gather(*(run_one(block) for block in blocks))

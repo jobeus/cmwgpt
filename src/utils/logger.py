@@ -97,5 +97,8 @@ def setup_logger():
     logging.getLogger("discord.gateway").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    # The Anthropic SDK's own copy of httpx (each request is a span in Logfire anyway).
+    logging.getLogger("httpx2").setLevel(logging.WARNING)
+    logging.getLogger("httpcore2").setLevel(logging.WARNING)
 
     return root
