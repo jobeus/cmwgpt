@@ -88,7 +88,7 @@ class StreamingReply:
             self._shown = preview
         except Exception as e:
             # Stop previewing; finish() still delivers the full reply.
-            logger.warning(f"Couldn't update the streamed reply preview: {concise_error(e)}")
+            logger.warning("Couldn't update the streamed reply preview: %s", concise_error(e))
             self._failed = True
         finally:
             self._sending = False
@@ -117,7 +117,7 @@ class StreamingReply:
                     await self._message.edit(content=content, suppress=True)
                 return
             except Exception as e:
-                logger.warning(f"Couldn't finish the streamed reply, posting it fresh: {concise_error(e)}")
+                logger.warning("Couldn't finish the streamed reply, posting it fresh: %s", concise_error(e))
                 await self.discard()
         if files:
             await self._message_service.send_channel_reply_with_files(self._channel, text, files)
@@ -132,7 +132,7 @@ class StreamingReply:
             try:
                 await message.delete()
             except Exception as e:
-                logger.warning(f"Couldn't delete the streamed reply preview: {concise_error(e)}")
+                logger.warning("Couldn't delete the streamed reply preview: %s", concise_error(e))
 
 
 def _preview(text: str, status: str, limit: int) -> str:

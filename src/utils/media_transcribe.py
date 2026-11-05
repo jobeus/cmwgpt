@@ -72,7 +72,7 @@ async def transcribe_audio(audio_bytes: bytes, filename: str, mime_type: str) ->
     await record_cost(GROQ, groq_cost(body.get("duration")))
     transcript = str(body.get("text") or "").strip()
     if not transcript:
-        logger.warning(f"Groq returned an empty transcript for {filename}")
+        logger.warning("Groq returned an empty transcript for %s", filename)
         return None
     return transcript
 
@@ -108,7 +108,7 @@ async def transcribe_audio_file(path: str, mime_type: str = "audio/mpeg") -> Opt
             os.path.join(chunk_dir, "chunk_%04d.mp3"),
         ])
         chunks = sorted(os.listdir(chunk_dir))
-        logger.info(f"Transcribing {os.path.basename(path)} in {len(chunks)} chunks")
+        logger.info("Transcribing %s in %s chunks", os.path.basename(path), len(chunks))
         parts = []
         for name in chunks:
             with open(os.path.join(chunk_dir, name), "rb") as f:
@@ -129,7 +129,7 @@ async def transcribe_video_url(video_url: str) -> Optional[str]:
     try:
         mp4_path = os.path.join(temp_dir, "video.mp4")
         mp3_path = os.path.join(temp_dir, "audio.mp3")
-        logger.info(f"Downloading video: {video_url}")
+        logger.info("Downloading video: %s", video_url)
         await download_public(video_url, mp4_path, timeout=DOWNLOAD_TIMEOUT_SECONDS)
         await asyncio.to_thread(
             _run_ffmpeg, ["-i", mp4_path, *SPEECH_AUDIO_ARGS, mp3_path])
@@ -185,7 +185,7 @@ def _download_audio(url: str, ydl_opts: dict) -> Optional[str]:
         # ffprobe finds no audio codec; retry forcing a format that has audio.
         if "unable to obtain file audio codec" not in str(e):
             raise
-        logger.warning(f"Audio extraction failed for format. Retrying with strict h264 fallback for {url}")
+        logger.warning("Audio extraction failed for format. Retrying with strict h264 fallback for %s", url)
         return _run_ydl(url, {**ydl_opts, "format": "best[vcodec=h264]"})
 
 
@@ -209,10 +209,10 @@ async def download_and_transcribe_video(
 
     cfg = get_config()
     if not cfg.groq_api_key:
-        logger.error(f"GROQ_API_KEY is not set. Cannot transcribe {label} videos.")
+        logger.error("GROQ_API_KEY is not set. Cannot transcribe %s videos.", label)
         return None
 
-    logger.info(f"Fetching {label} transcript for URL: {url}")
+    logger.info("Fetching %s transcript for URL: %s", label, url)
     # A private per-call temp directory, so concurrent requests for the same
     # video never clobber each other's files.
     temp_dir = tempfile.mkdtemp(prefix=f"{file_prefix}_")
@@ -222,22 +222,22 @@ async def download_and_transcribe_video(
             audio_file = await asyncio.to_thread(_download_audio, url, ydl_opts)
         except Exception as e:
             if "took longer than" in str(e):
-                logger.warning(f"Gave up downloading {label} video {url}: {e}")
+                logger.warning("Gave up downloading %s video %s: %s", label, url, e)
                 return None
             if not cfg.transcript_proxy:
-                logger.warning(f"Download failed and no proxy configured for {url}: {e}")
+                logger.warning("Download failed and no proxy configured for %s: %s", url, e)
                 return None
-            logger.warning(f"Direct download failed for {url}: {e}. Falling back to proxy.")
+            logger.warning("Direct download failed for %s: %s. Falling back to proxy.", url, e)
             try:
                 audio_file = await asyncio.to_thread(
                     _download_audio, url,
                     {**ydl_opts, "proxy": cfg.transcript_proxy, "progress_hooks": [_download_deadline_hook()]})
             except Exception as e2:
-                logger.warning(f"Proxy download also failed for {url}: {e2}. URL may not be a video.")
+                logger.warning("Proxy download also failed for %s: %s. URL may not be a video.", url, e2)
                 return None
 
         if not audio_file:
-            logger.warning(f"No audio downloaded for {label} URL (not a video?): {url}")
+            logger.warning("No audio downloaded for %s URL (not a video?): %s", label, url)
             return None
 
         transcript = await transcribe_audio_file(audio_file)
@@ -245,7 +245,7 @@ async def download_and_transcribe_video(
             await cache.set(url, transcript)
         return transcript
     except Exception as e:
-        logger.error(f"Unexpected error processing {label} video {url}: {e}")
+        logger.error("Unexpected error processing %s video %s: %s", label, url, e, exc_info=True)
         return None
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)

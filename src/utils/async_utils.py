@@ -3,7 +3,6 @@ Async command utilities for Discord bot commands.
 """
 
 import logging
-import traceback
 from typing import Any, Awaitable, Callable
 
 import discord
@@ -40,15 +39,11 @@ async def safe_run(interaction: discord.Interaction,
         # expired) mid-command. Nothing to respond to — one small log line,
         # no traceback dump.
         logger.warning(
-            f"Interaction vanished mid-command ({concise_error(e)}) — the invocation "
-            "message was likely deleted. Skipping the reply; the bot is still running."
+            "Interaction vanished mid-command (%s) — the invocation message was likely deleted. Skipping the reply; the bot is still running.", concise_error(e)
         )
     except Exception:
-        error_dump = traceback.format_exc()
-        logger.error(
-            f"\U0001f6a8 Unhandled error in async command!\n"
-            f"====== ERROR DUMP ======\n{error_dump}\n========================"
-        )
+        command = getattr(getattr(interaction, "command", None), "qualified_name", None) or "?"
+        logger.exception("Unhandled error in /%s for %s", command, getattr(interaction, "user", None))
         try:
             await interaction.followup.send(
                 content="Sorry, I encountered an unexpected error. Please try again later.",
@@ -56,4 +51,4 @@ async def safe_run(interaction: discord.Interaction,
             )
         except Exception as discord_error:
             logger.error(
-                f"Failed to send error message to Discord: {concise_error(discord_error)}")
+                "Failed to send error message to Discord: %s", concise_error(discord_error))

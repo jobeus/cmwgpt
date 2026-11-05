@@ -535,7 +535,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         with patch("src.bot.handlers.mention.logger.error") as mock_error:
             await handler.handle_mention(message, SimpleNamespace(id=999), "gpt-test")
 
-        self.assertTrue(any("Failed to send fallback error message" in call.args[0] for call in mock_error.call_args_list))
+        self.assertTrue(any("Couldn't post the fallback error message" in call.args[0] for call in mock_error.call_args_list))
 
     async def test_handle_mention_handles_unexpected_errors_with_fallback_send(self):
         handler, _, _, claude_service, message_service = self.make_handler()
@@ -567,7 +567,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         with patch("src.bot.handlers.mention.logger.error") as mock_error:
             await handler.handle_mention(message, SimpleNamespace(id=999), "gpt-test")
 
-        self.assertTrue(any("Failed to send fallback error message" in call.args[0] for call in mock_error.call_args_list))
+        self.assertTrue(any("Couldn't post the fallback error message" in call.args[0] for call in mock_error.call_args_list))
 
     def _simple_msg(self, msg_id, channel, content="hi", author_id=111):
         return SimpleNamespace(

@@ -156,7 +156,7 @@ class IrcLog:
                     pass  # a search in another thread still reads it; it unmaps once that's done
             self._data, self._mtime = data, mtime
             self._marker_offsets, self._marker_days = offsets, days
-            logger.info(f"[irc log] Mapped {self.path} ({len(data) / 1e6:.1f}MB, {len(days)} date markers)")
+            logger.info("[irc log] Mapped %s (%.1fMB, %s date markers)", self.path, len(data) / 1e6, len(days))
             return data
 
     def _canonical(self, nick: str) -> Optional[str]:
@@ -480,13 +480,13 @@ def load_irc_log(path: str, nicks_path: str = "") -> Optional[IrcLog]:
     if not path:
         return None
     if not Path(path).is_file():
-        logger.warning(f"[irc log] IRC_LOG={path} isn't a file; the search_irc_log tool is off.")
+        logger.warning("[irc log] IRC_LOG=%s isn't a file; the search_irc_log tool is off.", path)
         return None
     nicks = None
     if nicks_path:
         try:
             nicks = NickMap.from_file(nicks_path)
-            logger.info(f"[irc log] Loaded {len(nicks)} nick rules from {nicks_path}")
+            logger.info("[irc log] Loaded %s nick rules from %s", len(nicks), nicks_path)
         except OSError as e:
-            logger.warning(f"[irc log] Couldn't read IRC_NICKS={nicks_path}: {e}; nicks won't be consolidated.")
+            logger.warning("[irc log] Couldn't read IRC_NICKS=%s: %s; nicks won't be consolidated.", nicks_path, e)
     return IrcLog(path, nicks)

@@ -70,7 +70,7 @@ def assert_public_url_sync(url: str) -> None:
     try:
         addresses = _resolve_addresses(host)
     except socket.gaierror as e:
-        logger.debug(f"DNS resolution failed during SSRF check for {host}: {e}")
+        logger.debug("DNS resolution failed during SSRF check for %s: %s", host, e)
         return
 
     for addr in addresses:

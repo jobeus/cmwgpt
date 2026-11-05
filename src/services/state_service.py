@@ -134,10 +134,10 @@ class StateService:
             fd = os.open(temp_filename, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(state_data, f, indent=2)
-            logger.debug(f"State saved to temporary file: {temp_filename}")
+            logger.debug("State saved to temporary file: %s", temp_filename)
             return temp_filename
         except (OSError, TypeError, ValueError) as e:
-            logger.error(f"Failed to save state to temporary file: {e}")
+            logger.error("Failed to save state to temporary file: %s", e)
             return None
 
     def load_state_from_temp_files(self) -> bool:
@@ -156,18 +156,17 @@ class StateService:
                     self._last_git_sha = state_data.get("last_git_sha")
                     self._restart_info = state_data.get("restart_info") or {}
                 logger.info(
-                    f"Restored {len(self._active_channels)} active channels from {state_file} "
-                    f"(last git SHA: {self._last_git_sha}, restart info: {self._restart_info})"
+                    "Restored %s active channels from %s (last git SHA: %s, restart info: %s)", len(self._active_channels), state_file, self._last_git_sha, self._restart_info
                 )
                 break
             except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
-                logger.error(f"Failed to load state from {state_file}: {e}")
+                logger.error("Failed to load state from %s: %s", state_file, e)
 
         for state_file in state_files:
             try:
                 os.remove(state_file)
             except OSError as e:
-                logger.error(f"Failed to clean up temporary file {state_file}: {e}")
+                logger.error("Failed to clean up temporary file %s: %s", state_file, e)
         return True
 
     # -- settings file --------------------------------------------------------
@@ -190,7 +189,7 @@ class StateService:
                 json.dump(settings_data, f, indent=2)
             os.replace(temp_file, self._settings_file)
         except (OSError, ValueError) as e:
-            logger.error(f"Failed to save settings: {e}")
+            logger.error("Failed to save settings: %s", e)
 
     def _load_settings(self) -> None:
         if not os.path.exists(self._settings_file):
@@ -205,4 +204,4 @@ class StateService:
                 self._death_settings = settings_data.get("death_settings")
             logger.info("Loaded persistent settings from disk")
         except (OSError, json.JSONDecodeError, ValueError) as e:
-            logger.error(f"Failed to load settings: {e}")
+            logger.error("Failed to load settings: %s", e)

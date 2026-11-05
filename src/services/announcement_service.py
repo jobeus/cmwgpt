@@ -61,10 +61,10 @@ class AnnouncementService:
             if result.returncode == 0:
                 return result.stdout.strip()  # Full SHA
             else:
-                logger.error(f"Failed to get git SHA: {result.stderr}")
+                logger.error("Failed to get git SHA: %s", result.stderr)
                 return None
         except Exception as e:
-            logger.error(f"Error getting git SHA: {e}")
+            logger.error("Error getting git SHA: %s", e, exc_info=True)
             return None
 
     def _get_complete_changelog(
@@ -96,7 +96,7 @@ class AnnouncementService:
                 return "\n".join(f"• {line}" for line in lines)
             return None
         except Exception as e:
-            logger.debug(f"Error getting changelog: {e}")
+            logger.debug("Error getting changelog: %s", e)
             return None
 
     @staticmethod
@@ -140,7 +140,7 @@ class AnnouncementService:
         # announcement
         if previous_sha and previous_sha == current_sha:
             logger.info(
-                f"Git SHA unchanged ({current_sha[:7]}), skipping duplicate update announcement")
+                "Git SHA unchanged (%s), skipping duplicate update announcement", current_sha[:7])
             return
 
         # Get active channels
@@ -180,13 +180,13 @@ class AnnouncementService:
                     message = f"{base_message} Changes:\n[View complete changelog]({paste_url})"
                 except Exception as e:
                     logger.error(
-                        f"Failed to upload changelog to paste service: {e}")
+                        "Failed to upload changelog to paste service: %s", e, exc_info=True)
                     message = self._build_truncated_message(base_message, changelog)
             else:
                 message = self._build_truncated_message(base_message, changelog)
 
         logger.info(
-            f"Announcing update to {len(active_channels)} channels: {current_sha_short}")
+            "Announcing update to %s channels: %s", len(active_channels), current_sha_short)
 
         # Send announcements to all active channels
         successful_announcements = 0
@@ -199,31 +199,31 @@ class AnnouncementService:
                     await channel.send(message)
                     successful_announcements += 1
                     logger.debug(
-                        f"Sent update announcement to #{channel.name} ({channel_id})"
+                        "Sent update announcement to #%s (%s)", channel.name, channel_id
                     )
 
                     # Small delay to avoid rate limiting
                     await asyncio.sleep(0.5)
                 else:
                     logger.warning(
-                        f"Could not find or access channel {channel_id}")
+                        "Could not find or access channel %s", channel_id)
                     failed_announcements += 1
             except discord.Forbidden:
                 logger.warning(
-                    f"No permission to send message to channel {channel_id}")
+                    "No permission to send message to channel %s", channel_id)
                 failed_announcements += 1
             except discord.HTTPException as e:
                 logger.error(
-                    f"HTTP error sending announcement to channel {channel_id}: {e}")
+                    "HTTP error sending announcement to channel %s: %s", channel_id, e)
                 failed_announcements += 1
             except Exception as e:
                 logger.error(
-                    f"Unexpected error sending announcement to channel {channel_id}: {e}")
+                    "Unexpected error sending announcement to channel %s: %s", channel_id, e, exc_info=True)
                 failed_announcements += 1
 
         logger.info(
-            f"Update announcements sent: {successful_announcements} successful, {failed_announcements} failed")
+            "Update announcements sent: %s successful, %s failed", successful_announcements, failed_announcements)
 
         # Update the git SHA in state now that we've announced the update
         self._state_service.set_last_git_sha(current_sha)
-        logger.debug(f"Updated last git SHA to: {current_sha[:7]}")
+        logger.debug("Updated last git SHA to: %s", current_sha[:7])

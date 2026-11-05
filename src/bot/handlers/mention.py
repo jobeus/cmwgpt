@@ -69,7 +69,7 @@ def _load_how_i_work() -> str:
     try:
         return HOW_I_WORK_PATH.read_text(encoding="utf-8").strip()
     except OSError:
-        logger.warning(f"Architecture summary '{HOW_I_WORK_PATH}' not found; leaving it out.")
+        logger.warning("Architecture summary '%s' not found; leaving it out.", HOW_I_WORK_PATH)
         return ""
 
 
@@ -100,7 +100,9 @@ def _logs_note(channel_id: int) -> str:
         "mention is a root span named 'mention by {user} in #{channel}' with attributes `message_id`, "
         "`channel_id`, `user`, `text`, `model`, `cost`, `seconds`, `tools` and `error`; inside its trace are "
         "the model calls, a 'tool {tool_name}' span per tool call (`args`, `is_error`, `result`), the HTTP "
-        f"and Redis calls, and the log lines. This channel's id is {channel_id}. Keep queries small: a recent "
+        f"and Redis calls, and the log lines. A log line's `span_name` is its message template (like \"Couldn't "
+        "fetch #%s's first message: %s\"), so count by that; `message` is the filled-in text, and a logged "
+        f"exception has `is_exception` and `exception_type`. This channel's id is {channel_id}. Keep queries small: a recent "
         "time window, `LIMIT` 20 or less, only the columns you need, and never the `gen_ai.input.messages` "
         "attribute (whole prompts).\n"
     )
@@ -296,7 +298,7 @@ class MentionHandler:
                     if note:
                         _append_to_mention(recent_messages, note)
                     logger.info(
-                        f"Context prepared for mention by {message.author}, sending to {'Gemini' if is_gemini_model(model) else 'Claude API'}...")
+                        "Context prepared for mention by %s, sending to %s...", message.author, 'Gemini' if is_gemini_model(model) else 'Claude API')
                     channel_id = message.channel.id
 
                     # Identity threaded into every model call for this mention.
@@ -321,7 +323,7 @@ class MentionHandler:
                 if reply_content is None:
                     await streaming_reply.discard()
                     ledger.stats["error"] = "empty response"
-                    logger.error(f"❌ Received None from get_chat_completion for model {model}.")
+                    logger.error("Model %s returned an empty reply for the mention by %s", model, message.author)
                     await self._message_service.send_channel_reply(
                         message.channel,
                         f"I'm sorry, I failed to get a response from the model '{model}'. It returned an empty result."
@@ -348,7 +350,8 @@ class MentionHandler:
 
             except (GeminiServiceError, AnthropicServiceError) as e:
                 ledger.stats["error"] = str(e)[:500]
-                logger.error(f"❌ API error in mention handler:\\n{e}")
+                logger.error("Model API error answering the mention by %s in #%s: %s", message.author,
+                             getattr(message.channel, "name", message.channel.id), e)
                 await self._send_error(
                     message.channel, f"Sorry, I encountered an error while processing your mention: {str(e)}")
 
@@ -358,8 +361,7 @@ class MentionHandler:
                 # concisely instead of dumping the page, and reassure that the
                 # bot itself is fine.
                 logger.error(
-                    f"🌩️ Discord API server error while handling mention: {concise_error(e)}. "
-                    "This is a Discord-side outage; the bot is still running and will handle new messages normally."
+                    "Discord API server error while handling a mention: %s. This is a Discord-side outage; the bot is still running and will handle new messages normally.", concise_error(e)
                 )
                 try:
                     await self._message_service.send_channel_reply(
@@ -368,12 +370,12 @@ class MentionHandler:
                     )
                 except Exception as discord_error:
                     logger.warning(
-                        f"⚠️ Couldn't notify the channel about the Discord outage either: {concise_error(discord_error)}"
+                        "⚠️ Couldn't notify the channel about the Discord outage either: %s", concise_error(discord_error)
                     )
 
             except Exception as e:
                 ledger.stats["error"] = f"{type(e).__name__}: {e}"[:500]
-                logger.exception("🚨 Unexpected error in mention handler")
+                logger.exception("Unexpected error answering the mention by %s", message.author)
                 await self._send_error(
                     message.channel,
                     "Sorry, I encountered an unexpected error while processing your mention. Please try again later.",
@@ -408,13 +410,14 @@ class MentionHandler:
         try:
             await self._message_service.send_channel_reply(channel, error_message)
         except Exception as discord_error:
-            logger.error(f"⚠️ Failed to send error message to Discord: {discord_error}")
+            logger.error("Couldn't post the error reply to #%s: %s", getattr(channel, "name", None), discord_error)
             try:
                 await channel.send(
                     "Sorry, I encountered an error and couldn't respond to your mention. Please try again later."
                 )
             except Exception:
-                logger.error("Failed to send fallback error message")
+                logger.error("Couldn't post the fallback error message to #%s either", getattr(channel, "name", None),
+                             exc_info=True)
 
     async def queue_mention(
             self,
@@ -461,7 +464,7 @@ class MentionHandler:
             Tuple of (OpenAI-style message list, system prompt string)
         """
         logger.info(
-            f"Mention by {message.author} in #{message.channel}: {message.content}"
+            "Mention by %s in #%s: %s", message.author, message.channel, message.content
         )
 
         def status(text: str) -> None:
@@ -490,7 +493,7 @@ class MentionHandler:
                 # The gap is too large (MAX_HISTORY_GAP+ messages since last bot interaction).
                 # To save cost and avoid giant context windows, we abandon the old
                 # interaction and start a fresh context from the most recent messages.
-                logger.info(f"Massive message gap detected in #{message.channel.name}. Resetting context.")
+                logger.info("Massive message gap detected in #%s. Resetting context.", message.channel.name)
                 history_msgs = []
                 for service in (self._gemini_service, self._anthropic_service):
                     if service:
@@ -648,20 +651,20 @@ class MentionHandler:
         try:
             first_day = await asyncio.to_thread(self._irc_log.first_day)
         except Exception as e:
-            logger.warning(f"Couldn't read the IRC log's dates: {e}")
+            logger.warning("Couldn't read the IRC log's dates: %s", e)
             first_day = None
         self._irc_start = first_day.isoformat() if first_day else ""
         try:
             speakers = await asyncio.to_thread(self._irc_log.speakers, IRC_ROSTER_SIZE)
         except Exception as e:
-            logger.warning(f"Couldn't tally the IRC log's speakers: {e}")
+            logger.warning("Couldn't tally the IRC log's speakers: %s", e)
             speakers = []
         self._irc_roster = "; ".join(
             f"{name} {lines:,}" + (f" {first}-{last}" if first and last and first != last else
                                    f" {first}" if first else "")
             for name, lines, first, last in speakers
         )
-        logger.info(f"[irc log] Read the first day and top speakers in {time.monotonic() - started:.1f}s")
+        logger.info("[irc log] Read the first day and top speakers in %.1fs", time.monotonic() - started)
 
     async def _history_ranges(self, channel: Any) -> str:
         """Which dates the Discord history and the IRC log cover, so the model knows which to search."""
@@ -671,7 +674,7 @@ class MentionHandler:
             try:
                 first = await anext(aiter(channel.history(limit=1, oldest_first=True)), None)
             except Exception as e:
-                logger.warning(f"Couldn't fetch #{channel}'s first message: {concise_error(e)}")
+                logger.warning("Couldn't fetch #%s's first message: %s", channel, concise_error(e))
             when = getattr(first, "created_at", None) or getattr(channel, "created_at", None)
             start = when.date().isoformat() if when else ""
             self._discord_starts[channel.id] = start
@@ -784,7 +787,7 @@ class MentionHandler:
                 except (discord.NotFound, discord.Forbidden):
                     break
                 except discord.HTTPException as e:
-                    logger.warning(f"Couldn't fetch message {parent_id} of a reply thread: {concise_error(e)}")
+                    logger.warning("Couldn't fetch message %s of a reply thread: %s", parent_id, concise_error(e))
                     break
             chain.append(parent)
             current = parent
@@ -838,7 +841,7 @@ class MentionHandler:
             block = await self._timezone_store.time_zones_block(
                 message.guild.id, _conversation_user_ids(message, history_msgs, bot_user))
         except Exception as e:
-            logger.warning(f"Couldn't load time zones: {concise_error(e)}")
+            logger.warning("Couldn't load time zones: %s", concise_error(e))
             return
         if not block:
             return

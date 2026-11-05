@@ -208,11 +208,10 @@ class DeathService:
             with open(self._state_file, "w", encoding="utf-8") as f:
                 json.dump(data, f)
             logger.debug(
-                f"Saved {len(self._known_names)} known / {len(self._announced_titles)} "
-                f"announced death names to {self._state_file}"
+                "Saved %s known / %s announced death names to %s", len(self._known_names), len(self._announced_titles), self._state_file
             )
         except (OSError, ValueError) as exc:
-            logger.error(f"Failed to save death state: {exc}")
+            logger.error("Failed to save death state: %s", exc)
 
     def _load_state(self) -> None:
         """Load known names and announced titles from a previous session, if available."""
@@ -231,11 +230,10 @@ class DeathService:
                 self._known_names = {tuple(item) for item in data}
                 self._announced_titles = {t[1] for t in self._known_names if len(t) > 1}
             logger.info(
-                f"Loaded {len(self._known_names)} known / {len(self._announced_titles)} "
-                f"announced death names from {self._state_file}"
+                "Loaded %s known / %s announced death names from %s", len(self._known_names), len(self._announced_titles), self._state_file
             )
         except (OSError, json.JSONDecodeError, ValueError) as exc:
-            logger.error(f"Failed to load death state: {exc}")
+            logger.error("Failed to load death state: %s", exc)
 
     # -- main loop ----------------------------------------------------------
 
@@ -257,7 +255,7 @@ class DeathService:
                 except asyncio.CancelledError:
                     raise
                 except (httpx.HTTPError, asyncio.TimeoutError) as exc:
-                    logger.warning(f"Network error during death-page poll: {exc}")
+                    logger.warning("Network error during death-page poll: %s", exc)
                 except Exception:
                     logger.exception("Error during death-page poll")
 
@@ -276,7 +274,7 @@ class DeathService:
         if resp.status_code == 304:
             return
         if resp.status_code != 200:
-            logger.warning(f"Deaths page returned {resp.status_code}")
+            logger.warning("Deaths page returned %s", resp.status_code)
             return
         self._deaths_page_etag = resp.headers.get("etag")
 
@@ -288,7 +286,7 @@ class DeathService:
             self._known_names = current
             self._first_poll = False
             logger.info(
-                f"Death service baseline: {len(current)} names for {year}"
+                "Death service baseline: %s names for %s", len(current), year
             )
             return
 
@@ -298,7 +296,7 @@ class DeathService:
             self._known_names = current
             return
 
-        logger.info(f"Detected {len(new_names)} new name(s) on deaths page")
+        logger.info("Detected %s new name(s) on deaths page", len(new_names))
 
         # Names whose view count we could not determine this round. They are
         # deliberately left out of the known-names set so the next poll sees
@@ -312,7 +310,7 @@ class DeathService:
                 # the deaths page and reappeared.
                 if article_title in self._announced_titles:
                     logger.debug(
-                        f"Already announced {display_name} ({article_title}) — skipping"
+                        "Already announced %s (%s) — skipping", display_name, article_title
                     )
                     continue
 
@@ -321,8 +319,7 @@ class DeathService:
 
                 if avg_views is None:
                     logger.warning(
-                        f"Could not determine view count for {display_name} "
-                        f"({article_title}) — not marking as seen, will retry next poll"
+                        "Could not determine view count for %s (%s) — not marking as seen, will retry next poll", display_name, article_title
                     )
                     unchecked.add((display_name, article_title))
                     continue
@@ -334,29 +331,28 @@ class DeathService:
                     person = await self.is_person(article_title)
                     if person is None:
                         logger.warning(
-                            f"Could not confirm {display_name} ({article_title}) is a person "
-                            f"— not marking as seen, will retry next poll"
+                            "Could not confirm %s (%s) is a person — not marking as seen, will retry next poll", display_name, article_title
                         )
                         unchecked.add((display_name, article_title))
                         continue
                     if not person:
                         logger.info(
-                            f"Skipped: {display_name} ({article_title}) is not a person per Wikidata"
+                            "Skipped: %s (%s) is not a person per Wikidata", display_name, article_title
                         )
                         continue
                     logger.info(
-                        f"Met threshold: {display_name} ({avg_views:,} avg monthly views) -> ANNOUNCING"
+                        "Met threshold: %s (%s avg monthly views) -> ANNOUNCING", display_name, f"{avg_views:,}"
                     )
                     await self._announce(display_name, article_title, avg_views)
                     self._announced_titles.add(article_title)
                 else:
                     logger.info(
-                        f"Skipped: {display_name} ({avg_views:,} avg monthly views, below {min_views:,} threshold)"
+                        "Skipped: %s (%s avg monthly views, below %s threshold)",
+                        display_name, f"{avg_views:,}", f"{min_views:,}",
                     )
             except Exception:
                 logger.exception(
-                    f"Error checking views for {display_name} — not marking as seen, "
-                    f"will retry next poll"
+                    "Error checking views for %s — not marking as seen, will retry next poll", display_name
                 )
                 unchecked.add((display_name, article_title))
 
@@ -390,7 +386,7 @@ class DeathService:
                 },
             )
             if resp.status_code != 200:
-                logger.warning(f"Wikipedia pageprops returned {resp.status_code} for {article_title}")
+                logger.warning("Wikipedia pageprops returned %s for %s", resp.status_code, article_title)
                 return None
             pages = resp.json().get("query", {}).get("pages", [])
             item = pages[0].get("pageprops", {}).get("wikibase_item") if pages else None
@@ -407,7 +403,7 @@ class DeathService:
                 },
             )
             if resp.status_code != 200:
-                logger.warning(f"Wikidata returned {resp.status_code} for {item} ({article_title})")
+                logger.warning("Wikidata returned %s for %s (%s)", resp.status_code, item, article_title)
                 return None
             claims = resp.json().get("claims", {}).get(WIKIDATA_INSTANCE_OF, [])
             if not claims:
@@ -418,7 +414,7 @@ class DeathService:
             }
             return WIKIDATA_HUMAN in kinds
         except (httpx.HTTPError, asyncio.TimeoutError, ValueError) as exc:
-            logger.warning(f"Person check failed for {article_title}: {exc}")
+            logger.warning("Person check failed for %s: %s", article_title, exc)
             return None
 
     # -- pageviews ----------------------------------------------------------
@@ -478,30 +474,28 @@ class DeathService:
                 # Rate limits and upstream 5xx are transient: back off and retry.
                 if resp.status_code == 429 or resp.status_code >= 500:
                     if last_attempt:
-                        logger.warning(f"Pageviews API returned {resp.status_code} for {article_title}: {resp.text}")
+                        logger.warning("Pageviews API returned %s for %s: %s", resp.status_code, article_title, resp.text)
                         break
                     delay = base_delay * (2 ** attempt)
                     logger.warning(
-                        f"Pageviews API returned {resp.status_code} for {article_title}: {resp.text} — "
-                        f"retrying in {delay}s (attempt {attempt + 1}/{max_retries})"
+                        "Pageviews API returned %s for %s: %s — retrying in %ss (attempt %s/%s)", resp.status_code, article_title, resp.text, delay, attempt + 1, max_retries
                     )
                     await asyncio.sleep(delay)
                     continue
 
-                logger.warning(f"Pageviews API returned {resp.status_code} for {article_title}: {resp.text}")
+                logger.warning("Pageviews API returned %s for %s: %s", resp.status_code, article_title, resp.text)
                 return None
             except (httpx.HTTPError, asyncio.TimeoutError) as exc:
                 if last_attempt:
-                    logger.warning(f"Network error fetching pageviews for {article_title}: {exc}")
+                    logger.warning("Network error fetching pageviews for %s: %s", article_title, exc)
                     break
                 delay = base_delay * (2 ** attempt)
                 logger.warning(
-                    f"Network error fetching pageviews for {article_title}: {exc} — "
-                    f"retrying in {delay}s (attempt {attempt + 1}/{max_retries})"
+                    "Network error fetching pageviews for %s: %s — retrying in %ss (attempt %s/%s)", article_title, exc, delay, attempt + 1, max_retries
                 )
                 await asyncio.sleep(delay)
 
-        logger.error(f"Failed to fetch pageviews for {article_title} after {max_retries} attempts.")
+        logger.error("Failed to fetch pageviews for %s after %s attempts.", article_title, max_retries)
         return None
 
     # -- announcement -------------------------------------------------------
@@ -516,7 +510,7 @@ class DeathService:
 
         channel = self._bot.get_channel(int(self._death_channel_id))
         if channel is None:
-            logger.error(f"Could not find channel {self._death_channel_id}")
+            logger.error("Could not find channel %s", self._death_channel_id)
             return
 
         wiki_link = (
@@ -524,7 +518,7 @@ class DeathService:
         )
         message = f"RIP {display_name} - {wiki_link}"
 
-        logger.info(f"Announcing death: {message} ({avg_views:,} avg monthly views)")
+        logger.info("Announcing death: %s (%s avg monthly views)", message, f"{avg_views:,}")
 
         # Post the RIP line with the Wikipedia URL as-is first, so Discord can
         # unfurl the link embed, then follow up with the AI summary as a
@@ -532,7 +526,7 @@ class DeathService:
         try:
             await channel.send(message)
         except discord.HTTPException as exc:
-            logger.error(f"Failed to send death announcement: {exc}")
+            logger.error("Failed to send death announcement: %s", exc)
             return
 
         summary = await self._summarize_person(display_name, wiki_link, channel.id)
@@ -542,7 +536,7 @@ class DeathService:
         try:
             await channel.send(summary)
         except discord.HTTPException as exc:
-            logger.error(f"Failed to send death summary follow-up: {exc}")
+            logger.error("Failed to send death summary follow-up: %s", exc)
 
     def _channel_model(self, channel_id: Optional[int]) -> Optional[str]:
         """The model set for ``channel_id``, or the default model when it has none."""
@@ -585,7 +579,7 @@ class DeathService:
                 reply = reply.get("text", "")
             return str(reply or "").strip() or None
         except Exception:
-            logger.exception(f"Failed to summarize {display_name} for death announcement")
+            logger.exception("Failed to summarize %s for death announcement", display_name)
             return None
 
     async def write_limerick(self, target: str, channel_id: Optional[int] = None) -> Tuple[bool, str]:
@@ -631,8 +625,8 @@ class DeathService:
         try:
             avg_views = await self.get_avg_monthly_views(article_title) or 0
         except Exception:
-            logger.exception(f"force_announce: failed to fetch pageviews for {article_title}")
+            logger.exception("force_announce: failed to fetch pageviews for %s", article_title)
 
-        logger.info(f"[force_announce] Announcing {display_name} ({avg_views:,} avg monthly views)")
+        logger.info("[force_announce] Announcing %s (%s avg monthly views)", display_name, f"{avg_views:,}")
         await self._announce(display_name, article_title, avg_views)
         return True, f"Forced death announcement for **{display_name}** in the death channel."

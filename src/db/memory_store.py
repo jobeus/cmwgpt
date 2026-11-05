@@ -82,7 +82,7 @@ class MemoryStore:
         capped = cap_profile(profile)
         if capped != profile:
             logger.warning(
-                f"Memory for user {user_id} in guild {guild_id} was over {MAX_PROFILE_BYTES} bytes; trimmed"
+                "Memory for user %s in guild %s was over %s bytes; trimmed", user_id, guild_id, MAX_PROFILE_BYTES
             )
         await self._redis_getter().set(_profile_key(guild_id, user_id), capped)
 

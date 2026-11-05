@@ -973,8 +973,7 @@ def build_mention_tools(
         filename = f"image{draws}.png"
         model = resolve_image_model(state_service, channel_id, default_image_model)
         options = _image_options(args, DRAW_ASPECT_RATIO)
-        logger.info(f"[draw tool] Channel {channel_id} Model: {model.id} Options: {options.describe()} "
-                    f"Prompt: {prompt[:200]}")
+        logger.info("[draw tool] Channel %s Model: %s Options: %s Prompt: %s", channel_id, model.id, options.describe(), prompt[:200])
         try:
             result = await generate_image(prompt=prompt, model=model, gemini_service=gemini_service, options=options)
         except ImageOptionError as e:
@@ -1026,8 +1025,7 @@ def build_mention_tools(
             return text_result("Those messages have no images.", is_error=True)
         model = resolve_image_model(state_service, channel_id, default_image_model)
         options = _image_options(args)
-        logger.info(f"[edit tool] Channel {channel_id} Model: {model.id} Options: {options.describe()} "
-                    f"Images: {len(images)} Prompt: {prompt[:200]}")
+        logger.info("[edit tool] Channel %s Model: %s Options: %s Images: %s Prompt: %s", channel_id, model.id, options.describe(), len(images), prompt[:200])
         try:
             result = await generate_image(
                 prompt=prompt, model=model, gemini_service=gemini_service, images_b64=images, options=options)
@@ -1062,7 +1060,7 @@ def build_mention_tools(
                 "or use /memory correct.", is_error=True)
         member = guild.get_member(target_id)
         name = getattr(member, "display_name", None) or str(target_id)
-        logger.info(f"[remember tool] {user_id} changed memory for {target_id}: {note[:200]}")
+        logger.info("[remember tool] %s changed memory for %s: %s", user_id, target_id, note[:200])
         try:
             profile, cost = await memory_corrector(guild_id, target_id, name, note)
         except ValueError:
@@ -1080,7 +1078,7 @@ def build_mention_tools(
             state = await self_state_updater(guild_id, aspect, text)
         except ValueError as e:
             return text_result(str(e), is_error=True)
-        logger.info(f"[update_self tool] Guild {guild_id} {aspect}: {text}")
+        logger.info("[update_self tool] Guild %s %s: %s", guild_id, aspect, text)
         return text_result(f"Updated. You now have:\n{state}")
 
     async def remind(args: Dict[str, Any]) -> ToolResult:
@@ -1115,7 +1113,7 @@ def build_mention_tools(
         except ValueError as e:
             return text_result(str(e), is_error=True)
         await timezone_store.set(guild_id, ids[0], zone)
-        logger.info(f"[set_timezone tool] Guild {guild_id} <@{ids[0]}>: {zone.key}")
+        logger.info("[set_timezone tool] Guild %s <@%s>: %s", guild_id, ids[0], zone.key)
         return text_result(f"Saved. <@{ids[0]}> is in {describe_zone(zone)}.")
 
     async def list_reminders(_args: Dict[str, Any]) -> ToolResult:
@@ -1175,8 +1173,7 @@ def build_mention_tools(
             # Discord leaves age-restricted channels out unless asked, even when one is the only channel searched.
             include_nsfw=any(c.is_nsfw() for c in channels),
         )
-        logger.info(f"[search tool] Channel {channel_id} Query: {filters.query[:200]} "
-                    f"Filters: {sorted(k for k, v in args.items() if v)}")
+        logger.info("[search tool] Channel %s Query: %s Filters: %s", channel_id, filters.query[:200], sorted(k for k, v in args.items() if v))
         text = await search_messages(
             guild, channels, filters, sort=str(args.get("sort") or "newest"), skip=_int_arg(args, "skip"))
         return text_result(text)
@@ -1216,7 +1213,7 @@ def build_mention_tools(
             content += blocks
             if count >= MAX_VIEW_IMAGES:
                 break
-        logger.info(f"[view_images tool] Channel {channel.id} Messages: {message_ids} Images: {count}")
+        logger.info("[view_images tool] Channel %s Messages: %s Images: %s", channel.id, message_ids, count)
         return ToolResult(content=content, is_error=count == 0)
 
     async def react(args: Dict[str, Any]) -> ToolResult:
@@ -1243,7 +1240,7 @@ def build_mention_tools(
                     "Discord doesn't know that emoji. Use a Unicode emoji or one of this server's custom emoji.",
                     is_error=True)
             raise
-        logger.info(f"[react tool] Channel {channel_id} Message: {message_ids[0]} Emoji: {emoji}")
+        logger.info("[react tool] Channel %s Message: %s Emoji: %s", channel_id, message_ids[0], emoji)
         return text_result("Reacted.")
 
     async def wiki_pageviews(args: Dict[str, Any]) -> ToolResult:
@@ -1262,7 +1259,7 @@ def build_mention_tools(
         if not query:
             return text_result("Give keywords, a link, a slug or a ticker.", is_error=True)
         status = str(args.get("status") or "active")
-        logger.info(f"[prediction_markets tool] Channel {channel_id} Query: {query[:200]} Status: {status}")
+        logger.info("[prediction_markets tool] Channel %s Query: %s Status: %s", channel_id, query[:200], status)
         try:
             text = await prediction_market_lookup(query, status)
         except MarketDataError as e:
@@ -1279,7 +1276,7 @@ def build_mention_tools(
         urls = list(dict.fromkeys(urls))[:MAX_READ_URLS]
         if not urls:
             return text_result("No links given.", is_error=True)
-        logger.info(f"[read_urls tool] Channel {channel_id} URLs: {urls}")
+        logger.info("[read_urls tool] Channel %s URLs: %s", channel_id, urls)
         text, image_parts = await url_content_fetcher("\n".join(urls), cache_only=False)
         if not text and not image_parts:
             return text_result("Couldn't read any of those links.", is_error=True)
@@ -1302,7 +1299,7 @@ def build_mention_tools(
         try:
             summary, cost = await get_video_summary(video_id, focus, video_summarizer)
         except Exception as e:
-            logger.warning(f"[summarize_youtube tool] {video_id} failed: {e}")
+            logger.warning("[summarize_youtube tool] %s failed: %s", video_id, e)
             return text_result(f"Couldn't watch that video ({e}). Try `transcribe_youtube`.", is_error=True)
         return ToolResult(
             content=[{"type": "text", "text": f"Gemini's summary of {video_url(video_id)}:\n{summary}"}], cost=cost)
@@ -1321,11 +1318,11 @@ def build_mention_tools(
                 return text_result("That message has no video attached.", is_error=True)
         elif not target.startswith(("http://", "https://")):
             return text_result("Give a video link or the ID of a message with a video.", is_error=True)
-        logger.info(f"[watch_video tool] Channel {channel_id} {target[:200]} focus={focus[:100]!r}")
+        logger.info("[watch_video tool] Channel %s %s focus=%r", channel_id, target[:200], focus[:100])
         try:
             answer, cost = await video_watcher(target, focus)
         except Exception as e:
-            logger.warning(f"[watch_video tool] {target[:200]} failed: {e}")
+            logger.warning("[watch_video tool] %s failed: %s", target[:200], e)
             return text_result(f"Couldn't watch that video: {e}", is_error=True)
         return ToolResult(content=[{"type": "text", "text": f"Gemini watched the video:\n{answer}"}], cost=cost)
 
@@ -1344,7 +1341,7 @@ def build_mention_tools(
     async def old_quotes(args: Dict[str, Any]) -> ToolResult:
         assert quote_file is not None  # only offered when set
         query = str(args.get("query") or "").strip()
-        logger.info(f"[quotes tool] Channel {channel_id} Query: {query[:200]}")
+        logger.info("[quotes tool] Channel %s Query: %s", channel_id, query[:200])
         text = await asyncio.to_thread(
             quote_file.get, query=query, random_count=_int_arg(args, "random_count"), skip=_int_arg(args, "skip"))
         return text_result(text)
@@ -1358,7 +1355,7 @@ def build_mention_tools(
         if not query.strip():
             return text_result("No query given.", is_error=True)
         nick = str(args.get("nick") or "").strip().lstrip("@+%~&")
-        logger.info(f"[irc log tool] Channel {channel_id} Query: {query[:200]} Nick: {nick}")
+        logger.info("[irc log tool] Channel %s Query: %s Nick: %s", channel_id, query[:200], nick)
         text = await asyncio.to_thread(
             irc_log.search,
             query,
@@ -1376,7 +1373,7 @@ def build_mention_tools(
             return text_result("No query given.", is_error=True)
         nick = str(args.get("nick") or "").strip().lstrip("@+%~&")
         group_by = [g for g in _as_list(args.get("group_by")) if g in ("nick", "year")]
-        logger.info(f"[irc log tool] Channel {channel_id} Count: {query[:200]} Nick: {nick} Group: {group_by}")
+        logger.info("[irc log tool] Channel %s Count: %s Nick: %s Group: %s", channel_id, query[:200], nick, group_by)
         text = await asyncio.to_thread(
             irc_log.count, query, nick=nick, group_by=group_by, top=_int_arg(args, "top") or 15)
         return text_result(text)
@@ -1387,7 +1384,7 @@ def build_mention_tools(
             day = date.fromisoformat(str(args.get("date") or "").strip())
         except ValueError:
             return text_result("Give the date as YYYY-MM-DD.", is_error=True)
-        logger.info(f"[irc log tool] Channel {channel_id} Day: {day}")
+        logger.info("[irc log tool] Channel %s Day: %s", channel_id, day)
         text = await asyncio.to_thread(irc_log.read_day, day, start_line=_int_arg(args, "start_line"))
         return text_result(text)
 

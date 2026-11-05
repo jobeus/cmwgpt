@@ -101,7 +101,8 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(first, DEFAULT_SYSTEM_PROMPT)
             self.assertEqual(second, DEFAULT_SYSTEM_PROMPT)
             mock_warning.assert_called_once()
-            self.assertIn("missing_prompt.txt", mock_warning.call_args.args[0])
+            message, *args = mock_warning.call_args.args
+            self.assertIn("missing_prompt.txt", message % tuple(args))
         finally:
             config_module._missing_prompt_files_warned.discard("missing_prompt.txt")
 

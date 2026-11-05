@@ -82,11 +82,11 @@ class AutoUpdateService:
         try:
             await web.TCPSite(runner, self._host, self._port).start()
         except OSError as e:
-            logger.error(f"Deploy webhook could not bind {self._host}:{self._port}: {e}")
+            logger.error("Deploy webhook could not bind %s:%s: %s", self._host, self._port, e)
             await runner.cleanup()
             return
         self._runner = runner
-        logger.info(f"Deploy webhook listening on {self._host}:{self._port}/deploy")
+        logger.info("Deploy webhook listening on %s:%s/deploy", self._host, self._port)
 
     async def stop(self) -> None:
         """Stop the webhook listener."""
@@ -103,7 +103,7 @@ class AutoUpdateService:
             return False
 
         restart_type = "manual" if manual else "automatic"
-        logger.info(f"Triggering {restart_type} restart")
+        logger.info("Triggering %s restart", restart_type)
 
         # Create a wrapper that passes the manual flag
         async def restart_wrapper():
@@ -127,7 +127,7 @@ class AutoUpdateService:
         timestamp = request.headers.get("X-Deploy-Timestamp", "")
         signature = request.headers.get("X-Deploy-Signature", "")
         if not self._verify(timestamp, signature, body):
-            logger.warning(f"Rejected deploy webhook from {request.remote}: bad signature or timestamp")
+            logger.warning("Rejected deploy webhook from %s: bad signature or timestamp", request.remote)
             return web.json_response({"error": "unauthorized"}, status=401)
 
         try:
@@ -137,10 +137,10 @@ class AutoUpdateService:
 
         current = self._get_current_commit_hash()
         if sha and current and sha == current:
-            logger.info(f"Deploy webhook for {sha[:7]}: already running it")
+            logger.info("Deploy webhook for %s: already running it", sha[:7])
             return web.json_response({"status": "up-to-date", "sha": current})
 
-        logger.info(f"Deploy webhook for {sha[:7] or '?'} (running {current[:7] if current else '?'}), restarting")
+        logger.info("Deploy webhook for %s (running %s), restarting", sha[:7] or '?', current[:7] if current else '?')
         if not await self.trigger_restart(manual=False):
             return web.json_response({"error": "restart could not be queued"}, status=503)
         return web.json_response({"status": "restarting", "sha": sha}, status=202)

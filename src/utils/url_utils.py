@@ -115,7 +115,7 @@ async def inject_article_cache(url: str, text: str) -> None:
     Useful for immediately caching content we just generated (like from paste services).
     """
     await _article_cache.set(url, text)
-    logger.debug(f"Directly injected cache for article: {url}")
+    logger.debug("Directly injected cache for article: %s", url)
 
 
 async def _fetch_wikipedia(parsed) -> Optional[str]:
@@ -150,7 +150,7 @@ async def _resolve_vreddit(url: str, proxy: Optional[str]) -> str:
         if response.is_redirect and location:
             return urljoin(url, location)
     except Exception as e:
-        logger.debug(f"Failed to resolve v.redd.it redirect for {url}: {e}")
+        logger.debug("Failed to resolve v.redd.it redirect for %s: %s", url, e)
     return url
 
 
@@ -170,7 +170,7 @@ async def get_article_text(url: str, *, cache_only: bool = False) -> Optional[st
         return cached
 
     try:
-        logger.info(f"Fetching article for URL: {url}")
+        logger.info("Fetching article for URL: %s", url)
         proxy = get_config().transcript_proxy or None
         # Fetch a possibly rewritten URL but always cache under the original,
         # since that is what later lookups use.
@@ -184,7 +184,7 @@ async def get_article_text(url: str, *, cache_only: bool = False) -> Optional[st
                     await _article_cache.set(url, text)
                     return text
             except Exception as e:
-                logger.warning(f"Failed to fetch Wikipedia via API for {url}, falling back to scraper: {e}")
+                logger.warning("Failed to fetch Wikipedia via API for %s, falling back to scraper: %s", url, e)
 
         if parsed.netloc.lower() == 'v.redd.it':
             fetch_url = await _resolve_vreddit(fetch_url, proxy)
@@ -200,14 +200,14 @@ async def get_article_text(url: str, *, cache_only: bool = False) -> Optional[st
 
         text = await asyncio.to_thread(_extract_text, response.text)
         if not text:
-            logger.warning(f"No article text could be extracted for {url}")
+            logger.warning("No article text could be extracted for %s", url)
             return None
 
         await _article_cache.set(url, text)
         return text
 
     except Exception as e:
-        logger.warning(f"Failed to fetch article text for {url}: {e}")
+        logger.warning("Failed to fetch article text for %s: %s", url, e)
         return None
 
 

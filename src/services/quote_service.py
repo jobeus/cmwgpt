@@ -43,7 +43,7 @@ class QuoteFile:
                 text = self.path.read_text(encoding="utf-8", errors="replace")
                 self._quotes = [line.strip() for line in text.splitlines() if line.strip()]
                 self._mtime = mtime
-                logger.info(f"[quotes] Loaded {len(self._quotes)} quotes from {self.path}")
+                logger.info("[quotes] Loaded %s quotes from %s", len(self._quotes), self.path)
             return self._quotes
 
     def get(self, *, query: str = "", random_count: int = 0, skip: int = 0) -> str:
@@ -98,6 +98,6 @@ def load_quote_file(path: str) -> Optional[QuoteFile]:
     if not path:
         return None
     if not Path(path).is_file():
-        logger.warning(f"[quotes] OLD_QUOTE_BOT={path} isn't a file; the old_quotes tool is off.")
+        logger.warning("[quotes] OLD_QUOTE_BOT=%s isn't a file; the old_quotes tool is off.", path)
         return None
     return QuoteFile(path)

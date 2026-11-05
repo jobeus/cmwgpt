@@ -74,15 +74,13 @@ class TestMainSignalHandlers(unittest.TestCase):
         _, handle_signal, _ = main.setup_signal_handlers(bot_client)
 
         loop = MagicMock()
-        with patch("builtins.print") as mock_print:
+        with self.assertLogs("main", "INFO") as logs:
             handle_signal(signal.SIGINT, loop)
             handle_signal(signal.SIGINT, loop)
             handle_signal(signal.SIGTERM, loop)
 
         self.assertEqual(loop.create_task.call_count, 1)
-        self.assertTrue(
-            any("already in progress" in call.args[0] for call in mock_print.call_args_list)
-        )
+        self.assertTrue(any("already in progress" in line for line in logs.output))
         # Clean up the single scheduled coroutine
         loop.create_task.call_args.args[0].close()
 
@@ -92,12 +90,12 @@ class TestMainSignalHandlers(unittest.TestCase):
         _, handle_signal, _ = main.setup_signal_handlers(bot_client)
 
         loop = MagicMock()
-        with patch("builtins.print") as mock_print:
+        with self.assertLogs("main", "INFO") as logs:
             handle_signal(signal.SIGTERM, loop)
             run_scheduled_shutdown(loop)
 
         bot_client.shutdown.assert_awaited_once_with()
-        self.assertTrue(any("Error during shutdown" in call.args[0] for call in mock_print.call_args_list))
+        self.assertTrue(any("Error during shutdown" in line for line in logs.output))
 
     def test_shutdown_reports_top_level_shutdown_errors(self):
         bot_client = make_bot_client()
@@ -105,11 +103,11 @@ class TestMainSignalHandlers(unittest.TestCase):
         _, handle_signal, _ = main.setup_signal_handlers(bot_client)
 
         loop = MagicMock()
-        with patch("builtins.print") as mock_print:
+        with self.assertLogs("main", "INFO") as logs:
             handle_signal(signal.SIGTERM, loop)
             run_scheduled_shutdown(loop)
 
-        self.assertTrue(any("Error during shutdown" in call.args[0] for call in mock_print.call_args_list))
+        self.assertTrue(any("Error during shutdown" in line for line in logs.output))
         bot_client.shutdown.assert_not_awaited()
 
     def test_main_module_script_entrypoint_creates_client_registers_signals_and_runs(self):

@@ -208,17 +208,17 @@ class MemoryCommands:
                 interaction.guild_id, target.id, getattr(target, "display_name", str(target)), correction
             )
         except ValueError:
-            logger.exception(f"[/memory correct] unusable model reply for {target}")
+            logger.exception("[/memory correct] unusable model reply for %s", target)
             await interaction.followup.send(
                 "I couldn't apply that correction, so nothing changed. Try rewording it.", ephemeral=True
             )
             return
-        logger.info(f"[/memory correct] {interaction.user} corrected memory for {target}")
+        logger.info("[/memory correct] %s corrected memory for %s", interaction.user, target)
         await self._send_memory(interaction, f"Updated. {format_memory(target.id, profile)}", updated=True)
 
     async def _handle_clear(self, interaction: discord.Interaction) -> None:
         await self._store.clear_user(interaction.guild_id, interaction.user.id)
-        logger.info(f"[/memory clear] {interaction.user} cleared their memory")
+        logger.info("[/memory clear] %s cleared their memory", interaction.user)
         await interaction.followup.send(
             "Cleared everything I remembered about you. I'll start learning again from new chat.", ephemeral=True
         )
@@ -255,13 +255,13 @@ class MemoryCommands:
             try:
                 await channel.send(text)
             except discord.HTTPException as e:
-                logger.warning(f"Couldn't post {name} progress: {e}")
+                logger.warning("Couldn't post %s progress: %s", name, e)
 
         try:
             return await run(interaction.guild, progress=progress)
         except RuntimeError as e:
             await channel.send(str(e))
         except Exception:
-            logger.exception(f"{name} failed")
+            logger.exception("Memory rebuild %s failed partway through", name)
             await channel.send("The rebuild failed partway through; the logs have details.")
         return None

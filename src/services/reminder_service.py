@@ -140,7 +140,7 @@ def _from_hash(reminder_id: int, fields: Dict[str, str]) -> Optional[Reminder]:
             task=fields.get("task", ""),
         )
     except (KeyError, ValueError):
-        logger.warning(f"Skipping malformed reminder {reminder_id}: {fields}")
+        logger.warning("Skipping malformed reminder %s: %s", reminder_id, fields)
         return None
 
 
@@ -256,7 +256,7 @@ class ReminderService:
         if self._is_testing or (self._task and not self._task.done()):
             return
         self._task = asyncio.create_task(self._loop())
-        logger.info(f"Reminders checked every {POLL_SECONDS}s")
+        logger.info("Reminders checked every %ss", POLL_SECONDS)
 
     def stop(self) -> None:
         if self._task and not self._task.done():
@@ -270,7 +270,7 @@ class ReminderService:
                 with routine_span("reminder poll"):
                     await self.deliver_due()
             except Exception as e:
-                logger.warning(f"Couldn't check reminders: {concise_error(e)}")
+                logger.warning("Couldn't check reminders: %s", concise_error(e))
             await asyncio.sleep(max(1.0, POLL_SECONDS - (time.monotonic() - started)))
 
     # -- for the tools ----------------------------------------------------------
@@ -299,7 +299,7 @@ class ReminderService:
             user_ids=list(dict.fromkeys(user_ids or [set_by])), set_by=set_by, text=text, due_at=due_at,
             tz=zone.key if zone else "", task=task,
         )
-        logger.info(f"[reminder] Set {reminder.describe()}")
+        logger.info("[reminder] Set %s", reminder.describe())
         return reminder
 
     async def pending(self, channel_id: int) -> List[Reminder]:
@@ -311,7 +311,7 @@ class ReminderService:
         if reminder is None or reminder.channel_id != channel_id:
             raise ValueError(f"There's no pending reminder #{reminder_id} in this channel.")
         await self._store.remove(reminder_id)
-        logger.info(f"[reminder] Cancelled {reminder.describe()}")
+        logger.info("[reminder] Cancelled %s", reminder.describe())
         return reminder
 
     # -- delivery -----------------------------------------------------------------
@@ -334,7 +334,7 @@ class ReminderService:
             try:
                 channel = await self._bot.fetch_channel(reminder.channel_id)
             except (discord.NotFound, discord.Forbidden):
-                logger.warning(f"[reminder] Dropping #{reminder.id}: channel {reminder.channel_id} is gone")
+                logger.warning("[reminder] Dropping #%s: channel %s is gone", reminder.id, reminder.channel_id)
                 await self._store.remove(reminder.id)
                 return False
         content = reminder_message(reminder, now)
@@ -348,14 +348,14 @@ class ReminderService:
         try:
             await channel.send(content, allowed_mentions=mentions, reference=reference, mention_author=False)
         except discord.Forbidden:
-            logger.warning(f"[reminder] Dropping #{reminder.id}: can't post in channel {reminder.channel_id}")
+            logger.warning("[reminder] Dropping #%s: can't post in channel %s", reminder.id, reminder.channel_id)
             await self._store.remove(reminder.id)
             return False
         except discord.HTTPException as e:
-            logger.warning(f"[reminder] Couldn't post #{reminder.id}, will retry: {concise_error(e)}")
+            logger.warning("[reminder] Couldn't post #%s, will retry: %s", reminder.id, concise_error(e))
             return False
         await self._store.remove(reminder.id)
-        logger.info(f"[reminder] Posted {reminder.describe()}")
+        logger.info("[reminder] Posted %s", reminder.describe())
         if reminder.task and self._task_runner:
             # Its own task, so a long answer doesn't hold up other reminders.
             running = asyncio.create_task(self._run_task(reminder, channel))
@@ -369,12 +369,12 @@ class ReminderService:
         try:
             request = await channel.fetch_message(reminder.message_id)
         except (discord.NotFound, discord.Forbidden):
-            logger.warning(f"[reminder] Skipping the task of #{reminder.id}: the message that set it is gone")
+            logger.warning("[reminder] Skipping the task of #%s: the message that set it is gone", reminder.id)
             return
         except discord.HTTPException as e:
-            logger.warning(f"[reminder] Couldn't fetch the message for #{reminder.id}'s task: {concise_error(e)}")
+            logger.warning("[reminder] Couldn't fetch the message for #%s's task: %s", reminder.id, concise_error(e))
             return
         try:
             await self._task_runner(reminder, request)
         except Exception:
-            logger.exception(f"[reminder] Task of #{reminder.id} failed")
+            logger.exception("[reminder] Task of #%s failed", reminder.id)

@@ -114,7 +114,7 @@ class GeminiService:
         if time.time() - cached["timestamp"] > INTERACTION_CACHE_TTL:
             # Expired — discard
             del self._interaction_cache[channel_id]
-            logger.info(f"[gemini] Interaction cache expired for channel {channel_id}")
+            logger.info("[gemini] Interaction cache expired for channel %s", channel_id)
             return None
         return cached["interaction_id"]
 
@@ -130,7 +130,7 @@ class GeminiService:
     def clear_channel_cache(self, channel_id: int) -> None:
         """Clear the cached interaction for a channel (e.g. on model change or /reset)."""
         self._interaction_cache.pop(channel_id, None)
-        logger.info(f"[gemini] Cleared interaction cache for channel {channel_id}")
+        logger.info("[gemini] Cleared interaction cache for channel %s", channel_id)
 
     def _get_client(self):
         """Lazy-init the google-genai client."""
@@ -301,7 +301,7 @@ class GeminiService:
 
             return input_cost + output_cost + cached_cost
         except Exception as e:
-            logger.warning(f"Failed to estimate Gemini cost: {e}")
+            logger.warning("Failed to estimate Gemini cost: %s", e)
             return 0.0
 
     async def summarize_youtube(self, video_url: str, focus: str = "") -> tuple[str, float]:
@@ -315,7 +315,7 @@ class GeminiService:
         prompt = VIDEO_SUMMARY_PROMPT
         if focus.strip():
             prompt += f"\n\nPay special attention to this, and answer it if it's a question: {focus.strip()}"
-        logger.info(f"[gemini/video] Summarizing {video_url} focus={focus[:100]!r}")
+        logger.info("[gemini/video] Summarizing %s focus=%r", video_url, focus[:100])
         try:
             response = await self._get_client().aio.models.generate_content(
                 model=GEMINI_MODEL,
@@ -336,7 +336,7 @@ class GeminiService:
         text = (getattr(response, "text", None) or "").strip()
         if not text:
             raise GeminiServiceError("Gemini watched the video but wrote nothing.")
-        logger.info(f"[gemini/video] Usage: {usage}. Estimated cost: ${cost:.4f}")
+        logger.info("[gemini/video] Usage: %s. Estimated cost: $%.4f", usage, cost)
         return text, cost
 
     async def upload_video(self, path: str, mime_type: str = "video/mp4") -> Any:
@@ -370,7 +370,7 @@ class GeminiService:
         if mime_type:
             video["mime_type"] = mime_type
         mode = "agentic" if agentic else "static"
-        logger.info(f"[gemini/video] Watching {uri} ({mode})")
+        logger.info("[gemini/video] Watching %s (%s)", uri, mode)
         try:
             interaction = await client.aio.interactions.create(
                 model=GEMINI_MODEL, input=[video, {"type": "text", "text": prompt}], background=True, store=True)
@@ -393,7 +393,7 @@ class GeminiService:
         text = _interaction_text(interaction)
         if not text:
             raise GeminiServiceError("Gemini watched the video but wrote nothing.")
-        logger.info(f"[gemini/video] Watched {uri} ({mode}). Usage: {usage}. Estimated cost: ${cost:.4f}")
+        logger.info("[gemini/video] Watched %s (%s). Usage: %s. Estimated cost: $%.4f", uri, mode, usage, cost)
         return text, cost
 
     @staticmethod
@@ -444,8 +444,7 @@ class GeminiService:
             + image_tokens * model.price_image_output
             + text_tokens * model.price_text_output
         ) / 1_000_000
-        logger.info(f"[gemini/image] Usage: {input_tokens} input, {image_tokens} image, {text_tokens} text/thinking. "
-                    f"Estimated cost: ${cost:.4f}")
+        logger.info("[gemini/image] Usage: %s input, %s image, %s text/thinking. Estimated cost: $%.4f", input_tokens, image_tokens, text_tokens, cost)
         return cost
 
     async def get_chat_completion(
@@ -476,7 +475,7 @@ class GeminiService:
         # Check for a cached previous interaction ID for this channel
         prev_interaction_id = None if disable_cache else self._get_previous_interaction_id(channel_id)
         if prev_interaction_id:
-            logger.info(f"[gemini] Continuing conversation with previous_interaction_id={prev_interaction_id[:20]}...")
+            logger.info("[gemini] Continuing conversation with previous_interaction_id=%s...", prev_interaction_id[:20])
 
         # Build input for the current turn
         input_parts = self._build_input(messages, bool(prev_interaction_id))
@@ -514,7 +513,7 @@ class GeminiService:
                 # Log the prompt snippet
                 last_content = input_parts[-1].get("text", "") if input_parts else ""
                 snippet_trunc = str(last_content).replace("\n", " ")[:150]
-                logger.info(f"[gemini/{GEMINI_MODEL}] Prompt Snippet: {snippet_trunc}{'...' if len(str(last_content)) > 150 else ''}")
+                logger.info("[gemini/%s] Prompt Snippet: %s%s", GEMINI_MODEL, snippet_trunc, '...' if len(str(last_content)) > 150 else '')
 
                 interaction = await client.aio.interactions.create(**kwargs)
 
@@ -560,11 +559,11 @@ class GeminiService:
                             )
                             image_files.append(file)  # noqa: B023 - called in this same attempt
                         except Exception as e:
-                            logger.error(f"Failed to process image output: {e}")
+                            logger.error("Failed to process image output: %s", e, exc_info=True)
                     elif output_type == "thought":
                         summary = item.get("summary", "")
                         if summary:
-                            logger.info(f"[gemini] Thinking: {summary[:200]}")
+                            logger.info("[gemini] Thinking: %s", summary[:200])
 
                 if "steps" in interaction_dict and interaction_dict["steps"]:
                     # Gemini 3.1 Interactions API docs suggest content is nested in steps
@@ -579,7 +578,7 @@ class GeminiService:
                 response_text = "\n".join(text_parts) if text_parts else ""
 
                 if not response_text and not image_files:
-                    logger.error(f"⚠️ Gemini response had no text or images. Raw keys: {list(interaction_dict.keys())}")
+                    logger.error("Gemini response had no text or images. Raw keys: %s", list(interaction_dict.keys()))
                     raise ValueError("Gemini returned an empty response.")
 
                 if response_text:
@@ -591,18 +590,18 @@ class GeminiService:
                 usage = getattr(interaction, 'usage', None)
                 if usage:
                     cost = self._estimate_cost(usage)
-                    logger.info(f"[gemini] Usage: {usage}, Estimated cost: ${cost:.4f}")
+                    logger.info("[gemini] Usage: %s, Estimated cost: $%.4f", usage, cost)
                     await record_cost(GEMINI_DIRECT, cost)
 
                 # Log snippet
                 text_snippet = response_text.strip().replace("\n", " ")[:150] if response_text else "(empty)"
-                logger.info(f"[gemini/{GEMINI_MODEL}] response snippet: {text_snippet}{'...' if len(response_text or '') > 150 else ''}")
+                logger.info("[gemini/%s] response snippet: %s%s", GEMINI_MODEL, text_snippet, '...' if len(response_text or '') > 150 else '')
 
                 # Cache the interaction ID for future turns
                 interaction_id = getattr(interaction, 'id', None)
                 if interaction_id and channel_id and not disable_cache:
                     self._update_interaction_cache(channel_id, interaction_id)
-                    logger.info(f"[gemini] Cached interaction_id={interaction_id[:20]}... for channel {channel_id}")
+                    logger.info("[gemini] Cached interaction_id=%s... for channel %s", interaction_id[:20], channel_id)
 
                 # Return according to response format
                 if image_files:
@@ -618,13 +617,14 @@ class GeminiService:
 
             except Exception as e:
                 error_str = str(e)
-                logger.error(f"Gemini API error on attempt {attempt + 1}/{max_retries}: {error_str}")
-
                 if _is_retryable(e) and attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt)
-                    logger.info(f"Retrying in {delay} seconds...")
+                    logger.warning("Gemini API error on attempt %s/%s, retrying in %ss: %s",
+                                   attempt + 1, max_retries, delay, error_str)
                     await asyncio.sleep(delay)
                     continue
+                logger.error("Gemini API error on attempt %s/%s, giving up: %s", attempt + 1, max_retries, error_str,
+                             exc_info=True)
 
                 if attempt >= max_retries - 1:
                     raise GeminiServiceError(
@@ -641,7 +641,7 @@ class GeminiService:
             try:
                 await client.aio.aclose()
             except Exception as e:
-                logger.error(f"Error closing Gemini client: {e}")
+                logger.error("Error closing Gemini client: %s", e, exc_info=True)
 
     async def generate_image(
         self,
@@ -680,8 +680,7 @@ class GeminiService:
             tools=tools,
         )
 
-        logger.info(f"[gemini/image] {model.id} ({options.describe() or 'defaults'}), "
-                    f"{len(parts) - 1} images, Prompt: {prompt[:50]}")
+        logger.info("[gemini/image] %s (%s), %s images, Prompt: %s", model.id, options.describe() or 'defaults', len(parts) - 1, prompt[:50])
         response = await client.aio.models.generate_content(model=model.id, contents=parts, config=config)
 
         candidate_parts = (response.candidates[0].content.parts if response.candidates

@@ -81,7 +81,7 @@ class CostCommands:
             week = await self._cost_store.totals(today - timedelta(days=6), today)
             month = await self._cost_store.totals(month_start, today)
         except Exception as e:
-            logger.warning(f"Couldn't read the cost totals: {e}")
+            logger.warning("Couldn't read the cost totals: %s", e)
             return "I couldn't read my spending totals right now."
         month_label = f"{today:%B}"
         return format_cost_report(

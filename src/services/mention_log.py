@@ -73,4 +73,4 @@ def log_mention(record: Dict[str, Any]) -> None:
     try:
         _mention_logger.info(json.dumps(record, ensure_ascii=False, default=str))
     except Exception as e:
-        logger.warning(f"Couldn't write the mention log: {e}")
+        logger.warning("Couldn't write the mention log: %s", e)

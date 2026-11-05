@@ -147,10 +147,9 @@ def load_system_prompt(prompt_path: str = "system_prompt.txt") -> str:
         if prompt_path not in _missing_prompt_files_warned:
             _missing_prompt_files_warned.add(prompt_path)
             logger.warning(
-                f"System prompt file '{prompt_path}' not found; "
-                f"falling back to default system prompt.")
+                "System prompt file '%s' not found; falling back to default system prompt.", prompt_path)
     except (OSError, UnicodeDecodeError, PermissionError) as e:
-        print(f"Warning: Error loading {prompt_path}: {e}")
+        logger.warning("Couldn't read system prompt file '%s', using the default: %s", prompt_path, e)
 
     return DEFAULT_SYSTEM_PROMPT
 

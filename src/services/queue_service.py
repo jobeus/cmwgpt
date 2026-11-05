@@ -75,7 +75,7 @@ class QueueService:
             "queue_overflows": 0}
 
         logger.info(
-            f"QueueService initialized with max queue size per channel: {max_queue_size}")
+            "QueueService initialized with max queue size per channel: %s", max_queue_size)
 
     async def start(self) -> None:
         """Start the queue service (enables accepting messages)."""
@@ -107,7 +107,7 @@ class QueueService:
                 queue.put_nowait(shutdown_msg)
             except asyncio.QueueFull:
                 logger.warning(
-                    f"Queue full for channel {channel_id}, forcing shutdown")
+                    "Queue full for channel %s, forcing shutdown", channel_id)
 
         # Wait for all channel workers to complete
         if self._channel_workers:
@@ -146,11 +146,11 @@ class QueueService:
         if worker is None or worker.done():
             if worker is not None and worker.done():
                 logger.warning(
-                    f"Worker for channel {channel_id} died, respawning")
+                    "Worker for channel %s died, respawning", channel_id)
             self._channel_workers[channel_id] = asyncio.create_task(
                 self._process_channel_messages(channel_id))
             logger.debug(
-                f"Created queue and worker for channel {channel_id}")
+                "Created queue and worker for channel %s", channel_id)
 
         return self._channel_queues[channel_id]
 
@@ -193,13 +193,13 @@ class QueueService:
         try:
             queue.put_nowait(queued_msg)
             logger.debug(
-                f"Queued mention from {message.author} in #{message.channel} (channel queue {channel_id})"
+                "Queued mention from %s in #%s (channel queue %s)", message.author, message.channel, channel_id
             )
             return True
         except asyncio.QueueFull:
             self._stats["queue_overflows"] += 1
             logger.warning(
-                f"Channel {channel_id} queue full, dropping message from {message.author}"
+                "Channel %s queue full, dropping message from %s", channel_id, message.author
             )
             return False
 
@@ -241,13 +241,13 @@ class QueueService:
         try:
             queue.put_nowait(queued_msg)
             logger.debug(
-                f"Queued command from {interaction.user} in #{interaction.channel} (channel queue {channel_id})"
+                "Queued command from %s in #%s (channel queue %s)", interaction.user, interaction.channel, channel_id
             )
             return True
         except asyncio.QueueFull:
             self._stats["queue_overflows"] += 1
             logger.warning(
-                f"Channel {channel_id} queue full, dropping command from {interaction.user}"
+                "Channel %s queue full, dropping command from %s", channel_id, interaction.user
             )
             return False
 
@@ -297,7 +297,7 @@ class QueueService:
         Args:
             channel_id: The channel ID this worker processes
         """
-        logger.debug(f"Channel {channel_id} processing loop started")
+        logger.debug("Channel %s processing loop started", channel_id)
         queue = self._channel_queues[channel_id]
 
         while self._is_running:
@@ -308,7 +308,7 @@ class QueueService:
                 # Check for shutdown signal
                 if queued_msg.message_type == MessageType.SHUTDOWN:
                     logger.debug(
-                        f"Channel {channel_id} received shutdown signal")
+                        "Channel %s received shutdown signal", channel_id)
                     queue.task_done()
                     break
 
@@ -327,23 +327,22 @@ class QueueService:
 
             except asyncio.CancelledError:
                 logger.debug(
-                    f"Channel {channel_id} processing loop cancelled")
+                    "Channel %s processing loop cancelled", channel_id)
                 break
             except Exception as e:
                 # Catch *everything* else (discord.HTTPException, KeyError, ...)
                 # so an unexpected error can never kill the channel worker.
                 if is_discord_server_error(e):
                     logger.error(
-                        f"Discord API server error in channel {channel_id} processing loop: {concise_error(e)}. "
-                        "This is a Discord-side outage; the worker is still running and will keep processing new messages."
+                        "Discord API server error in channel %s processing loop: %s. This is a Discord-side outage; the worker is still running and will keep processing new messages.", channel_id, concise_error(e)
                     )
                 else:
                     logger.error(
-                        f"Error in channel {channel_id} processing loop: {e}",
+                        "Error in channel %s processing loop: %s", channel_id, e,
                         exc_info=True)
                 self._stats["messages_failed"] += 1
 
-        logger.debug(f"Channel {channel_id} processing loop ended")
+        logger.debug("Channel %s processing loop ended", channel_id)
 
     async def _handle_queued_message(self, queued_msg: QueuedMessage) -> None:
         """
@@ -358,15 +357,15 @@ class QueueService:
             # Log processing start
             if queued_msg.message_type == MessageType.MENTION:
                 logger.debug(
-                    f"Processing {queued_msg.message_type.value} message from {getattr(queued_msg.discord_message, "author", None)}"
+                    "Processing %s message from %s", queued_msg.message_type.value, getattr(queued_msg.discord_message, "author", None)
                 )
             elif queued_msg.message_type == MessageType.COMMAND:
                 logger.debug(
-                    f"Processing {queued_msg.message_type.value} from {getattr(queued_msg.interaction, "user", None)}"
+                    "Processing %s from %s", queued_msg.message_type.value, getattr(queued_msg.interaction, "user", None)
                 )
             elif queued_msg.message_type == MessageType.RESTART:
                 logger.debug(
-                    f"Processing {queued_msg.message_type.value} signal"
+                    "Processing %s signal", queued_msg.message_type.value
                 )
 
             # Call the appropriate handler directly - they should be properly
@@ -381,7 +380,7 @@ class QueueService:
             processing_time = asyncio.get_event_loop().time() - start_time
             self._stats["messages_processed"] += 1
 
-            logger.debug(f"Processed message in {processing_time:.2f}s")
+            logger.debug("Processed message in %.2fs", processing_time)
 
         except Exception as e:
             # Catch *everything* (discord.HTTPException, KeyError, ...) so a
@@ -398,13 +397,11 @@ class QueueService:
 
             if is_discord_server_error(e):
                 logger.error(
-                    f"Discord API server error while processing {queued_msg.message_type.value} from {user_info}: "
-                    f"{concise_error(e)}. This is a Discord-side outage; the bot is still running and will "
-                    "handle new messages normally."
+                    "Discord API server error while processing %s from %s: %s. This is a Discord-side outage; the bot is still running and will handle new messages normally.", queued_msg.message_type.value, user_info, concise_error(e)
                 )
             else:
                 logger.error(
-                    f"Error processing {queued_msg.message_type.value} from {user_info}: {e}",
+                    "Error processing %s from %s: %s", queued_msg.message_type.value, user_info, e,
                     exc_info=True,
                 )
 

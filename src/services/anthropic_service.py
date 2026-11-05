@@ -169,7 +169,7 @@ def _convert_part(part: Any, role: str) -> Optional[Dict[str, Any]]:
         if match:
             mime = match.group("mime").lower()
             if mime not in _SUPPORTED_IMAGE_TYPES:
-                logger.debug(f"[anthropic] Skipping unsupported image type {mime}")
+                logger.debug("[anthropic] Skipping unsupported image type %s", mime)
                 return None
             return {
                 "type": "image",
@@ -394,13 +394,13 @@ def _log_cache_diagnostics(api_model: str, channel_id: Optional[int], response: 
     where = f"[{api_model}] channel={channel_id}"
     if reason is None:
         # Either nothing to report or the comparison hadn't finished yet.
-        logger.debug(f"{where} cache diagnostics: no miss reported")
+        logger.debug("%s cache diagnostics: no miss reported", where)
         return
     missed = getattr(reason, "cache_missed_input_tokens", None)
     if missed:
-        logger.warning(f"{where} cache miss: {reason.type}, ~{missed} input tokens not read from cache")
+        logger.warning("%s cache miss: %s, ~%s input tokens not read from cache", where, reason.type, missed)
     else:
-        logger.info(f"{where} cache diagnostics: {reason.type}")
+        logger.info("%s cache diagnostics: %s", where, reason.type)
 
 
 class AnthropicService:
@@ -461,7 +461,7 @@ class AnthropicService:
                 await self._client.close()
                 logger.debug("Anthropic client closed")
             except Exception as e:
-                logger.error(f"Error closing Anthropic client: {e}")
+                logger.error("Error closing Anthropic client: %s", e, exc_info=True)
             finally:
                 self._client = None
 
@@ -538,11 +538,11 @@ class AnthropicService:
             try:
                 metadata = await client.files.retrieve_metadata(file_id)
                 if (getattr(metadata, "size_bytes", 0) or 0) > MAX_CODE_FILE_BYTES:
-                    logger.info(f"[code_execution] Skipping {file_id}: too big to attach")
+                    logger.info("[code_execution] Skipping %s: too big to attach", file_id)
                     continue
                 data = await (await client.files.download(file_id)).read()
             except Exception as e:
-                logger.warning(f"[code_execution] Couldn't download {file_id}: {e}")
+                logger.warning("[code_execution] Couldn't download %s: %s", file_id, e)
                 continue
             name = os.path.basename(getattr(metadata, "filename", "") or "") or f"{file_id}.bin"
             files.append(discord.File(io.BytesIO(data), filename=name))
@@ -565,12 +565,12 @@ class AnthropicService:
                 return text_result(f"There's no tool named {name}.", is_error=True)
             on_status(tool.status)
             note_stat("tools", name)
-            logger.info(f"[tool] {name} {str(args)[:300]}")
+            logger.info("[tool] %s %s", name, str(args)[:300])
             with logfire.span("tool {tool_name}", tool_name=name, args=args) as span:
                 try:
                     result = await tool.run(args)
                 except Exception as e:
-                    logger.warning(f"[tool] {name} failed: {e}")
+                    logger.warning("[tool] %s failed: %s", name, e)
                     span.set_level("error")
                     return text_result(f"{name} failed: {e}", is_error=True)
                 await image_links_ready(result.content)
@@ -670,7 +670,7 @@ class AnthropicService:
 
         last_text = api_messages[-1]["content"][0].get("text", "") if api_messages else ""
         snippet = last_text.replace("\n", " ")
-        logger.info(f"[{api_model}] Prompt Snippet: {snippet[:150]}{'...' if len(snippet) > 150 else ''}")
+        logger.info("[%s] Prompt Snippet: %s%s", api_model, snippet[:150], '...' if len(snippet) > 150 else '')
 
         total_cost = 0.0
         previous_message_id = self._last_message_ids.get(channel_id) if channel_id else None
@@ -704,14 +704,14 @@ class AnthropicService:
                 except anthropic.BadRequestError as e:
                     if kwargs.get("mcp_servers") and _is_mcp_error(e):
                         # Logfire is down or the key stopped working: answer without the logs.
-                        logger.warning(f"[{api_model}] Logfire MCP failed, retrying without it: {e.message}")
+                        logger.warning("[%s] Logfire MCP failed, retrying without it: %s", api_model, e.message)
                         kwargs = _without_logfire_mcp(kwargs)
                         continue
                     if strict_dropped or not _is_grammar_error(e) or not kwargs.get("tools"):
                         raise
                     # Too many or too big strict schemas: the arguments just aren't guaranteed
                     # to match then, and every handler checks its own input anyway.
-                    logger.warning(f"[{api_model}] Strict tool grammar too large; retrying without strict mode")
+                    logger.warning("[%s] Strict tool grammar too large; retrying without strict mode", api_model)
                     kwargs["tools"] = [_without_strict(t) for t in kwargs["tools"]]
                     strict_dropped = True
                     continue
@@ -721,7 +721,7 @@ class AnthropicService:
                     # Throw this response away and ask again at high effort.
                     escalated = True
                     note_stat("think_harder", 1)
-                    logger.info(f"[{api_model}] think_harder requested: {reason[:300]}")
+                    logger.info("[%s] think_harder requested: %s", api_model, reason[:300])
                     # Clear any draft it wrote before the call.
                     show("")
                     status(THINKING_HARDER_STATUS)
@@ -748,19 +748,19 @@ class AnthropicService:
                 if tool_rounds >= MAX_TOOL_ROUNDS:
                     kwargs["tool_choice"] = {"type": "none"}
         except anthropic.AuthenticationError as e:
-            logger.error(f"Anthropic authentication error: {e}")
+            logger.error("Anthropic authentication error: %s", e)
             raise AnthropicServiceError("Authentication failed. Please check ANTHROPIC_API_KEY.") from e
         except anthropic.BadRequestError as e:
-            logger.error(f"Anthropic bad request: {e}")
+            logger.error("Anthropic bad request: %s", e)
             raise AnthropicServiceError(f"Invalid request: {e.message}") from e
         except anthropic.RateLimitError as e:
-            logger.error(f"Anthropic rate limit after retries: {e}")
+            logger.error("Anthropic rate limit after retries: %s", e)
             raise AnthropicServiceError("Rate limit exceeded. Please try again later.") from e
         except anthropic.APIStatusError as e:
-            logger.error(f"Anthropic API error ({e.status_code}): {e}")
+            logger.error("Anthropic API error (%s): %s", e.status_code, e)
             raise AnthropicServiceError(f"Claude API error {e.status_code}: {e.message}") from e
         except anthropic.APIConnectionError as e:
-            logger.error(f"Anthropic connection error: {e}")
+            logger.error("Anthropic connection error: %s", e)
             raise AnthropicServiceError("Connection to the Claude API failed. Please try again later.") from e
 
         if response is None:
@@ -773,17 +773,13 @@ class AnthropicService:
         if response.stop_reason == "refusal":
             details = getattr(response, "stop_details", None)
             category = getattr(details, "category", None) if details else None
-            logger.warning(f"[{api_model}] Request declined (category={category})")
+            logger.warning("[%s] Request declined (category=%s)", api_model, category)
             raise AnthropicServiceError(f"Claude declined this request (category: {category or 'unknown'}).")
 
         response_text = _response_text(response)
         usage = getattr(response, "usage", None)
         logger.info(
-            f"[{response.model}] stop_reason={response.stop_reason} cost=${total_cost:.4f} "
-            f"cache_read={getattr(usage, 'cache_read_input_tokens', 0)} "
-            f"cache_write={getattr(usage, 'cache_creation_input_tokens', 0)} "
-            f"tool_rounds={tool_rounds} "
-            f"response snippet: {response_text.replace(chr(10), ' ')[:150]}"
+            "[%s] stop_reason=%s cost=$%.4f cache_read=%s cache_write=%s tool_rounds=%s response snippet: %s", response.model, response.stop_reason, total_cost, getattr(usage, 'cache_read_input_tokens', 0), getattr(usage, 'cache_creation_input_tokens', 0), tool_rounds, response_text.replace(chr(10), ' ')[:150]
         )
         cleaned = "\n\n".join(texts + [clean_reply(response_text, bot_id=resolved_bot_id)]).strip()
         if code_file_ids:
@@ -871,7 +867,7 @@ class MessageBatcher:
         try:
             await self._run_batch(by_id)
         except Exception as e:
-            logger.warning(f"[batch] Batch of {len(items)} failed: {e}")
+            logger.warning("[batch] Batch of %s failed: %s", len(items), e)
         finally:
             for item in by_id.values():
                 if not item.future.done():
@@ -881,11 +877,11 @@ class MessageBatcher:
         client = self._service.get_client()
         batch = await client.beta.messages.batches.create(
             requests=[{"custom_id": cid, "params": item.params} for cid, item in by_id.items()])
-        logger.info(f"[batch] Sent {batch.id} with {len(by_id)} requests")
+        logger.info("[batch] Sent %s with %s requests", batch.id, len(by_id))
         waited = 0.0
         while getattr(batch, "processing_status", None) != "ended":
             if waited >= self._max_wait_seconds:
-                logger.warning(f"[batch] {batch.id} took too long; cancelling it")
+                logger.warning("[batch] %s took too long; cancelling it", batch.id)
                 await client.beta.messages.batches.cancel(batch.id)
                 return
             await asyncio.sleep(self._poll_seconds)
@@ -909,5 +905,5 @@ class MessageBatcher:
                 item.future.set_exception(AnthropicServiceError("Claude declined this request."))
                 continue
             item.future.set_result((_response_text(message), cost))
-        logger.info(f"[batch] {batch.id} ended: {len(by_id)} requests, ${total:.4f}")
+        logger.info("[batch] %s ended: %s requests, $%.4f", batch.id, len(by_id), total)
 

@@ -20,7 +20,7 @@ from src.bot.commands.wikicount import WikiCountCommands
 from src.services.model_catalog import is_model_unavailable
 from src.telemetry import instrument_command_tree
 
-logger = logging.getLogger("discord_bot")
+logger = logging.getLogger(__name__)
 
 
 class DiscordBotClient:
@@ -81,12 +81,11 @@ class DiscordBotClient:
         """Load any saved state from previous restart."""
         try:
             if self.services.state_service.load_state_from_temp_files():
-                print("✅ Restored previous state")
+                logger.info("Restored the state saved before the last restart")
             else:
-                print("🆕 Starting with fresh state")
+                logger.info("No saved state from a restart; starting fresh")
         except Exception as e:
-            logger.error(f"Error loading saved state: {e}")
-            print("⚠️  Failed to restore state, starting fresh")
+            logger.error("Couldn't restore the saved state, starting fresh: %s", e, exc_info=True)
             # Continue with fresh state if loading fails
 
     def _set_current_git_sha(self) -> None:
@@ -99,16 +98,16 @@ class DiscordBotClient:
                 # announcement service
                 if not self.services.state_service.get_last_git_sha():
                     self.services.state_service.set_last_git_sha(current_sha)
-                    logger.info(f"Set initial git SHA: {current_sha[:7]}")
+                    logger.info("Set initial git SHA: %s", current_sha[:7])
                 else:
                     # Don't update - let the announcement service handle the
                     # comparison and update
                     logger.debug(
-                        f"Current git SHA: {current_sha[:7]}, preserving previous SHA for comparison")
+                        "Current git SHA: %s, preserving previous SHA for comparison", current_sha[:7])
             else:
                 logger.warning("Could not determine current git SHA")
         except Exception as e:
-            logger.error(f"Error setting current git SHA: {e}")
+            logger.error("Error setting current git SHA: %s", e, exc_info=True)
 
     def _get_current_git_sha(self) -> Optional[str]:
         """
@@ -123,10 +122,10 @@ class DiscordBotClient:
             if result.returncode == 0:
                 return result.stdout.strip()
             else:
-                logger.error(f"Failed to get git SHA: {result.stderr}")
+                logger.error("Failed to get git SHA: %s", result.stderr)
                 return None
         except Exception as e:
-            logger.error(f"Error getting git SHA: {e}")
+            logger.error("Error getting git SHA: %s", e, exc_info=True)
             return None
 
     def _setup_auto_update(self) -> None:
@@ -137,7 +136,7 @@ class DiscordBotClient:
                 self.services.restart_handler.perform_restart)
             logger.info("Auto-update service configured")
         except Exception as e:
-            logger.error(f"Error setting up auto-update service: {e}")
+            logger.error("Error setting up auto-update service: %s", e, exc_info=True)
 
     async def _send_update_announcement_if_needed(self) -> None:
         """Send update announcement if this was a restart."""
@@ -158,10 +157,10 @@ class DiscordBotClient:
             # Send announcement
             await self.services.announcement_service.announce_update(was_manual=was_manual)
             logger.info(
-                f"Sent update announcements to active channels (manual: {was_manual})")
+                "Sent update announcements to active channels (manual: %s)", was_manual)
 
         except Exception as e:
-            logger.error(f"Error sending update announcement: {e}")
+            logger.error("Error sending update announcement: %s", e, exc_info=True)
 
     def _check_for_restart_info(self) -> bool:
         """True if the previous process was restarted manually (/restart)."""
@@ -191,7 +190,7 @@ class DiscordBotClient:
                 guild = discord.Object(id=int(self.config.discord_guild_id))
                 self.bot.tree.copy_global_to(guild=guild)
                 await self.bot.tree.sync(guild=guild)
-                logger.info(f"Commands synced instantly to guild {self.config.discord_guild_id}")
+                logger.info("Commands synced instantly to guild %s", self.config.discord_guild_id)
             else:
                 await self.bot.tree.sync()
                 logger.info("Commands synced globally (may take up to 1 hour to propagate)")
@@ -215,19 +214,12 @@ class DiscordBotClient:
             if hasattr(self.mention_handler, "warm_up"):
                 self.mention_handler.warm_up()
 
-            print(f"🤖 Logged in as {self.bot.user}")
-
-            # Log auto-update status
-            status = self.services.auto_update_service.get_status()
-            if status["running"]:
-                print(f"🔄 Auto-update webhook listening on port {status['port']}")
-            else:
-                print("🔄 Auto-update webhook disabled")
+            logger.info("Logged in to Discord as %s in %s guild(s)", self.bot.user, len(self.bot.guilds))
 
             # Send update announcement if this was a restart
             await self._send_update_announcement_if_needed()
 
-            print("🚀 Bot ready!")
+            logger.info("Bot ready")
 
         @self.bot.event
         async def on_disconnect():
@@ -297,7 +289,7 @@ class DiscordBotClient:
         """The model a channel answers with: its ``/model``, or the default if that's unset or unavailable."""
         model = self.services.state_service.get_model(channel.id) or self.config.default_model
         if is_model_unavailable(model, self.config):
-            logger.info(f"Model {model} for #{channel} is unavailable; using {self.config.default_model}")
+            logger.info("Model %s for #%s is unavailable; using %s", model, channel, self.config.default_model)
             model = self.config.default_model
         return model
 
@@ -308,7 +300,7 @@ class DiscordBotClient:
         queued = await self.mention_handler.queue_reminder_task(
             reminder, request, self.bot.user, self._channel_model(request.channel))
         if not queued:
-            logger.warning(f"[reminder] Couldn't queue the task of #{reminder.id}: the channel's queue is full")
+            logger.warning("[reminder] Couldn't queue the task of #%s: the channel's queue is full", reminder.id)
 
     async def _handle_message(self, message: discord.Message) -> None:
         """
@@ -331,7 +323,7 @@ class DiscordBotClient:
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue mention from {message.author} in #{message.channel} - queue may be full"
+                    "Failed to queue mention from %s in #%s - queue may be full", message.author, message.channel
                 )
                 try:
                     await self.services.message_service.send_channel_reply(
@@ -339,7 +331,7 @@ class DiscordBotClient:
                         "I'm too backed up in this channel to take that right now. Mention me again in a bit."
                     )
                 except Exception as e:
-                    logger.warning(f"⚠️ Couldn't tell #{message.channel} the queue is full: {e}")
+                    logger.warning("Couldn't tell #%s the queue is full: %s", message.channel, e)
 
         # Ensure other commands are still processed
         await self.bot.process_commands(message)
@@ -358,7 +350,7 @@ class DiscordBotClient:
 
     def run(self) -> None:
         """Start the Discord bot; returns once the bot has been closed."""
-        print("🔌 Starting Discord bot...")
+        logger.info("Starting the Discord bot")
         self.bot.run(self.config.discord_bot_token)
 
 

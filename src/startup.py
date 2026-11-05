@@ -152,9 +152,9 @@ async def shutdown_services(services: AppServices) -> None:
             result = action()
             if hasattr(result, "__await__"):
                 await result
-            logger.info(f"Shutdown: {name} done")
+            logger.info("Shutdown: %s done", name)
         except Exception as e:
-            logger.error(f"Shutdown: {name} failed: {e}")
+            logger.error("Shutdown: %s failed: %s", name, e, exc_info=True)
 
     await step("deploy webhook stop", services.auto_update_service.stop)
     if services.memory_service is not None:

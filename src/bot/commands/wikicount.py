@@ -58,5 +58,5 @@ class WikiCountCommands:
             await interaction.followup.send(f"**{article_title.replace('_', ' ')}**: {avg_views:,} avg monthly views over past {months} months")
             
         except Exception:
-            logger.exception(f"Error in /wikicount for {target}")
+            logger.exception("Error in /wikicount for %s", target)
             await interaction.followup.send("An error occurred while fetching pageviews.")

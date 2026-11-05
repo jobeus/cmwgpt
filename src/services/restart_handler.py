@@ -45,21 +45,23 @@ class RestartHandler:
             logger.warning("Restart already in progress, ignoring duplicate request")
             return
         self._restart_in_progress = True
-        print("🔄 Restarting bot...")
+        logger.info("Restarting the bot (%s)", "manual /restart" if manual else "deploy")
 
         if self._state_service.save_state_to_temp_file({"manual_restart": manual}):
-            print("✅ State saved")
+            logger.info("Saved state for the restart")
         else:
-            print("⚠️  Failed to save state, continuing anyway")
+            logger.warning("Couldn't save state for the restart; continuing anyway")
 
         # git pull is synchronous; keep it off the loop so heartbeats continue.
-        print("📥 Updating code...")
         try:
             pulled = await asyncio.to_thread(self._git_pull)
         except Exception as e:
-            logger.error(f"git pull raised: {e}")
+            logger.error("git pull raised: %s", e, exc_info=True)
             pulled = False
-        print("✅ Code updated" if pulled else "⚠️  Git pull failed, continuing anyway")
+        if pulled:
+            logger.info("Pulled the latest code")
+        else:
+            logger.warning("git pull failed; restarting on the current code")
 
         self.exit_code = RESTART_EXIT_CODE
         if self._shutdown is None:
@@ -67,7 +69,6 @@ class RestartHandler:
             return
         # This usually runs inside a queue worker, which shutdown waits on, so
         # run the shutdown as its own task instead of awaiting it here.
-        print("🚀 Restarting...")
         self._shutdown_task = asyncio.get_running_loop().create_task(self._shutdown())
 
     def is_restart_in_progress(self) -> bool:
@@ -76,6 +77,6 @@ class RestartHandler:
     async def perform_graceful_shutdown(self) -> None:
         """Save state before a non-restart shutdown (Ctrl-C, SIGTERM)."""
         if self._state_service.save_state_to_temp_file({"manual_restart": False, "graceful_shutdown": True}):
-            print("✅ State saved")
+            logger.info("Saved state before shutting down")
         else:
-            print("⚠️  Failed to save state")
+            logger.warning("Couldn't save state before shutting down")

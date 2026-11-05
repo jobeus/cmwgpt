@@ -104,13 +104,13 @@ class PersistentCache:
                 self._client = self._client_getter()
             except Exception as e:
                 # Under tests there's no Redis at all: stay in memory for good.
-                logger.debug(f"Cache {self.cache_name} running in memory: {e}")
+                logger.debug("Cache %s running in memory: %s", self.cache_name, e)
                 self._down_until = float("inf")
                 return None
         return self._client
 
     def _redis_failed(self, e: Exception) -> None:
-        logger.warning(f"Redis error in cache {self.cache_name}, using memory for now: {e}")
+        logger.warning("Redis error in cache %s, using memory for now: %s", self.cache_name, e)
         self._down_until = time.monotonic() + REDIS_RETRY_SECONDS
 
     async def get(self, key: Hashable, default: Any = None) -> Any:
@@ -132,7 +132,7 @@ class PersistentCache:
     async def set(self, key: Hashable, value: Any) -> None:
         raw = await _dumps(value)
         if len(raw) > MAX_VALUE_BYTES:
-            logger.debug(f"Not caching {self.cache_name}:{key}: {len(raw)} bytes is too big")
+            logger.debug("Not caching %s:%s: %s bytes is too big", self.cache_name, key, len(raw))
             return
         client = self._redis()
         if client is not None:
@@ -233,7 +233,7 @@ def skip_recent_failures(kind: str) -> Callable[[F], F]:
                 return await fn(key, *args, **kwargs)
             failure_key = f"{kind}:{key}"
             if await _recently_failed(failure_key):
-                logger.debug(f"Skipping {failure_key}: failed within the last hour")
+                logger.debug("Skipping %s: failed within the last hour", failure_key)
                 return None
             result = await fn(key, *args, **kwargs)
             await _record_result(failure_key, result)

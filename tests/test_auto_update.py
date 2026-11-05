@@ -154,9 +154,9 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
         state_service.save_state_to_temp_file.return_value = None
         handler = RestartHandler(state_service=state_service, git_pull=lambda: True)
 
-        with patch("builtins.print") as mock_print:
+        with self.assertLogs("src.services.restart_handler", "WARNING") as logs:
             await handler.perform_graceful_shutdown()
-        mock_print.assert_called_with("⚠️  Failed to save state")
+        self.assertIn("Couldn't save state before shutting down", logs.output[-1])
 
         state_service = MagicMock()
         state_service.save_state_to_temp_file.side_effect = RuntimeError("disk full")

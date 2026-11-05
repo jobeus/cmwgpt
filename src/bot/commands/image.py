@@ -166,8 +166,7 @@ class ImageCommands:
         channel_id = interaction.channel.id
         self._state_service.mark_channel_active(channel_id)
         active_model = resolve_image_model(self._state_service, channel_id, self._default_image_model, model)
-        logger.info(f"[{command}] Channel {channel_id} Model: {active_model.id} "
-                    f"Options: {options.describe() or 'defaults'} Images: {len(attachments)} Prompt: {prompt}")
+        logger.info("[%s] Channel %s Model: %s Options: %s Images: %s Prompt: %s", command, channel_id, active_model.id, options.describe() or 'defaults', len(attachments), prompt)
 
         async with best_effort_typing(interaction.channel):
             try:
@@ -180,15 +179,15 @@ class ImageCommands:
                     options=options,
                 )
             except (ImageOptionError, GeminiServiceError, APIError) as e:
-                logger.error(f"Image error in {command}: {e}")
+                logger.error("Image error in %s: %s", command, e)
                 await self._send_error(interaction, prompt, str(e))
                 return
             except Exception as e:
-                logger.exception(f"Unexpected error in {command}: {e}")
+                logger.exception("Unexpected error in %s: %s", command, e)
                 await self._send_error(interaction, prompt, "Something unexpected went wrong. Please try again later.")
                 return
 
-        logger.info(f"[{command}] Channel {channel_id}: image generated")
+        logger.info("[%s] Channel %s: image generated", command, channel_id)
         filename = "edited.png" if edit else "image.png"
         header = _result_header(result.cost, active_model, options, prompt)
         if edit:
@@ -205,7 +204,7 @@ class ImageCommands:
         try:
             await interaction.followup.send(content=content[:DISCORD_MESSAGE_LIMIT])
         except Exception as discord_error:
-            logger.error(f"Failed to send image error to Discord: {discord_error}")
+            logger.error("Failed to send image error to Discord: %s", discord_error)
 
     def _create_imagemodel_command(self) -> app_commands.Command:
         """Create the /imagemodel command."""
@@ -230,7 +229,7 @@ class ImageCommands:
         chosen = find_image_model(model)
         if chosen:
             self._state_service.set_image_model(channel_id, chosen.id)
-            logger.info(f"[/imagemodel] Channel {channel_id}: image model set to {chosen.id}")
+            logger.info("[/imagemodel] Channel %s: image model set to %s", channel_id, chosen.id)
             await interaction.followup.send(f"Image model set to `{chosen.name}`.", ephemeral=True)
         else:
             current = resolve_image_model(self._state_service, channel_id, self._default_image_model)

@@ -201,11 +201,11 @@ async def _convert_message(
                 else:
                     text_payload[0]["text"] += f"\n[Attached file: {attach.filename}]"
         except Exception as e:
-            logger.error(f"Failed to convert attachment context for msg {msg.id}: {e}")
+            logger.error("Failed to convert attachment context for msg %s: %s", msg.id, e, exc_info=True)
 
     # 3. Add native embed image previews
     for embed in msg.embeds:
-        logger.debug(f"Checking embed for image previews: {embed.title}")
+        logger.debug("Checking embed for image previews: %s", embed.title)
         # Prefer Discord's media proxy: it's always reachable, already
         # resized, and never points at an address of the poster's choosing.
         embed_url = None
@@ -216,13 +216,13 @@ async def _convert_message(
 
         if embed_url:
             try:
-                logger.debug(f"Fetching embed preview image from: {embed_url}")
+                logger.debug("Fetching embed preview image from: %s", embed_url)
                 image_data_url = await url_converter(embed_url)
                 file_payloads.append(
                     {"type": "image_url", "image_url": {"url": image_data_url}}
                 )
             except Exception as ex:
-                logger.warning(f"Failed to fetch embed preview context for msg {msg.id}: {ex}")
+                logger.warning("Failed to fetch embed preview context for msg %s: %s", msg.id, ex)
 
     # Chat completions API doesn't support image_url parts in the 'assistant'
     # role natively. So if it's an assistant message with images, send text

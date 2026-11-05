@@ -48,7 +48,7 @@ class MessageService:
             pasted_url = await self._upload_to_paste(text)
             return f"My response was too long to post here, so I've uploaded it to: {pasted_url}"
         except Exception as e:
-            logger.error(f"Error uploading to paste service: {e}")
+            logger.error("Error uploading to paste service: %s", e, exc_info=True)
             return (
                 f"The content of my response was over {self.DISCORD_MESSAGE_LIMIT} characters "
                 "(discord limit), and there was a problem uploading it to paste service. "
@@ -75,7 +75,7 @@ class MessageService:
                 await send(content=content, files=files or [], suppress_embeds=True, **kwargs)
                 return
             except (Forbidden, NotFound) as e:
-                logger.error(f"Discord permission/not-found error while sending: {e}")
+                logger.error("Discord permission/not-found error while sending: %s", e)
                 raise
             except HTTPException as e:
                 if e.status == 413 and files:
@@ -85,14 +85,14 @@ class MessageService:
                         suppress_embeds=True, **kwargs)
                     return
                 if e.status < 500 or attempt == SEND_ATTEMPTS:
-                    logger.error(f"Discord HTTP error while sending: {concise_error(e)}")
+                    logger.error("Discord HTTP error while sending: %s", concise_error(e))
                     raise
-                logger.warning(f"Discord server error on attempt {attempt}: {concise_error(e)}")
+                logger.warning("Discord server error on attempt %s: %s", attempt, concise_error(e))
             except Exception as e:
                 if attempt == SEND_ATTEMPTS:
-                    logger.error(f"Unexpected error sending message, giving up: {e}")
+                    logger.error("Unexpected error sending message, giving up: %s", e, exc_info=True)
                     raise
-                logger.warning(f"Unexpected error sending message on attempt {attempt}: {e}")
+                logger.warning("Unexpected error sending message on attempt %s: %s", attempt, e)
             await asyncio.sleep(RETRY_BASE_DELAY_SECONDS * 2 ** (attempt - 1))
 
     async def send_channel_reply(self, channel: discord.TextChannel, reply_text: str) -> None:

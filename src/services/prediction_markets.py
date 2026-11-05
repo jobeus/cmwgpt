@@ -47,7 +47,7 @@ async def prediction_market_lookup(query: str, status: str = "active") -> str:
             errors.append(f"{name}: {result}")
             sections.append(f"{name}: lookup failed ({result})")
         elif isinstance(result, Exception):
-            logger.error(f"{name} lookup failed", exc_info=result)
+            logger.error("%s lookup failed", name, exc_info=result)
             errors.append(f"{name}: lookup failed")
             sections.append(f"{name}: lookup failed")
         elif isinstance(result, str) and result:

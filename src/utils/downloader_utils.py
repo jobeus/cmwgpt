@@ -113,7 +113,7 @@ async def fetch_all_url_content(
                 return None
             return source.render(key, result)
         except Exception as e:
-            logger.warning(f"Failed to fetch {source.name} content for {key}: {type(e).__name__}: {e}")
+            logger.warning("Failed to fetch %s content for %s: %s: %s", source.name, key, type(e).__name__, e)
             return None
 
     results = await asyncio.gather(*(run(source, key) for source, key in jobs))
@@ -127,7 +127,7 @@ async def fetch_all_url_content(
         sections.setdefault(source.name, []).append(text)
         images.extend({"type": "image_url", "image_url": {"url": url}} for url in image_urls)
         if not cache_only:
-            logger.info(f"Fetched {source.name} content for {key}")
+            logger.info("Fetched %s content for %s", source.name, key)
 
     blocks = [
         f"------\n{source.header}\n\n" + "\n\n".join(sections[source.name])

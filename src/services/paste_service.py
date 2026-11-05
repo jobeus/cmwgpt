@@ -50,7 +50,7 @@ class PasteService:
                     raise Exception(
                         f"Paste service error: {response.status_code} - {response.text}")
         except httpx.RequestError as e:
-            logger.error(f"Network error uploading to paste service: {e}")
+            logger.error("Network error uploading to paste service: %s", e)
             raise Exception(f"Failed to upload to paste service: {e}") from e
 
     async def upload_image(self, data: bytes, media_type: str = "image/png") -> str:

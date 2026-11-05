@@ -114,7 +114,7 @@ def _youtube_seconds(url: str) -> Optional[float]:
             info = ydl.extract_info(url, download=False)
         return float(info.get("duration")) if info and info.get("duration") else None
     except Exception as e:
-        logger.info(f"[video] Couldn't get the length of {url}: {e}")
+        logger.info("[video] Couldn't get the length of %s: %s", url, e)
         return None
 
 
@@ -169,7 +169,7 @@ async def download_video(url: str, temp_dir: str) -> str:
         proxy = get_config().transcript_proxy
         if not proxy or "took longer than" in str(e):
             raise VideoError(f"Couldn't download a video from that link: {e}") from e
-        logger.warning(f"[video] Direct download of {url} failed ({e}); trying the proxy")
+        logger.warning("[video] Direct download of %s failed (%s); trying the proxy", url, e)
         try:
             found = await asyncio.to_thread(_ytdlp_video, url, temp_dir, proxy)
         except Exception as e2:
@@ -218,7 +218,7 @@ class VideoWatcher:
             try:
                 return await self._gemini.watch_video(url, watch_prompt(focus), agentic=True)
             except GeminiServiceError as e:
-                logger.warning(f"[video] Agentic watch of {url} failed ({e}); watching it statically")
+                logger.warning("[video] Agentic watch of %s failed (%s); watching it statically", url, e)
         try:
             return await self._gemini.summarize_youtube(url, focus)
         except GeminiServiceError as e:
@@ -232,7 +232,7 @@ class VideoWatcher:
                     upload["uri"], watch_prompt(focus), agentic=upload["seconds"] >= AGENTIC_MIN_SECONDS,
                     mime_type=upload["mime_type"])
             except GeminiServiceError as e:
-                logger.info(f"[video] The earlier upload of {url} didn't work ({e}); uploading it again")
+                logger.info("[video] The earlier upload of %s didn't work (%s); uploading it again", url, e)
         upload = await self._upload(url)
         try:
             return await self._gemini.watch_video(
@@ -255,7 +255,7 @@ class VideoWatcher:
             mime_type = GEMINI_VIDEO_TYPES.get(os.path.splitext(downloaded)[1].lower())
             if size < UPLOAD_AS_IS_BYTES and mime_type:
                 path = downloaded
-                logger.info(f"[video] {url}: {seconds:.0f}s, uploading {size // 1024} KB as it is")
+                logger.info("[video] %s: %.0fs, uploading %s KB as it is", url, seconds, size // 1024)
             else:
                 path, mime_type = os.path.join(temp_dir, "watch.mp4"), "video/mp4"
                 try:
@@ -263,7 +263,7 @@ class VideoWatcher:
                 except subprocess.CalledProcessError as e:
                     raise VideoError("Couldn't re-encode that video.") from e
                 logger.info(
-                    f"[video] {url}: {seconds:.0f}s, re-encoded {size // 1024} KB -> {os.path.getsize(path) // 1024} KB")
+                    "[video] %s: %.0fs, re-encoded %s KB -> %s KB", url, seconds, size // 1024, os.path.getsize(path) // 1024)
             try:
                 uploaded = await self._gemini.upload_video(path, mime_type)
             except GeminiServiceError as e:

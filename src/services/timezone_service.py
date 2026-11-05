@@ -73,7 +73,7 @@ class TimezoneStore:
                 try:
                     zones[uid] = ZoneInfo(name)
                 except (ZoneInfoNotFoundError, ValueError):
-                    logger.warning(f"Ignoring unknown saved time zone {name!r} for {uid}")
+                    logger.warning("Ignoring unknown saved time zone %r for %s", name, uid)
         return zones
 
     async def get(self, guild_id: int, user_id: int) -> Optional[ZoneInfo]:

@@ -164,7 +164,7 @@ async def record_cost(provider: str, amount: Optional[float]) -> None:
     try:
         amount = float(amount or 0.0)
     except (TypeError, ValueError):
-        logger.warning(f"Ignoring a non-numeric {provider} cost: {amount!r}")
+        logger.warning("Ignoring a non-numeric %s cost: %r", provider, amount)
         return
     if amount <= 0:
         return
@@ -179,4 +179,4 @@ async def record_cost(provider: str, amount: Optional[float]) -> None:
             ledger.user_id if ledger else None, ledger.channel_id if ledger else None,
         )
     except Exception as e:
-        logger.warning(f"Couldn't save a {provider} cost of ${amount:.4f}: {e}")
+        logger.warning("Couldn't save a %s cost of $%.4f: %s", provider, amount, e)

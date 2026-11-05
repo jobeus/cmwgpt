@@ -28,19 +28,17 @@ def setup_signal_handlers(bot_client):
         try:
             await bot_client.services.restart_handler.perform_graceful_shutdown()
             await bot_client.shutdown()
-            print("✅ Shutdown complete, exiting...")
+            logger.info("Shutdown complete, exiting")
         except Exception as e:
-            logger.error(f"Error during shutdown: {e}")
-            print(f"⚠️  Error during shutdown: {e}")
+            logger.error("Error during shutdown: %s", e, exc_info=True)
 
     def handle_signal(signum, loop):
         signal_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
         if shutdown_state["in_progress"]:
-            print(f"\n🛑 {signal_name} received again, shutdown already in progress...")
+            logger.info("%s received again; shutdown already in progress", signal_name)
             return
         shutdown_state["in_progress"] = True
-        print(f"\n🛑 Received {signal_name}, performing graceful shutdown...")
-        logger.info(f"Received {signal_name}, initiating graceful shutdown")
+        logger.info("Received %s, shutting down gracefully", signal_name)
         loop.create_task(complete_shutdown())
 
     def register_signal_handlers(loop):

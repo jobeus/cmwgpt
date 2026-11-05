@@ -82,7 +82,7 @@ def compress_image(
         return out_bytes.getvalue()
     except Exception as e:
         logger.warning(
-            f"Image compression failed: {e}. Falling back to original bytes.")
+            "Image compression failed: %s. Falling back to original bytes.", e)
         return image_bytes
 
 
@@ -109,7 +109,7 @@ def pcm_to_wav(
             wav_file.writeframes(pcm_bytes)
         return wav_io.getvalue()
     except Exception as e:
-        logger.warning(f"PCM to WAV conversion failed: {e}. Returning original bytes.")
+        logger.warning("PCM to WAV conversion failed: %s. Returning original bytes.", e)
         return pcm_bytes
 
 
@@ -153,7 +153,7 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
 
     except Exception as e:
         logger.error(
-            f"Failed to convert attachment {attachment.filename} to base64: {e}")
+            "Failed to convert attachment %s to base64: %s", attachment.filename, e, exc_info=True)
         raise
 
 
@@ -179,7 +179,7 @@ async def url_to_base64_data_url(url: str) -> str:
         await _url_base64_cache.set(url, data_url)
         return data_url
     except Exception as e:
-        logger.warning(f"Failed to fetch image URL '{url}': {type(e).__name__}: {e}")
+        logger.warning("Failed to fetch image URL '%s': %s: %s", url, type(e).__name__, e)
         raise
 
 
@@ -236,10 +236,10 @@ async def transcribe_audio_attachment(attachment: discord.Attachment) -> Optiona
                     f.write(file_bytes)
                 transcript = await transcribe_audio_file(path, content_type)
         if transcript:
-            logger.info(f"Successfully transcribed audio attachment {filename} using Groq.")
+            logger.info("Successfully transcribed audio attachment %s using Groq.", filename)
             await _audio_transcript_cache.set(attachment.id, transcript)
         return transcript
 
     except Exception as e:
-        logger.error(f"Error transcribing audio attachment {attachment.filename}: {e}")
+        logger.error("Error transcribing audio attachment %s: %s", attachment.filename, e, exc_info=True)
         return None

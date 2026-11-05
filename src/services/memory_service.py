@@ -395,12 +395,13 @@ class MemoryService:
         if self._config.is_testing:
             return
         if not self.available:
-            logger.warning(f"Memory job disabled: model {self._model} has no API key configured")
+            logger.warning("Memory job disabled: model %s has no API key configured", self._model)
             return
         if self._task and not self._task.done():
             return
         self._task = asyncio.create_task(self._schedule_loop())
-        logger.info(f"Memory job scheduled daily at {JOB_TIME:%H:%M} {JOB_TIMEZONE.key} using {self._model}")
+        logger.info(
+            "Memory job scheduled daily at %s %s using %s", f"{JOB_TIME:%H:%M}", JOB_TIMEZONE.key, self._model)
 
     def stop(self) -> None:
         if self._task and not self._task.done():
@@ -432,7 +433,7 @@ class MemoryService:
                     try:
                         await self._store.clear_retired(guild.id)
                     except Exception as e:
-                        logger.warning(f"Couldn't clear retired memory keys for guild {guild.id}: {e}")
+                        logger.warning("Couldn't clear retired memory keys for guild %s: %s", guild.id, e)
                     now = self._now()
                     stored = await self._store.get_processed_through(guild.id)
                     start = _to_aware_utc(stored) if stored else now - WINDOW
@@ -473,7 +474,7 @@ class MemoryService:
             try:
                 stats = await self.process_window(guild, start, end)
             except Exception as e:
-                logger.exception(f"Memory window {start:%Y-%m-%d %H:%M} failed for guild {guild.id}")
+                logger.exception("Memory window %s failed for guild %s", f"{start:%Y-%m-%d %H:%M}", guild.id)
                 await self._store.set_job_state(guild.id, _to_naive_utc(start), f"failed: {e}")
                 raise
             days += 1
@@ -491,8 +492,7 @@ class MemoryService:
                     f"updated {len(stats['users_updated'])} people"
                 )
         logger.info(
-            f"Memory {source} for guild {guild.id}: {days} days, {messages} messages, "
-            f"{len(users_updated)} users, ${cost:.4f}"
+            "Memory %s for guild %s: %s days, %s messages, %s users, $%.4f", source, guild.id, days, messages, len(users_updated), cost
         )
         return {"days": days, "messages": messages, "users_updated": sorted(users_updated), "cost": cost}
 
@@ -562,7 +562,7 @@ class MemoryService:
                     msg async for msg in channel.history(limit=None, after=start, before=end, oldest_first=True)
                 ]
             except (discord.Forbidden, discord.HTTPException) as e:
-                logger.warning(f"Memory job couldn't read #{channel.name}: {e}")
+                logger.warning("Memory job couldn't read #%s: %s", channel.name, e)
                 continue
             if messages:
                 results.append((channel, messages))
@@ -575,7 +575,7 @@ class MemoryService:
                 return await batcher.complete(
                     model=self._model, system_prompt=system_prompt, user_text=user_text, effort=MEMORY_EFFORT)
             except AnthropicServiceError as e:
-                logger.warning(f"Batched memory call failed ({e}); retrying it directly")
+                logger.warning("Batched memory call failed (%s); retrying it directly", e)
         reply, cost = await dispatch_completion(
             model=self._model,
             messages=[{"role": "user", "content": [{"type": "text", "text": user_text}]}],
@@ -597,7 +597,7 @@ class MemoryService:
         )
         facts = {uid: fs for uid, fs in parse_extracted_facts(reply).items() if uid in speakers}
         if not facts and reply.strip().lower().strip(". ") not in ("(none)", "none", "{}"):
-            logger.warning(f"Memory extraction got no facts from a reply: {reply[:500]!r}")
+            logger.warning("Memory extraction got no facts from a reply: %r", reply[:500])
         return facts, cost
 
     async def _merge(
@@ -637,7 +637,7 @@ class MemoryService:
         )
         new_profile = parse_corrected_profile(reply)
         if new_profile is None:
-            logger.warning(f"Memory correction for <@{user_id}> got an unusable reply: {reply[:500]!r}")
+            logger.warning("Memory correction for <@%s> got an unusable reply: %r", user_id, reply[:500])
             raise ValueError("The model didn't return a usable memory.")
         await self._store.save_profile(guild_id, user_id, new_profile)
         return new_profile, cost
@@ -668,7 +668,7 @@ class MemoryService:
         try:
             state = await self._store.get_self_state(guild_id)
         except Exception as e:
-            logger.warning(f"Couldn't load the bot's own state: {e}")
+            logger.warning("Couldn't load the bot's own state: %s", e)
             return ""
         text = format_self_state(state)
         if not text:
@@ -685,7 +685,7 @@ class MemoryService:
         try:
             user_ids = await self._store.list_user_ids(guild_id)
         except Exception as e:
-            logger.warning(f"Couldn't load the memory index: {e}")
+            logger.warning("Couldn't load the memory index: %s", e)
             return ""
         lines = []
         if user_ids:
@@ -708,7 +708,7 @@ class MemoryService:
         try:
             rows = await self._store.get_many(guild_id, ids)
         except Exception as e:
-            logger.warning(f"Couldn't load user notes: {e}")
+            logger.warning("Couldn't load user notes: %s", e)
             return ""
 
         sections = []

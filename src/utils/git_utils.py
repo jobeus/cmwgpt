@@ -19,7 +19,7 @@ def is_git_repository() -> bool:
             ["git", "rev-parse", "--git-dir"], capture_output=True, text=True, timeout=10)
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
-        logger.error(f"Error checking git repository status: {e}")
+        logger.error("Error checking git repository status: %s", e)
         return False
 
 
@@ -31,10 +31,10 @@ def get_current_commit_hash() -> Optional[str]:
         if result.returncode == 0:
             return result.stdout.strip()
         else:
-            logger.error(f"Failed to get current commit hash: {result.stderr}")
+            logger.error("Failed to get current commit hash: %s", result.stderr)
             return None
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
-        logger.error(f"Error getting current commit hash: {e}")
+        logger.error("Error getting current commit hash: %s", e)
         return None
 
 
@@ -62,19 +62,19 @@ def perform_git_pull() -> bool:
             if "Already up to date" in output:
                 logger.debug("Git pull: Already up to date")
             elif output:
-                logger.info(f"Git pull: {output}")
+                logger.info("Git pull: %s", output)
             return True
         else:
             logger.error(
-                f"Git pull failed with return code {result.returncode}"
+                "Git pull failed with return code %s", result.returncode
             )
             if result.stderr.strip():
-                logger.error(f"Git pull error: {result.stderr.strip()}")
+                logger.error("Git pull error: %s", result.stderr.strip())
             return False
 
     except subprocess.TimeoutExpired:
         logger.error("Git pull timed out")
         return False
     except (FileNotFoundError, OSError) as e:
-        logger.error(f"Error during git pull: {e}")
+        logger.error("Error during git pull: %s", e)
         return False

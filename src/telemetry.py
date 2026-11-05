@@ -143,7 +143,7 @@ async def _upload(key: str, raw: bytes, media_type: str) -> None:
         if link:
             _links[key] = link
     except Exception as e:
-        logger.warning(f"[telemetry] Couldn't upload a {media_type} for its trace link: {e}")
+        logger.warning("[telemetry] Couldn't upload a %s for its trace link: %s", media_type, e)
     finally:
         _pending.pop(key, None)
 
@@ -192,7 +192,7 @@ async def image_links_ready(value: Any = None, *, images: Sequence[Tuple[Any, st
         if tasks:
             await asyncio.wait(tasks, timeout=LINK_WAIT_SECONDS)
     except Exception as e:
-        logger.warning(f"[telemetry] Couldn't get image links ready: {e}")
+        logger.warning("[telemetry] Couldn't get image links ready: %s", e)
 
 
 def without_blobs(blocks: Any) -> Any:
@@ -258,9 +258,9 @@ def strip_images_from_spans() -> None:
     for name, wrap in (("Claude", _wrap_anthropic_parts), ("Gemini", _wrap_gemini_parts)):
         try:
             if not wrap():
-                logger.warning(f"[telemetry] Couldn't hook {name} spans; images will be sent in full")
+                logger.warning("[telemetry] Couldn't hook %s spans; images will be sent in full", name)
         except Exception as e:
-            logger.warning(f"[telemetry] Couldn't hook {name} spans ({e}); images will be sent in full")
+            logger.warning("[telemetry] Couldn't hook %s spans (%s); images will be sent in full", name, e)
 
 
 # -- slash commands ----------------------------------------------------------------------------
@@ -336,11 +336,11 @@ def setup_telemetry(env_file: Optional[str] = None) -> bool:
         try:
             instrument()
         except Exception as e:
-            logger.warning(f"[telemetry] Couldn't instrument {name}: {e}")
+            logger.warning("[telemetry] Couldn't instrument %s: %s", name, e)
 
     # Everything the bot logs at INFO and above, attached to whatever span is current.
     handler = logfire.LogfireLoggingHandler(level=logging.INFO)
     logging.getLogger().addHandler(handler)
 
-    logger.info(f"[telemetry] Sending traces and logs to Logfire ({_environment(env_file)})")
+    logger.info("[telemetry] Sending traces and logs to Logfire (%s)", _environment(env_file))
     return True

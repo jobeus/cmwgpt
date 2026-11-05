@@ -81,7 +81,7 @@ async def _photos_to_data_urls(photo_urls: List[str]) -> List[str]:
         try:
             data_urls.append(await url_to_base64_data_url(photo_url))
         except Exception as e:
-            logger.warning(f"Failed to fetch tweet photo {photo_url}: {e}")
+            logger.warning("Failed to fetch tweet photo %s: %s", photo_url, e)
     return data_urls
 
 
@@ -101,7 +101,7 @@ async def _fetch_tweet_detail(tweet_url: str, rapidapi_key: str) -> Optional[dic
     # The numeric ID after /status/, ignoring trailing segments like /photo/1.
     id_match = re.search(r'/status/(\d+)', tweet_url)
     if not id_match:
-        logger.warning(f"No /status/<id> tweet ID found in URL, skipping: {tweet_url}")
+        logger.warning("No /status/<id> tweet ID found in URL, skipping: %s", tweet_url)
         return None
     async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
         response = await client.get(
@@ -121,7 +121,7 @@ async def find_tweet_video_url(tweet_url: str) -> Optional[str]:
     try:
         data = await _fetch_tweet_detail(tweet_url, key)
     except Exception as e:
-        logger.warning(f"Couldn't look up the video in {tweet_url}: {e}")
+        logger.warning("Couldn't look up the video in %s: %s", tweet_url, e)
         return None
     media = extract_media(data, for_watching=True) if data else []
     return next((m['url'] for m in media if m['type'] == 'video'), None)
@@ -165,7 +165,7 @@ async def get_tweet_context(tweet_url: str, *, cache_only: bool = False) -> Opti
             try:
                 video_transcript = await transcribe_video_url(video_url)
             except Exception as e:
-                logger.warning(f"Failed to process video for tweet {tweet_url}: {e}")
+                logger.warning("Failed to process video for tweet %s: %s", tweet_url, e)
 
         # Top replies: the first 5 entries after the main tweet (cursor entries are skipped).
         replies = []
@@ -191,8 +191,8 @@ async def get_tweet_context(tweet_url: str, *, cache_only: bool = False) -> Opti
         return context, image_data_urls
 
     except KeyError as ke:
-        logger.warning(f"Failed to parse RapidAPI JSON response for {tweet_url}: {ke}")
+        logger.warning("Failed to parse RapidAPI JSON response for %s: %s", tweet_url, ke)
         return None
     except Exception as e:
-        logger.warning(f"Failed to fetch Twitter text for {tweet_url}: {e}")
+        logger.warning("Failed to fetch Twitter text for %s: %s", tweet_url, e)
         return None

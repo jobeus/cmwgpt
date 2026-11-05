@@ -127,12 +127,12 @@ async def get_reddit_post(url: str, *, cache_only: bool = False) -> Optional[Tup
             response.raise_for_status()
             data = response.json()
     except (httpx.HTTPError, ValueError) as e:
-        logger.warning(f"Failed to fetch Reddit post {url}: {e}")
+        logger.warning("Failed to fetch Reddit post %s: %s", url, e)
         return None
 
     post = data.get("data") if data.get("success") else None
     if not isinstance(post, dict) or not post.get("title"):
-        logger.warning(f"RapidAPI returned no Reddit post for {url}: {str(data)[:300]}")
+        logger.warning("RapidAPI returned no Reddit post for %s: %s", url, str(data)[:300])
         return None
 
     images: List[str] = []
@@ -140,7 +140,7 @@ async def get_reddit_post(url: str, *, cache_only: bool = False) -> Optional[Tup
         try:
             images.append(await url_to_base64_data_url(image_url))
         except Exception as e:
-            logger.warning(f"Failed to fetch Reddit image {image_url}: {e}")
+            logger.warning("Failed to fetch Reddit image %s: %s", image_url, e)
     text = render_post(post)
     await _reddit_cache.set(url, (text, images))
     return text, images

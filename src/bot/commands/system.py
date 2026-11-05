@@ -87,7 +87,7 @@ class SystemCommands:
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue model command from {interaction.user} in #{interaction.channel} - queue may be full"
+                    "Failed to queue model command from %s in #%s - queue may be full", interaction.user, interaction.channel
                 )
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
@@ -118,7 +118,7 @@ class SystemCommands:
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue systemprompt set command from {interaction.user} in #{interaction.channel} - queue may be full"
+                    "Failed to queue systemprompt set command from %s in #%s - queue may be full", interaction.user, interaction.channel
                 )
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
@@ -138,7 +138,7 @@ class SystemCommands:
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue systemprompt reset command from {interaction.user} in #{interaction.channel} - queue may be full"
+                    "Failed to queue systemprompt reset command from %s in #%s - queue may be full", interaction.user, interaction.channel
                 )
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
@@ -175,7 +175,7 @@ class SystemCommands:
             self._state_service.set_model(channel_id, model)
             if self._on_model_change:
                 self._on_model_change(channel_id)
-            logger.info(f"[/model] Channel {channel_id}: model set to {model}")
+            logger.info("[/model] Channel %s: model set to %s", channel_id, model)
             await interaction.followup.send(f"Model set to `{model}`.", ephemeral=True)
         else:
             current_model = self._state_service.get_model(
@@ -206,7 +206,7 @@ class SystemCommands:
             self._state_service.set_system_prompt(channel_id, prompt_text)
 
             logger.info(
-                f"[/systemprompt set] Channel {channel_id}: system prompt updated.")
+                "[/systemprompt set] Channel %s: system prompt updated.", channel_id)
             await interaction.followup.send(
                 "System prompt updated for this channel. The new prompt will be used for future messages and context.",
                 ephemeral=True,
@@ -217,7 +217,7 @@ class SystemCommands:
             if not current_prompt:
                 current_prompt = self._system_prompt_loader() + "\n" + legend_section
             logger.info(
-                f"[/systemprompt set] Channel {channel_id}: displayed current system prompt.")
+                "[/systemprompt set] Channel %s: displayed current system prompt.", channel_id)
             await interaction.followup.send(
                 _code_block_message("Current system prompt for this channel:", current_prompt), ephemeral=True
             )
@@ -243,7 +243,7 @@ class SystemCommands:
             full_prompt = self._system_prompt_loader() + "\n" + legend_section
 
         logger.info(
-            f"[/systemprompt view] Channel {channel_id}: displayed full composed system prompt.")
+            "[/systemprompt view] Channel %s: displayed full composed system prompt.", channel_id)
 
         await interaction.followup.send(
             _code_block_message("**Full system prompt for this channel (as sent to the model):**", full_prompt),
@@ -268,10 +268,10 @@ class SystemCommands:
         # arrays)
         self._state_service.clear_system_prompt(channel_id)
         logger.info(
-            f"[/systemprompt reset] Channel {channel_id}: custom prompt removed, reverting to default.")
+            "[/systemprompt reset] Channel %s: custom prompt removed, reverting to default.", channel_id)
 
         logger.info(
-            f"[/systemprompt reset] Channel {channel_id}: system prompt reset to default.")
+            "[/systemprompt reset] Channel %s: system prompt reset to default.", channel_id)
         await interaction.followup.send("System prompt for this channel has been reset to the default.", ephemeral=True)
 
     def _create_restart_command(self) -> app_commands.Command:
@@ -297,7 +297,7 @@ class SystemCommands:
 
             if not queued:
                 logger.warning(
-                    f"Failed to queue restart command from {interaction.user} in #{interaction.channel} - queue may be full"
+                    "Failed to queue restart command from %s in #%s - queue may be full", interaction.user, interaction.channel
                 )
                 await interaction.followup.send(
                     "Sorry, the bot is currently busy. Please try again in a moment.", ephemeral=True
@@ -320,7 +320,7 @@ class SystemCommands:
             self, interaction: discord.Interaction) -> None:
         """Handle the /help command."""
         logger.info(
-            f"[/help] Help requested by {interaction.user} in #{interaction.channel}")
+            "[/help] Help requested by %s in #%s", interaction.user, interaction.channel)
 
         help_text = (
             "**🤖 AI Bot Commands Help**\n\n"
@@ -355,7 +355,7 @@ class SystemCommands:
             interaction: The Discord interaction
         """
         logger.info(
-            f"[/restart] Manual restart requested by {interaction.user} in #{interaction.channel}"
+            "[/restart] Manual restart requested by %s in #%s", interaction.user, interaction.channel
         )
 
         # Send confirmation message

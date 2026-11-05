@@ -55,16 +55,13 @@ async def safe_defer(interaction, *, ephemeral: bool = False, thinking: bool = T
     except discord.NotFound:
         command_name = getattr(getattr(interaction, "command", None), "name", "?")
         logger.warning(
-            f"Interaction for '/{command_name}' expired before it could be acknowledged "
-            "(bot took >3s to respond — event loop stall or Discord lag). Skipping this "
-            "invocation; the bot is still running and new commands will work."
+            "Interaction for '/%s' expired before it could be acknowledged (bot took >3s to respond — event loop stall or Discord lag). Skipping this invocation; the bot is still running and new commands will work.", command_name
         )
         return False
     except discord.HTTPException as e:
         command_name = getattr(getattr(interaction, "command", None), "name", "?")
         logger.warning(
-            f"Failed to defer interaction for '/{command_name}': {concise_error(e)}. "
-            "Skipping this invocation; the bot is still running."
+            "Failed to defer interaction for '/%s': %s. Skipping this invocation; the bot is still running.", command_name, concise_error(e)
         )
         return False
 
@@ -83,8 +80,7 @@ async def safe_followup_send(interaction, content, *, ephemeral: bool = False, *
         return True
     except discord.NotFound as e:
         logger.warning(
-            f"Interaction followup target is gone ({concise_error(e)}) — the invocation "
-            "message was likely deleted or the token expired."
+            "Interaction followup target is gone (%s) — the invocation message was likely deleted or the token expired.", concise_error(e)
         )
         channel = getattr(interaction, "channel", None)
         if ephemeral or channel is None:
@@ -94,7 +90,7 @@ async def safe_followup_send(interaction, content, *, ephemeral: bool = False, *
             logger.info("Delivered the reply as a plain channel message instead.")
             return True
         except Exception as send_error:
-            logger.warning(f"Channel fallback also failed: {concise_error(send_error)}")
+            logger.warning("Channel fallback also failed: %s", concise_error(send_error))
             return False
 
 
@@ -112,7 +108,7 @@ async def best_effort_typing(channel):
         await typing_ctx.__aenter__()
     except Exception as e:
         logger.warning(
-            f"Couldn't start typing indicator ({concise_error(e)}); continuing without it."
+            "Couldn't start typing indicator (%s); continuing without it.", concise_error(e)
         )
         yield
         return
@@ -123,4 +119,4 @@ async def best_effort_typing(channel):
         try:
             await typing_ctx.__aexit__(None, None, None)
         except Exception as e:
-            logger.debug(f"Failed to stop typing indicator: {concise_error(e)}")
+            logger.debug("Failed to stop typing indicator: %s", concise_error(e))

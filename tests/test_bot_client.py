@@ -380,14 +380,14 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         )
 
         client.services.state_service.load_state_from_temp_files.return_value = False
-        with patch("builtins.print") as mock_print:
+        with self.assertLogs("src.bot.client", "INFO") as logs:
             client._load_saved_state()
-        mock_print.assert_called_with("🆕 Starting with fresh state")
+        self.assertIn("starting fresh", logs.output[-1])
 
         client.services.state_service.load_state_from_temp_files.side_effect = RuntimeError("boom")
-        with patch("builtins.print") as mock_print:
+        with self.assertLogs("src.bot.client", "ERROR") as logs:
             client._load_saved_state()
-        mock_print.assert_called_with("⚠️  Failed to restore state, starting fresh")
+        self.assertIn("Couldn't restore the saved state", logs.output[-1])
 
         client.services.state_service.get_last_git_sha.return_value = "existing"
         client._get_current_git_sha = MagicMock(return_value="newsha")

@@ -41,7 +41,7 @@ async def _image_to_data_url(image_url: Optional[str]) -> Optional[str]:
     try:
         return await url_to_base64_data_url(image_url)
     except Exception as e:
-        logger.warning(f"Failed to fetch Instagram image {image_url}: {e}")
+        logger.warning("Failed to fetch Instagram image %s: %s", image_url, e)
         return None
 
 
@@ -64,7 +64,7 @@ async def find_instagram_video_url(url: str) -> Optional[str]:
     try:
         data = await _fetch_instagram_info(url, key)
     except Exception as e:
-        logger.warning(f"Couldn't look up the video in {url}: {e}")
+        logger.warning("Couldn't look up the video in %s: %s", url, e)
         return None
     if data.get("error") or data.get("type") != "video":
         return None
@@ -94,7 +94,7 @@ async def get_instagram_context(url: str, *, cache_only: bool = False) -> Option
         data = await _fetch_instagram_info(url, cfg.rapidapi_key)
 
         if data.get("error"):
-            logger.warning(f"Error returned from RapidAPI for Instagram {url}: {data}")
+            logger.warning("Error returned from RapidAPI for Instagram %s: %s", url, data)
             return None
 
         media_type = data.get("type")
@@ -111,18 +111,18 @@ async def get_instagram_context(url: str, *, cache_only: bool = False) -> Option
                 if video_transcript:
                     context += f"\nVideo Transcript: {video_transcript}"
             except Exception as e:
-                logger.warning(f"Failed to process video for Instagram {url}: {e}")
+                logger.warning("Failed to process video for Instagram %s: %s", url, e)
 
         image_data_url = await _image_to_data_url(image_url)
         await _instagram_cache.set(url, (context, image_data_url))
         return context, image_data_url
 
     except KeyError as ke:
-        logger.warning(f"Failed to parse RapidAPI JSON response for Instagram {url}: {ke}")
+        logger.warning("Failed to parse RapidAPI JSON response for Instagram %s: %s", url, ke)
         return None
     except httpx.HTTPError as he:
-        logger.warning(f"HTTPError fetching Instagram {url}: {he}")
+        logger.warning("HTTPError fetching Instagram %s: %s", url, he)
         return None
     except Exception as e:
-        logger.warning(f"Failed to fetch Instagram text for {url}: {e}")
+        logger.warning("Failed to fetch Instagram text for %s: %s", url, e)
         return None

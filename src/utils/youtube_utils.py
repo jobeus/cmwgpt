@@ -77,7 +77,7 @@ async def get_transcript(video_id: str, *, cache_only: bool = False) -> Optional
             else:
                 api = YouTubeTranscriptApi()
 
-            logger.info(f"Fetching transcript for video ID: {video_id}")
+            logger.info("Fetching transcript for video ID: %s", video_id)
             return " ".join(snippet.text for snippet in api.fetch(video_id))
 
         transcript_text = await asyncio.to_thread(_fetch)
@@ -86,5 +86,5 @@ async def get_transcript(video_id: str, *, cache_only: bool = False) -> Optional
 
     except Exception as e:
         logger.warning(
-            f"Failed to fetch transcript for video ID {video_id}: {e}")
+            "Failed to fetch transcript for video ID %s: %s", video_id, e)
         return None

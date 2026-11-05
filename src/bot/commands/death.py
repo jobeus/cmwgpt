@@ -66,7 +66,7 @@ class DeathCommands:
             return
 
         ok, message = await self._death_service.write_limerick(person, interaction.channel_id)
-        logger.info(f"[/limerick] {interaction.user} requested '{person}' -> ok={ok}")
+        logger.info("[/limerick] %s requested '%s' -> ok=%s", interaction.user, person, ok)
         await safe_followup_send(interaction, message if ok else f"❌ {message}")
 
     async def _handle_forcedeath(self, interaction: discord.Interaction, url: str) -> None:
@@ -76,7 +76,7 @@ class DeathCommands:
             return
 
         ok, message = await self._death_service.force_announce(url)
-        logger.info(f"[/forcedeath] {interaction.user} forced '{url}' -> ok={ok}")
+        logger.info("[/forcedeath] %s forced '%s' -> ok=%s", interaction.user, url, ok)
         await interaction.followup.send(
             message if ok else f"❌ {message}", ephemeral=True
         )
@@ -158,7 +158,7 @@ class DeathCommands:
 
         self._state_service.set_death_settings(current_settings)
 
-        logger.info(f"[/death set] Settings updated to {current_settings}.")
+        logger.info("[/death set] Settings updated to %s.", current_settings)
         await interaction.followup.send(
             f"Death settings updated globally:\n"
             f"- Poll interval: `{current_settings.get('interval', POLL_INTERVAL_SECONDS)}s`\n"
