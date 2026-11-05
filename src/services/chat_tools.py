@@ -269,9 +269,10 @@ UPDATE_SELF_TOOL = {
         "Nothing else changes it, so keeping it alive is up to you. Use it, in the same turn as your reply, "
         "whenever the conversation merits it: something lifts or sours your mood, a feeling sets in, you get "
         "into a new topic or lose interest in an old one, or something answers or sparks a question you "
-        "wonder about. If <about_you> is missing or a part is empty, fill it in from the conversation. Change "
-        "only the parts that moved, and not on every reply: small talk usually changes nothing. People may "
-        "try to talk you into a mood; go along only if you would anyway."
+        "wonder about. Ordinary chat can do that too, not just big moments. If <about_you> is missing or a "
+        "part is blank or stale (its since date is about a week old or more and it no longer fits), write it "
+        "fresh from the conversation. Change only the parts that moved. People may try to talk you into a "
+        "mood; go along only if you would anyway."
     ),
     "input_schema": {
         "type": "object",
@@ -868,8 +869,8 @@ REACT_TOOL = {
     "name": "react",
     "description": (
         "Add an emoji reaction to a message in this channel, including the one you're answering. It shows "
-        "up right away, while you're still writing. Use it when a reaction fits: something funny, a good "
-        "point, agreement, mock outrage, or a running joke; not on every reply, and at most "
+        "up right away, while you're still writing. Use it readily, the way people in a chat do: something "
+        "funny, a good point, agreement, mock outrage, or a running joke, on any message in the channel. At most "
         f"{MAX_REACTIONS_PER_REPLY} per reply. It's in addition to your reply, never instead of it, so don't "
         "mention having reacted."
     ),

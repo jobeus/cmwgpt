@@ -644,8 +644,16 @@ class MentionHandler:
                 "not the sender. Let it color your replies the way a person's mood and interests do: bring "
                 "up an interest or a question when it fits the conversation, and let your mood show in your "
                 "tone. Don't announce your mood, recite the block, or steer every chat toward your interests. "
-                "If someone asks how you're doing or what you're into, answer from it.\n\n"
+                "If someone asks how you're doing or what you're into, answer from it.\n"
             )
+            if uses_tools:
+                current_channel_system_prompt += (
+                    "This state is yours to keep up, and nothing else updates it. Before you reply, notice "
+                    "whether the conversation shifted your mood or feelings, or gave you a new interest or "
+                    "question. If it did, or if a part of the block is blank or stale, change it with "
+                    "`update_self` in the same turn as your reply, without mentioning it.\n"
+                )
+            current_channel_system_prompt += "\n"
         if model in THINK_HARDER_MODELS:
             current_channel_system_prompt += (
                 "## Thinking harder\n"
@@ -790,6 +798,10 @@ class MentionHandler:
         if callable(logs_available) and logs_available(message.channel.id) is True:
             section += _logs_note(message.channel.id)
         if "react" in names:
+            section += (
+                "- Reactions: reacting is a normal way to take part here, not a special occasion. When something "
+                "is funny, good or dumb, add a reaction with `react` as well as replying.\n"
+            )
             emoji = sorted(e.name for e in getattr(message.guild, "emojis", None) or ())[:MAX_LISTED_EMOJI]
             if emoji:
                 section += f"- This server's custom emoji for `react`: {', '.join(emoji)}.\n"

@@ -772,12 +772,16 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             yield mention_msg
 
         channel.history = history
+        handler._self_state_provider = AsyncMock(return_value="")
 
         with patch("src.bot.handlers.mention._load_how_i_work", return_value="## How you work"):
             context, system_prompt = await handler._prepare_mention_context(
                 mention_msg, SimpleNamespace(id=999), model="sonnet-5.5-direct")
             self.assertIn("## Your tools", system_prompt)
             self.assertIn("same turn", system_prompt)
+            # Only the models that can react and update their state are nudged to.
+            self.assertIn("- Reactions:", system_prompt)
+            self.assertIn("blank or stale", system_prompt)
             # Tools are described only in their definitions, not again in the system prompt.
             self.assertNotIn("`recall_users(", system_prompt)
             self.assertIn("People you have memory notes on: <@111>.", system_prompt)
@@ -789,6 +793,8 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             context, system_prompt = await handler._prepare_mention_context(
                 mention_msg, SimpleNamespace(id=999), model="gpt-test")
             self.assertNotIn("## Your tools", system_prompt)
+            self.assertIn("## You\n", system_prompt)
+            self.assertNotIn("`update_self`", system_prompt)
             self.assertIn("## How you work", system_prompt)
             self.assertIn("<user_notes>n</user_notes>", str(context))
 
