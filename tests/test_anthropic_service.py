@@ -595,13 +595,27 @@ class TestCacheDiagnostics(unittest.IsolatedAsyncioTestCase):
         await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
         self.assertEqual(self.previous_ids(client), [None, None])
 
-    async def test_cache_miss_with_lost_tokens_is_a_warning(self):
+    async def test_a_cache_miss_that_read_little_is_a_warning(self):
         reason = SimpleNamespace(type="system_changed", cache_missed_input_tokens=4200)
-        service, _ = self.make_service(
-            _response(diagnostics=SimpleNamespace(cache_miss_reason=reason)))
+        service, _ = self.make_service(_response(
+            diagnostics=SimpleNamespace(cache_miss_reason=reason),
+            usage=SimpleNamespace(input_tokens=100, output_tokens=5, cache_read_input_tokens=0,
+                                  cache_creation_input_tokens=4100)))
         with self.assertLogs("src.services.anthropic_service", level="WARNING") as logs:
             await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
-        self.assertTrue(any("system_changed" in line and "4200" in line for line in logs.output))
+        self.assertTrue(any("system_changed" in line and "4200" in line and "0%" in line for line in logs.output))
+
+    async def test_a_cache_miss_that_still_read_most_of_the_prompt_is_info(self):
+        # What 13:33:43 looked like: the previous request's tool round is gone, but the cache held.
+        reason = SimpleNamespace(type="messages_changed", cache_missed_input_tokens=8700)
+        service, _ = self.make_service(_response(
+            diagnostics=SimpleNamespace(cache_miss_reason=reason),
+            usage=SimpleNamespace(input_tokens=427, output_tokens=5, cache_read_input_tokens=36729,
+                                  cache_creation_input_tokens=301)))
+        with self.assertLogs("src.services.anthropic_service", level="INFO") as logs:
+            await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
+        self.assertTrue(any("messages_changed" in line and "98%" in line for line in logs.output))
+        self.assertFalse(any(line.startswith("WARNING") for line in logs.output))
 
     async def test_reasons_without_lost_tokens_are_info(self):
         reason = SimpleNamespace(type="previous_message_not_found")

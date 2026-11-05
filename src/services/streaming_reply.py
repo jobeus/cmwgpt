@@ -12,6 +12,7 @@ request fails.
 import asyncio
 import contextlib
 import logging
+import re
 import time
 from typing import Any, List, Optional
 
@@ -24,6 +25,13 @@ logger = logging.getLogger(__name__)
 EDIT_INTERVAL_SECONDS = 1.5
 # Shown at the end of the preview while the reply is still coming in.
 CURSOR = " ▌"
+# A preview that's only a status line, with no reply text yet.
+_STATUS_ONLY_RE = re.compile(r"-# [^\n]*\.\.\.")
+
+
+def is_status_only(content: str) -> bool:
+    """Whether a message's text is a preview still showing only its status, like ``-# reading the chat...``."""
+    return bool(_STATUS_ONLY_RE.fullmatch(content or ""))
 
 
 class StreamingReply:

@@ -955,6 +955,31 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         gemini_service.clear_channel_cache.assert_called_once_with(77)
         anthropic_service.clear_channel_cache.assert_called_once_with(77)
 
+    async def test_the_bots_status_preview_stays_out_of_the_history(self):
+        handler, _, _, _, _ = self.make_handler()
+        channel = MagicMock()
+        channel.id = 79
+        mention_msg = self._simple_msg(4, channel, content="<@999> who won?")
+        fetched = [
+            self._simple_msg(5, channel, content="-# reading the chat...", author_id=999),
+            mention_msg,
+            self._simple_msg(3, channel, content="an earlier reply", author_id=999),
+            self._simple_msg(2, channel, content="-# someone's own note..."),
+        ]
+
+        async def history(limit=None, after=None):
+            for msg in fetched:
+                yield msg
+
+        channel.history = history
+        messages, _ = await handler._prepare_mention_context(mention_msg, SimpleNamespace(id=999))
+
+        text = str(messages)
+        self.assertNotIn("reading the chat", text)
+        self.assertIn("an earlier reply", text)
+        self.assertIn("someone's own note", text)
+        self.assertIn("who won?", str(messages[-1]))
+
     async def test_a_full_history_window_clears_gemini_and_anthropic_caches(self):
         gemini_service = MagicMock()
         anthropic_service = MagicMock()

@@ -4,7 +4,7 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.streaming_reply import CURSOR, StreamingReply, _preview
+from src.services.streaming_reply import CURSOR, StreamingReply, _preview, is_status_only
 
 
 def make_streamer(*, send_side_effect=None):
@@ -170,6 +170,17 @@ class TestPreview(unittest.TestCase):
         preview = _preview("x" * 5000, "drawing...", 2000)
         self.assertEqual(len(preview), 2000)
         self.assertTrue(preview.endswith("…" + CURSOR + "\n-# drawing..."))
+
+
+class TestIsStatusOnly(unittest.TestCase):
+    def test_a_preview_with_only_its_status_is_recognized(self):
+        self.assertTrue(is_status_only(_preview("", "reading the chat...", 2000)))
+
+    def test_anything_with_reply_text_is_not(self):
+        self.assertFalse(is_status_only(_preview("Here's the answer", "thinking...", 2000)))
+        self.assertFalse(is_status_only("Here's the answer"))
+        self.assertFalse(is_status_only("-# a small note"))
+        self.assertFalse(is_status_only(""))
 
 
 if __name__ == "__main__":

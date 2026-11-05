@@ -137,6 +137,8 @@ def _is_mcp_error(error: anthropic.BadRequestError) -> bool:
 # Fingerprints are only kept for requests that carry this beta, so it's sent
 # on every request.
 CACHE_DIAGNOSIS_BETA = "cache-diagnosis-2026-04-07"
+# A reported miss is only worth a warning when less than this share of the prompt was read from the cache.
+CACHE_READ_SHARE_TO_WARN = 0.8
 
 _DATA_URL_RE = re.compile(r"^data:(?P<mime>[\w/+.-]+);base64,(?P<data>.+)$", re.DOTALL)
 _SUPPORTED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
@@ -386,6 +388,13 @@ def _note_usage(response: Any) -> None:
     note_stat("web_searches", (getattr(server_tool_use, "web_search_requests", 0) or 0) if server_tool_use else 0)
 
 
+def _cache_read_share(usage: Any) -> float:
+    """How much of a request's input came from the prompt cache, 0-1."""
+    read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    total = read + (getattr(usage, "cache_creation_input_tokens", 0) or 0) + (getattr(usage, "input_tokens", 0) or 0)
+    return read / total if total else 0.0
+
+
 def _log_cache_diagnostics(api_model: str, channel_id: Optional[int], response: Any) -> None:
     """Log why the prompt cache missed, from the response's cache diagnostics."""
     diagnostics = getattr(response, "diagnostics", None)
@@ -399,7 +408,13 @@ def _log_cache_diagnostics(api_model: str, channel_id: Optional[int], response: 
         return
     missed = getattr(reason, "cache_missed_input_tokens", None)
     if missed:
-        logger.warning("%s cache miss: %s, ~%s input tokens not read from cache", where, reason.type, missed)
+        # The missed tokens are measured against the whole previous request, including its tool rounds and
+        # the blocks added to its mention, which aren't sent again. So what matters is how much of this
+        # prompt came from the cache.
+        share = _cache_read_share(getattr(response, "usage", None))
+        log = logger.warning if share < CACHE_READ_SHARE_TO_WARN else logger.info
+        log("%s cache miss: %s, ~%s input tokens not read from cache, %.0f%% of this prompt read from it",
+            where, reason.type, missed, share * 100)
     else:
         logger.info("%s cache diagnostics: %s", where, reason.type)
 

@@ -25,7 +25,7 @@ from src.services.quote_service import QuoteFile
 from src.services.completion_dispatch import dispatch_completion
 from src.services.mention_log import log_mention, mention_record
 from src.services.cost_service import CostLedger, cost_scope
-from src.services.streaming_reply import StreamingReply
+from src.services.streaming_reply import StreamingReply, is_status_only
 from src.utils.chat_context import COST_PREFIX_PATTERN, build_chat_context
 from src.utils.message_utils import format_discord_timestamp
 from src.utils.downloader_utils import fetch_all_url_content
@@ -77,6 +77,15 @@ def _load_how_i_work() -> str:
     except OSError:
         logger.warning("Architecture summary '%s' not found; leaving it out.", HOW_I_WORK_PATH)
         return ""
+
+
+def _without_status_previews(history_msgs: List[discord.Message], bot_id: int) -> List[discord.Message]:
+    """Drop the bot's previews that only show a status so far.
+
+    The preview goes up while the history is being fetched, so the fetch can catch it, and the
+    model would then see itself having said "reading the chat..." just before the question.
+    """
+    return [m for m in history_msgs if not (m.author.id == bot_id and is_status_only(m.content))]
 
 
 def _mention_last(
@@ -576,7 +585,7 @@ class MentionHandler:
             if history_msgs:
                 self._store_history_cache(channel_id, current_time, history_msgs[0])
 
-        history_msgs = _mention_last(history_msgs, message)
+        history_msgs = _mention_last(_without_status_previews(history_msgs, bot_user.id), message)
         # Models with tools look up memory and how_i_work themselves instead of getting them every time.
         uses_tools = self._uses_tools(model)
 
