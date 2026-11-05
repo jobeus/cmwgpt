@@ -717,6 +717,62 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
             await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[self.tool()])
         self.assertEqual(client.beta.messages.create.await_count, 1)
 
+    async def test_mention_requests_get_the_logfire_logs_read_only(self):
+        service, client = self.make_service(_response("answer"))
+        service._logfire_read_token = "pylf_read"
+        service._logs_channel_id = 42
+
+        await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=USER, tools=[self.tool()], channel_id=42)
+
+        sent = client.beta.messages.create.call_args.kwargs
+        self.assertEqual(sent["mcp_servers"][0]["authorization_token"], "pylf_read")
+        toolset = next(t for t in sent["tools"] if t.get("type") == "mcp_toolset")
+        self.assertEqual(toolset["default_config"], {"enabled": False})
+        self.assertIn("query_run", toolset["configs"])
+        self.assertFalse(any(name.startswith(("dashboard", "alert", "variable")) for name in toolset["configs"]))
+        self.assertIn("mcp-client-2025-11-20", sent["betas"])
+        self.assertTrue(service.logs_available(42))
+
+    async def test_no_logs_without_a_key_outside_the_channel_or_without_client_tools(self):
+        service, client = self.make_service(_response("answer"), _response("answer"), _response("answer"),
+                                            _response("answer"))
+        service._logs_channel_id = 42
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[self.tool()],
+                                          channel_id=42)
+        service._logfire_read_token = "pylf_read"
+        # Another channel, or no channel set at all, doesn't get them.
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[self.tool()],
+                                          channel_id=7)
+        service._logs_channel_id = None
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[self.tool()],
+                                          channel_id=42)
+        service._logs_channel_id = 42
+        # A background job (no client tools) doesn't get them either.
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=42)
+        self.assertFalse(service.logs_available(7))
+        for call in client.beta.messages.create.call_args_list:
+            self.assertNotIn("mcp_servers", call.kwargs)
+
+    async def test_a_logfire_mcp_failure_retries_without_the_logs(self):
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        auth = anthropic.BadRequestError(
+            "mcp_servers[0] 'logfire': Authentication error while communicating with MCP server.",
+            response=httpx.Response(400, request=request), body=None)
+        service, client = self.make_service(auth, _response("answer"))
+        service._logfire_read_token = "pylf_revoked"
+        service._logs_channel_id = 42
+
+        text, _ = await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=USER, tools=[self.tool()], channel_id=42)
+
+        self.assertEqual(text, "answer")
+        first, retry = (c.kwargs for c in client.beta.messages.create.call_args_list)
+        self.assertIn("mcp_servers", first)
+        self.assertNotIn("mcp_servers", retry)
+        self.assertFalse(any(t.get("type") == "mcp_toolset" for t in retry["tools"]))
+        self.assertNotIn("mcp-client-2025-11-20", retry["betas"])
+
     async def test_a_failing_tool_becomes_an_error_result(self):
         call = SimpleNamespace(type="tool_use", id="toolu_1", name="recall_channel", input={})
         service, client = self.make_service(

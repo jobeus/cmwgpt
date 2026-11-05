@@ -98,6 +98,38 @@ THINKING_STATUS = "thinking..."
 WEB_SEARCH_STATUS = "searching the web..."
 SEARCH_RESULTS_STATUS = "reading search results..."
 CODE_STATUS = "running code..."
+LOGS_STATUS = "checking my logs..."
+
+# The bot's own traces and logs in Logfire, through the API's MCP connector (Anthropic calls the
+# server). Read-only tools only; the key's own scope limits it further.
+MCP_BETA = "mcp-client-2025-11-20"
+LOGFIRE_MCP_NAME = "logfire"
+LOGFIRE_MCP_TOOLS = ("query_run", "query_schema_reference", "query_find_exceptions_in_file", "issue_list")
+
+
+def logfire_mcp_params(url: str, token: str) -> Dict[str, Any]:
+    """The request fields that give the model the Logfire MCP tools."""
+    return {
+        "mcp_servers": [{"type": "url", "url": url, "name": LOGFIRE_MCP_NAME, "authorization_token": token}],
+        "toolset": {
+            "type": "mcp_toolset",
+            "mcp_server_name": LOGFIRE_MCP_NAME,
+            "default_config": {"enabled": False},
+            "configs": {name: {"enabled": True} for name in LOGFIRE_MCP_TOOLS},
+        },
+    }
+
+
+def _without_logfire_mcp(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """``kwargs`` with the Logfire MCP server, its toolset and its beta taken out."""
+    trimmed = {k: v for k, v in kwargs.items() if k != "mcp_servers"}
+    trimmed["tools"] = [t for t in kwargs.get("tools", []) if t.get("type") != "mcp_toolset"]
+    trimmed["betas"] = [b for b in kwargs.get("betas", []) if b != MCP_BETA]
+    return trimmed
+
+
+def _is_mcp_error(error: anthropic.BadRequestError) -> bool:
+    return "mcp_server" in str(getattr(error, "message", "") or error)
 
 # Cache diagnostics (beta): each request names the previous response in its
 # channel, and the API reports where the prompt-cache prefix diverged from it.
@@ -295,6 +327,8 @@ def _block_status(block: Any, tool_statuses: Dict[str, str]) -> Optional[str]:
     kind = getattr(block, "type", None)
     if kind in ("thinking", "redacted_thinking"):
         return THINKING_STATUS
+    if kind == "mcp_tool_use":
+        return LOGS_STATUS
     if kind == "server_tool_use":
         return WEB_SEARCH_STATUS if getattr(block, "name", "") == "web_search" else CODE_STATUS
     if kind == "web_search_tool_result":
@@ -372,14 +406,26 @@ def _log_cache_diagnostics(api_model: str, channel_id: Optional[int], response: 
 class AnthropicService:
     """Service for handling direct Claude API interactions."""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, *, logfire_read_token: str = "",
+                 logfire_mcp_url: str = "https://logfire-us.pydantic.dev/mcp",
+                 logs_channel_id: Optional[int] = None):
         self._api_key = api_key
+        self._logfire_read_token = logfire_read_token
+        self._logs_channel_id = logs_channel_id
+        self._logfire_mcp_url = logfire_mcp_url
         self._client: Optional[anthropic.AsyncAnthropic] = None
         self._bot_id_loader: Optional[Callable[[], Optional[int]]] = None
         # channel_id -> index of the last history message marked in the previous request
         self._history_breakpoints: Dict[int, int] = {}
         # channel_id -> id of the previous response, for cache diagnostics
         self._last_message_ids: Dict[int, str] = {}
+
+    def logs_available(self, channel_id: Optional[int]) -> bool:
+        """Whether mention replies in ``channel_id`` can query the bot's own Logfire traces.
+
+        Only in the one configured channel: the traces hold every channel's conversations.
+        """
+        return bool(self._logfire_read_token) and channel_id is not None and channel_id == self._logs_channel_id
 
     def set_client(self, client) -> None:
         """Set a custom client (useful for testing)."""
@@ -612,6 +658,11 @@ class AnthropicService:
             kwargs["tools"] = kwargs.get("tools", []) + [CODE_EXECUTION_TOOL] + [
                 t.definition for t in client_tools.values()
             ]
+        if client_tools and self.logs_available(channel_id):
+            mcp = logfire_mcp_params(self._logfire_mcp_url, self._logfire_read_token)
+            kwargs["mcp_servers"] = mcp["mcp_servers"]
+            kwargs["tools"] = kwargs.get("tools", []) + [mcp["toolset"]]
+            kwargs["betas"] = kwargs["betas"] + [MCP_BETA]
         # Only at the model's default effort: a caller that set its own effort gets exactly that.
         think_harder = model in THINK_HARDER_MODELS and effort is None
         if think_harder:
@@ -651,6 +702,11 @@ class AnthropicService:
                         resolved_bot_id, show if on_text else None, status, tool_statuses, code_file_ids,
                     )
                 except anthropic.BadRequestError as e:
+                    if kwargs.get("mcp_servers") and _is_mcp_error(e):
+                        # Logfire is down or the key stopped working: answer without the logs.
+                        logger.warning(f"[{api_model}] Logfire MCP failed, retrying without it: {e.message}")
+                        kwargs = _without_logfire_mcp(kwargs)
+                        continue
                     if strict_dropped or not _is_grammar_error(e) or not kwargs.get("tools"):
                         raise
                     # Too many or too big strict schemas: the arguments just aren't guaranteed

@@ -69,10 +69,14 @@ def test_without_blobs_replaces_base64_blocks_only():
     assert without_blobs("plain") == "plain"
 
 
-def _span(name, *, attributes=None, scope="logfire", error=False):
+_next_span_id = iter(range(1, 10_000))
+
+
+def _span(name, *, attributes=None, scope="logfire", error=False, span_id=None):
     status = SimpleNamespace(status_code=SimpleNamespace(name="ERROR" if error else "UNSET"))
     return SimpleNamespace(
         name=name, attributes=attributes or {}, instrumentation_scope=SimpleNamespace(name=scope), status=status,
+        context=SimpleNamespace(span_id=span_id or next(_next_span_id)),
     )
 
 
@@ -89,6 +93,9 @@ def test_keep_trace_keeps_everything_that_isnt_a_routine_poll():
 def test_keep_trace_drops_an_idle_poll_and_keeps_a_busy_one():
     root = _span("reminder poll", attributes={ROUTINE_ATTRIBUTE: True})
     assert keep_trace(_info(root, root)) == 0.0
+    # The root ending arrives as a different object with the same span id.
+    ended_root = _span("reminder poll", attributes={ROUTINE_ATTRIBUTE: True}, span_id=root.context.span_id)
+    assert keep_trace(_info(ended_root, root)) == 0.0
     assert keep_trace(_info(_span("ZRANGEBYSCORE", scope="opentelemetry.instrumentation.redis"), root)) == 0.0
     # A failed GET, a log line or a model call makes it worth keeping.
     assert keep_trace(_info(_span("GET", scope="opentelemetry.instrumentation.httpx", error=True), root)) == 1.0

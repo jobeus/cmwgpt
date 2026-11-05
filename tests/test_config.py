@@ -108,3 +108,20 @@ class TestConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_logfire_read_token_falls_back_to_the_tracing_key():
+    from src.config import load_config
+
+    assert load_config({"LOGFIRE_API_KEY": "pylf_rw"}, load_env_file=False).logfire_read_token == "pylf_rw"
+    both = {"LOGFIRE_API_KEY": "pylf_rw", "LOGFIRE_READ_TOKEN": "pylf_r"}
+    assert load_config(both, load_env_file=False).logfire_read_token == "pylf_r"
+    assert load_config({}, load_env_file=False).logfire_read_token == ""
+
+
+def test_logs_channel_comes_from_discord_channel_id():
+    from src.config import load_config
+
+    assert load_config({"DISCORD_CHANNEL_ID": " 1234 "}, load_env_file=False).logs_channel_id == 1234
+    assert load_config({"DISCORD_CHANNEL_ID": ""}, load_env_file=False).logs_channel_id is None
+    assert load_config({}, load_env_file=False).logs_channel_id is None

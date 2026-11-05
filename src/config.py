@@ -21,6 +21,11 @@ def _read_bool(value: Optional[str], default: bool) -> bool:
     return value.lower() in ("true", "1")
 
 
+def _read_optional_int(value: Optional[str]) -> Optional[int]:
+    value = (value or "").strip()
+    return int(value) if value.isdigit() else None
+
+
 def _read_int(value: Optional[str], default: int) -> int:
     if value is None:
         return default
@@ -78,6 +83,11 @@ class AppConfig:
     irc_nicks_path: str = ""
     # The old IRC quote bot's quotes, one per line; the old_quotes tool is off when unset.
     old_quote_bot_path: str = ""
+    # A Logfire key with project:read, so the direct models can query the bot's own traces.
+    logfire_read_token: str = ""
+    logfire_mcp_url: str = "https://logfire-us.pydantic.dev/mcp"
+    # The one channel where mentions get that logs tool; off everywhere when unset.
+    logs_channel_id: Optional[int] = None
 
 
 def load_config(
@@ -114,6 +124,12 @@ def load_config(
         irc_log_path=source.get("IRC_LOG", "").strip(),
         irc_nicks_path=source.get("IRC_NICKS", "").strip(),
         old_quote_bot_path=source.get("OLD_QUOTE_BOT", "").strip(),
+        # Its own key if set, else the tracing key (fine when that one also has project:read).
+        logfire_read_token=(
+            source.get("LOGFIRE_READ_TOKEN") or source.get("LOGFIRE_TOKEN") or source.get("LOGFIRE_API_KEY") or ""
+        ).strip(),
+        logfire_mcp_url=source.get("LOGFIRE_MCP_URL", "").strip() or "https://logfire-us.pydantic.dev/mcp",
+        logs_channel_id=_read_optional_int(source.get("DISCORD_CHANNEL_ID")),
     )
 
 

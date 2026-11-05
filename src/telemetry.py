@@ -67,7 +67,8 @@ def keep_trace(info: TailSamplingSpanInfo) -> float:
     if not (root.attributes or {}).get(ROUTINE_ATTRIBUTE):
         return 1.0
     span = info.span
-    if span is root:
+    # Compared by id: when a span ends, the callback gets a new object for it.
+    if _span_id(span) == _span_id(root):
         return 0.0
     scope = getattr(span.instrumentation_scope, "name", "") or ""
     if scope.startswith(_ROUTINE_SCOPES):
@@ -75,6 +76,11 @@ def keep_trace(info: TailSamplingSpanInfo) -> float:
         status = getattr(getattr(span, "status", None), "status_code", None)
         return 1.0 if getattr(status, "name", "") == "ERROR" else 0.0
     return 1.0
+
+
+def _span_id(span: Any) -> Optional[int]:
+    context = span.get_span_context() if hasattr(span, "get_span_context") else getattr(span, "context", None)
+    return getattr(context, "span_id", None)
 
 
 def routine_span(name: str, **attributes: Any):

@@ -60,7 +60,12 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     state_service = StateService()
     queue_service = QueueService()
     gemini_service = GeminiService(api_key=app_config.gemini_api_key)
-    anthropic_service = AnthropicService(api_key=app_config.anthropic_api_key)
+    anthropic_service = AnthropicService(
+        api_key=app_config.anthropic_api_key,
+        logfire_read_token="" if app_config.is_testing else app_config.logfire_read_token,
+        logfire_mcp_url=app_config.logfire_mcp_url,
+        logs_channel_id=app_config.logs_channel_id,
+    )
     paste_service = PasteService(cache_injector=inject_article_cache)
     # Links to the images in the traces; only used while tracing is on.
     set_image_uploader(paste_service.upload_image)

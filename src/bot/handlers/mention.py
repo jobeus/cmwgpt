@@ -88,6 +88,24 @@ def _mention_last(
     return others + [message]
 
 
+def _logs_note(channel_id: int) -> str:
+    """The tools-section lines about querying the bot's own traces in Logfire."""
+    return (
+        "- Your own traces and logs, in Logfire (`query_run` runs SQL; `query_schema_reference` shows the "
+        "schema; `issue_list` lists recurring exceptions). Use them when someone asks why you failed, errored, "
+        "were slow, or did something odd, then explain what happened in plain words; don't paste raw rows. "
+        "The `records` table has one row per span or log line: `start_timestamp`, `duration`, `trace_id`, "
+        "`span_name`, `message`, `level`, `is_exception`, `exception_type`, `exception_message`, `attributes` "
+        "(JSON, read with `attributes->>'key'`) and `deployment_environment` (use 'production'). Each answered "
+        "mention is a root span named 'mention by {user} in #{channel}' with attributes `message_id`, "
+        "`channel_id`, `user`, `text`, `model`, `cost`, `seconds`, `tools` and `error`; inside its trace are "
+        "the model calls, a 'tool {tool_name}' span per tool call (`args`, `is_error`, `result`), the HTTP "
+        f"and Redis calls, and the log lines. This channel's id is {channel_id}. Keep queries small: a recent "
+        "time window, `LIMIT` 20 or less, only the columns you need, and never the `gen_ai.input.messages` "
+        "attribute (whole prompts).\n"
+    )
+
+
 def _append_to_mention(chat_context: List[Dict[str, Any]], text: str) -> None:
     """Add ``text`` to the last user turn (the mention)."""
     for entry in reversed(chat_context):
@@ -702,6 +720,9 @@ class MentionHandler:
             "like). Use it for exact math, statistics, or charts, for example of IRC log counts by year. "
             "Files your code saves, like a chart PNG, are attached to your reply.\n"
         )
+        logs_available = getattr(self._anthropic_service, "logs_available", None)
+        if callable(logs_available) and logs_available(message.channel.id) is True:
+            section += _logs_note(message.channel.id)
         if "react" in names:
             emoji = sorted(e.name for e in getattr(message.guild, "emojis", None) or ())[:MAX_LISTED_EMOJI]
             if emoji:

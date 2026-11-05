@@ -53,9 +53,14 @@ These are loaded by `src/config.py`.
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `LOGFIRE_TOKEN` | empty | Logfire project write token (`LOGFIRE_API_KEY` is read too). Set it and the bot sends traces and INFO+ logs; leave it empty and nothing is sent |
+| `LOGFIRE_READ_TOKEN` | the tracing key | A Logfire key with `project:read`, for the logs tool below. Only needed when the tracing key can't read |
+| `LOGFIRE_MCP_URL` | `https://logfire-us.pydantic.dev/mcp` | Logfire's MCP server (`logfire-eu` for an EU project) |
+| `DISCORD_CHANNEL_ID` | empty | The one channel where mentions get the logs tool below; unset, it's off everywhere |
 | `LOGFIRE_ENVIRONMENT` | `development` for `.env.development`, else `production` | The environment Logfire files the traces under |
 
 Each mention is one trace: the context building, every Claude/Gemini call (prompt, reply, tool calls, tokens), every tool call, HTTP fetches and Redis commands, with the mention's cost and usage stats on the root span. Slash commands, the nightly memory job, death announcements and delivered reminders get their own traces. Images in prompts and tool results show up as a `[image/png, 412 KB: https://paste.jobe.wtf/abc.png]` note instead of base64: PNGs and JPEGs are uploaded to paste.jobe.wtf (once each; the links are kept in Redis) so the trace links to them. Gemini chat calls don't record their images at all. The 15-second reminder and death-page polls only keep a trace when the poll does something. The code is in `src/telemetry.py`.
+
+The direct Claude models can also read these traces when answering a mention in `DISCORD_CHANNEL_ID`, so you can ask the bot there why it failed or was slow. Only that channel gets it (a thread under it has its own id and doesn't), because the traces hold every channel's conversations. Each mention request includes Logfire's MCP server through the Claude API's MCP connector: Anthropic connects to it with the key from the request, and nothing is stored on the Claude side. Only read-only tools are allowed (`query_run`, `query_schema_reference`, `query_find_exceptions_in_file`, `issue_list`). If Logfire rejects the key or is down, the request is retried without the logs. Anyone who can post in that channel can ask it about any traced conversation.
 
 ## Recommended minimal setups
 
