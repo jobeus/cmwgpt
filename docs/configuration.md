@@ -55,7 +55,7 @@ These are loaded by `src/config.py`.
 | `LOGFIRE_TOKEN` | empty | Logfire project write token (`LOGFIRE_API_KEY` is read too). Set it and the bot sends traces and INFO+ logs; leave it empty and nothing is sent |
 | `LOGFIRE_ENVIRONMENT` | `development` for `.env.development`, else `production` | The environment Logfire files the traces under |
 
-Each mention is one trace: the context building, every Claude/Gemini call (prompt, reply, tool calls, tokens), every tool call, HTTP fetches and Redis commands, with the mention's cost and usage stats on the root span. Slash commands, the nightly memory job, death announcements and delivered reminders get their own traces. Images in prompts and tool results show up as a `[image/png, 412 KB]` note instead of base64. The 15-second reminder and death-page polls only keep a trace when the poll does something. The code is in `src/telemetry.py`.
+Each mention is one trace: the context building, every Claude/Gemini call (prompt, reply, tool calls, tokens), every tool call, HTTP fetches and Redis commands, with the mention's cost and usage stats on the root span. Slash commands, the nightly memory job, death announcements and delivered reminders get their own traces. Images in prompts and tool results show up as a `[image/png, 412 KB: https://paste.jobe.wtf/abc.png]` note instead of base64: PNGs and JPEGs are uploaded to paste.jobe.wtf (once each; the links are kept in Redis) so the trace links to them. Gemini chat calls don't record their images at all. The 15-second reminder and death-page polls only keep a trace when the poll does something. The code is in `src/telemetry.py`.
 
 ## Recommended minimal setups
 

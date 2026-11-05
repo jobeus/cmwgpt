@@ -10,6 +10,7 @@ from typing import Optional
 import discord
 from PIL import Image
 
+from src.telemetry import start_image_upload
 from src.utils.cache_utils import PersistentCache
 from src.utils.http_client import fetch_public
 from src.utils.media_transcribe import GROQ_MAX_UPLOAD_BYTES, transcribe_audio, transcribe_audio_file
@@ -87,6 +88,8 @@ def compress_image(
 
 async def _image_bytes_to_data_url(image_bytes: bytes) -> str:
     compressed = await asyncio.to_thread(compress_image, image_bytes)
+    # Gets the trace link uploading now, so the model call doesn't wait for it.
+    start_image_upload(compressed, "image/jpeg")
     return f"data:image/jpeg;base64,{base64.b64encode(compressed).decode('ascii')}"
 
 

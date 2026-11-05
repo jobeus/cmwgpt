@@ -115,3 +115,100 @@ async def test_command_tree_call_is_wrapped_once():
     )
     await tree._call(interaction)
     assert calls == [interaction]
+
+
+class _MemoryStore:
+    def __init__(self, data=None):
+        self.data = dict(data or {})
+
+    async def get(self, key, default=None):
+        return self.data.get(key, default)
+
+    async def set(self, key, value):
+        self.data[key] = value
+
+
+@pytest.fixture
+def linking(monkeypatch):
+    """Tracing on, a fake uploader and an in-memory link store."""
+    uploads = []
+
+    async def uploader(data, media_type):
+        uploads.append((data, media_type))
+        return f"https://paste.jobe.wtf/p{len(uploads)}{'.jpg' if media_type == 'image/jpeg' else '.png'}"
+
+    store = _MemoryStore()
+    monkeypatch.setattr(telemetry, "_sending", True)
+    monkeypatch.setattr(telemetry, "_uploader", uploader)
+    monkeypatch.setattr(telemetry, "_links", telemetry.LRUCache(10))
+    monkeypatch.setattr(telemetry, "_pending", {})
+    monkeypatch.setattr(telemetry, "_link_store", store)
+    return SimpleNamespace(uploads=uploads, store=store)
+
+
+@pytest.mark.asyncio
+async def test_request_images_are_uploaded_once_and_linked_in_the_note(linking):
+    image = {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": IMAGE_B64}}
+    request = [
+        {"role": "user", "content": [image, {"type": "text", "text": "what"}]},
+        # The same image again inside a tool result, plus a type paste.jobe.wtf doesn't take.
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": [image]}]},
+        {"role": "user", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/webp", "data": "AAAA"}}]},
+    ]
+    await telemetry.image_links_ready(request)
+    await telemetry.image_links_ready(request)
+    assert linking.uploads == [(b"\0" * 300_000, "image/png")]
+    assert without_blobs([image])[0]["text"] == "[image/png, 293 KB: https://paste.jobe.wtf/p1.png]"
+    assert len(linking.store.data) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_stored_link_is_reused_without_uploading(linking):
+    raw = b"\xff\xd8 jpeg bytes"
+    linking.store.data[telemetry._image_key(raw)] = "https://paste.jobe.wtf/old.jpg"
+    await telemetry.image_links_ready(images=[(raw, "image/jpeg")])
+    assert linking.uploads == []
+    assert telemetry._blob_note("image/jpeg", raw) == "[image/jpeg, 13 B: https://paste.jobe.wtf/old.jpg]"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_upload_leaves_the_plain_note(linking, monkeypatch):
+    async def broken(data, media_type):
+        raise RuntimeError("429 rate limited")
+
+    monkeypatch.setattr(telemetry, "_uploader", broken)
+    await telemetry.image_links_ready(images=[(b"png", "image/png")])
+    assert telemetry._blob_note("image/png", b"png") == "[image/png, 3 B]"
+    assert telemetry._pending == {}
+
+
+def test_nothing_is_uploaded_while_tracing_is_off(monkeypatch):
+    monkeypatch.setattr(telemetry, "_sending", False)
+    monkeypatch.setattr(telemetry, "_uploader", lambda *a: pytest.fail("uploaded"))
+    assert telemetry.start_image_upload(IMAGE_B64, "image/png") is None
+
+
+@pytest.mark.asyncio
+async def test_paste_service_uploads_an_image():
+    import httpx
+
+    from src.services.paste_service import PasteService
+
+    seen = []
+
+    def handler(request):
+        seen.append(request.content)
+        return httpx.Response(201, text="https://paste.jobe.wtf/abc.jpg\n" if seen[-1] == b"new" else "https://paste.jobe.wtf/abc\n")
+
+    service = PasteService(client_factory=lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kw))
+    assert await service.upload_image(b"\xff\xd8", "image/jpeg") == "https://paste.jobe.wtf/abc.jpg"
+    assert seen == [b"\xff\xd8"]
+    # The server's own extension isn't doubled.
+    assert await service.upload_image(b"new", "image/jpeg") == "https://paste.jobe.wtf/abc.jpg"
+
+    def too_big(request):
+        return httpx.Response(413, text="too large")
+
+    service = PasteService(client_factory=lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(too_big), **kw))
+    with pytest.raises(Exception, match="413"):
+        await service.upload_image(b"x")

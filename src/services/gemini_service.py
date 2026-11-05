@@ -19,6 +19,7 @@ import httpx
 
 from src.services.cost_service import GEMINI_DIRECT, record_cost
 from src.services.image_service import ImageModel, ImageOptions, ImageResult
+from src.telemetry import image_links_ready
 from src.utils.message_utils import clean_reply, resolve_bot_id
 
 logger = logging.getLogger(__name__)
@@ -658,6 +659,8 @@ class GeminiService:
             types.Part.from_bytes(data=data, mime_type=_image_mime_type(data))
             for data in (base64.b64decode(b64) for b64 in images_b64 or [])
         ]
+        await image_links_ready(images=[
+            (p.inline_data.data, p.inline_data.mime_type or "") for p in parts if p.inline_data])
         parts.append(types.Part.from_text(text=prompt))
 
         tools = None

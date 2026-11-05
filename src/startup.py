@@ -23,6 +23,7 @@ from src.services.queue_service import QueueService
 from src.services.reminder_service import ReminderService
 from src.services.timezone_service import TimezoneStore
 from src.services.video_service import VideoWatcher
+from src.telemetry import set_image_uploader
 from src.services.restart_handler import RestartHandler
 from src.services.state_service import StateService
 from src.utils.url_utils import inject_article_cache
@@ -61,6 +62,8 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     gemini_service = GeminiService(api_key=app_config.gemini_api_key)
     anthropic_service = AnthropicService(api_key=app_config.anthropic_api_key)
     paste_service = PasteService(cache_injector=inject_article_cache)
+    # Links to the images in the traces; only used while tracing is on.
+    set_image_uploader(paste_service.upload_image)
     message_service = MessageService(paste_service_instance=paste_service)
 
     restart_handler = RestartHandler(state_service=state_service)

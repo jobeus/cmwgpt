@@ -12,19 +12,28 @@
 Without a token nothing is sent; the bot's own spans still run but go nowhere.
 
 Images and documents sent to (or drawn by) the models are replaced in the spans by a short
-``[image/png, 412 KB]`` note, so a pasted screenshot doesn't put megabytes of base64 into every
-span of a conversation.
+``[image/png, 412 KB: https://paste.jobe.wtf/abc.png]`` note, so a pasted screenshot doesn't put
+megabytes of base64 into every span of a conversation. PNGs and JPEGs are uploaded to
+paste.jobe.wtf for the link: :func:`start_image_upload` starts that as soon as an image comes in,
+and :func:`image_links_ready` waits for it (briefly) before a model call, because the span's note is
+written the moment the request starts. Links are kept in Redis, so a restart doesn't upload again.
 
 The reminder and death-page pollers run every 15 seconds. Their spans are only kept when the
 poll does something (logs, calls a model, announces); an idle poll's trace is dropped.
 """
 
+import asyncio
+import base64
+import binascii
+import hashlib
 import logging
 import os
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Dict, Iterator, Optional, Sequence, Tuple
 
 import logfire
 from logfire.sampling import SamplingOptions, TailSamplingSpanInfo
+
+from src.utils.cache_utils import LRUCache, PersistentCache
 
 logger = logging.getLogger(__name__)
 
@@ -75,28 +84,120 @@ def routine_span(name: str, **attributes: Any):
 
 # -- keeping images out of the spans ---------------------------------------------------------
 
+# Images go to paste.jobe.wtf so a span's note can link to them. Only these types are accepted there.
+UPLOADABLE_TYPES = {"image/png", "image/jpeg"}
+# How long a model call waits for its images' uploads before going ahead without the links.
+LINK_WAIT_SECONDS = 5.0
 
-def _blob_note(media_type: str, size: int) -> str:
-    return f"[{media_type or 'binary'}, {size / 1024:.0f} KB]"
+_sending = False
+_uploader: Optional[Callable[[bytes, str], Awaitable[str]]] = None
+_links: LRUCache[str] = LRUCache(2000)
+_pending: Dict[str, "asyncio.Task[None]"] = {}
+_link_store: Optional[PersistentCache] = None
 
 
-def _base64_size(data: Any) -> int:
+def set_image_uploader(uploader: Optional[Callable[[bytes, str], Awaitable[str]]]) -> None:
+    """``uploader(data, media_type)`` returns the image's URL. Only used while tracing is on."""
+    global _uploader
+    _uploader = uploader
+
+
+def _raw_bytes(data: Any) -> bytes:
     if isinstance(data, (bytes, bytearray)):
-        return len(data)
+        return bytes(data)
     if isinstance(data, str):
-        return len(data) * 3 // 4
-    return 0
+        try:
+            return base64.b64decode(data, validate=False)
+        except (binascii.Error, ValueError):
+            return b""
+    return b""
+
+
+def _image_key(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _blob_note(media_type: str, data: Any) -> str:
+    raw = _raw_bytes(data)
+    size = f"{len(raw) / 1024:.0f} KB" if len(raw) >= 1024 else f"{len(raw)} B"
+    note = f"{media_type or 'binary'}, {size}"
+    link = _links.get(_image_key(raw)) if raw else None
+    return f"[{note}: {link}]" if link else f"[{note}]"
+
+
+async def _upload(key: str, raw: bytes, media_type: str) -> None:
+    global _link_store
+    try:
+        if _link_store is None:
+            _link_store = PersistentCache("paste_image_links")
+        link = await _link_store.get(key)
+        if not link and _uploader is not None:
+            link = await _uploader(raw, media_type)
+            await _link_store.set(key, link)
+        if link:
+            _links[key] = link
+    except Exception as e:
+        logger.warning(f"[telemetry] Couldn't upload a {media_type} for its trace link: {e}")
+    finally:
+        _pending.pop(key, None)
+
+
+def start_image_upload(data: Any, media_type: str) -> "Optional[asyncio.Task[None]]":
+    """Start uploading an image (base64 or bytes) for the span notes, unless it's already up.
+
+    Returns the upload to wait on, or None. Does nothing while tracing is off.
+    """
+    if not (_sending and _uploader) or (media_type or "").lower() not in UPLOADABLE_TYPES:
+        return None
+    raw = _raw_bytes(data)
+    if not raw:
+        return None
+    key = _image_key(raw)
+    if key in _links:
+        return None
+    task = _pending.get(key)
+    if task is None:
+        task = asyncio.create_task(_upload(key, raw, media_type.lower()))
+        _pending[key] = task
+    return task
+
+
+def _base64_sources(value: Any) -> Iterator[Dict[str, Any]]:
+    """Every ``{"type": "base64", ...}`` source in a Messages API request, tool results included."""
+    if isinstance(value, dict):
+        if value.get("type") == "base64" and "data" in value:
+            yield value
+        for item in value.values():
+            if isinstance(item, (dict, list)):
+                yield from _base64_sources(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _base64_sources(item)
+
+
+async def image_links_ready(value: Any = None, *, images: Sequence[Tuple[Any, str]] = ()) -> None:
+    """Upload the images in ``value`` (Messages API content) and ``images`` (data, media type) pairs,
+    waiting up to ``LINK_WAIT_SECONDS`` so the model call's span can link to them. Never raises."""
+    if not (_sending and _uploader):
+        return
+    try:
+        found = [(s.get("data"), s.get("media_type", "")) for s in _base64_sources(value)]
+        tasks = {t for data, media_type in [*found, *images] if (t := start_image_upload(data, media_type))}
+        if tasks:
+            await asyncio.wait(tasks, timeout=LINK_WAIT_SECONDS)
+    except Exception as e:
+        logger.warning(f"[telemetry] Couldn't get image links ready: {e}")
 
 
 def without_blobs(blocks: Any) -> Any:
-    """Content blocks (Messages API shape) with any base64 image or document swapped for a size note."""
+    """Content blocks (Messages API shape) with any base64 image or document swapped for a note."""
     if not isinstance(blocks, list):
         return blocks
     cleaned = []
     for block in blocks:
         source = block.get("source") if isinstance(block, dict) else None
         if isinstance(source, dict) and source.get("type") == "base64":
-            cleaned.append({"type": "text", "text": _blob_note(source.get("media_type", ""), _base64_size(source.get("data")))})
+            cleaned.append({"type": "text", "text": _blob_note(source.get("media_type", ""), source.get("data"))})
         else:
             cleaned.append(block)
     return cleaned
@@ -115,7 +216,7 @@ def _wrap_anthropic_parts() -> bool:
     def convert(part: object) -> Any:
         converted = original(part)
         if isinstance(converted, dict) and converted.get("type") == "blob":
-            note = _blob_note(converted.get("media_type", ""), _base64_size(converted.get("content")))
+            note = _blob_note(converted.get("media_type", ""), converted.get("content"))
             return {"type": "text", "content": note}
         return converted
 
@@ -138,7 +239,7 @@ def _wrap_gemini_parts() -> bool:
     def to_part(part: Any, idx: int) -> Any:
         converted = original(part, idx)
         if isinstance(converted, BlobPart):
-            return TextPart(content=_blob_note(converted.mime_type or "", _base64_size(converted.content)))
+            return TextPart(content=_blob_note(converted.mime_type or "", converted.content))
         return converted
 
     to_part._cmwgpt_wrapped = True  # type: ignore[attr-defined]
@@ -196,6 +297,7 @@ def setup_telemetry(env_file: Optional[str] = None) -> bool:
         return bool(telemetry_token())
     _configured = True
 
+    global _sending
     token = telemetry_token()
     if not token:
         # Keeps logfire.span() quiet and cheap; nothing is exported.
@@ -214,6 +316,7 @@ def setup_telemetry(env_file: Optional[str] = None) -> bool:
     )
 
     strip_images_from_spans()
+    _sending = True
     # Gemini only records prompts and replies when asked to.
     os.environ.setdefault("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "SPAN_ONLY")
 

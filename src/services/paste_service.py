@@ -53,6 +53,21 @@ class PasteService:
             logger.error(f"Network error uploading to paste service: {e}")
             raise Exception(f"Failed to upload to paste service: {e}") from e
 
+    async def upload_image(self, data: bytes, media_type: str = "image/png") -> str:
+        """Upload a PNG or JPEG and return its URL, with an extension so it opens as an image.
+
+        Raises:
+            Exception: If the upload fails (anything but 201, e.g. 413 over 20 MiB)
+        """
+        extension = ".jpg" if media_type == "image/jpeg" else ".png"
+        async with self._client_factory(timeout=httpx.Timeout(20.0)) as client:
+            response = await client.post(self.base_url, content=data)
+        if response.status_code != 201:
+            raise Exception(f"Paste service error: {response.status_code} - {response.text[:200]}")
+        url = response.text.strip()
+        # The server adds the extension itself for images; older versions didn't.
+        return url if "." in url.rsplit("/", 1)[-1] else url + extension
+
     async def upload_markdown(self, markdown_text: str) -> str:
         """
         Upload markdown text to paste service.
