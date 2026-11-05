@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 
 from src.services.anthropic_service import AnthropicServiceError
-from src.bot.handlers.mention import MentionHandler
+from src.bot.handlers.mention import MAX_HISTORY_WINDOW, MentionHandler
 from src.services.cost_service import CLAUDE_DIRECT, record_cost
 
 
@@ -269,7 +269,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIn("## How you work (your own architecture)", system_prompt)
         self.assertEqual(context[-1]["content"][1]["type"], "image_url")
         self.assertEqual(history_calls[0], (10, None))
-        self.assertEqual(history_calls[1], (100, older_msg))
+        self.assertEqual(history_calls[1], (MAX_HISTORY_WINDOW, older_msg))
         self.assertEqual(handler._history_cache[channel.id]["timestamp"], 1005)
         self.assertIn("newer", cached_context[-1]["content"][0]["text"])
 
@@ -618,7 +618,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         context, _ = await after._prepare_mention_context(second_mention, SimpleNamespace(id=999))
 
         channel.fetch_message.assert_awaited_once_with(10)
-        self.assertEqual(history_calls[-1], (100, oldest))
+        self.assertEqual(history_calls[-1], (MAX_HISTORY_WINDOW, oldest))
         anthropic_service.clear_channel_cache.assert_not_called()
         self.assertEqual(len(context), 2)
 
@@ -955,9 +955,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         gemini_service.clear_channel_cache.assert_called_once_with(77)
         anthropic_service.clear_channel_cache.assert_called_once_with(77)
 
-    async def test_massive_history_gap_clears_gemini_and_anthropic_caches(self):
-        from src.bot.handlers.mention import MAX_HISTORY_GAP
-
+    async def test_a_full_history_window_clears_gemini_and_anthropic_caches(self):
         gemini_service = MagicMock()
         anthropic_service = MagicMock()
         handler, _, _, _, _ = self.make_handler(
@@ -968,7 +966,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         channel.name = "busy"
         oldest = self._simple_msg(1, channel)
         mention_msg = self._simple_msg(2, channel)
-        gap_msgs = [self._simple_msg(100 + i, channel) for i in range(MAX_HISTORY_GAP)]
+        gap_msgs = [self._simple_msg(100 + i, channel) for i in range(MAX_HISTORY_WINDOW)]
 
         async def history(limit=None, after=None):
             for msg in (gap_msgs if after is not None else [mention_msg]):
@@ -977,9 +975,11 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         channel.history = history
         handler._history_cache[78] = {"timestamp": 1000, "oldest_message": oldest}
 
-        with patch("src.bot.handlers.mention.time", MagicMock(time=MagicMock(return_value=1001))):
+        with patch("src.bot.handlers.mention.time", MagicMock(time=MagicMock(return_value=1001))), \
+                self.assertLogs("src.bot.handlers.mention", "INFO") as logs:
             await handler._prepare_mention_context(mention_msg, SimpleNamespace(id=999))
 
+        self.assertTrue(any(f"#busy reached {MAX_HISTORY_WINDOW} messages" in line for line in logs.output))
         gemini_service.clear_channel_cache.assert_called_once_with(78)
         anthropic_service.clear_channel_cache.assert_called_once_with(78)
         self.assertIs(handler._history_cache[78]["oldest_message"], mention_msg)

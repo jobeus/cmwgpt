@@ -46,9 +46,10 @@ IRC_ROSTER_SIZE = 60
 # How many of the server's custom emoji the tools section lists for ``react``.
 MAX_LISTED_EMOJI = 80
 
-# How many messages a channel's growing history window may gain before it resets
-# to the last INCLUDE_NUM_CHATLINES messages.
-MAX_HISTORY_GAP = 100
+# How many messages a channel's growing history window may hold, counted from its first
+# message however recently the bot was used, before it resets to the last
+# INCLUDE_NUM_CHATLINES messages. The window can't slide: that would break the cached prompt.
+MAX_HISTORY_WINDOW = 200
 
 # How many earlier messages of a reply thread from before the history window a mention
 # gets, and how much of each.
@@ -534,15 +535,18 @@ class MentionHandler:
         if oldest_message is not None:
             history_msgs.append(oldest_message)
             
-            # Fetch up to MAX_HISTORY_GAP messages after the oldest message
-            async for msg in message.channel.history(limit=MAX_HISTORY_GAP, after=oldest_message):
+            # Fetch up to MAX_HISTORY_WINDOW messages after the oldest message
+            async for msg in message.channel.history(limit=MAX_HISTORY_WINDOW, after=oldest_message):
                 history_msgs.append(msg)
 
-            if len(history_msgs) >= MAX_HISTORY_GAP:
-                # The gap is too large (MAX_HISTORY_GAP+ messages since last bot interaction).
-                # To save cost and avoid giant context windows, we abandon the old
-                # interaction and start a fresh context from the most recent messages.
-                logger.info("Massive message gap detected in #%s. Resetting context.", message.channel.name)
+            if len(history_msgs) >= MAX_HISTORY_WINDOW:
+                # The window is full. To save cost and avoid giant context windows, we abandon
+                # it and start a fresh context from the most recent messages.
+                age_hours = (current_time - discord.utils.snowflake_time(oldest_message.id).timestamp()) / 3600
+                logger.info(
+                    "History window of #%s reached %s messages (started %.1fh ago). Resetting context.",
+                    message.channel.name, MAX_HISTORY_WINDOW, age_hours,
+                )
                 history_msgs = []
                 for service in (self._gemini_service, self._anthropic_service):
                     if service:
