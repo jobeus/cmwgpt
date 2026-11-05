@@ -119,6 +119,13 @@ class TestDeathService(unittest.TestCase):
         # Polling tests assume every name is a person; the person check itself
         # is tested through DeathService.is_person directly.
         self.service.is_person = AsyncMock(return_value=True)
+        # Likewise every title is taken as the real one and no article is fetched, except in the
+        # tests of those two steps.
+        self._real_resolve_title = self.service._resolve_title
+        self.service._resolve_title = AsyncMock(side_effect=lambda candidates: candidates[0])
+        article_patch = patch("src.services.death_service.get_article_text", AsyncMock(return_value=None))
+        self.mock_article = article_patch.start()
+        self.addCleanup(article_patch.stop)
 
     def tearDown(self):
         self.loop.close()
@@ -196,19 +203,76 @@ class TestDeathService(unittest.TestCase):
 
     # ----- Force announce -----
 
-    def test_parse_article_title(self):
-        from src.services.death_service import parse_article_title
-        self.assertEqual(
-            parse_article_title("https://en.wikipedia.org/wiki/Kevin_Keegan"),
-            "Kevin_Keegan",
-        )
-        self.assertEqual(
-            parse_article_title("https://en.wikipedia.org/wiki/Ren%C3%A9_Dupont"),
-            "René_Dupont",
-        )
-        self.assertEqual(parse_article_title("kevin keegan"), "Kevin_keegan")
-        self.assertEqual(parse_article_title("  "), "")
-        self.assertEqual(parse_article_title(""), "")
+    def _title_page(self, title, **extra):
+        return httpx.Response(200, json={"query": {"pages": [{"ns": 0, "title": title, **extra}]}})
+
+    def test_resolve_title_follows_a_redirect(self):
+        async def run_test():
+            http = self._fake_http(self._title_page("Michael Jackson"))
+            self.assertEqual(await self._real_resolve_title(["Michael_jackson"]), "Michael_Jackson")
+            params = http.get.call_args.kwargs["params"]
+            self.assertEqual(params["titles"], "Michael jackson")
+            self.assertEqual(params["redirects"], 1)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_resolve_title_tries_the_next_candidate(self):
+        async def run_test():
+            self._fake_http(self._title_page("Kimmarie johnson", missing=True), self._title_page("Kimmarie Johnson"))
+            self.assertEqual(
+                await self._real_resolve_title(["Kimmarie_johnson", "Kimmarie_Johnson"]), "Kimmarie_Johnson")
+
+        self.loop.run_until_complete(run_test())
+
+    def test_resolve_title_none_when_nothing_is_an_article(self):
+        async def run_test():
+            self._fake_http(self._title_page("Nobody", missing=True))
+            self.assertIsNone(await self._real_resolve_title(["Nobody"]))
+            self._fake_http(self._title_page("A|B", invalid=True))
+            self.assertIsNone(await self._real_resolve_title(["A|B"]))
+            self._fake_http(httpx.Response(200, json={"query": {"pages": [{"ns": 1, "title": "Talk:Foo"}]}}))
+            self.assertIsNone(await self._real_resolve_title(["Talk:Foo"]))
+            two = httpx.Response(200, json={"query": {"pages": [{"ns": 0, "title": "A"}, {"ns": 0, "title": "B"}]}})
+            self._fake_http(two)
+            self.assertIsNone(await self._real_resolve_title(["A|B"]))
+
+        self.loop.run_until_complete(run_test())
+
+    def test_resolve_title_keeps_the_best_guess_when_wikipedia_fails(self):
+        async def run_test():
+            self._fake_http(httpx.Response(503))
+            self.assertEqual(await self._real_resolve_title(["Kevin_keegan", "Kevin_Keegan"]), "Kevin_keegan")
+            self._fake_http(httpx.ConnectError("down"))
+            self.assertEqual(await self._real_resolve_title(["Kevin_keegan", "Kevin_Keegan"]), "Kevin_keegan")
+
+        self.loop.run_until_complete(run_test())
+
+    def test_force_announce_links_the_real_article(self):
+        """A name typed in the wrong case announces under the article's own title."""
+        async def run_test():
+            self.service._resolve_title = AsyncMock(return_value="Michael_Jackson")
+            with patch.object(self.service, "get_avg_monthly_views", AsyncMock(return_value=5)) as mock_views, \
+                    patch.object(self.service, "_announce", AsyncMock()) as mock_announce:
+                ok, _ = await self.service.force_announce("Michael jackson")
+
+            self.assertTrue(ok)
+            self.service._resolve_title.assert_awaited_once_with(["Michael_jackson", "Michael_Jackson"])
+            mock_views.assert_awaited_once_with("Michael_Jackson")
+            mock_announce.assert_awaited_once_with("Michael Jackson", "Michael_Jackson", 5)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_force_announce_refuses_a_missing_article(self):
+        async def run_test():
+            self.service._resolve_title = AsyncMock(return_value=None)
+            with patch.object(self.service, "_announce", AsyncMock()) as mock_announce:
+                ok, message = await self.service.force_announce("Nobody at all")
+
+            self.assertFalse(ok)
+            self.assertIn("No Wikipedia article found", message)
+            mock_announce.assert_not_awaited()
+
+        self.loop.run_until_complete(run_test())
 
     def test_force_announce_rejects_bad_input(self):
         async def run_test():
@@ -901,6 +965,70 @@ class TestDeathService(unittest.TestCase):
             self.assertIn("https://en.wikipedia.org/wiki/Kevin_Keegan", prompt)
             self.assertIn("limerick", prompt.lower())
             self.assertFalse(kwargs["search"])
+
+        self.loop.run_until_complete(run_test())
+
+    def _limerick_model(self, reply):
+        mock_claude = MagicMock()
+        mock_claude.get_chat_completion = AsyncMock(return_value=(reply, 0.0))
+        self.service._anthropic_service = mock_claude
+        self.service._model = "sonnet-5.5-direct"
+        return mock_claude
+
+    def test_limerick_prompt_holds_the_article_text(self):
+        async def run_test():
+            from src.services.death_service import MAX_LIMERICK_ARTICLE_CHARS
+            mock_claude = self._limerick_model("A verse")
+            self.mock_article.return_value = "Known for curling. " + "x" * MAX_LIMERICK_ARTICLE_CHARS
+
+            ok, _ = await self.service.write_limerick("Kevin Keegan")
+
+            self.assertTrue(ok)
+            self.mock_article.assert_awaited_once_with("https://en.wikipedia.org/wiki/Kevin_Keegan")
+            prompt = mock_claude.get_chat_completion.call_args.kwargs["messages"][0]["content"][0]["text"]
+            self.assertIn("Known for curling.", prompt)
+            # Cut to the limit, then the closing tag.
+            self.assertTrue(prompt.endswith("x\n</article>"))
+            self.assertLess(prompt.count("x"), MAX_LIMERICK_ARTICLE_CHARS + 100)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_write_limerick_for_someone_without_an_article(self):
+        """No article means no link and no fetch, but the model can still try."""
+        async def run_test():
+            mock_claude = self._limerick_model("A verse")
+            self.service._resolve_title = AsyncMock(return_value=None)
+
+            ok, message = await self.service.write_limerick("nobody special")
+
+            self.assertTrue(ok)
+            self.assertEqual(message, "A verse")
+            self.mock_article.assert_not_awaited()
+            prompt = mock_claude.get_chat_completion.call_args.kwargs["messages"][0]["content"][0]["text"]
+            self.assertIn("Nobody special", prompt)
+            self.assertNotIn("wikipedia.org", prompt)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_write_limerick_reports_a_model_that_cant_write_one(self):
+        async def run_test():
+            self._limerick_model("NO_LIMERICK")
+            ok, message = await self.service.write_limerick("Kevin Keegan")
+            self.assertFalse(ok)
+            self.assertIn("failed to produce a limerick", message)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_announce_posts_only_the_rip_when_the_model_cant_write_one(self):
+        async def run_test():
+            self._limerick_model("NO_LIMERICK")
+            mock_channel = AsyncMock()
+            self.mock_bot.get_channel.return_value = mock_channel
+
+            await self.service._announce("Kevin Keegan", "Kevin_Keegan", 5)
+
+            mock_channel.send.assert_awaited_once_with(
+                "RIP Kevin Keegan - https://en.wikipedia.org/wiki/Kevin_Keegan")
 
         self.loop.run_until_complete(run_test())
 

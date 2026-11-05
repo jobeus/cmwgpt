@@ -19,8 +19,8 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Optional, Set, Tuple, Any
-from urllib.parse import unquote, urlparse
+from typing import Any, List, Optional, Set, Tuple
+from urllib.parse import unquote
 
 import httpx
 import discord
@@ -30,6 +30,7 @@ from discord.ext import commands
 from src.db.state_store import StateStore
 from src.services.completion_dispatch import dispatch_completion
 from src.telemetry import routine_span
+from src.utils.url_utils import get_article_text, wiki_title_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,12 @@ PAGEVIEW_MONTHS = 3
 
 # User-Agent per Wikimedia policy
 USER_AGENT = "cmwgpt-bot/1.0 (jobeus@gmail.com)"
+
+# How much of the article goes into a limerick prompt. The lead and career come first, and this
+# keeps a huge article from costing much.
+MAX_LIMERICK_ARTICLE_CHARS = 12_000
+# What the model answers instead of a limerick when it can't write one.
+NO_LIMERICK = "NO_LIMERICK"
 
 # Wikidata "instance of" property and the "human" item it must point at.
 WIKIDATA_INSTANCE_OF = "P31"
@@ -84,31 +91,6 @@ def parse_deaths_html(html: str) -> list[Tuple[str, str]]:
                 results.append((name, title))
 
     return results
-
-
-def parse_article_title(target: str) -> str:
-    """Extract a Wikipedia article title from a URL or bare title.
-
-    Accepts a full ``https://en.wikipedia.org/wiki/...`` URL or a plain title
-    like ``Kevin Keegan``. Returns the underscore-joined article title, or an
-    empty string if nothing usable could be parsed.
-    """
-    if not target:
-        return ""
-    target = target.strip()
-
-    if "wikipedia.org/wiki/" in target:
-        parsed = urlparse(target)
-        path_parts = parsed.path.split("/wiki/")
-        if len(path_parts) > 1:
-            return unquote(path_parts[1]).replace(" ", "_")
-        return ""
-
-    title = target.replace(" ", "_")
-    # Wikipedia capitalises the first letter of article titles.
-    if title:
-        title = title[0].upper() + title[1:]
-    return title
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +344,36 @@ class DeathService:
 
     # -- person check -------------------------------------------------------
 
+    async def _resolve_title(self, candidates: List[str]) -> Optional[str]:
+        """The real article title for the first of ``candidates`` that exists, following redirects.
+
+        So "Michael jackson" gives ``Michael_Jackson``. Returns None when none of them is an
+        article. If Wikipedia can't answer, the best guess is returned so the caller can go on.
+        """
+        for title in candidates:
+            try:
+                resp = await self._client().get(
+                    "https://en.wikipedia.org/w/api.php",
+                    params={
+                        "action": "query",
+                        "redirects": 1,
+                        "titles": title.replace("_", " "),
+                        "format": "json",
+                        "formatversion": 2,
+                    },
+                )
+                if resp.status_code != 200:
+                    logger.warning("Wikipedia title lookup returned %s for %s", resp.status_code, title)
+                    return candidates[0]
+                pages = resp.json().get("query", {}).get("pages", [])
+            except (httpx.HTTPError, ValueError) as exc:
+                logger.warning("Could not look up Wikipedia title %s: %s", title, exc)
+                return candidates[0]
+            # More than one page means the input held a "|", which the API takes as a separator.
+            if len(pages) == 1 and pages[0].get("ns") == 0 and not {"missing", "invalid"} & pages[0].keys():
+                return pages[0]["title"].replace(" ", "_")
+        return None
+
     async def is_person(self, article_title: str) -> Optional[bool]:
         """Whether Wikidata says *article_title* is about a human.
 
@@ -546,24 +558,33 @@ class DeathService:
         return self._model
 
     async def _summarize_person(
-        self, display_name: str, wiki_link: str, channel_id: Optional[int] = None
+        self, display_name: str, wiki_link: Optional[str], channel_id: Optional[int] = None
     ) -> Optional[str]:
         """Ask the chat model for a limerick about the deceased.
 
+        This call has no tools, so it can't open the link: the article's text goes in the prompt.
         Uses the model set for the channel it's posted in, like a mention there would.
-        Best-effort: any failure (or an unconfigured model/service) just returns None
-        and the plain RIP message is sent.
+        Best-effort: any failure, a model that says it can't write one, or an unconfigured
+        model/service just returns None and the plain RIP message is sent.
         """
         model = self._channel_model(channel_id)
         if not model:
             return None
 
+        subject = f"{display_name} ({wiki_link})" if wiki_link else display_name
         prompt = (
-            f"Write a funny limerick about what {display_name} ({wiki_link}) is known for. It's for an "
+            f"Write a funny limerick about what {subject} is known for. It's for an "
             f"adult Discord server, so edgy is fine, as long as the jokes are about their public life and work. "
             f"Use as many verses as it takes to cover the main things they're known for. Your reply is "
-            f"posted as-is, so give only a title line and the limerick."
+            f"posted as-is, so give only a title line and the limerick. If you don't know enough about "
+            f"them to write it, reply with only {NO_LIMERICK}."
         )
+        article = await get_article_text(wiki_link) if wiki_link else None
+        if article:
+            prompt += (
+                f"\n\nTheir Wikipedia article, as background facts:\n"
+                f"<article>\n{article[:MAX_LIMERICK_ARTICLE_CHARS]}\n</article>"
+            )
         try:
             reply, _cost = await dispatch_completion(
                 model=model,
@@ -576,7 +597,11 @@ class DeathService:
             )
             if isinstance(reply, dict):
                 reply = reply.get("text", "")
-            return str(reply or "").strip() or None
+            text = str(reply or "").strip()
+            if NO_LIMERICK in text:
+                logger.info("The model had no limerick for %s", display_name)
+                return None
+            return text or None
         except Exception:
             logger.exception("Failed to summarize %s for death announcement", display_name)
             return None
@@ -590,12 +615,14 @@ class DeathService:
         if not self._channel_model(channel_id):
             return False, "No chat model is configured for limericks."
 
-        article_title = parse_article_title(target)
-        if not article_title:
+        candidates = wiki_title_candidates(target)
+        if not candidates:
             return False, "Could not determine a person from that input."
 
-        display_name = article_title.replace("_", " ")
-        wiki_link = f"https://en.wikipedia.org/wiki/{article_title}"
+        # Someone with no article can still get a limerick if the model knows them.
+        article_title = await self._resolve_title(candidates)
+        display_name = (article_title or candidates[0]).replace("_", " ")
+        wiki_link = f"https://en.wikipedia.org/wiki/{article_title}" if article_title else None
 
         limerick = await self._summarize_person(display_name, wiki_link, channel_id)
         if not limerick:
@@ -612,9 +639,13 @@ class DeathService:
         if not self._death_channel_id:
             return False, "DEATH_CHANNEL_ID is not configured — no channel to announce to."
 
-        article_title = parse_article_title(target)
-        if not article_title:
+        candidates = wiki_title_candidates(target)
+        if not candidates:
             return False, "Could not determine a Wikipedia article title from that input."
+
+        article_title = await self._resolve_title(candidates)
+        if not article_title:
+            return False, f"No Wikipedia article found for **{candidates[0].replace('_', ' ')}**."
 
         display_name = article_title.replace("_", " ")
 

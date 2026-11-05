@@ -80,10 +80,10 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 
 **Other features:**
 - `/draw` and `/edit` make images with Gemini's image models, the channel's `/imagemodel` by default: banana-2.1 (`gemini-nano-banana-2.1`, the default), banana-pro (`gemini-3-pro-image`) or banana-2-lite (`gemini-3.1-flash-lite-image`, cheapest). Options: `aspect_ratio` (1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9, and 1:4, 4:1, 1:8, 8:1 on banana-2.1 only; `/draw` defaults to 16:9, `/edit` keeps the input's shape), `size` (1K default, 2K, 4K; lite is 1K only), `thinking` (minimal/medium/high on banana-2.1, minimal/high on lite; pro always thinks), `search` (Google web search grounding on banana-2.1 and pro, web+image on banana-2.1), `model`, and up to 8 attached images (`/edit` edits the first, the rest are references). Text the model writes alongside the image is posted under it. The draw and edit_image tools use the same models and options.
-- **Deathwatch** polls Wikipedia's "Deaths in <year>" every 15s. It posts RIP plus a limerick you write for anyone averaging at least 40k monthly pageviews over 3 months whose Wikidata item says they're a human (articles with no Wikidata item yet get the benefit of the doubt).
+- **Deathwatch** polls Wikipedia's "Deaths in <year>" every 15s. It posts RIP plus a limerick you write for anyone averaging at least 40k monthly pageviews over 3 months whose Wikidata item says they're a human (articles with no Wikidata item yet get the benefit of the doubt). The limerick call has no tools, so the article's text goes in its prompt; if you still can't write one, only the RIP is posted.
 - `/wikicount` looks up an article's average monthly pageviews.
 - `/cost` shows what the bot has spent today, this week and this month, by provider (claude-direct, gemini-direct, groq, plus openrouter and runpod from before they were removed), plus the month's top spenders.
-- `/death`, `/forcedeath` and `/limerick` cover the rest of deathwatch.
+- `/death`, `/forcedeath` and `/limerick` cover the rest of deathwatch. `/forcedeath` and `/limerick` take a Wikipedia URL or a name in any capitalization and go to the real article, following redirects.
 - `/help`.
 
 **Deploys:** a push to main runs CI (lint, mypy, tests), then a signed webhook tells you to restart. A restart (`/restart` is admin-only) saves state to Redis, `git pull`s, drains the queues, and exits with code 42. The start script reinstalls dependencies and relaunches, and systemd supervises it.
