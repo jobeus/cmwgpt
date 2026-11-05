@@ -266,7 +266,7 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
             gemini_service=MagicMock(),
             anthropic_service=MagicMock(),
         )
-        services.state_service.load_state_from_temp_files.return_value = False
+        services.state_service.load_restart_state.return_value = False
         services.state_service.get_last_git_sha.return_value = None
 
         with patch("src.bot.client.discord.Intents.default", return_value=intents), patch(
@@ -290,7 +290,7 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             mock_system.call_args.kwargs["on_model_change"], client._clear_model_caches
         )
-        services.state_service.load_state_from_temp_files.assert_called_once_with()
+        services.state_service.load_restart_state.assert_called_once_with()
         services.state_service.set_last_git_sha.assert_called_once_with("abc123")
         services.auto_update_service.set_restart_callback.assert_called_once_with(
             services.restart_handler.perform_restart
@@ -379,12 +379,12 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
             restart_handler=MagicMock(),
         )
 
-        client.services.state_service.load_state_from_temp_files.return_value = False
+        client.services.state_service.load_restart_state.return_value = False
         with self.assertLogs("src.bot.client", "INFO") as logs:
             client._load_saved_state()
         self.assertIn("starting fresh", logs.output[-1])
 
-        client.services.state_service.load_state_from_temp_files.side_effect = RuntimeError("boom")
+        client.services.state_service.load_restart_state.side_effect = RuntimeError("boom")
         with self.assertLogs("src.bot.client", "ERROR") as logs:
             client._load_saved_state()
         self.assertIn("Couldn't restore the saved state", logs.output[-1])

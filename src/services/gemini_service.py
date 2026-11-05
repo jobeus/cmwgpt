@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Union
 import discord
 import httpx
 
+from src.db.state_store import StateStore
 from src.services.cost_service import GEMINI_DIRECT, record_cost
 from src.services.image_service import ImageModel, ImageOptions, ImageResult
 from src.telemetry import image_links_ready
@@ -90,15 +91,26 @@ def _is_retryable(error: Exception) -> bool:
     return isinstance(error, (httpx.TransportError, asyncio.TimeoutError, ConnectionError))
 
 
+# Each channel's latest interaction id, in Redis so a restart can continue the conversation.
+CONTEXT_KEY = "context:gemini"
+
+
 class GeminiService:
     """Service for handling Google Gemini Interactions API calls."""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, *, context_store: Optional[StateStore] = None):
         self._api_key = api_key or os.environ.get("GEMINI_API_KEY", "")
         self._client = None
         self._bot_id_loader = None
         # Per-channel cache: {channel_id: {"interaction_id": str, "timestamp": float}}
         self._interaction_cache: Dict[int, Dict[str, Any]] = {}
+        self._context_store = context_store or StateStore(None)
+        for channel, saved in self._context_store.get_all(CONTEXT_KEY).items():
+            if isinstance(saved, dict) and saved.get("interaction_id") and channel.isdigit():
+                self._interaction_cache[int(channel)] = {
+                    "interaction_id": str(saved["interaction_id"]),
+                    "timestamp": float(saved.get("timestamp") or 0),
+                }
 
     def set_bot_id_loader(self, bot_id_loader):
         """Set a callable that returns the current bot user ID."""
@@ -126,10 +138,13 @@ class GeminiService:
             "interaction_id": interaction_id,
             "timestamp": time.time(),
         }
+        self._context_store.set_field(
+            CONTEXT_KEY, channel_id, self._interaction_cache[channel_id], ttl_seconds=INTERACTION_CACHE_TTL)
 
     def clear_channel_cache(self, channel_id: int) -> None:
         """Clear the cached interaction for a channel (e.g. on model change or /reset)."""
         self._interaction_cache.pop(channel_id, None)
+        self._context_store.delete_field(CONTEXT_KEY, channel_id)
         logger.info("[gemini] Cleared interaction cache for channel %s", channel_id)
 
     def _get_client(self):

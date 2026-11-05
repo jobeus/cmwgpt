@@ -16,9 +16,7 @@ as seen, so the next poll picks it up and tries again.
 """
 
 import asyncio
-import json
 import logging
-import os
 import re
 from datetime import datetime, timezone
 from typing import Optional, Set, Tuple, Any
@@ -29,6 +27,7 @@ import discord
 from bs4 import BeautifulSoup
 from discord.ext import commands
 
+from src.db.state_store import StateStore
 from src.services.completion_dispatch import dispatch_completion
 from src.telemetry import routine_span
 
@@ -54,7 +53,10 @@ WIKIDATA_INSTANCE_OF = "P31"
 WIKIDATA_HUMAN = "Q5"
 
 # Temp file for persisting known-names across restarts
-STATE_FILE = ".cache/cmwgpt_death_names.json"
+# Known names and announced titles, in Redis (cmwgpt:death:names).
+STATE_KEY = "death:names"
+# The JSON file they lived in before Redis, imported once.
+LEGACY_STATE_FILE = ".cache/cmwgpt_death_names.json"
 
 
 def parse_deaths_html(html: str) -> list[Tuple[str, str]]:
@@ -121,14 +123,16 @@ class DeathService:
         *,
         state_service,
         death_channel_id: str,
-        state_file: str = STATE_FILE,
+        store: Optional[StateStore] = None,
+        legacy_state_file: str = LEGACY_STATE_FILE,
         model: Optional[str] = None,
         gemini_service=None,
         anthropic_service=None,
     ):
         self._state_service = state_service
         self._death_channel_id = death_channel_id
-        self._state_file = state_file
+        self._store = store or StateStore(None)
+        self._legacy_state_file = legacy_state_file
         self._gemini_service = gemini_service
         self._anthropic_service = anthropic_service
         self._model = model
@@ -145,7 +149,6 @@ class DeathService:
         self._deaths_page_etag: Optional[str] = None
         self._first_poll = True
 
-        # Try to load persisted state
         self._load_state()
 
     def _get_setting(self, key: str, default: Any) -> Any:
@@ -170,7 +173,7 @@ class DeathService:
             return
         self._running = True
 
-        # If we loaded state from disk, skip the first-poll baseline
+        # If we loaded saved state, skip the first-poll baseline
         if self._known_names:
             self._first_poll = False
 
@@ -196,30 +199,24 @@ class DeathService:
     # -- state persistence --------------------------------------------------
 
     def _save_state(self) -> None:
-        """Persist current known names and announced titles to disk."""
-        if not self._state_file:
-            return
-        try:
-            os.makedirs(os.path.dirname(self._state_file) or ".", exist_ok=True)
-            data = {
-                "known": [list(t) for t in self._known_names],
-                "announced": sorted(self._announced_titles),
-            }
-            with open(self._state_file, "w", encoding="utf-8") as f:
-                json.dump(data, f)
+        """Save the known names and announced titles to Redis."""
+        data = {
+            "known": sorted(list(t) for t in self._known_names),
+            "announced": sorted(self._announced_titles),
+        }
+        if self._store.set(STATE_KEY, data):
             logger.debug(
-                "Saved %s known / %s announced death names to %s", len(self._known_names), len(self._announced_titles), self._state_file
-            )
-        except (OSError, ValueError) as exc:
-            logger.error("Failed to save death state: %s", exc)
+                "Saved %s known / %s announced death names", len(self._known_names), len(self._announced_titles))
 
     def _load_state(self) -> None:
-        """Load known names and announced titles from a previous session, if available."""
-        if not self._state_file or not os.path.exists(self._state_file):
+        """Load known names and announced titles from a previous run, if any."""
+        data = self._store.import_legacy_file(self._legacy_state_file, STATE_KEY)
+        imported = data is not None
+        if not imported:
+            data = self._store.get(STATE_KEY)
+        if data is None:
             return
         try:
-            with open(self._state_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
             if isinstance(data, dict):
                 self._known_names = {tuple(item) for item in data.get("known", [])}
                 self._announced_titles = set(data.get("announced", []))
@@ -229,11 +226,13 @@ class DeathService:
                 # announced so we don't re-post historic deaths on upgrade.
                 self._known_names = {tuple(item) for item in data}
                 self._announced_titles = {t[1] for t in self._known_names if len(t) > 1}
-            logger.info(
-                "Loaded %s known / %s announced death names from %s", len(self._known_names), len(self._announced_titles), self._state_file
-            )
-        except (OSError, json.JSONDecodeError, ValueError) as exc:
-            logger.error("Failed to load death state: %s", exc)
+        except (TypeError, ValueError) as exc:
+            logger.error("Ignoring unreadable saved death names: %s", exc)
+            return
+        if imported:
+            self._save_state()
+        logger.info(
+            "Loaded %s known / %s announced death names", len(self._known_names), len(self._announced_titles))
 
     # -- main loop ----------------------------------------------------------
 

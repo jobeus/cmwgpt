@@ -40,6 +40,7 @@ class TestStartupIntegration(unittest.TestCase):
                 "QUIET_UPDATES": "true",
                 "DEATH_CHANNEL_ID": "999",
                 "INCLUDE_NUM_CHATLINES": "7",
+                "TESTING": "true",
             },
             load_env_file=False,
         )
@@ -57,6 +58,11 @@ class TestStartupIntegration(unittest.TestCase):
         self.assertIs(services.mention_handler._queue_service, services.queue_service)
         self.assertEqual(services.death_service._death_channel_id, "999")
         self.assertEqual(services.mention_handler._include_num_chatlines, 7)
+        # One state store backs the settings and every service's per-channel conversation state.
+        store = services.state_service._store
+        for owner in (services.death_service, services.anthropic_service, services.gemini_service,
+                      services.mention_handler):
+            self.assertIs(getattr(owner, "_store", None) or owner._context_store, store)
 
     def test_create_bot_client_uses_load_config_services_and_discord_bot_client(self):
         fake_config = SimpleNamespace(name="config")

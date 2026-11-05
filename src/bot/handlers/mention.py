@@ -14,6 +14,7 @@ import logfire
 
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url, transcribe_audio_attachment
 from src.utils.discord_error_utils import best_effort_typing, concise_error
+from src.db.state_store import CONTEXT_TTL_SECONDS, StateStore
 from src.services.anthropic_service import (
     THINK_HARDER_MODELS, THINKING_STATUS, AnthropicServiceError, is_direct_anthropic_model,
 )
@@ -57,6 +58,10 @@ REPLY_CHAIN_MESSAGE_CHARS = 1500
 # Maximum number of channels to keep in the per-channel history cache before
 # evicting the least-recently-used entry.
 HISTORY_CACHE_MAX_CHANNELS = 200
+
+# Each channel's history window (when it was last extended, and the message it starts at),
+# in Redis so a restart within the hour sends the same history and still reads the prompt cache.
+HISTORY_WINDOW_KEY = "context:history_window"
 
 # The bot's description of its own architecture, added to every mention's system
 # prompt (whatever the channel's prompt is) so it can explain how it works. Models
@@ -157,6 +162,7 @@ class MentionHandler:
         timezone_store: Any = None,
         video_summarizer: Optional[Callable[[str, str], Awaitable[tuple[str, float]]]] = None,
         video_watcher: Optional[Callable[[str, str], Awaitable[tuple[str, float]]]] = None,
+        context_store: Optional[StateStore] = None,
     ):
         self._state_service = state_service
         self._gemini_service = gemini_service
@@ -190,8 +196,47 @@ class MentionHandler:
         # channel_id -> day of the channel's first Discord message
         self._discord_starts: Dict[int, str] = {}
         # Cache for history fetching optimization (bounded, LRU-ish eviction)
-        # channel_id -> {"timestamp": float, "oldest_message": discord.Message}
+        # channel_id -> {"timestamp": float, "oldest_message": discord.Message}; a window
+        # restored from Redis has "oldest_message_id" instead until the message is fetched.
         self._history_cache: Dict[int, Dict[str, Any]] = {}
+        self._context_store = context_store or StateStore(None)
+        self._restore_history_windows()
+
+    def _restore_history_windows(self) -> None:
+        """Pick up the history windows the previous process was extending."""
+        now = time.time()
+        for channel, saved in self._context_store.get_all(HISTORY_WINDOW_KEY).items():
+            try:
+                timestamp = float(saved["timestamp"])
+                entry = {"timestamp": timestamp, "oldest_message_id": int(saved["oldest_message_id"])}
+                channel_id = int(channel)
+            except (KeyError, TypeError, ValueError):
+                logger.warning("Ignoring an unreadable history window for channel %s: %s", channel, saved)
+                continue
+            if now - timestamp <= HISTORY_WINDOW_SECONDS:
+                self._history_cache[channel_id] = entry
+        if self._history_cache:
+            logger.info("Restored the history windows of %s channels", len(self._history_cache))
+
+    def _save_history_window(self, channel_id: int) -> None:
+        entry = self._history_cache[channel_id]
+        oldest = entry.get("oldest_message")
+        self._context_store.set_field(HISTORY_WINDOW_KEY, channel_id, {
+            "timestamp": entry["timestamp"],
+            "oldest_message_id": oldest.id if oldest is not None else entry.get("oldest_message_id"),
+        }, ttl_seconds=CONTEXT_TTL_SECONDS)
+
+    async def _window_start(self, channel: Any, entry: Dict[str, Any]) -> Optional[discord.Message]:
+        """The message a channel's history window starts at, fetching it for a restored window."""
+        if entry.get("oldest_message") is not None:
+            return entry["oldest_message"]
+        try:
+            message = await channel.fetch_message(entry["oldest_message_id"])
+        except discord.HTTPException as e:
+            logger.info("Couldn't fetch the first message of #%s's restored history window: %s", channel, concise_error(e))
+            return None
+        entry["oldest_message"] = message
+        return message
 
     def _uses_tools(self, model: Optional[str]) -> bool:
         """Whether ``model`` gets client tools: memory, how_i_work and drawing are then looked up on demand."""
@@ -232,6 +277,7 @@ class MentionHandler:
             "timestamp": timestamp,
             "oldest_message": oldest_message,
         }
+        self._save_history_window(channel_id)
 
     async def handle_mention(
             self,
@@ -481,8 +527,11 @@ class MentionHandler:
 
         limit_lines = self._include_num_chatlines
 
+        oldest_message = None
         if cache_entry and (current_time - cache_entry["timestamp"]) <= HISTORY_WINDOW_SECONDS:
-            oldest_message = cache_entry["oldest_message"]
+            oldest_message = await self._window_start(message.channel, cache_entry)
+
+        if oldest_message is not None:
             history_msgs.append(oldest_message)
             
             # Fetch up to MAX_HISTORY_GAP messages after the oldest message
@@ -508,6 +557,7 @@ class MentionHandler:
             else:
                 # Update timestamp for this channel
                 self._history_cache[channel_id]["timestamp"] = current_time
+                self._save_history_window(channel_id)
         else:
             # History window reset: the providers' per-channel continuation
             # state no longer matches what we're about to send.

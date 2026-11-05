@@ -47,10 +47,10 @@ class RestartHandler:
         self._restart_in_progress = True
         logger.info("Restarting the bot (%s)", "manual /restart" if manual else "deploy")
 
-        if self._state_service.save_state_to_temp_file({"manual_restart": manual}):
-            logger.info("Saved state for the restart")
+        if self._state_service.save_restart_state({"manual_restart": manual}):
+            logger.info("Saved state to Redis for the restart")
         else:
-            logger.warning("Couldn't save state for the restart; continuing anyway")
+            logger.warning("Couldn't save state to Redis for the restart; continuing anyway")
 
         # git pull is synchronous; keep it off the loop so heartbeats continue.
         try:
@@ -76,7 +76,7 @@ class RestartHandler:
 
     async def perform_graceful_shutdown(self) -> None:
         """Save state before a non-restart shutdown (Ctrl-C, SIGTERM)."""
-        if self._state_service.save_state_to_temp_file({"manual_restart": False, "graceful_shutdown": True}):
+        if self._state_service.save_restart_state({"manual_restart": False, "graceful_shutdown": True}):
             logger.info("Saved state before shutting down")
         else:
             logger.warning("Couldn't save state before shutting down")

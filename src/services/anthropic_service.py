@@ -18,6 +18,7 @@ import discord
 import logfire
 
 from src.config import get_config
+from src.db.state_store import CONTEXT_TTL_SECONDS, StateStore
 from src.services.chat_tools import ChatTool, ToolResult, text_result
 from src.services.cost_service import CLAUDE_DIRECT, note_stat, record_cost
 from src.telemetry import image_links_ready, without_blobs
@@ -403,12 +404,17 @@ def _log_cache_diagnostics(api_model: str, channel_id: Optional[int], response: 
         logger.info("%s cache diagnostics: %s", where, reason.type)
 
 
+# Each channel's breakpoint and previous response id, in Redis so a restart within the
+# hour still reads the prompt cache (a moved breakpoint would miss) and keeps diagnosing it.
+CONTEXT_KEY = "context:anthropic"
+
+
 class AnthropicService:
     """Service for handling direct Claude API interactions."""
 
     def __init__(self, api_key: Optional[str] = None, *, logfire_read_token: str = "",
                  logfire_mcp_url: str = "https://logfire-us.pydantic.dev/mcp",
-                 logs_channel_id: Optional[int] = None):
+                 logs_channel_id: Optional[int] = None, context_store: Optional[StateStore] = None):
         self._api_key = api_key
         self._logfire_read_token = logfire_read_token
         self._logs_channel_id = logs_channel_id
@@ -419,6 +425,22 @@ class AnthropicService:
         self._history_breakpoints: Dict[int, int] = {}
         # channel_id -> id of the previous response, for cache diagnostics
         self._last_message_ids: Dict[int, str] = {}
+        self._context_store = context_store or StateStore(None)
+        self._restore_context()
+
+    def _restore_context(self) -> None:
+        """Pick up each channel's cache state saved by the previous process."""
+        for channel, saved in self._context_store.get_all(CONTEXT_KEY).items():
+            try:
+                channel_id = int(channel)
+                if isinstance(saved.get("breakpoint"), int):
+                    self._history_breakpoints[channel_id] = saved["breakpoint"]
+                if saved.get("message_id"):
+                    self._last_message_ids[channel_id] = str(saved["message_id"])
+            except (AttributeError, ValueError):
+                logger.warning("Ignoring unreadable cache state for channel %s: %s", channel, saved)
+        if self._history_breakpoints or self._last_message_ids:
+            logger.info("Restored Claude cache state for %s channels", len(self._history_breakpoints))
 
     def logs_available(self, channel_id: Optional[int]) -> bool:
         """Whether mention replies in ``channel_id`` can query the bot's own Logfire traces.
@@ -453,6 +475,7 @@ class AnthropicService:
         """
         self._history_breakpoints.pop(channel_id, None)
         self._last_message_ids.pop(channel_id, None)
+        self._context_store.delete_field(CONTEXT_KEY, channel_id)
 
     async def close(self) -> None:
         """Close the Anthropic client and clean up resources."""
@@ -769,6 +792,11 @@ class AnthropicService:
             self._history_breakpoints[channel_id] = history_index
         if channel_id and previous_message_id:
             self._last_message_ids[channel_id] = previous_message_id
+        if channel_id and (history_index is not None or previous_message_id):
+            self._context_store.set_field(CONTEXT_KEY, channel_id, {
+                "breakpoint": self._history_breakpoints.get(channel_id),
+                "message_id": self._last_message_ids.get(channel_id),
+            }, ttl_seconds=CONTEXT_TTL_SECONDS)
 
         if response.stop_reason == "refusal":
             details = getattr(response, "stop_details", None)

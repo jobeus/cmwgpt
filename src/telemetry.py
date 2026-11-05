@@ -3,6 +3,7 @@
 :func:`setup_telemetry` runs once at startup (``main.py``). With a Logfire write token in
 ``LOGFIRE_TOKEN`` (or ``LOGFIRE_API_KEY``) it sends:
 
+- a span per Discord REST call (discord.py's aiohttp requests), with Discord's rate-limit headers,
 - a span per Claude and Gemini call, with the prompt, reply, tool calls, tokens and model,
 - a span per outgoing httpx request (page fetches, Wikipedia, Polymarket, ...), with its headers and,
   when small, its bodies, and a span per Redis command
@@ -466,6 +467,9 @@ def setup_telemetry(env_file: Optional[str] = None) -> bool:
         ("anthropic", logfire.instrument_anthropic),
         ("google-genai", logfire.instrument_google_genai),
         ("httpx", instrument_http),
+        # discord.py talks to Discord's REST API through aiohttp: every send, edit, reaction and
+        # history fetch, with Discord's X-RateLimit-* headers. The bot token header is scrubbed.
+        ("aiohttp client (Discord API)", lambda: logfire.instrument_aiohttp_client(capture_headers=True)),
         ("redis", lambda: logfire.instrument_redis(response_hook=_redis_response_hook)),
         ("system metrics", logfire.instrument_system_metrics),
     ):

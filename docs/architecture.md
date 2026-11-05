@@ -325,7 +325,7 @@ flowchart LR
 | `src/services/image_service.py` | Image models and options | See each Gemini image model's aspect ratios, sizes, thinking and search |
 | `src/services/streaming_reply.py` | Streamed reply preview | Debug status lines, edits and the final reply |
 | `src/services/gemini_service.py` | Native Gemini integration | Understand `google`/`google-high` calls and the Gemini timeout |
-| `src/services/state_service.py` | Per-channel persistence | See where model/system-prompt/service settings live |
+| `src/services/state_service.py` | Per-channel settings and restart state, in Redis | See where model/system-prompt/service settings live |
 | `src/services/queue_service.py` | FIFO work queue | Understand serialized mention processing |
 | `src/services/memory_service.py` | Per-user memory | Understand the nightly job, `/memory` edits, and the notes added to mentions |
 | `src/db/memory_store.py` | Memory in Redis | Understand the memory keys and the 100 KB cap |
@@ -365,5 +365,5 @@ flowchart LR
 
 - **Mention-first UX:** the primary conversational surface is normal Discord chat, not a slash command.
 - **Service composition over globals:** `src/startup.py` explicitly wires the main collaborators.
-- **Small storage footprint:** Redis holds per-user memory (one key per user) and URL results; channel settings live in state files.
+- **Small storage footprint:** Redis holds per-user memory (one key per user), URL results, channel settings, restart state and each channel's conversation state.
 - **Python only:** the whole runtime is the Python bot; there is no separate web UI.

@@ -1,26 +1,37 @@
 """
-Thread-safe state for the Discord bot.
+Thread-safe state for the Discord bot, kept in Redis (``StateStore``).
 
-- Per-channel settings (chat model, image model, system prompt) and the global
-  death settings persist in a JSON settings file.
-- Restart state (active channels, last git SHA, why we restarted) survives a
-  restart through a temp file written just before exit.
+- Per-channel settings (chat model, image model, system prompt) are the hash
+  ``cmwgpt:settings:channels`` (one JSON object per channel), and the death settings
+  are ``cmwgpt:settings:death``.
+- Restart state (active channels, last git SHA, why we restarted) is
+  ``cmwgpt:restart_state``, written just before exit and taken on the next start.
+
+The settings JSON file and ``/tmp`` restart files from before Redis are imported once.
 """
 
 import glob
 import json
 import logging
 import os
-import stat
 import threading
 import time
 from typing import Any, Dict, Optional
 
+from src.db.state_store import StateStore
+
 logger = logging.getLogger(__name__)
 
-STATE_FILE_PATTERN = "/tmp/cmwgpt_state_backup_*.json"
+CHANNEL_SETTINGS_KEY = "settings:channels"
+DEATH_SETTINGS_KEY = "settings:death"
+RESTART_STATE_KEY = "restart_state"
+# A restart takes seconds; state older than this is from some other run and is ignored.
+RESTART_STATE_TTL_SECONDS = 24 * 3600
 
-# Per-channel settings and the key each is saved under in the settings file.
+LEGACY_SETTINGS_FILE = ".cache/cmwgpt_settings.json"
+LEGACY_RESTART_FILES = "/tmp/cmwgpt_state_backup_*.json"
+
+# Per-channel settings and the key each was saved under in the legacy settings file.
 _CHANNEL_SETTINGS = {
     "model": "models",
     "image_model": "image_models",
@@ -31,16 +42,20 @@ _CHANNEL_SETTINGS = {
 class StateService:
     """Thread-safe state management for the Discord bot."""
 
-    def __init__(self):
+    def __init__(self, store: Optional[StateStore] = None, *,
+                 legacy_settings_file: str = LEGACY_SETTINGS_FILE,
+                 legacy_restart_files: str = LEGACY_RESTART_FILES):
+        self._store = store or StateStore(None)
+        self._legacy_restart_files = legacy_restart_files
         self._channel_settings: Dict[int, Dict[str, Optional[str]]] = {}
         self._active_channels: set[int] = set()
         self._last_git_sha: Optional[str] = None
         self._death_settings: Optional[Dict[str, Any]] = None
-        # What the previous process said about why it exited (see save_state_to_temp_file).
+        # What the previous process said about why it exited (see save_restart_state).
         self._restart_info: Dict[str, Any] = {}
         self._lock = threading.RLock()
 
-        self._settings_file = os.environ.get("CMWGPT_SETTINGS_FILE", ".cache/cmwgpt_settings.json")
+        self._import_legacy_settings(legacy_settings_file)
         self._load_settings()
 
     # -- per-channel settings -------------------------------------------------
@@ -51,8 +66,13 @@ class StateService:
 
     def _set_channel_setting(self, channel_id: int, key: str, value: Optional[str]) -> None:
         with self._lock:
-            self._channel_settings.setdefault(channel_id, {})[key] = value
-        self._save_settings()
+            settings = self._channel_settings.setdefault(channel_id, {})
+            settings[key] = value
+            saved = {k: v for k, v in settings.items() if v}
+        if saved:
+            self._store.set_field(CHANNEL_SETTINGS_KEY, channel_id, saved)
+        else:
+            self._store.delete_field(CHANNEL_SETTINGS_KEY, channel_id)
 
     def get_model(self, channel_id: int) -> Optional[str]:
         return self._get_channel_setting(channel_id, "model")
@@ -84,12 +104,12 @@ class StateService:
     def set_death_settings(self, settings: Dict[str, Any]) -> None:
         with self._lock:
             self._death_settings = settings.copy()
-        self._save_settings()
+        self._store.set(DEATH_SETTINGS_KEY, self._death_settings)
 
     def clear_death_settings(self) -> None:
         with self._lock:
             self._death_settings = None
-        self._save_settings()
+        self._store.set(DEATH_SETTINGS_KEY, None)
 
     def mark_channel_active(self, channel_id: int) -> None:
         """Remember a channel the bot has been used in (for update announcements)."""
@@ -110,98 +130,87 @@ class StateService:
 
     @property
     def restart_info(self) -> Dict[str, Any]:
-        """Restart info loaded from the previous process's state file (empty if none)."""
+        """Restart info saved by the previous process (empty if none)."""
         return dict(self._restart_info)
 
     # -- restart state --------------------------------------------------------
 
-    def save_state_to_temp_file(self, restart_info: Optional[dict] = None) -> Optional[str]:
-        """Save restart state to an owner-only temp file. Returns its path, or None on failure."""
-        try:
-            timestamp = int(time.time())
-            pid = os.getpid()
-            temp_filename = f"/tmp/cmwgpt_state_backup_{timestamp}_{pid}.json"
-            with self._lock:
-                state_data: Dict[str, Any] = {
-                    "active_channels": list(self._active_channels),
-                    "last_git_sha": self._last_git_sha,
-                    "timestamp": timestamp,
-                    "pid": pid,
-                }
-            if restart_info:
-                state_data["restart_info"] = restart_info
+    def save_restart_state(self, restart_info: Optional[dict] = None) -> bool:
+        """Save the state the next process picks up after a restart. True if it reached Redis."""
+        with self._lock:
+            state_data: Dict[str, Any] = {
+                "active_channels": sorted(self._active_channels),
+                "last_git_sha": self._last_git_sha,
+                "timestamp": int(time.time()),
+                "pid": os.getpid(),
+            }
+        if restart_info:
+            state_data["restart_info"] = restart_info
+        return self._store.set(RESTART_STATE_KEY, state_data, ttl_seconds=RESTART_STATE_TTL_SECONDS)
 
-            fd = os.open(temp_filename, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(state_data, f, indent=2)
-            logger.debug("State saved to temporary file: %s", temp_filename)
-            return temp_filename
-        except (OSError, TypeError, ValueError) as e:
-            logger.error("Failed to save state to temporary file: %s", e)
-            return None
-
-    def load_state_from_temp_files(self) -> bool:
-        """Load the newest restart state file, then delete all of them. True if one was found."""
-        state_files = sorted(glob.glob(STATE_FILE_PATTERN), reverse=True)
-        if not state_files:
-            logger.info("No temporary state files found")
+    def load_restart_state(self) -> bool:
+        """Take the state the previous process saved before it exited. True if there was some."""
+        state_data = self._store.pop(RESTART_STATE_KEY)
+        legacy = self._take_legacy_restart_state()
+        state_data = state_data or legacy
+        if not isinstance(state_data, dict):
             return False
-
-        for state_file in state_files:
-            try:
-                with open(state_file, "r", encoding="utf-8") as f:
-                    state_data = json.load(f)
-                with self._lock:
-                    self._active_channels = {int(c) for c in state_data.get("active_channels", [])}
-                    self._last_git_sha = state_data.get("last_git_sha")
-                    self._restart_info = state_data.get("restart_info") or {}
-                logger.info(
-                    "Restored %s active channels from %s (last git SHA: %s, restart info: %s)", len(self._active_channels), state_file, self._last_git_sha, self._restart_info
-                )
-                break
-            except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
-                logger.error("Failed to load state from %s: %s", state_file, e)
-
-        for state_file in state_files:
-            try:
-                os.remove(state_file)
-            except OSError as e:
-                logger.error("Failed to clean up temporary file %s: %s", state_file, e)
+        try:
+            with self._lock:
+                self._active_channels = {int(c) for c in state_data.get("active_channels", [])}
+                self._last_git_sha = state_data.get("last_git_sha")
+                self._restart_info = state_data.get("restart_info") or {}
+        except (TypeError, ValueError) as e:
+            logger.error("Ignoring unreadable restart state %s: %s", state_data, e)
+            return False
+        logger.info(
+            "Restored %s active channels (last git SHA: %s, restart info: %s)",
+            len(self._active_channels), self._last_git_sha, self._restart_info)
         return True
 
-    # -- settings file --------------------------------------------------------
+    def _take_legacy_restart_state(self) -> Optional[Dict[str, Any]]:
+        """The newest restart file a pre-Redis process left in /tmp; deletes them all."""
+        files = sorted(glob.glob(self._legacy_restart_files), reverse=True)
+        state_data = None
+        for path in files:
+            if state_data is None:
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        state_data = json.load(f)
+                except (OSError, ValueError) as e:
+                    logger.error("Couldn't read the old restart file %s: %s", path, e)
+            try:
+                os.remove(path)
+            except OSError as e:
+                logger.error("Couldn't delete the old restart file %s: %s", path, e)
+        return state_data
 
-    def _save_settings(self) -> None:
-        try:
-            os.makedirs(os.path.dirname(self._settings_file) or ".", exist_ok=True)
-            with self._lock:
-                settings_data: Dict[str, Any] = {
-                    file_key: {
-                        str(channel_id): values[key]
-                        for channel_id, values in self._channel_settings.items() if values.get(key)
-                    }
-                    for key, file_key in _CHANNEL_SETTINGS.items()
-                }
-                settings_data["death_settings"] = self._death_settings
+    # -- settings -------------------------------------------------------------
 
-            temp_file = f"{self._settings_file}.tmp"
-            with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(settings_data, f, indent=2)
-            os.replace(temp_file, self._settings_file)
-        except (OSError, ValueError) as e:
-            logger.error("Failed to save settings: %s", e)
+    def _import_legacy_settings(self, path: str) -> None:
+        data = self._store.import_legacy_file(path, CHANNEL_SETTINGS_KEY)
+        if not isinstance(data, dict):
+            return
+        channels: Dict[str, Dict[str, str]] = {}
+        for key, file_key in _CHANNEL_SETTINGS.items():
+            for channel_id, value in (data.get(file_key) or {}).items():
+                if value:
+                    channels.setdefault(str(channel_id), {})[key] = value
+        for channel_id, settings in channels.items():
+            self._store.set_field(CHANNEL_SETTINGS_KEY, channel_id, settings)
+        if data.get("death_settings") is not None:
+            self._store.set(DEATH_SETTINGS_KEY, data["death_settings"])
 
     def _load_settings(self) -> None:
-        if not os.path.exists(self._settings_file):
-            return
-        try:
-            with open(self._settings_file, "r", encoding="utf-8") as f:
-                settings_data = json.load(f)
-            with self._lock:
-                for key, file_key in _CHANNEL_SETTINGS.items():
-                    for channel_id, value in (settings_data.get(file_key) or {}).items():
-                        self._channel_settings.setdefault(int(channel_id), {})[key] = value
-                self._death_settings = settings_data.get("death_settings")
-            logger.info("Loaded persistent settings from disk")
-        except (OSError, json.JSONDecodeError, ValueError) as e:
-            logger.error("Failed to load settings: %s", e)
+        channels = self._store.get_all(CHANNEL_SETTINGS_KEY)
+        death_settings = self._store.get(DEATH_SETTINGS_KEY)
+        with self._lock:
+            for channel_id, settings in channels.items():
+                try:
+                    self._channel_settings[int(channel_id)] = {
+                        key: settings.get(key) for key in _CHANNEL_SETTINGS if settings.get(key)}
+                except (AttributeError, ValueError):
+                    logger.warning("Ignoring unreadable settings for channel %s: %s", channel_id, settings)
+            self._death_settings = death_settings if isinstance(death_settings, dict) else None
+        if channels or death_settings:
+            logger.info("Loaded settings for %s channels from Redis", len(channels))

@@ -1,6 +1,8 @@
 """Tests for MentionHandler context building and queue delegation."""
 
 import asyncio
+import json
+import time
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -23,7 +25,7 @@ class AsyncTyping:
 
 class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
     def make_handler(self, *, attachment_converter=None, url_converter=None, url_content_fetcher=None,
-                     gemini_service=None, anthropic_service=None):
+                     gemini_service=None, anthropic_service=None, context_store=None):
         queue_service = MagicMock()
         queue_service.queue_mention = AsyncMock(return_value=True)
         state_service = MagicMock()
@@ -44,6 +46,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             url_content_fetcher=url_content_fetcher or AsyncMock(return_value=("", [])),
             gemini_service=gemini_service,
             anthropic_service=anthropic_service,
+            context_store=context_store,
         )
         return handler, state_service, queue_service, anthropic_service, message_service
 
@@ -580,6 +583,75 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             embeds=[],
             created_at=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
         )
+
+    async def test_history_window_survives_a_restart(self):
+        """A restarted bot sends the same history as before, so the prompt cache still reads."""
+        import fakeredis
+        from src.db.state_store import StateStore
+
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        channel = MagicMock()
+        channel.id = 90
+        channel.name = "general"
+        oldest = self._simple_msg(10, channel)
+        first_mention = self._simple_msg(20, channel)
+        second_mention = self._simple_msg(30, channel)
+        history_calls = []
+
+        async def history(limit=None, after=None):
+            history_calls.append((limit, after))
+            if after is None:
+                for msg in (first_mention, oldest):
+                    yield msg
+            else:
+                yield second_mention
+
+        channel.history = history
+        channel.fetch_message = AsyncMock(return_value=oldest)
+        anthropic_service = MagicMock()
+        before, *_ = self.make_handler(anthropic_service=anthropic_service, context_store=StateStore(lambda: redis))
+        await before._prepare_mention_context(first_mention, SimpleNamespace(id=999))
+        anthropic_service.clear_channel_cache.reset_mock()
+
+        after, *_ = self.make_handler(anthropic_service=anthropic_service, context_store=StateStore(lambda: redis))
+        self.assertEqual(after._history_cache[90]["oldest_message_id"], 10)
+        context, _ = await after._prepare_mention_context(second_mention, SimpleNamespace(id=999))
+
+        channel.fetch_message.assert_awaited_once_with(10)
+        self.assertEqual(history_calls[-1], (100, oldest))
+        anthropic_service.clear_channel_cache.assert_not_called()
+        self.assertEqual(len(context), 2)
+
+    async def test_restored_history_window_resets_when_its_first_message_is_gone(self):
+        import discord
+        import fakeredis
+        from src.db.state_store import StateStore
+
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        redis.hset("cmwgpt:context:history_window", "91", json.dumps({"timestamp": time.time(), "oldest_message_id": 5}))
+        # Too old to extend, and unreadable: both are dropped.
+        redis.hset("cmwgpt:context:history_window", "92", json.dumps({"timestamp": 1, "oldest_message_id": 6}))
+        redis.hset("cmwgpt:context:history_window", "93", json.dumps({"nope": 1}))
+        anthropic_service = MagicMock()
+        with self.assertLogs("src.bot.handlers.mention", "WARNING"):
+            handler, *_ = self.make_handler(anthropic_service=anthropic_service, context_store=StateStore(lambda: redis))
+        self.assertEqual(set(handler._history_cache), {91})
+
+        channel = MagicMock()
+        channel.id = 91
+        channel.name = "general"
+        mention = self._simple_msg(20, channel)
+
+        async def history(limit=None, after=None):
+            yield mention
+
+        channel.history = history
+        channel.fetch_message = AsyncMock(side_effect=discord.NotFound(MagicMock(status=404), "gone"))
+        await handler._prepare_mention_context(mention, SimpleNamespace(id=999))
+
+        anthropic_service.clear_channel_cache.assert_called_once_with(91)
+        self.assertIs(handler._history_cache[91]["oldest_message"], mention)
+        self.assertEqual(json.loads(redis.hget("cmwgpt:context:history_window", "91"))["oldest_message_id"], 20)
 
     async def test_mention_replying_to_an_old_thread_gets_its_earlier_messages(self):
         handler, _, _, _, _ = self.make_handler()

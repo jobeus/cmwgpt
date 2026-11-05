@@ -136,13 +136,13 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_perform_graceful_shutdown_uses_injected_state_service(self):
         state_service = MagicMock()
-        state_service.save_state_to_temp_file.return_value = "/tmp/state.json"
+        state_service.save_restart_state.return_value = "/tmp/state.json"
         handler = RestartHandler(state_service=state_service, git_pull=lambda: True)
         handler.set_shutdown_callback(AsyncMock())
 
         await handler.perform_graceful_shutdown()
 
-        state_service.save_state_to_temp_file.assert_called_once_with(
+        state_service.save_restart_state.assert_called_once_with(
             {"manual_restart": False, "graceful_shutdown": True}
         )
         # A plain shutdown only saves state: no exit code, no shutdown callback.
@@ -151,7 +151,7 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_perform_graceful_shutdown_on_save_failure(self):
         state_service = MagicMock()
-        state_service.save_state_to_temp_file.return_value = None
+        state_service.save_restart_state.return_value = None
         handler = RestartHandler(state_service=state_service, git_pull=lambda: True)
 
         with self.assertLogs("src.services.restart_handler", "WARNING") as logs:
@@ -159,7 +159,7 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Couldn't save state before shutting down", logs.output[-1])
 
         state_service = MagicMock()
-        state_service.save_state_to_temp_file.side_effect = RuntimeError("disk full")
+        state_service.save_restart_state.side_effect = RuntimeError("disk full")
         handler = RestartHandler(state_service=state_service, git_pull=lambda: True)
 
         with self.assertRaises(RuntimeError):
@@ -167,7 +167,7 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_perform_restart_sets_exit_code_and_schedules_shutdown(self):
         state_service = MagicMock()
-        state_service.save_state_to_temp_file.return_value = "/tmp/state.json"
+        state_service.save_restart_state.return_value = "/tmp/state.json"
         git_pull = MagicMock(return_value=True)
         handler = RestartHandler(state_service=state_service, git_pull=git_pull)
         shutdown = AsyncMock()
@@ -177,7 +177,7 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(handler.exit_code, RESTART_EXIT_CODE)
         self.assertEqual(RESTART_EXIT_CODE, 42)
-        state_service.save_state_to_temp_file.assert_called_once_with({"manual_restart": True})
+        state_service.save_restart_state.assert_called_once_with({"manual_restart": True})
         git_pull.assert_called_once_with()
         self.assertTrue(handler.is_restart_in_progress())
         # Shutdown runs as its own task, not inline in perform_restart.
@@ -213,12 +213,12 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
 
         await handler.perform_restart(manual=False)
 
-        state_service.save_state_to_temp_file.assert_not_called()
+        state_service.save_restart_state.assert_not_called()
         self.assertIsNone(handler.exit_code)
 
     async def test_perform_restart_continues_when_save_and_git_pull_fail(self):
         state_service = MagicMock()
-        state_service.save_state_to_temp_file.return_value = None
+        state_service.save_restart_state.return_value = None
         git_pull = MagicMock(side_effect=RuntimeError("git exploded"))
         handler = RestartHandler(state_service=state_service, git_pull=git_pull)
         shutdown = AsyncMock()
@@ -228,7 +228,7 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
         await handler._shutdown_task
 
         self.assertEqual(handler.exit_code, RESTART_EXIT_CODE)
-        state_service.save_state_to_temp_file.assert_called_once_with({"manual_restart": False})
+        state_service.save_restart_state.assert_called_once_with({"manual_restart": False})
         git_pull.assert_called_once_with()
         shutdown.assert_awaited_once_with()
 

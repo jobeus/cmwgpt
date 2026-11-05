@@ -80,7 +80,7 @@ class DiscordBotClient:
     def _load_saved_state(self) -> None:
         """Load any saved state from previous restart."""
         try:
-            if self.services.state_service.load_state_from_temp_files():
+            if self.services.state_service.load_restart_state():
                 logger.info("Restored the state saved before the last restart")
             else:
                 logger.info("No saved state from a restart; starting fresh")
@@ -225,6 +225,10 @@ class DiscordBotClient:
         async def on_disconnect():
             logger.warning(
                 "Disconnected from Discord, attempting to reconnect")
+
+        @self.bot.event
+        async def on_resumed():
+            logger.info("Resumed the Discord gateway session")
 
         @self.bot.event
         async def on_message(message: discord.Message):

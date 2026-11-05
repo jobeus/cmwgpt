@@ -12,4 +12,4 @@ redis>=8.1.0
 # The IRC log search runs the model's regexes with it: unlike re, it lets go of the GIL while
 # matching (so a slow pattern can't freeze the event loop) and can time a pattern out.
 regex>=2026.9.29
-logfire[httpx,redis,google-genai,system-metrics]>=5.4.0
+logfire[httpx,redis,google-genai,system-metrics,aiohttp-client]>=5.4.0

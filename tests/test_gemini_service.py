@@ -306,6 +306,18 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_kwargs["store"], True)
         self.assertIn({"type": "google_search"}, call_kwargs["tools"])
 
+    def test_interaction_ids_survive_a_restart(self):
+        import fakeredis
+        from src.db.state_store import StateStore
+
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        GeminiService(api_key="k", context_store=StateStore(lambda: redis))._update_interaction_cache(123, "int-1")
+        restored = GeminiService(api_key="k", context_store=StateStore(lambda: redis))
+        self.assertEqual(restored._get_previous_interaction_id(123), "int-1")
+
+        restored.clear_channel_cache(123)
+        self.assertIsNone(GeminiService(api_key="k", context_store=StateStore(lambda: redis))._get_previous_interaction_id(123))
+
     async def test_get_chat_completion_with_disable_cache(self):
         service = self.make_service()
         # Seed cache

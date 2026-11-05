@@ -326,6 +326,34 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         second = client.beta.messages.create.call_args.kwargs["messages"]
         self.assertEqual(_marked(second), [28])
 
+    async def test_cache_state_survives_a_restart(self):
+        """A restarted service keeps the previous breakpoint and diagnostics chain for the channel."""
+        import fakeredis
+        from src.db.state_store import StateStore
+
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        before = AnthropicService(api_key="test-key", context_store=StateStore(lambda: redis))
+        client = MagicMock()
+        client.beta.messages.create = AsyncMock(return_value=_response("one", id="msg_1"))
+        before.set_client(client)
+        await before.get_chat_completion(model="sonnet-5.5-direct", messages=_history(3), channel_id=7)
+        self.assertGreater(redis.ttl("cmwgpt:context:anthropic"), 0)
+
+        after = AnthropicService(api_key="test-key", context_store=StateStore(lambda: redis))
+        client.beta.messages.create = AsyncMock(return_value=_response("two", id="msg_2"))
+        after.set_client(client)
+        await after.get_chat_completion(model="sonnet-5.5-direct", messages=_history(30), channel_id=7)
+        kwargs = client.beta.messages.create.call_args.kwargs
+        # The old history breakpoint is marked again, so the cache written before the restart reads.
+        self.assertEqual(_marked(kwargs["messages"]), [1, 28])
+        self.assertEqual(kwargs["diagnostics"], {"previous_message_id": "msg_1"})
+
+        after.clear_channel_cache(7)
+        self.assertEqual(redis.hgetall("cmwgpt:context:anthropic"), {})
+        redis.hset("cmwgpt:context:anthropic", "8", "[1]")
+        with self.assertLogs("src.services.anthropic_service", "WARNING"):
+            self.assertEqual(AnthropicService(context_store=StateStore(lambda: redis))._history_breakpoints, {})
+
     async def test_strips_bot_mention_using_resolved_bot_id(self):
         service, _ = self.make_service(_response("<@42> hello"), _response("<@42> hello"))
         service.set_bot_id_loader(lambda: 42)

@@ -4,12 +4,15 @@ Tests HTML parsing, name diffing, pageview threshold, announcements, and state p
 """
 
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch, mock_open
+from unittest.mock import AsyncMock, MagicMock, patch
 import asyncio
 import os
 import sys
 
+import fakeredis
 import httpx
+
+from src.db.state_store import StateStore
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -89,10 +92,13 @@ class TestDeathService(unittest.TestCase):
     def setUp(self):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        self.store = StateStore(lambda: redis)
 
         # Remove any leftover test state file
         try:
             os.remove("/tmp/_test_death_names.json")
+            os.remove("/tmp/_test_death_names.json.migrated")
         except FileNotFoundError:
             pass
 
@@ -102,7 +108,7 @@ class TestDeathService(unittest.TestCase):
         self.state_service.get_model.return_value = None
         self.service = DeathService(
             state_service=self.state_service,
-            state_file="/tmp/_test_death_names.json",
+            store=self.store,
             death_channel_id="12345",
         )
 
@@ -118,6 +124,7 @@ class TestDeathService(unittest.TestCase):
         self.loop.close()
         try:
             os.remove("/tmp/_test_death_names.json")
+            os.remove("/tmp/_test_death_names.json.migrated")
         except FileNotFoundError:
             pass
 
@@ -217,7 +224,7 @@ class TestDeathService(unittest.TestCase):
             from src.services.death_service import DeathService
             svc = DeathService(
                 state_service=self.state_service,
-                state_file="/tmp/_test_death_names.json",
+                store=self.store,
                 death_channel_id="",
             )
             ok, msg = await svc.force_announce("https://en.wikipedia.org/wiki/Kevin_Keegan")
@@ -239,7 +246,7 @@ class TestDeathService(unittest.TestCase):
         from src.services.death_service import DeathService
         new_service = DeathService(
             state_service=self.state_service,
-            state_file="/tmp/_test_death_names.json",
+            store=self.store,
             death_channel_id="12345",
         )
         self.assertEqual(new_service._known_names, self.service._known_names)
@@ -252,7 +259,7 @@ class TestDeathService(unittest.TestCase):
         from src.services.death_service import DeathService
         new_service = DeathService(
             state_service=self.state_service,
-            state_file="/tmp/_test_death_names.json",
+            store=self.store,
             death_channel_id="12345",
         )
         # Simulate start() without actually creating the asyncio task
@@ -265,7 +272,8 @@ class TestDeathService(unittest.TestCase):
         from src.services.death_service import DeathService
         service = DeathService(
             state_service=self.state_service,
-            state_file="/tmp/_missing_death_names.json",
+            store=StateStore(lambda: fakeredis.FakeRedis(decode_responses=True)),
+            legacy_state_file="/tmp/_missing_death_names.json",
             death_channel_id="12345",
         )
         self.assertEqual(service._known_names, set())
@@ -279,7 +287,7 @@ class TestDeathService(unittest.TestCase):
 
         service = DeathService(
             state_service=self.state_service,
-            state_file="/tmp/_test_death_names.json",
+            store=self.store,
             death_channel_id="",
         )
         service.start()
@@ -314,17 +322,20 @@ class TestDeathService(unittest.TestCase):
         self.service.stop()
 
     def test_save_and_load_state_handle_errors(self):
+        import redis as _redis
+
+        def down():
+            raise _redis.ConnectionError("refused")
+
+        self.service._store = StateStore(down)
         self.service._known_names = {("John Doe", "John_Doe")}
+        self.service._save_state()  # logged, not raised
 
-        with patch("builtins.open", side_effect=OSError("denied")):
-            self.service._save_state()
-
-        with patch("os.path.exists", return_value=True), patch(
-            "builtins.open", mock_open(read_data="{bad json")
-        ):
-            self.service._known_names = set()
-            self.service._load_state()
-            self.assertEqual(self.service._known_names, set())
+        self.service._store = self.store
+        self.store.set("death:names", {"known": [1, 2], "announced": []})
+        self.service._known_names = set()
+        self.service._load_state()
+        self.assertEqual(self.service._known_names, set())
 
     def test_write_limerick_without_model_configured(self):
         async def run_test():
@@ -385,7 +396,8 @@ class TestDeathService(unittest.TestCase):
         from src.services.death_service import DeathService
         service = DeathService(
             state_service=self.state_service,
-            state_file="/tmp/_test_death_names.json",
+            store=self.store,
+            legacy_state_file="/tmp/_test_death_names.json",
             death_channel_id="12345",
         )
         self.assertEqual(
@@ -393,6 +405,10 @@ class TestDeathService(unittest.TestCase):
             {("John Doe", "John_Doe"), ("Jane Smith", "Jane_Smith")},
         )
         self.assertEqual(service._announced_titles, {"John_Doe", "Jane_Smith"})
+        # Imported into Redis once; the file is set aside so it isn't read again.
+        self.assertEqual(self.store.get("death:names")["announced"], ["Jane_Smith", "John_Doe"])
+        self.assertFalse(os.path.exists("/tmp/_test_death_names.json"))
+        self.assertTrue(os.path.exists("/tmp/_test_death_names.json.migrated"))
 
     def test_announced_titles_round_trip(self):
         """Announced titles persist and reload alongside known names."""
@@ -403,7 +419,7 @@ class TestDeathService(unittest.TestCase):
         from src.services.death_service import DeathService
         reloaded = DeathService(
             state_service=self.state_service,
-            state_file="/tmp/_test_death_names.json",
+            store=self.store,
             death_channel_id="12345",
         )
         self.assertEqual(reloaded._announced_titles, {"John_Doe"})
@@ -928,7 +944,7 @@ class TestDeathService(unittest.TestCase):
             anthropic.get_chat_completion = AsyncMock()
             svc = DeathService(
                 state_service=self.state_service,
-                state_file="/tmp/_test_death_names.json",
+                store=self.store,
                 death_channel_id="12345",
                 anthropic_service=anthropic,
                 gemini_service=gemini,
@@ -954,7 +970,7 @@ class TestDeathService(unittest.TestCase):
             gemini.get_chat_completion = AsyncMock()
             svc = DeathService(
                 state_service=self.state_service,
-                state_file="/tmp/_test_death_names.json",
+                store=self.store,
                 death_channel_id="12345",
                 gemini_service=gemini,
                 anthropic_service=anthropic,

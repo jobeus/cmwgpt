@@ -7,7 +7,8 @@ from typing import Any, Optional
 from src.bot.handlers.mention import MentionHandler
 from src.config import AppConfig, get_system_prompt, load_config
 from src.db.memory_store import MemoryStore
-from src.db.redis_client import close_redis
+from src.db.redis_client import close_redis, get_sync_redis
+from src.db.state_store import StateStore
 from src.services.announcement_service import AnnouncementService
 from src.services.auto_update_service import AutoUpdateService
 from src.services.cost_service import CostStore, set_cost_store
@@ -57,11 +58,15 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     cost_store = None if app_config.is_testing else CostStore()
     set_cost_store(cost_store)
 
-    state_service = StateService()
+    # Settings, restart state and each channel's conversation state. Under tests there's
+    # no Redis, so it lives only in memory.
+    state_store = StateStore(None if app_config.is_testing else get_sync_redis)
+    state_service = StateService(state_store)
     queue_service = QueueService()
-    gemini_service = GeminiService(api_key=app_config.gemini_api_key)
+    gemini_service = GeminiService(api_key=app_config.gemini_api_key, context_store=state_store)
     anthropic_service = AnthropicService(
         api_key=app_config.anthropic_api_key,
+        context_store=state_store,
         logfire_read_token="" if app_config.is_testing else app_config.logfire_read_token,
         logfire_mcp_url=app_config.logfire_mcp_url,
         logs_channel_id=app_config.logs_channel_id,
@@ -85,6 +90,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     )
     death_service = DeathService(
         state_service=state_service,
+        store=state_store,
         death_channel_id=app_config.death_channel_id,
         gemini_service=gemini_service,
         anthropic_service=anthropic_service,
@@ -121,6 +127,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         timezone_store=None if app_config.is_testing else TimezoneStore(),
         video_summarizer=video_watcher.summarize_youtube if video_watcher else None,
         video_watcher=video_watcher.watch if video_watcher else None,
+        context_store=state_store,
     )
 
     return AppServices(
