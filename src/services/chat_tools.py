@@ -21,6 +21,7 @@ from src.services.discord_history import (
     AUTHOR_TYPES, EMBED_TYPES, HAS_FILTERS, MAX_FILTER_VALUES, MAX_READ_MESSAGES, MAX_SLOP, SORTS, SearchFilters,
     read_around, readable_channels, search_messages,
 )
+from src.services.election_service import ElectionDataError, parse_race_id, race_results, search_races
 from src.services.image_service import (
     ASPECT_RATIOS,
     DRAW_ASPECT_RATIO,
@@ -547,6 +548,64 @@ PREDICTION_MARKETS_TOOL = {
             },
         },
         "required": ["query", "status"],
+        "additionalProperties": False,
+    },
+}
+
+ELECTION_RESULTS_TOOL = {
+    "name": "election_results",
+    "description": (
+        "Look up election results and race calls worldwide from civicAPI, live and historical: votes, percentages, "
+        "winners, seats and how much has reported, for national, regional and local races and referendums. Use it "
+        "whenever someone asks who won or is winning an election, how a race or ballot measure is going, or for past "
+        "results. A search lists the matching races, most votes first; give `race` to get one race in full with its "
+        "called time and regional breakdown, and add `region` for a particular county or state. Searches match race "
+        "names, not candidates, so to find someone's race search the office and place (\"colorado governor\", "
+        "\"president\" with country BR). Coverage varies, especially outside the US: a race with no results reported "
+        "may just be missing from civicAPI, so say so rather than treating it as uncounted, and try web search. WINNER "
+        "means civicAPI called it; otherwise say who is leading and how much has reported, and never call a race "
+        "yourself. Several candidates marked \"WINNER or advanced to a runoff\" usually means a first round, so open "
+        "the race or look for its runoff rather than saying they all won. Results can be partial and change, so cite the race link and credit civicAPI."
+    ),
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Words in the race's name, e.g. 'governor' or 'brazil president runoff'. Empty for none.",
+            },
+            "race": {
+                "type": "string",
+                "description": "A race ID or civicapi.org results link, for that race in full. Empty to search.",
+            },
+            "region": {
+                "type": "string",
+                "description": "With `race`: part of a region's name, e.g. 'Boulder'. Empty lists the biggest regions.",
+            },
+            "country": {
+                "type": "string",
+                "description": "ISO 3166-1 alpha-2 code, e.g. 'US', 'DE'; names like 'Germany' don't work. Empty for all.",
+            },
+            "province": {
+                "type": "string",
+                "description": "State or region code: 'CO' for US states, otherwise ISO 3166-2 like 'DE-BE'. Empty for all.",
+            },
+            "district": {
+                "type": "string",
+                "description": "County, canton or similar, by its full English name. Empty for all.",
+            },
+            "start_date": {
+                "type": "string",
+                "description": "Only races on or after this day, YYYY-MM-DD. Empty for no limit.",
+            },
+            "end_date": {
+                "type": "string",
+                "description": "Only races on or before this day, YYYY-MM-DD. Empty for no limit.",
+            },
+            "skip": {"type": "integer", "description": "How many races to skip, for paging. 0 for the first page."},
+        },
+        "required": ["query", "race", "region", "country", "province", "district", "start_date", "end_date", "skip"],
         "additionalProperties": False,
     },
 }
@@ -1270,6 +1329,36 @@ def build_mention_tools(
                 is_error=True)
         return text_result(text)
 
+    async def election_results(args: Dict[str, Any]) -> ToolResult:
+        def arg(key: str) -> str:
+            return str(args.get(key) or "").strip()
+
+        race = arg("race")
+        try:
+            if race:
+                race_id = parse_race_id(race)
+                if race_id is None:
+                    return text_result("Give `race` as a race ID or a civicapi.org results link.", is_error=True)
+                logger.info("[election_results tool] Channel %s Race: %s Region: %s", channel_id, race_id, arg("region")[:100])
+                text = await race_results(race_id, arg("region"))
+                return text_result(text) if text else text_result(f"civicAPI has no race {race_id}.", is_error=True)
+
+            filters = {k: arg(k) for k in ("query", "country", "province", "district")}
+            if not any(filters.values()) and not arg("start_date") and not arg("end_date"):
+                return text_result("Give a race, a query or at least one filter.", is_error=True)
+            days = {k: date.fromisoformat(arg(k)).isoformat() if arg(k) else "" for k in ("start_date", "end_date")}
+            logger.info("[election_results tool] Channel %s Search: %s %s", channel_id, filters, days)
+            text = await search_races(**filters, **days, skip=_int_arg(args, "skip"))
+        except ValueError:
+            return text_result("Give start_date and end_date as YYYY-MM-DD.", is_error=True)
+        except ElectionDataError as e:
+            return text_result(str(e), is_error=True)
+        if not text:
+            return text_result(
+                "No races match. Searches match race names rather than candidates, and country must be an ISO code "
+                "like 'DE'. Try fewer filters or other words.", is_error=True)
+        return text_result(text)
+
     async def read_urls(args: Dict[str, Any]) -> ToolResult:
         assert url_content_fetcher is not None  # only offered when set
         urls = [str(u).strip() for u in args.get("urls") or [] if str(u).strip()]
@@ -1426,5 +1515,6 @@ def build_mention_tools(
     if wiki_views:
         tools.append(ChatTool(WIKI_PAGEVIEWS_TOOL, wiki_pageviews, "checking wikipedia..."))
     tools.append(ChatTool(PREDICTION_MARKETS_TOOL, prediction_markets, "checking the odds..."))
+    tools.append(ChatTool(ELECTION_RESULTS_TOOL, election_results, "counting the votes..."))
     tools.append(ChatTool(HOW_I_WORK_TOOL, how_i_work, "checking how I work..."))
     return tools

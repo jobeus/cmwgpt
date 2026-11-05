@@ -230,6 +230,7 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | `read_urls` | `fetch_all_url_content` (same fetchers and cache as enrichment), for any URL, including web search results; used instead of the API's `web_fetch` so links go through the site-specific fetchers | — |
 | `wiki_pageviews` | `DeathService.get_avg_monthly_views` | — |
 | `prediction_markets` | `src/services/prediction_markets.py` runs `polymarket_service.py` (public Gamma search/event API, CLOB price history) and `kalshi_service.py` (kalshi.com's keyless `/v1/search/series`, public Trade API v2 events/markets/candlesticks) concurrently and joins their results; shared fetch/format helpers in `src/utils/market_format.py`. No key, no cache | — |
+| `election_results` | `src/services/election_service.py`: civicAPI's public `race/search` (up to 500 fetched, then ranked by votes here, since its own order puts national races after regional ones) and `race/{id}`, retrying its 503s when overloaded. No key, no cache; every result credits civicAPI, which its terms require | — |
 | `how_i_work` | `src/prompts/how_i_work.txt` | — |
 | `think_harder` (opus only) | handled inside `AnthropicService`: discards the reply and re-asks at high effort | — |
 
