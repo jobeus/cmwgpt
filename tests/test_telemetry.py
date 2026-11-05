@@ -219,3 +219,86 @@ async def test_paste_service_uploads_an_image():
     service = PasteService(client_factory=lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(too_big), **kw))
     with pytest.raises(Exception, match="413"):
         await service.upload_image(b"x")
+
+
+def test_redis_commands_keep_their_keys_and_cut_long_values():
+    from src.telemetry import REDIS_VALUE_CHARS, format_redis_command
+
+    assert format_redis_command(["GETEX", "cmwgpt:cache:pages:abc", "EX", 2592000]) == (
+        "GETEX cmwgpt:cache:pages:abc EX 2592000")
+    image = "data:image/jpeg;base64," + "A" * 5000
+    statement = format_redis_command([b"SET", b"cmwgpt:cache:attachments:1", image.encode()])
+    assert statement.startswith("SET cmwgpt:cache:attachments:1 data:image/jpeg;base64,AAA")
+    assert f"…(+{len(image) - REDIS_VALUE_CHARS} more)" in statement
+
+
+def test_redis_reply_preview():
+    from src.telemetry import redis_reply_preview
+
+    assert redis_reply_preview(None) == "nil"
+    assert redis_reply_preview(b"hello") == "hello"
+    assert redis_reply_preview(3) == "3"
+    assert redis_reply_preview([b"a", None]) == "[a, nil]"
+    assert redis_reply_preview({b"total": b"1.5"}) == "{total: 1.5}"
+    assert redis_reply_preview(list(range(25))).endswith("…(+5 more)]")
+
+
+def test_redis_spans_get_the_whole_command():
+    import opentelemetry.instrumentation.redis as instrumentation
+    from opentelemetry.instrumentation.redis import util
+
+    original = util._format_command_args
+    try:
+        assert telemetry.capture_redis_commands()
+        assert util._format_command_args(["GET", "k"]) == "GET k"
+        assert instrumentation._format_command_args(["GET", "k"]) == "GET k"
+    finally:
+        util._format_command_args = original
+        instrumentation._format_command_args = original
+
+
+def test_redis_response_hook_records_the_reply():
+    attributes = {}
+    span = SimpleNamespace(is_recording=lambda: True, set_attribute=attributes.__setitem__)
+    telemetry._redis_response_hook(span, None, None)
+    assert attributes == {"db.redis.reply": "nil", "db.redis.reply_size": 0}
+
+
+def _scrub(path, value, searched):
+    import re
+
+    from logfire import ScrubMatch
+
+    match = re.search(r"session|api[._ -]?key|" + telemetry._SECRET_VALUE.pattern, searched)
+    return telemetry.scrub_secrets_only(ScrubMatch(path, value, match))
+
+
+def test_scrubbing_keeps_chat_text_but_not_secrets():
+    text = "I lost my session cookie"
+    assert _scrub(("attributes", "text"), text, text) == text
+    # A field named like a secret is still redacted, whatever its value.
+    assert _scrub(("attributes", "http.request.header.x-rapidapi-key"), "abc", "x-rapidapi-key") is None
+    # So is text that carries an actual key.
+    leaked = "my key is sk-ant-api03-AAAAAAAAAAAAAAAAAAAA"
+    assert _scrub(("attributes", "text"), leaked, leaked) is None
+
+
+def test_secret_matches_stop_at_the_prefix():
+    # Logfire puts the matched text in its redaction note, so it must not be the key itself.
+    for secret, prefix in (("sk-ant-api03-AAAAAAAAAAAAAAAAAAAA", "sk-ant-"),
+                           ("AIza" + "B" * 35, "AIza"), ("pylf_v2_us_" + "C" * 40, "pylf_v2_")):
+        assert telemetry._SECRET_VALUE.search(secret).group(0) == prefix
+
+
+def test_http_bodies_are_captured_only_when_small():
+    calls = []
+    small = SimpleNamespace(headers={"content-length": "512"}, capture_body=lambda: calls.append("request"),
+                            capture_body_if_text=lambda: calls.append("response"))
+    big = SimpleNamespace(headers={"content-length": str(telemetry.HTTP_BODY_LIMIT + 1)},
+                          capture_body=lambda: calls.append("big"), capture_body_if_text=lambda: calls.append("big"))
+    unknown = SimpleNamespace(headers={}, capture_body=lambda: calls.append("unknown"),
+                              capture_body_if_text=lambda: calls.append("unknown"))
+    for info in (small, big, unknown):
+        telemetry._httpx_request_hook(None, info)
+        telemetry._httpx_response_hook(None, info, info)
+    assert calls == ["request", "response"]

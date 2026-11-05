@@ -4,7 +4,9 @@
 ``LOGFIRE_TOKEN`` (or ``LOGFIRE_API_KEY``) it sends:
 
 - a span per Claude and Gemini call, with the prompt, reply, tool calls, tokens and model,
-- a span per outgoing httpx request (page fetches, Wikipedia, Polymarket, ...) and Redis command,
+- a span per outgoing httpx request (page fetches, Wikipedia, Polymarket, ...), with its headers and,
+  when small, its bodies, and a span per Redis command
+  (the whole command with values cut short, and a preview of the reply),
 - the bot's own spans: each answered mention (with its cost and usage stats), each tool call,
   each slash command, the nightly memory job, a death announcement, a delivered reminder,
 - every log record at INFO and above from the ``logging`` module.
@@ -28,6 +30,7 @@ import binascii
 import hashlib
 import logging
 import os
+import re
 from typing import Any, Awaitable, Callable, Dict, Iterator, Optional, Sequence, Tuple
 
 import logfire
@@ -253,6 +256,137 @@ def _wrap_gemini_parts() -> bool:
     return True
 
 
+# -- scrubbing: secrets only ---------------------------------------------------------------------
+
+# Logfire's default scrubbing blanks any value that merely mentions "session", "cookie", "auth",
+# "secret" and the like, which would hide chat text that says those words. Fields *named* like a
+# secret (an Authorization or API-key header) are still redacted, and so is any value that looks
+# like an actual key.
+# Lookaheads keep each match to the key's prefix: Logfire puts the matched text in its redaction note.
+_SECRET_VALUE = re.compile(
+    r"pylf_v\d+_|sk-ant-(?=[\w-]{10})|AIza(?=[\w-]{30})|\bBearer\s(?=\s*[\w.~+/=-]{16})|xox[abpr]-(?=[\w-]{10})"
+    r"|gh[pousr]_(?=\w{20})|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+)
+
+
+def scrub_secrets_only(match: Any) -> Any:
+    """``ScrubbingOptions.callback``: keep a value whose *text* tripped a pattern, unless it looks like a key.
+
+    Returning the value keeps it; returning None lets Logfire redact it.
+    """
+    value = match.value
+    searched = match.pattern_match.string
+    if isinstance(value, str) and searched == value and not _SECRET_VALUE.search(value):
+        return value
+    return None
+
+
+# -- HTTP: headers always, bodies when small -------------------------------------------------------
+
+# Bodies are kept only when the Content-Length is known and at most this, so page fetches, the deaths
+# page and Gemini requests carrying images stay out. Streamed downloads are never captured.
+HTTP_BODY_LIMIT = 16 * 1024
+
+
+def _small_body(headers: Any) -> bool:
+    length = (headers.get("content-length") or "").strip() if headers is not None else ""
+    return length.isdigit() and 0 < int(length) <= HTTP_BODY_LIMIT
+
+
+def _httpx_request_hook(span: Any, request: Any) -> None:
+    if _small_body(getattr(request, "headers", None)) and hasattr(request, "capture_body"):
+        request.capture_body()
+
+
+def _httpx_response_hook(span: Any, request: Any, response: Any) -> None:
+    if _small_body(getattr(response, "headers", None)) and hasattr(response, "capture_body_if_text"):
+        response.capture_body_if_text()
+
+
+async def _httpx_async_request_hook(span: Any, request: Any) -> None:
+    _httpx_request_hook(span, request)
+
+
+async def _httpx_async_response_hook(span: Any, request: Any, response: Any) -> None:
+    _httpx_response_hook(span, request, response)
+
+
+def instrument_http() -> None:
+    logfire.instrument_httpx(
+        capture_headers=True,
+        request_hook=_httpx_request_hook,
+        response_hook=_httpx_response_hook,
+        async_request_hook=_httpx_async_request_hook,
+        async_response_hook=_httpx_async_response_hook,
+    )
+
+
+# -- Redis: whole commands and their replies ----------------------------------------------------
+
+# The OpenTelemetry Redis instrumentation records ``GETEX ? ? ?``. The bot's Redis holds nothing
+# private, so the spans get the real keys and values, each value cut short (cached pages and
+# base64 images run to megabytes), plus a preview of the reply.
+REDIS_VALUE_CHARS = 200
+REDIS_STATEMENT_CHARS = 4000
+
+
+def _short(value: Any, limit: int = REDIS_VALUE_CHARS) -> str:
+    if isinstance(value, (bytes, bytearray)):
+        text = bytes(value[: limit * 4]).decode("utf-8", errors="replace")
+        total = len(value)
+    else:
+        text = str(value)
+        total = len(text)
+    if total > limit:
+        return f"{text[:limit]}…(+{total - limit} more)"
+    return text
+
+
+def format_redis_command(args: Sequence[Any]) -> str:
+    """``GETEX cmwgpt:cache:pages:https://… EX 2592000``, values cut at ``REDIS_VALUE_CHARS``."""
+    return _short(" ".join(_short(arg) for arg in args), REDIS_STATEMENT_CHARS)
+
+
+def redis_reply_preview(response: Any) -> str:
+    """A short, readable form of a Redis reply: ``nil`` for a miss, else the value (cut short)."""
+    if response is None:
+        return "nil"
+    if isinstance(response, (list, tuple)):
+        items = [redis_reply_preview(item) for item in response[:20]]
+        more = f", …(+{len(response) - 20} more)" if len(response) > 20 else ""
+        return _short("[" + ", ".join(items) + more + "]", 1000)
+    if isinstance(response, dict):
+        items = [f"{_short(k, 80)}: {redis_reply_preview(v)}" for k, v in list(response.items())[:20]]
+        more = f", …(+{len(response) - 20} more)" if len(response) > 20 else ""
+        return _short("{" + ", ".join(items) + more + "}", 1000)
+    return _short(response)
+
+
+def _redis_response_hook(span: Any, instance: Any, response: Any) -> None:
+    if not span.is_recording():
+        return
+    span.set_attribute("db.redis.reply", redis_reply_preview(response))
+    if response is None or isinstance(response, (list, tuple, dict, bytes, bytearray, str)):
+        span.set_attribute("db.redis.reply_size", 0 if response is None else len(response))
+
+
+def capture_redis_commands() -> bool:
+    """Make the Redis spans record whole commands (single and pipelined), not ``? ? ?``."""
+    try:
+        import opentelemetry.instrumentation.redis as instrumentation
+        from opentelemetry.instrumentation.redis import util
+    except ImportError:
+        return False
+    hooked = False
+    for module in (instrumentation, util):
+        if hasattr(module, "_format_command_args"):
+            module._format_command_args = format_redis_command  # type: ignore[attr-defined]
+            hooked = True
+    if not hooked:
+        logger.warning("[telemetry] Couldn't hook the Redis spans; commands stay as ? placeholders")
+    return hooked
+
+
 def strip_images_from_spans() -> None:
     """Install the image filters. Logs a warning if a Logfire upgrade moved the hook."""
     for name, wrap in (("Claude", _wrap_anthropic_parts), ("Gemini", _wrap_gemini_parts)):
@@ -317,11 +451,13 @@ def setup_telemetry(env_file: Optional[str] = None) -> bool:
         environment=_environment(env_file),
         console=False,
         sampling=SamplingOptions(tail=keep_trace),
+        scrubbing=logfire.ScrubbingOptions(callback=scrub_secrets_only, extra_patterns=[_SECRET_VALUE.pattern]),
         # Lets Logfire link each span to its line on GitHub.
         code_source=logfire.CodeSource(repository="https://github.com/jobeus/cmwgpt", revision="main"),
     )
 
     strip_images_from_spans()
+    capture_redis_commands()
     _sending = True
     # Gemini only records prompts and replies when asked to.
     os.environ.setdefault("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "SPAN_ONLY")
@@ -329,8 +465,8 @@ def setup_telemetry(env_file: Optional[str] = None) -> bool:
     for name, instrument in (
         ("anthropic", logfire.instrument_anthropic),
         ("google-genai", logfire.instrument_google_genai),
-        ("httpx", logfire.instrument_httpx),
-        ("redis", logfire.instrument_redis),
+        ("httpx", instrument_http),
+        ("redis", lambda: logfire.instrument_redis(response_hook=_redis_response_hook)),
         ("system metrics", logfire.instrument_system_metrics),
     ):
         try:
