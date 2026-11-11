@@ -462,6 +462,109 @@ class TestThinkingStaysOutOfTheReply(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.beta.messages.stream.call_args.kwargs["output_config"], {"effort": "medium"})
 
 
+class MarkupStream(FakeMessageStream):
+    """A stream whose text turns into typed-out tool calls; notes whether it was read to the end."""
+
+    def __init__(self, chunks):
+        super().__init__(chunks, final=None)
+        self.current_message_snapshot = SimpleNamespace(usage=SimpleNamespace(
+            input_tokens=100, cache_read_input_tokens=0, cache_creation_input_tokens=0, output_tokens=1))
+        self.finished = False
+
+    async def __aiter__(self):
+        for chunk in self._chunks:
+            yield SimpleNamespace(type="text", text=chunk)
+        self.finished = True
+
+    async def get_final_message(self):
+        raise AssertionError("a stopped stream has no final message")
+
+
+MARKUP = ['Ha. ', '<invoke name="react">\n', '<parameter name="emoji">😂</parameter>\n', "</invoke>" * 50]
+
+
+class TestToolMarkupInReplies(unittest.IsolatedAsyncioTestCase):
+    def _service(self, *streams):
+        service = AnthropicService(api_key="test-key")
+        client = MagicMock()
+        client.beta.messages.stream = MagicMock(side_effect=list(streams))
+        service.set_client(client)
+        return service, client
+
+    async def test_stops_the_stream_and_asks_again(self):
+        bad = MarkupStream(MARKUP)
+        service, client = self._service(bad, FakeMessageStream(["Back in 2005."], _response("Back in 2005.")))
+        seen = []
+
+        text, cost = await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, on_text=seen.append)
+
+        self.assertEqual(text, "Back in 2005.")
+        self.assertFalse(bad.finished)
+        self.assertEqual(client.beta.messages.stream.call_count, 2)
+        # The markup never reaches the preview: the text before it does, then it's cleared.
+        self.assertFalse(any("<invoke" in s or "<parameter" in s for s in seen))
+        self.assertEqual(seen, ["Ha.", "", "Back in 2005."])
+        self.assertGreater(cost, 0)
+
+    async def test_gives_up_after_one_retry(self):
+        service, client = self._service(MarkupStream(MARKUP), MarkupStream(MARKUP))
+
+        with self.assertRaises(AnthropicServiceError) as ctx:
+            await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, on_text=lambda _: None)
+
+        self.assertIn("tool calls out as text", str(ctx.exception))
+        self.assertEqual(client.beta.messages.stream.call_count, 2)
+
+    async def test_unstreamed_reply_with_markup_is_asked_again(self):
+        service = AnthropicService(api_key="test-key")
+        client = MagicMock()
+        client.beta.messages.create = AsyncMock(side_effect=[
+            _response('<function_calls>\n<invoke name="remember">'), _response("A verse")])
+        service.set_client(client)
+
+        text, _ = await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER)
+
+        self.assertEqual(text, "A verse")
+        self.assertEqual(client.beta.messages.create.await_count, 2)
+
+    async def test_ordinary_angle_brackets_are_fine(self):
+        reply = "Use <parameter> tags in XML, or <invoke> in docs."
+        service, client = self._service(FakeMessageStream([reply], _response(reply)))
+
+        text, _ = await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, on_text=lambda _: None)
+
+        self.assertEqual(text, reply)
+        self.assertEqual(client.beta.messages.stream.call_count, 1)
+
+
+class TestReplyMaxTokens(unittest.IsolatedAsyncioTestCase):
+    async def test_max_tokens_is_passed_and_think_harder_gets_the_full_cap(self):
+        from src.services.anthropic_service import MAX_TOKENS, REPLY_MAX_TOKENS
+        call = SimpleNamespace(type="tool_use", id="toolu_1", name="think_harder", input={"reason": "hard"})
+        service = AnthropicService(api_key="test-key")
+        client = MagicMock()
+        client.beta.messages.create = AsyncMock(side_effect=[
+            _response(stop_reason="tool_use", content=[call], model="claude-opus-5-5"),
+            _response("answer", model="claude-opus-5-5")])
+        service.set_client(client)
+
+        await service.get_chat_completion(model="opus-5.5-direct", messages=USER, max_tokens=REPLY_MAX_TOKENS)
+
+        caps = [c.kwargs["max_tokens"] for c in client.beta.messages.create.await_args_list]
+        self.assertEqual(caps, [REPLY_MAX_TOKENS, MAX_TOKENS])
+
+    async def test_default_is_the_full_cap(self):
+        from src.services.anthropic_service import MAX_TOKENS
+        service = AnthropicService(api_key="test-key")
+        client = MagicMock()
+        client.beta.messages.create = AsyncMock(return_value=_response("hi"))
+        service.set_client(client)
+
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER)
+
+        self.assertEqual(client.beta.messages.create.call_args.kwargs["max_tokens"], MAX_TOKENS)
+
+
 class TestThinkHarderStreaming(unittest.IsolatedAsyncioTestCase):
     async def test_statuses_follow_what_the_model_starts(self):
         call = SimpleNamespace(type="tool_use", id="toolu_1", name="recall_channel", input={})

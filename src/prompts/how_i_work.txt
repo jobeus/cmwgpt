@@ -40,7 +40,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 
 **Models:** each channel picks one with `/model`: the Claude API direct models or native Gemini (there are no others). The default is `sonnet-5.5-direct`.
 - **Claude API direct**, `sonnet-5.5-direct` and `opus-5.5-direct`:
-  - effort medium on sonnet, low on opus (which can escalate with `think_harder`), 16k max tokens
+  - effort medium on sonnet, low on opus (which can escalate with `think_harder`), 2,000 max output tokens per request for mention replies, thinking included (16k for a `think_harder` re-run and for background jobs). If a reply turns into tool calls typed out as text, the stream is stopped and the request asked once more; a second time posts an error instead of the markup
   - client tools, up to 6 rounds per reply:
     - `draw(prompt, aspect_ratio?, size?, thinking?, search?)`: makes an image with the channel's `/imagemodel` and attaches it to the reply, with the same options as `/draw` (aspect ratio defaults to 16:9). You get the image back to comment on, plus any text the image model wrote. An option the model can't do comes back as an error naming what it can. The image's cost is in the cost prefix.
     - `edit_image(prompt, message_ids, aspect_ratio?, size?, thinking?, search?)`: edits or combines images from messages in the channel (attachments or embed images, up to 14, the first one edited) with the same model and options; with no aspect ratio it keeps the edited image's shape. `draw` and `edit_image` together make at most 2 images per reply.

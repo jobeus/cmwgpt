@@ -16,7 +16,7 @@ from src.utils.discord_helper import get_mention_legend, attachment_to_base64_da
 from src.utils.discord_error_utils import best_effort_typing, concise_error
 from src.db.state_store import CONTEXT_TTL_SECONDS, StateStore
 from src.services.anthropic_service import (
-    THINK_HARDER_MODELS, THINKING_STATUS, AnthropicServiceError, is_direct_anthropic_model,
+    REPLY_MAX_TOKENS, THINK_HARDER_MODELS, THINKING_STATUS, AnthropicServiceError, is_direct_anthropic_model,
 )
 from src.services.chat_tools import ChatTool, build_mention_tools
 from src.services.gemini_service import GeminiServiceError, is_gemini_model
@@ -371,6 +371,7 @@ class MentionHandler:
                         on_text=streaming_reply.push,
                         tools=tools,
                         on_status=streaming_reply.status,
+                        max_tokens=REPLY_MAX_TOKENS,
                     )
                 except BaseException:
                     await streaming_reply.discard()

@@ -11,6 +11,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import anthropic
@@ -55,6 +56,16 @@ _MODELS_BY_API_ID: Dict[str, DirectModel] = {m.api_id: m for m in DIRECT_MODELS.
 PRICE_WEB_SEARCH = 0.01
 
 MAX_TOKENS = 16000
+# Output cap per request for a chat reply in Discord, thinking included. Replies aim at Discord's
+# 2000 characters and rarely pass 1,100 tokens, so this leaves room for a long one while a
+# runaway reply stops after a few seconds. A think_harder re-run gets MAX_TOKENS, since high
+# effort can think for longer than this on its own.
+REPLY_MAX_TOKENS = 2000
+# Text that looks like a tool call the model typed out instead of making. It never runs, and
+# once started the model tends to repeat it until max_tokens.
+TOOL_MARKUP = re.compile(r"<(?:invoke|parameter) name=|</?function_calls>|</?antml:")
+# Requests re-sent after the model typed out tool calls, before giving up.
+MAX_TOOL_MARKUP_RETRIES = 1
 WEB_SEARCH_MAX_USES = 10
 # Server-side Python sandbox, offered with client tools (mention replies). It's free alongside
 # web search. Files it saves come back as file IDs and are attached to the reply.
@@ -142,6 +153,34 @@ CACHE_READ_SHARE_TO_WARN = 0.8
 
 _DATA_URL_RE = re.compile(r"^data:(?P<mime>[\w/+.-]+);base64,(?P<data>.+)$", re.DOTALL)
 _SUPPORTED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+
+
+def _aborted_stream_cost(stream: Any, streamed: str, model: DirectModel) -> float:
+    """Rough cost of a stream stopped early, which never reports its final usage.
+
+    The input side comes from the message's start event; the output is guessed from the text
+    so far (about 4 characters a token), which leaves out any thinking before it.
+    """
+    snapshot = getattr(stream, "current_message_snapshot", None)
+    usage = getattr(snapshot, "usage", None)
+    if usage is None:
+        return 0.0
+    estimate = SimpleNamespace(
+        input_tokens=getattr(usage, "input_tokens", 0) or 0,
+        cache_read_input_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
+        cache_creation_input_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0,
+        output_tokens=len(streamed) // 4,
+        server_tool_use=None,
+    )
+    return _usage_cost(estimate, model)
+
+
+class _ToolMarkupError(Exception):
+    """The model wrote tool-call markup as reply text; carries what the request cost so far."""
+
+    def __init__(self, cost: float):
+        super().__init__("tool-call markup in the reply text")
+        self.cost = cost
 
 
 class AnthropicServiceError(Exception):
@@ -542,6 +581,11 @@ class AnthropicService:
                     async for event in stream:
                         if event.type == "text":
                             streamed += event.text
+                            if TOOL_MARKUP.search(streamed):
+                                # Leaving the block closes the stream, so it stops generating.
+                                aborted_cost = _aborted_stream_cost(stream, streamed, direct_model)
+                                await record_cost(CLAUDE_DIRECT, aborted_cost)
+                                raise _ToolMarkupError(cost + aborted_cost)
                             on_text(clean_reply(streamed, bot_id=resolved_bot_id))
                         elif event.type == "content_block_start" and on_status:
                             status = _block_status(getattr(event, "content_block", None), tool_statuses or {})
@@ -555,6 +599,8 @@ class AnthropicService:
             response_cost = _usage_cost(getattr(response, "usage", None), served_by)
             cost += response_cost
             await record_cost(CLAUDE_DIRECT, response_cost)
+            if TOOL_MARKUP.search(_response_text(response)):
+                raise _ToolMarkupError(cost)
             _note_usage(response)
             _log_cache_diagnostics(api_model, channel_id, response)
             previous_message_id = getattr(response, "id", None) or previous_message_id
@@ -650,6 +696,7 @@ class AnthropicService:
         effort: Optional[str] = None,
         tools: Optional[Sequence[ChatTool]] = None,
         on_status: Optional[Callable[[str], None]] = None,
+        max_tokens: int = MAX_TOKENS,
     ) -> Tuple[Union[str, Dict[str, Any]], float]:
         """Get a chat completion from the Claude API. Returns ``(reply, cost)``.
 
@@ -659,7 +706,8 @@ class AnthropicService:
         ``{"text": ..., "files": [...]}`` instead of a string. With ``tools``, the model also
         gets code execution, and the files its code saves are attached the same way.
         ``on_status`` hears what the model is doing while there's no new text: thinking,
-        searching, running code, or running a tool.
+        searching, running code, or running a tool. ``max_tokens`` caps each request's output,
+        thinking included (a think_harder re-run gets at least ``MAX_TOKENS``).
         """
         client = self.get_client()
         resolved_bot_id = resolve_bot_id(bot_id, state_service, self._bot_id_loader)
@@ -671,7 +719,7 @@ class AnthropicService:
 
         kwargs: Dict[str, Any] = {
             "model": api_model,
-            "max_tokens": MAX_TOKENS,
+            "max_tokens": max_tokens,
             "output_config": {"effort": effort or direct_model.effort},
             # On a safety decline, let the API re-run on its recommended fallback model.
             "betas": ["server-side-fallback-2026-07-01", CACHE_DIAGNOSIS_BETA],
@@ -730,6 +778,7 @@ class AnthropicService:
 
         escalated = False
         strict_dropped = False
+        markup_retries = 0
         tool_rounds = 0
         try:
             while True:
@@ -739,6 +788,18 @@ class AnthropicService:
                         client, api_messages, kwargs, direct_model, channel_id, previous_message_id,
                         resolved_bot_id, show if on_text else None, status, tool_statuses, code_file_ids,
                     )
+                except _ToolMarkupError as e:
+                    total_cost += e.cost
+                    note_stat("tool_markup", 1)
+                    if markup_retries >= MAX_TOOL_MARKUP_RETRIES:
+                        logger.error("[%s] Reply was tool-call markup again; giving up", api_model)
+                        raise AnthropicServiceError(
+                            "Claude wrote its tool calls out as text instead of running them. Try again.") from e
+                    markup_retries += 1
+                    logger.warning("[%s] Reply turned into tool-call markup; asking again", api_model)
+                    # Clear the draft it streamed before the markup.
+                    show("")
+                    continue
                 except anthropic.BadRequestError as e:
                     if kwargs.get("mcp_servers") and _is_mcp_error(e):
                         # Logfire is down or the key stopped working: answer without the logs.
@@ -766,6 +827,7 @@ class AnthropicService:
                     # Same tools so the tools/system cache still reads. Without client tools,
                     # ``none`` stops a second call; with them, a repeat call gets an error result.
                     kwargs["output_config"] = {"effort": THINK_HARDER_EFFORT}
+                    kwargs["max_tokens"] = max(max_tokens, MAX_TOKENS)
                     if not client_tools:
                         kwargs["tool_choice"] = {"type": "none"}
                     api_messages = _with_think_harder_note(api_messages, reason)

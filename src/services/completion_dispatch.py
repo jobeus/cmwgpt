@@ -32,6 +32,7 @@ async def dispatch_completion(
     effort: Optional[str] = None,
     tools: Optional[Sequence[Any]] = None,
     on_status: Optional[Callable[[str], None]] = None,
+    max_tokens: Optional[int] = None,
 ) -> Tuple[ReplyContent, float]:
     """Route ``messages`` to the right model and return ``(reply, cost)``.
 
@@ -51,6 +52,8 @@ async def dispatch_completion(
             offers them.
         on_status: Called with what the model is doing (thinking, searching, a tool call)
             while no new text is coming. Only the Claude API route reports it.
+        max_tokens: Caps each Claude API request's output, thinking included; unset, the
+            service default. Gemini ignores it.
     """
     if is_gemini_model(model):
         return await gemini_service.get_chat_completion(
@@ -69,5 +72,6 @@ async def dispatch_completion(
         effort=effort,
         tools=tools,
         on_status=on_status,
+        **({"max_tokens": max_tokens} if max_tokens else {}),
         **identity,
     )
