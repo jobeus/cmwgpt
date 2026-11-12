@@ -534,10 +534,18 @@ class MemoryService:
 
         async def merge_one(user_id: int, facts: List[str]) -> float:
             async with semaphore:
+                before = existing.get(user_id, "")
                 new_profile, cost = await self._merge(
-                    speakers.get(user_id, str(user_id)), user_id, existing.get(user_id, ""), facts, today
+                    speakers.get(user_id, str(user_id)), user_id, before, facts, today
                 )
-                await self._store.save_profile(guild.id, user_id, new_profile)
+                if new_profile is None:
+                    # An empty or malformed reply would otherwise wipe or mangle what's stored.
+                    logger.warning("Memory merge for <@%s> got an unusable reply; keeping the stored profile", user_id)
+                elif await self._store.get(guild.id, user_id) != before:
+                    # A batched merge can take hours; a /memory correct or clear made meanwhile wins.
+                    logger.info("Memory for <@%s> changed during the merge; keeping that change", user_id)
+                else:
+                    await self._store.save_profile(guild.id, user_id, new_profile)
                 return cost
 
         costs = await asyncio.gather(*(merge_one(uid, facts) for uid, facts in observations.items()))
@@ -607,7 +615,8 @@ class MemoryService:
         profile: str,
         facts: List[str],
         today: date,
-    ) -> Tuple[str, float]:
+    ) -> Tuple[Optional[str], float]:
+        """The merged profile (``""`` for "(none)"), or ``None`` when the reply isn't a profile."""
         new_facts = "\n".join(f"- {fact}" for fact in facts)
         reply, cost = await self._complete(
             MERGE_SYSTEM_PROMPT,
@@ -616,7 +625,7 @@ class MemoryService:
             f"Current profile:\n{profile or '(none)'}\n\n"
             f"New facts from today's chat:\n{new_facts}",
         )
-        return clean_profile(reply), cost
+        return parse_corrected_profile(reply), cost
 
     async def correct(
         self, guild_id: int, user_id: int, name: str, correction: str

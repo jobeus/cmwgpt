@@ -324,8 +324,13 @@ class DeathService:
                     logger.info(
                         "Met threshold: %s (%s avg monthly views) -> ANNOUNCING", display_name, f"{avg_views:,}"
                     )
-                    await self._announce(display_name, article_title, avg_views)
-                    self._announced_titles.add(article_title)
+                    if await self._announce(display_name, article_title, avg_views):
+                        self._announced_titles.add(article_title)
+                    else:
+                        logger.warning(
+                            "Couldn't post the announcement for %s (%s) — not marking as seen, will retry next poll", display_name, article_title
+                        )
+                        unchecked.add((display_name, article_title))
                 else:
                     logger.info(
                         "Skipped: %s (%s avg monthly views, below %s threshold)",
@@ -340,6 +345,9 @@ class DeathService:
         # Everything currently on the page is now known, except the names we
         # could not check — those stay "new" so the next poll retries them.
         self._known_names = current - unchecked
+        if unchecked:
+            # Or the next poll gets a 304 and returns before retrying them.
+            self._deaths_page_etag = None
         self._save_state()
 
     # -- person check -------------------------------------------------------
@@ -513,16 +521,20 @@ class DeathService:
 
     async def _announce(
         self, display_name: str, article_title: str, avg_views: int
-    ) -> None:
-        """Send a death announcement to the configured channel."""
+    ) -> bool:
+        """Send a death announcement to the configured channel.
+
+        False only when Discord refused the RIP message, which is worth retrying. A missing
+        bot or channel won't fix itself by the next poll, so those count as handled.
+        """
         if not self._bot:
             logger.error("Bot not set — cannot announce death")
-            return
+            return True
 
         channel = self._bot.get_channel(int(self._death_channel_id))
         if channel is None:
             logger.error("Could not find channel %s", self._death_channel_id)
-            return
+            return True
 
         wiki_link = (
             f"https://en.wikipedia.org/wiki/{article_title.replace(' ', '_')}"
@@ -538,16 +550,17 @@ class DeathService:
             await channel.send(message)
         except discord.HTTPException as exc:
             logger.error("Failed to send death announcement: %s", exc)
-            return
+            return False
 
         summary = await self._summarize_person(display_name, wiki_link, channel.id)
         if not summary:
-            return
+            return True
 
         try:
             await channel.send(summary)
         except discord.HTTPException as exc:
             logger.error("Failed to send death summary follow-up: %s", exc)
+        return True
 
     def _channel_model(self, channel_id: Optional[int]) -> Optional[str]:
         """The model set for ``channel_id``, or the default model when it has none."""

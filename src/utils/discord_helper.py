@@ -65,25 +65,25 @@ def compress_image(
         image_bytes: bytes,
         max_size: int = 1024,
         quality: int = 75) -> bytes:
-    """Compress and resize image bytes to a JPEG using Pillow (CPU-bound; run in a thread)."""
-    try:
-        img = Image.open(io.BytesIO(image_bytes))
-        # For JPEGs, let the decoder downscale while decoding (much cheaper).
-        img.draft('RGB', (max_size, max_size))
+    """Compress and resize image bytes to a JPEG using Pillow (CPU-bound; run in a thread).
 
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
+    Raises when Pillow can't decode the image (SVG, HEIC, over the pixel limit). The callers
+    label the result ``image/jpeg``, so handing back the original bytes would send the model
+    something it rejects, and from the cache it would fail every request with that image.
+    """
+    img = Image.open(io.BytesIO(image_bytes))
+    # For JPEGs, let the decoder downscale while decoding (much cheaper).
+    img.draft('RGB', (max_size, max_size))
 
-        if img.width > max_size or img.height > max_size:
-            img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
 
-        out_bytes = io.BytesIO()
-        img.save(out_bytes, format='JPEG', quality=quality)
-        return out_bytes.getvalue()
-    except Exception as e:
-        logger.warning(
-            "Image compression failed: %s. Falling back to original bytes.", e)
-        return image_bytes
+    if img.width > max_size or img.height > max_size:
+        img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+
+    out_bytes = io.BytesIO()
+    img.save(out_bytes, format='JPEG', quality=quality)
+    return out_bytes.getvalue()
 
 
 async def _image_bytes_to_data_url(image_bytes: bytes) -> str:

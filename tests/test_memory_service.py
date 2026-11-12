@@ -169,6 +169,38 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         channel = SimpleNamespace(id=5, name="general", history=history, permissions_for=lambda me: perms)
         return SimpleNamespace(id=42, me=object(), text_channels=[channel])
 
+    async def _run_merge(self, store, merge_reply, during_merge=None):
+        now = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)
+        service, _ = self.make_service(store, now)
+        guild = self.make_guild([make_msg(1, "test drove a tacoma today", name="Jobe")])
+
+        async def fake_dispatch(**kwargs):
+            if "Chat:" in kwargs["messages"][0]["content"][0]["text"]:
+                return json.dumps({"1": ["test drove a Tacoma"]}), 0.01
+            if during_merge:
+                during_merge()
+            return merge_reply, 0.002
+
+        with patch("src.services.memory_service.dispatch_completion", side_effect=fake_dispatch):
+            await service.process_window(guild, now - timedelta(days=1), now)
+
+    async def test_merge_keeps_the_stored_profile_on_an_empty_or_malformed_reply(self):
+        for reply in ("", "Sorry, I can't help with that."):
+            store = FakeStore({1: "Stable: has two dogs"})
+            await self._run_merge(store, reply)
+            self.assertEqual(store.rows[1], "Stable: has two dogs")
+            self.assertEqual(store.saved, [])
+
+    async def test_merge_does_not_overwrite_a_change_made_while_it_ran(self):
+        store = FakeStore({1: "Stable: has two dogs"})
+
+        def correct():
+            store.rows[1] = "Stable: has three dogs"
+
+        await self._run_merge(store, "Stable: has two dogs\nCurrent: truck shopping (2026-10-15)", correct)
+        self.assertEqual(store.rows[1], "Stable: has three dogs")
+        self.assertEqual(store.saved, [])
+
     async def test_process_window_extracts_then_merges_each_speaker(self):
         store = FakeStore({1: ("Stable: has two dogs", "- lives in Denver")})
         now = datetime(2026, 10, 16, 8, 0, tzinfo=UTC)

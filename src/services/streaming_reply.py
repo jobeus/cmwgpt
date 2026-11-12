@@ -79,28 +79,31 @@ class StreamingReply:
             self._task = asyncio.create_task(self._flush())
 
     async def _flush(self) -> None:
-        delay = self._next_flush_at - time.monotonic()
-        if delay > 0:
-            await asyncio.sleep(delay)
-        if self._closed:
-            return
-        preview = _preview(self._latest, self._status, self._message_service.DISCORD_MESSAGE_LIMIT)
-        if not preview or preview == self._shown:
-            return
-        self._sending = True
-        try:
-            if self._message is None:
-                self._message = await self._channel.send(content=preview, suppress_embeds=True)
-            else:
-                await self._message.edit(content=preview, suppress=True)
-            self._shown = preview
-        except Exception as e:
-            # Stop previewing; finish() still delivers the full reply.
-            logger.warning("Couldn't update the streamed reply preview: %s", concise_error(e))
-            self._failed = True
-        finally:
-            self._sending = False
-            self._next_flush_at = time.monotonic() + EDIT_INTERVAL_SECONDS
+        # Loops until what's shown is current: text or a status that arrived while an edit was
+        # in flight scheduled nothing (this task was still running), so it's picked up here.
+        while not self._failed:
+            delay = self._next_flush_at - time.monotonic()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            if self._closed:
+                return
+            preview = _preview(self._latest, self._status, self._message_service.DISCORD_MESSAGE_LIMIT)
+            if not preview or preview == self._shown:
+                return
+            self._sending = True
+            try:
+                if self._message is None:
+                    self._message = await self._channel.send(content=preview, suppress_embeds=True)
+                else:
+                    await self._message.edit(content=preview, suppress=True)
+                self._shown = preview
+            except Exception as e:
+                # Stop previewing; finish() still delivers the full reply.
+                logger.warning("Couldn't update the streamed reply preview: %s", concise_error(e))
+                self._failed = True
+            finally:
+                self._sending = False
+                self._next_flush_at = time.monotonic() + EDIT_INTERVAL_SECONDS
 
     async def _stop(self) -> None:
         """Stop previewing, letting a send already in flight land so it isn't posted twice."""

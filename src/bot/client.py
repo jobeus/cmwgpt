@@ -184,35 +184,42 @@ class DiscordBotClient:
                 return
             self._ready_once_completed = True
 
-            # Sync commands - guild-specific if configured (instant),
-            # otherwise global (can take up to 1 hour)
-            if self.config.discord_guild_id:
-                guild = discord.Object(id=int(self.config.discord_guild_id))
-                self.bot.tree.copy_global_to(guild=guild)
-                await self.bot.tree.sync(guild=guild)
-                logger.info("Commands synced instantly to guild %s", self.config.discord_guild_id)
-            else:
-                await self.bot.tree.sync()
-                logger.info("Commands synced globally (may take up to 1 hour to propagate)")
+            # This runs once, so each step is on its own: a step that fails (Discord 5xx on the
+            # sync, the webhook port in use) mustn't leave the ones after it never started.
+            async def step(name: str, run: Any) -> None:
+                try:
+                    result = run()
+                    if asyncio.iscoroutine(result):
+                        await result
+                except Exception:
+                    logger.exception("Startup step failed: %s", name)
 
-            # Start the message queue service
-            await self.services.queue_service.start()
+            async def sync_commands() -> None:
+                # Guild-specific if configured (instant), otherwise global (can take up to 1 hour)
+                if self.config.discord_guild_id:
+                    guild = discord.Object(id=int(self.config.discord_guild_id))
+                    self.bot.tree.copy_global_to(guild=guild)
+                    await self.bot.tree.sync(guild=guild)
+                    logger.info("Commands synced instantly to guild %s", self.config.discord_guild_id)
+                else:
+                    await self.bot.tree.sync()
+                    logger.info("Commands synced globally (may take up to 1 hour to propagate)")
 
-            # Start the deploy webhook listener
-            await self.services.auto_update_service.start()
-
-            # Start the death service
-            self.services.death_service.start()
+            # The queue first: without it no mention is answered.
+            await step("message queue", self.services.queue_service.start)
+            await step("command sync", sync_commands)
+            await step("deploy webhook", self.services.auto_update_service.start)
+            await step("death service", self.services.death_service.start)
 
             if getattr(self.services, "memory_service", None) is not None:
-                self.services.memory_service.start()
+                await step("memory service", self.services.memory_service.start)
 
             if getattr(self.services, "reminder_service", None) is not None:
-                self.services.reminder_service.start()
+                await step("reminder service", self.services.reminder_service.start)
 
             # Read the IRC log's dates and top speakers now, not on the first mention.
             if hasattr(self.mention_handler, "warm_up"):
-                self.mention_handler.warm_up()
+                await step("IRC log warm-up", self.mention_handler.warm_up)
 
             logger.info("Logged in to Discord as %s in %s guild(s)", self.bot.user, len(self.bot.guilds))
 

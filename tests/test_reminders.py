@@ -143,6 +143,34 @@ class TestReminderService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.service.deliver_due(), 0)
         self.assertEqual(await self.service.pending(20), [])
 
+    async def test_a_reminder_that_errors_does_not_hold_up_the_next_one(self):
+        bot, channel = _bot_with_channel()
+        channel.send.side_effect = [RuntimeError("boom"), None]
+        self.service.set_bot(bot)
+        await self.add(when="1m", text="first")
+        await self.add(when="2m", text="second")
+        self.now[0] = NOW + timedelta(minutes=3)
+
+        self.assertEqual(await self.service.deliver_due(), 1)
+        self.assertEqual([r.text for r in await self.service.pending(20)], ["first"])
+
+    async def test_a_message_discord_rejects_is_dropped_not_retried(self):
+        bot, channel = _bot_with_channel()
+        channel.send.side_effect = discord.HTTPException(SimpleNamespace(status=400, reason="bad"), "bad")
+        self.service.set_bot(bot)
+        await self.add(when="1m")
+        self.now[0] = NOW + timedelta(minutes=2)
+
+        self.assertEqual(await self.service.deliver_due(), 0)
+        self.assertEqual(await self.service.pending(20), [])
+
+    async def test_a_malformed_reminder_is_removed(self):
+        reminder = await self.add(when="1m")
+        await self.redis.hdel(f"cmwgpt:reminder:{reminder.id}", "guild_id")
+
+        self.assertEqual(await self.service.pending(20), [])
+        self.assertEqual(await self.redis.zcard("cmwgpt:reminders:due"), 0)
+
     async def test_cancel_only_in_its_own_channel(self):
         reminder = await self.add()
         with self.assertRaises(ValueError):

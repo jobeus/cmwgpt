@@ -184,6 +184,9 @@ class ReminderStore:
                 reminder = _from_hash(int(reminder_id), fields)
                 if reminder:
                     reminders.append(reminder)
+                else:
+                    # Unreadable for good; left in, it would be loaded and warned about every poll.
+                    await self.remove(int(reminder_id))
             else:
                 # The hash is gone (removed mid-way); drop the stray ID.
                 await self._redis_getter().zrem(_DUE_KEY, reminder_id)
@@ -323,8 +326,12 @@ class ReminderService:
         now = self._now()
         posted = 0
         for reminder in await self._store.due(now):
-            if await self._deliver(reminder, now):
-                posted += 1
+            try:
+                if await self._deliver(reminder, now):
+                    posted += 1
+            except Exception as e:
+                # One reminder that can't go out mustn't hold up the ones due after it.
+                logger.warning("[reminder] Couldn't deliver #%s, will retry: %s", reminder.id, concise_error(e))
         return posted
 
     async def _deliver(self, reminder: Reminder, now: datetime) -> bool:
@@ -352,6 +359,11 @@ class ReminderService:
             await self._store.remove(reminder.id)
             return False
         except discord.HTTPException as e:
+            if 400 <= e.status < 500 and e.status != 429:
+                # Discord rejected the message itself; sending it again would fail the same way.
+                logger.warning("[reminder] Dropping #%s: Discord won't take it: %s", reminder.id, concise_error(e))
+                await self._store.remove(reminder.id)
+                return False
             logger.warning("[reminder] Couldn't post #%s, will retry: %s", reminder.id, concise_error(e))
             return False
         await self._store.remove(reminder.id)

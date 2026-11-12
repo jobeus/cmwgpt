@@ -211,6 +211,21 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         client.services.death_service.start.assert_called_once_with()
         client._send_update_announcement_if_needed.assert_awaited_once_with()
 
+    async def test_on_ready_starts_services_even_when_the_command_sync_fails(self):
+        client, _ = self.make_client(guild_id="")
+        client._send_update_announcement_if_needed = AsyncMock()
+        client.bot.tree.sync.side_effect = RuntimeError("discord 503")
+        events = {}
+        client.bot.event = lambda fn: events.setdefault(fn.__name__, fn) or fn
+
+        client._setup_events()
+        await events["on_ready"]()
+
+        client.services.queue_service.start.assert_awaited_once_with()
+        client.services.auto_update_service.start.assert_awaited_once_with()
+        client.services.death_service.start.assert_called_once_with()
+        client._send_update_announcement_if_needed.assert_awaited_once_with()
+
     async def test_on_ready_skips_one_time_setup_on_gateway_reconnect(self):
         client, _ = self.make_client(guild_id="")
         client._send_update_announcement_if_needed = AsyncMock()

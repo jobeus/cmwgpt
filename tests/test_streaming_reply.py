@@ -49,6 +49,25 @@ class TestStreamingReply(unittest.IsolatedAsyncioTestCase):
         channel.send.assert_awaited_once()
         sent.edit.assert_awaited_once_with(content="Hello, world" + CURSOR, suppress=True)
 
+    async def test_status_set_while_an_edit_is_in_flight_is_shown_after_it(self):
+        streamer, channel, sent, _ = make_streamer()
+        release = asyncio.Event()
+
+        async def slow_send(**_kwargs):
+            await release.wait()
+            return sent
+
+        channel.send.side_effect = slow_send
+        with patch("src.services.streaming_reply.EDIT_INTERVAL_SECONDS", 0.01):
+            streamer.push("Hello")
+            await settle()
+            # Arrives mid-send, and nothing else comes in afterwards.
+            streamer.status("drawing...")
+            release.set()
+            await asyncio.sleep(0.05)
+
+        sent.edit.assert_awaited_once_with(content="Hello" + CURSOR + "\n-# drawing...", suppress=True)
+
     async def test_finish_edits_preview_into_final_reply(self):
         streamer, channel, sent, message_service = make_streamer()
         streamer.push("Hello")

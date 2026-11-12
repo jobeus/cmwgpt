@@ -13,6 +13,8 @@ from src.services.anthropic_service import (
     CODE_EXECUTION_TOOL,
     CODE_STATUS,
     DIRECT_MODELS,
+    CUT_OFF_NOTE,
+    MAX_TOKENS,
     MAX_TOOL_ROUNDS,
     SEARCH_RESULTS_STATUS,
     THINKING_HARDER_STATUS,
@@ -304,6 +306,21 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(AnthropicServiceError):
             await service.get_chat_completion(
                 model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}])
+
+    async def test_max_tokens_with_no_text_is_asked_again_with_a_higher_cap(self):
+        service, client = self.make_service(_response(content=[], stop_reason="max_tokens"), _response("answer"))
+        text, _ = await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}], max_tokens=2000)
+        self.assertEqual(text, "answer")
+        caps = [c.kwargs["max_tokens"] for c in client.beta.messages.create.await_args_list]
+        self.assertEqual(caps, [2000, MAX_TOKENS])
+
+    async def test_max_tokens_mid_reply_is_marked_as_cut_off(self):
+        service, client = self.make_service(_response("half an ans", stop_reason="max_tokens"))
+        text, _ = await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}], max_tokens=2000)
+        self.assertEqual(text, "half an ans" + CUT_OFF_NOTE)
+        self.assertEqual(client.beta.messages.create.await_count, 1)
 
     async def test_empty_response_raises(self):
         service, _ = self.make_service(_response(content=[]))

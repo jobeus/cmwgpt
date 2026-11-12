@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 from src.utils import discord_helper
 from src.utils.cache_utils import PersistentCache
@@ -20,11 +20,23 @@ def ok_response(content=b"image-bytes", status=200, url="https://example.com/ima
 
 
 class TestDiscordHelper(unittest.IsolatedAsyncioTestCase):
-    def test_compress_image_returns_original_on_failure(self):
-        with patch("src.utils.discord_helper.Image.open", side_effect=RuntimeError("bad image")):
-            result = discord_helper.compress_image(b"raw-bytes")
+    def test_compress_image_raises_on_undecodable_image(self):
+        with self.assertRaises(UnidentifiedImageError):
+            discord_helper.compress_image(b"<svg xmlns='http://www.w3.org/2000/svg'/>")
 
-        self.assertEqual(result, b"raw-bytes")
+    async def test_undecodable_attachment_is_not_cached_as_jpeg(self):
+        attachment = MagicMock()
+        attachment.id = 9
+        attachment.filename = "drawing.svg"
+        attachment.content_type = "image/svg+xml"
+        attachment.read = AsyncMock(return_value=b"<svg xmlns='http://www.w3.org/2000/svg'/>")
+        cache = AsyncDictCache()
+
+        with patch("src.utils.discord_helper._attachment_base64_cache", cache):
+            with self.assertRaises(UnidentifiedImageError):
+                await discord_helper.attachment_to_base64_data_url(attachment)
+
+        self.assertEqual(len(cache), 0)
 
     def test_compress_image_resizes_and_outputs_bytes(self):
         image = Image.new("RGBA", (2000, 1200), (255, 0, 0, 255))

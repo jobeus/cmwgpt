@@ -61,6 +61,8 @@ MAX_TOKENS = 16000
 # runaway reply stops after a few seconds. A think_harder re-run gets MAX_TOKENS, since high
 # effort can think for longer than this on its own.
 REPLY_MAX_TOKENS = 2000
+# Added to a reply that stopped at the cap, so it doesn't read as finished.
+CUT_OFF_NOTE = "\n-# (cut off: that hit my length limit)"
 # Text that looks like a tool call the model typed out instead of making. It never runs, and
 # once started the model tends to repeat it until max_tokens.
 TOOL_MARKUP = re.compile(r"<(?:invoke|parameter) name=|</?function_calls>|</?antml:")
@@ -777,6 +779,7 @@ class AnthropicService:
         tool_statuses["think_harder"] = THINKING_HARDER_STATUS
 
         escalated = False
+        cap_raised = False
         strict_dropped = False
         markup_retries = 0
         tool_rounds = 0
@@ -831,6 +834,16 @@ class AnthropicService:
                     if not client_tools:
                         kwargs["tool_choice"] = {"type": "none"}
                     api_messages = _with_think_harder_note(api_messages, reason)
+                    continue
+                if (response.stop_reason == "max_tokens" and not cap_raised and kwargs["max_tokens"] < MAX_TOKENS
+                        and not _response_text(response).strip()):
+                    # Thinking used the whole reply cap, so there's nothing to post. Ask once more
+                    # with room to answer; max_tokens isn't part of the cache key.
+                    cap_raised = True
+                    note_stat("max_tokens_retry", 1)
+                    logger.warning("[%s] Hit max_tokens (%s) before writing any text; asking again with %s",
+                                   api_model, kwargs["max_tokens"], MAX_TOKENS)
+                    kwargs["max_tokens"] = MAX_TOKENS
                     continue
                 if response.stop_reason != "tool_use" or not client_tools:
                     break
@@ -887,6 +900,9 @@ class AnthropicService:
             "[%s] stop_reason=%s cost=$%.4f cache_read=%s cache_write=%s tool_rounds=%s response snippet: %s", response.model, response.stop_reason, total_cost, getattr(usage, 'cache_read_input_tokens', 0), getattr(usage, 'cache_creation_input_tokens', 0), tool_rounds, response_text.replace(chr(10), ' ')[:150]
         )
         cleaned = "\n\n".join(texts + [clean_reply(response_text, bot_id=resolved_bot_id)]).strip()
+        if response.stop_reason == "max_tokens" and cleaned:
+            logger.warning("[%s] Reply was cut off at max_tokens (%s)", api_model, kwargs["max_tokens"])
+            cleaned += CUT_OFF_NOTE
         if code_file_ids:
             files += await self._download_code_files(client, code_file_ids)
         if files:

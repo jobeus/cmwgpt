@@ -630,6 +630,32 @@ class TestDeathService(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
+    def test_failed_announcement_is_retried_on_a_later_poll(self):
+        """A death Discord refused to post isn't marked as announced, and the page is re-read."""
+        async def run_test():
+            self.service._first_poll = False
+            self.service._known_names = set()
+            self._fake_http(httpx.Response(200, text=SAMPLE_HTML, headers={"etag": "v1"}))
+
+            with patch.object(self.service, "_save_state"), \
+                patch.object(self.service, "_announce", AsyncMock(side_effect=[False, True])) as mock_announce, \
+                patch.object(self.service, "get_avg_monthly_views", AsyncMock(return_value=5_000_000)), \
+                patch.object(self.service, "is_person", AsyncMock(return_value=True)), \
+                patch(
+                    "src.services.death_service.parse_deaths_html",
+                    return_value=[("Famous One", "Famous_One")],
+                ):
+                await self.service._poll_once()
+                self.assertNotIn("Famous_One", self.service._announced_titles)
+                self.assertEqual(self.service._known_names, set())
+                self.assertIsNone(self.service._deaths_page_etag)
+
+                await self.service._poll_once()
+                self.assertEqual(mock_announce.await_count, 2)
+                self.assertIn("Famous_One", self.service._announced_titles)
+
+        self.loop.run_until_complete(run_test())
+
     def test_poll_once_sets_baseline_and_handles_status_and_new_names(self):
         async def run_test():
             async def fake_views(article_title):

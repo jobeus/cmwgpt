@@ -82,6 +82,10 @@ def setup_logger():
         log_dir / "bot.log", when="midnight", backupCount=60, encoding="utf-8"
     )
     file_handler.suffix = "%Y-%m-%d.log"
+    # The handler finds old files to delete by matching this against their names and rebuilding
+    # the name with the namer. Its default has no ".log", so the rebuilt name never matched a
+    # real file and backupCount deleted nothing.
+    file_handler.extMatch = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}\.log(?!\d)")
 
     def _dated_log_namer(default_name: str) -> str:
         # default_name looks like "logs/bot.log.2026-07-03.log"
