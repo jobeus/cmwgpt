@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.streaming_reply import CURSOR, StreamingReply, _preview, is_status_only
+from src.utils.status_lines import STATUS_LINES, WILDCARDS, flavor
 
 
 def make_streamer(*, send_side_effect=None):
@@ -28,6 +29,12 @@ async def settle():
 
 
 class TestStreamingReply(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Plain statuses, so the previews are predictable; the joke lines have their own tests.
+        patcher = patch("src.services.streaming_reply.flavor", side_effect=lambda status: status)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     async def test_first_push_posts_preview_with_cursor(self):
         streamer, channel, _, _ = make_streamer()
         streamer.push("Hello")
@@ -177,6 +184,53 @@ class TestStreamingReply(unittest.IsolatedAsyncioTestCase):
             streamer.status("thinking harder...")
             await asyncio.sleep(0.03)
         sent.edit.assert_awaited_with(content="-# thinking harder...", suppress=True)
+
+
+class TestStatusLines(unittest.IsolatedAsyncioTestCase):
+    def _statuses(self):
+        from src.bot.handlers import mention
+        from src.services import anthropic_service
+        from tests.test_chat_tools import _full_tools
+        tools, _ = _full_tools(
+            irc_log=MagicMock(), quote_file=MagicMock(), url_content_fetcher=AsyncMock(),
+            self_state_updater=AsyncMock(), reminder_service=MagicMock(), timezone_store=MagicMock(),
+            video_summarizer=AsyncMock(), video_watcher=AsyncMock(),
+        )
+        named = [v for module in (mention, anthropic_service) for k, v in vars(module).items()
+                 if k.endswith("_STATUS") and isinstance(v, str)]
+        return set(named) | {tool.status for tool in tools.values()}
+
+    def test_every_status_has_joke_lines(self):
+        statuses = self._statuses()
+        self.assertGreater(len(statuses), 30)
+        self.assertEqual(statuses - set(STATUS_LINES), set())
+        self.assertEqual(set(STATUS_LINES) - statuses, set(), "lines for a status nothing shows")
+
+    def test_every_line_still_reads_as_a_status(self):
+        for line in [line for lines in STATUS_LINES.values() for line in lines] + list(WILDCARDS):
+            self.assertTrue(is_status_only(_preview("", line, 2000)), line)
+            self.assertLessEqual(len(line), 90, line)
+
+    def test_flavor_picks_a_line_and_sometimes_a_wildcard(self):
+        with patch("src.utils.status_lines.random.random", return_value=0.5):
+            self.assertIn(flavor("thinking..."), STATUS_LINES["thinking..."])
+        with patch("src.utils.status_lines.random.random", return_value=0.0):
+            self.assertIn(flavor("thinking..."), WILDCARDS)
+        self.assertEqual(flavor("something new..."), "something new...")
+
+    async def test_a_repeated_status_keeps_its_line_and_a_new_step_picks_again(self):
+        streamer, _, _, _ = make_streamer()
+        with patch("src.services.streaming_reply.flavor", side_effect=["one...", "two...", "three..."]) as pick:
+            streamer.status("thinking...")
+            streamer.status("thinking...")
+            self.assertEqual(streamer._status, "one...")
+            streamer.status("drawing...")
+            self.assertEqual(streamer._status, "two...")
+            streamer.push("text")
+            streamer.status("drawing...")
+            self.assertEqual(streamer._status, "three...")
+            self.assertEqual(pick.call_count, 3)
+            await settle()
 
 
 class TestPreview(unittest.TestCase):

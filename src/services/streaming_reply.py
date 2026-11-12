@@ -19,6 +19,7 @@ from typing import Any, List, Optional
 import discord
 
 from src.utils.discord_error_utils import concise_error
+from src.utils.status_lines import flavor
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,8 @@ class StreamingReply:
         self._message: Optional[discord.Message] = None
         self._latest = ""
         self._status = ""
+        # The plain status ``_status`` was picked for, so a repeat of it keeps the same line.
+        self._status_key = ""
         self._shown = ""
         self._next_flush_at = 0.0
         self._task: Optional[asyncio.Task] = None
@@ -64,14 +67,21 @@ class StreamingReply:
             return
         self._latest = text if text.strip() else ""
         if self._latest:
-            self._status = ""
+            self._status = self._status_key = ""
         self._schedule()
 
     def status(self, text: str) -> None:
-        """Show what the bot is doing, like ``reading links...``, under the reply so far."""
+        """Show what the bot is doing, like ``reading links...``, under the reply so far.
+
+        What's shown is one of that step's joke lines (``status_lines.flavor``), picked when the
+        step starts and kept while the same status repeats.
+        """
         if self._closed or self._failed:
             return
-        self._status = text.strip()
+        key = text.strip()
+        if key != self._status_key:
+            self._status_key = key
+            self._status = flavor(key)
         self._schedule()
 
     def _schedule(self) -> None:
