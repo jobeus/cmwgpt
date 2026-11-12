@@ -32,6 +32,7 @@ These are loaded by `src/config.py`.
 | `DEPLOY_WEBHOOK_SECRET` | empty | No | Shared secret for the signed deploy webhook; the listener is off when empty (see `docs/auto-update.md`) |
 | `DEPLOY_WEBHOOK_HOST` | `0.0.0.0` | No | Interface the deploy webhook binds to |
 | `DEPLOY_WEBHOOK_PORT` | `8787` | No | Port the deploy webhook listens on (`POST /deploy`) |
+| `PACKAGE_UPDATE_CHECK_HOURS` | `6` | No | How often the bot asks pip whether newer packages are out and restarts to install them; `0` turns it off |
 | `QUIET_UPDATES` | `false` | No | Suppresses restart/update announcements |
 | `TRANSCRIPT_PROXY` | empty | No | Optional helper for transcript/media/article retrieval |
 

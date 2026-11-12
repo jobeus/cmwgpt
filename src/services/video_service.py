@@ -40,6 +40,7 @@ from src.config import get_config
 from src.services.gemini_service import VIDEO_SUMMARY_PROMPT, GeminiServiceError
 from src.utils.cache_utils import PersistentCache
 from src.utils.http_client import download_public
+from src.utils.ssrf_guard import assert_public_url
 from src.utils.instagram_utils import extract_instagram_urls, find_instagram_video_url
 from src.utils.media_transcribe import DOWNLOAD_TIMEOUT_SECONDS, _download_deadline_hook
 from src.utils.twitter_utils import extract_twitter_urls, find_tweet_video_url
@@ -162,6 +163,12 @@ async def download_video(url: str, temp_dir: str) -> str:
         except Exception as e:
             raise VideoError(f"Couldn't download the video: {e}") from e
         return path
+    # yt-dlp fetches whatever it's given, so a link to the local network or a cloud metadata
+    # address must be turned away here (download_public does its own check above).
+    try:
+        await assert_public_url(url)
+    except ValueError as e:
+        raise VideoError("That link doesn't point at a public address.") from e
     found: Optional[str]
     try:
         found = await asyncio.to_thread(_ytdlp_video, url, temp_dir, None)

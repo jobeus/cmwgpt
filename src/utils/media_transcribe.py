@@ -23,6 +23,7 @@ import yt_dlp
 from src.config import get_config
 from src.services.cost_service import GROQ, record_cost
 from src.utils.http_client import download_public
+from src.utils.ssrf_guard import assert_public_url
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +211,13 @@ async def download_and_transcribe_video(
     cfg = get_config()
     if not cfg.groq_api_key:
         logger.error("GROQ_API_KEY is not set. Cannot transcribe %s videos.", label)
+        return None
+
+    # yt-dlp fetches whatever it's given; never point it at the local network.
+    try:
+        await assert_public_url(url)
+    except ValueError as e:
+        logger.warning("Not downloading %s video: %s", label, e)
         return None
 
     logger.info("Fetching %s transcript for URL: %s", label, url)

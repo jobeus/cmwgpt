@@ -133,6 +133,10 @@ async def _convert_message(
                     ref_author_id = h_msg.author.id
                     break
 
+        if ref_text is not None:
+            # A quoted bot reply starts with its cost, which the model shouldn't see or copy.
+            ref_text = COST_PREFIX_PATTERN.sub("", ref_text)
+
         if ref_text is not None and ref_timestamp and ref_author_id:
             reply_text = f"[Replying to message: \"[{ref_timestamp}] [{msg.reference.message_id}] <@{ref_author_id}>: {ref_text}\"]"
         elif ref_text is not None:

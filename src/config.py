@@ -32,6 +32,13 @@ def _read_int(value: Optional[str], default: int) -> int:
     return int(value)
 
 
+def _read_float(value: Optional[str], default: float) -> float:
+    try:
+        return float(value) if value and value.strip() else default
+    except ValueError:
+        return default
+
+
 def resolve_env_file_path(env: Optional[Mapping[str, str]] = None) -> Optional[str]:
     source = os.environ if env is None else env
     explicit_path = source.get("CMWGPT_ENV_FILE", "").strip()
@@ -77,6 +84,8 @@ class AppConfig:
     deploy_webhook_secret: str = ""
     deploy_webhook_host: str = "0.0.0.0"
     deploy_webhook_port: int = 8787
+    # How often to ask pip whether newer packages are out and restart onto them; 0 turns it off.
+    package_update_check_hours: float = 6.0
     # The channel's old IRC log, searchable by the direct models; the tools are off when unset.
     irc_log_path: str = ""
     # An irssistats-style nicks file ("canonical regex" per line) that merges IRC aliases.
@@ -121,6 +130,7 @@ def load_config(
         deploy_webhook_secret=source.get("DEPLOY_WEBHOOK_SECRET", ""),
         deploy_webhook_host=source.get("DEPLOY_WEBHOOK_HOST", "0.0.0.0"),
         deploy_webhook_port=_read_int(source.get("DEPLOY_WEBHOOK_PORT"), 8787),
+        package_update_check_hours=_read_float(source.get("PACKAGE_UPDATE_CHECK_HOURS"), 6.0),
         irc_log_path=source.get("IRC_LOG", "").strip(),
         irc_nicks_path=source.get("IRC_NICKS", "").strip(),
         old_quote_bot_path=source.get("OLD_QUOTE_BOT", "").strip(),

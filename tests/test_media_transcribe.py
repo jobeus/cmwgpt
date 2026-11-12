@@ -227,6 +227,18 @@ class TestDownloadAndTranscribeVideo(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         FakeYoutubeDL.instances = []
+        # No DNS lookups in tests; the guard itself is covered by test_ssrf_guard.
+        guard = patch("src.utils.media_transcribe.assert_public_url", new_callable=AsyncMock)
+        self.guard = guard.start()
+        self.addCleanup(guard.stop)
+
+    async def test_non_public_url_is_never_given_to_yt_dlp(self):
+        self.guard.side_effect = ValueError("resolves to private address")
+        with patch("src.config._cached_config", cfg(groq_api_key="groq-key")), patch(
+            "src.utils.media_transcribe.yt_dlp.YoutubeDL"
+        ) as mock_ydl:
+            self.assertIsNone(await self.run_dl(AsyncDictCache()))
+        mock_ydl.assert_not_called()
 
     async def run_dl(self, cache, *, cache_only=False):
         return await media_transcribe.download_and_transcribe_video(

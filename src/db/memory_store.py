@@ -3,6 +3,8 @@
 One key per user holds their current profile and nothing else (no history):
 
 - ``cmwgpt:memory:<guild_id>:<user_id>`` - the profile text, at most ``MAX_PROFILE_BYTES``
+- ``cmwgpt:memory_users:<guild_id>`` - set of the user IDs that have a profile, so listing them
+  doesn't walk every key in Redis; it's built from the profile keys the first time it's needed
 - ``cmwgpt:memory_job:<guild_id>`` - hash with the nightly job's ``processed_through``,
   ``last_run_at`` and ``last_status``
 - ``cmwgpt:self:<guild_id>`` - hash of the bot's own state in that server: one field per
@@ -27,6 +29,15 @@ MAX_PROFILE_BYTES = 100 * 1024
 
 def _profile_key(guild_id: int, user_id: int) -> str:
     return f"{KEY_PREFIX}memory:{guild_id}:{user_id}"
+
+
+def _index_key(guild_id: int) -> str:
+    return f"{KEY_PREFIX}memory_users:{guild_id}"
+
+
+# Kept in every built index, so a server with no profiles still has one (an empty set doesn't
+# exist in Redis, and would be rebuilt with a full scan on every mention).
+_INDEX_BUILT = "built"
 
 
 def _job_key(guild_id: int) -> str:
@@ -65,14 +76,24 @@ class MemoryStore:
 
     async def list_user_ids(self, guild_id: int) -> List[int]:
         """The IDs of every user in a server who has a profile, sorted."""
+        client = self._redis_getter()
+        members = await client.smembers(_index_key(guild_id))
+        if not members:
+            members = await self._build_index(guild_id)
+        ids = (m.decode() if isinstance(m, bytes) else m for m in members)
+        return sorted(int(m) for m in ids if m.isdigit())
+
+    async def _build_index(self, guild_id: int) -> List[str]:
+        """Make the server's index from its profile keys (the one time this scans Redis)."""
         prefix = f"{KEY_PREFIX}memory:{guild_id}:"
         client = self._redis_getter()
         ids = []
         async for key in client.scan_iter(match=f"{prefix}*", count=500):
             key = key.decode() if isinstance(key, bytes) else key
             if key[len(prefix):].isdigit():
-                ids.append(int(key[len(prefix):]))
-        return sorted(ids)
+                ids.append(key[len(prefix):])
+        await client.sadd(_index_key(guild_id), _INDEX_BUILT, *ids)
+        return ids
 
     async def save_profile(self, guild_id: int, user_id: int, profile: str) -> None:
         """Replace a user's profile (an empty one removes it)."""
@@ -84,11 +105,17 @@ class MemoryStore:
             logger.warning(
                 "Memory for user %s in guild %s was over %s bytes; trimmed", user_id, guild_id, MAX_PROFILE_BYTES
             )
-        await self._redis_getter().set(_profile_key(guild_id, user_id), capped)
+        client = self._redis_getter()
+        await client.set(_profile_key(guild_id, user_id), capped)
+        # Only into an index that's been built: a lone entry would pass for the whole list.
+        if await client.exists(_index_key(guild_id)):
+            await client.sadd(_index_key(guild_id), str(user_id))
 
     async def clear_user(self, guild_id: int, user_id: int) -> None:
         """Wipe a user's profile."""
-        await self._redis_getter().delete(_profile_key(guild_id, user_id))
+        client = self._redis_getter()
+        await client.delete(_profile_key(guild_id, user_id))
+        await client.srem(_index_key(guild_id), str(user_id))
 
     async def clear_learned_profiles(self, guild_id: int) -> None:
         """Wipe every profile in a server (used by /fillmemory)."""
@@ -96,6 +123,7 @@ class MemoryStore:
         keys = [key async for key in client.scan_iter(match=f"{KEY_PREFIX}memory:{guild_id}:*", count=500)]
         if keys:
             await client.delete(*keys)
+        await client.delete(_index_key(guild_id))
 
     async def clear_retired(self, guild_id: int) -> None:
         """Remove what the bot no longer keeps for a server: channel summaries, and the

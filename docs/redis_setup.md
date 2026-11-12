@@ -5,6 +5,7 @@ Redis holds everything the bot keeps between restarts:
 | Keys | What | Expires |
 | --- | --- | --- |
 | `cmwgpt:memory:<guild>:<user>` | One user's memory profile, right now (no history), max 100 KB | Never |
+| `cmwgpt:memory_users:<guild>` | Set of the user IDs with a profile (plus a `built` marker); rebuilt from the profile keys if deleted | Never |
 | `cmwgpt:memory_job:<guild>` | Nightly memory job progress (`processed_through`, last status) | Never |
 | `cmwgpt:costs:<YYYY-MM-DD>` | That day's spending (America/Denver): one field per provider, per person and per channel, for `/cost` | 400 days |
 | `cmwgpt:reminders:due`, `cmwgpt:reminder:<id>`, `cmwgpt:reminders:next_id` | Pending reminders (a sorted set by due time, one hash each) and the ID counter | Removed once posted |

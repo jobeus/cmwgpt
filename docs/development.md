@@ -83,7 +83,7 @@ CI runs only the Python job, on Python 3.14 (what the server runs): ruff, mypy, 
 | Run Python tests | `make test` |
 | Run verbose Python tests | `make test-verbose` |
 | Run coverage | `make test-coverage` |
-| Run a specific test module | `make test-specific TEST=downloader_utils` |
+| Run a specific test module | `make test-specific TEST=tests/test_downloader_utils.py` |
 | Run pytest directly | `.venv/bin/python -m pytest` |
 | Lint Python | `make lint` |
 | Type-check Python | `make typecheck` |

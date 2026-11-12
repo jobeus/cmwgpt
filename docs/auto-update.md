@@ -9,12 +9,14 @@ This page explains the bot's **git-aware restart model** so it feels predictable
 | `AutoUpdateService` | Listens for a signed deploy webhook from GitHub Actions and triggers a restart |
 | `RestartHandler` | Saves state, pulls code, runs the normal shutdown, and exits with restart code `42` |
 | `AnnouncementService` | Announces relevant updates after the bot comes back up |
+| `PackageUpdateService` | Every few hours asks pip whether newer packages are out and triggers the same restart to install them |
 
 Relevant code:
 
 - `src/services/auto_update_service.py`
 - `src/services/restart_handler.py`
 - `src/services/announcement_service.py`
+- `src/services/package_update_service.py`
 
 ## The config switches that matter most
 
@@ -22,6 +24,7 @@ Relevant code:
 | --- | --- |
 | `DEPLOY_WEBHOOK_SECRET` | Shared HMAC secret; when set, the bot listens for deploy webhooks. Empty disables it |
 | `DEPLOY_WEBHOOK_HOST` / `DEPLOY_WEBHOOK_PORT` | Where the listener binds (default `0.0.0.0:8787`) |
+| `PACKAGE_UPDATE_CHECK_HOURS` | Hours between checks for newer packages (default `6`); `0` turns the checks off |
 | `QUIET_UPDATES=true` | Suppress update announcements after restart |
 | `QUIET_UPDATES=false` | Allow update announcements when appropriate |
 
@@ -49,6 +52,17 @@ The restart path is intentional and stateful:
 5. `main.py` exits with code `42`
 
 That exit code is a signal to the **outer supervisor**, not an error to be ignored.
+
+## Package updates
+
+The bot always runs the newest release of every package, including the ones its requirements depend on:
+
+- `start.sh` runs `pip install --upgrade --upgrade-strategy eager -r requirements.txt` on every restart.
+- `PackageUpdateService` runs the same command with `--dry-run` every `PACKAGE_UPDATE_CHECK_HOURS`. If it would install anything, the bot restarts through the normal restart path. The commit hasn't changed, so nothing is announced.
+- The list that triggered a restart is kept in Redis. If the same list is still pending afterwards (a release pip can't install, or a deployment such as the Docker stack whose restart doesn't reinstall), the bot logs a warning and does not restart again for it.
+- Dependabot still raises the `>=` floors in `requirements.txt` daily, which keeps fresh installs and CI on current versions.
+
+Versions are deliberately not pinned: a new release reaches the bot before CI has run against it.
 
 ## Manual restart: `/restart`
 

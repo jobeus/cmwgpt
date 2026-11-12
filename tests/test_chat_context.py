@@ -76,6 +76,15 @@ class TestBuildChatContext(unittest.IsolatedAsyncioTestCase):
         self.assertIn('[Replying to message: "[', text_of(result[1]))
         self.assertIn("[10] <@7>: original text", text_of(result[1]))
 
+    async def test_cost_prefix_is_stripped_from_a_quoted_bot_reply(self):
+        original = make_msg(10, "[$0.012] the answer", author_id=BOT_ID)
+        reply = make_msg(11, "thanks", reference=SimpleNamespace(message_id=10, resolved=None, cached_message=None))
+
+        result = await self.build([original, reply])
+
+        self.assertIn(f"[10] <@{BOT_ID}>: the answer", text_of(result[1]))
+        self.assertNotIn("$0.012", text_of(result[1]))
+
     async def test_links_in_a_quoted_bot_reply_are_not_fetched(self):
         fetcher = AsyncMock(return_value=("", []))
         bot_reply = make_msg(10, "from the log: https://youtu.be/abc", author_id=BOT_ID)

@@ -149,6 +149,7 @@ def linking(monkeypatch):
     monkeypatch.setattr(telemetry, "_uploader", uploader)
     monkeypatch.setattr(telemetry, "_links", telemetry.LRUCache(10))
     monkeypatch.setattr(telemetry, "_pending", {})
+    monkeypatch.setattr(telemetry, "_retry_at", telemetry.LRUCache(10))
     monkeypatch.setattr(telemetry, "_link_store", store)
     return SimpleNamespace(uploads=uploads, store=store)
 
@@ -187,6 +188,25 @@ async def test_a_failed_upload_leaves_the_plain_note(linking, monkeypatch):
     await telemetry.image_links_ready(images=[(b"png", "image/png")])
     assert telemetry._blob_note("image/png", b"png") == "[image/png, 3 B]"
     assert telemetry._pending == {}
+
+
+@pytest.mark.asyncio
+async def test_a_failed_upload_is_not_tried_again_straight_away(linking, monkeypatch):
+    calls = []
+
+    async def broken(data, media_type):
+        calls.append(data)
+        raise RuntimeError("413 too large")
+
+    monkeypatch.setattr(telemetry, "_uploader", broken)
+    await telemetry.image_links_ready(images=[(b"png", "image/png")])
+    await telemetry.image_links_ready(images=[(b"png", "image/png")])
+    assert len(calls) == 1
+
+    monkeypatch.setattr(telemetry, "UPLOAD_RETRY_SECONDS", -1)
+    telemetry._retry_at[telemetry._image_key(b"png")] = 0.0
+    await telemetry.image_links_ready(images=[(b"png", "image/png")])
+    assert len(calls) == 2
 
 
 def test_nothing_is_uploaded_while_tracing_is_off(monkeypatch):

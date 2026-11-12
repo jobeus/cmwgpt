@@ -86,6 +86,6 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 - `/death`, `/forcedeath` and `/limerick` cover the rest of deathwatch. `/forcedeath` and `/limerick` take a Wikipedia URL or a name in any capitalization and go to the real article, following redirects.
 - `/help`.
 
-**Deploys:** a push to main runs CI (lint, mypy, tests), then a signed webhook tells you to restart. A restart (`/restart` is admin-only) saves state to Redis, `git pull`s, drains the queues, and exits with code 42. The start script reinstalls dependencies and relaunches, and systemd supervises it.
+**Deploys:** a push to main runs CI (lint, mypy, tests), then a signed webhook tells you to restart. A restart (`/restart` is admin-only) saves state to Redis, `git pull`s, drains the queues, and exits with code 42. The start script upgrades every Python package to its newest release (dependencies of dependencies too) and relaunches, and systemd supervises it. Every 6 hours you also ask pip whether newer releases are out and restart to install them, so packages never sit on an old version; that restart isn't announced. Dependabot raises the version floors in the repo daily.
 
 For changes or specifics beyond this, point people to your creator.

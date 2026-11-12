@@ -23,7 +23,9 @@ while true; do
     if [ $exit_code -eq 42 ]; then
         echo "Restarting script because it exited with code 42"
         echo "Running pip install requirements..."
-        "$PIP" install --upgrade -r requirements.txt
+        # eager: also upgrade the packages our requirements depend on, not just the ones
+        # listed, so nothing stays on an old release.
+        "$PIP" install --upgrade --upgrade-strategy eager -r requirements.txt
         sleep 1
     else
         echo "Not restarting. Exiting."

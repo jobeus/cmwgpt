@@ -244,12 +244,13 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
     def test_cost_estimation_with_cached(self):
         service = self.make_service()
         usage = SimpleNamespace(
-            total_input_tokens=500,
+            total_input_tokens=5500,
             total_output_tokens=100,
             total_thought_tokens=0,
             total_cached_tokens=5000,
         )
         cost = service._estimate_cost(usage)
+        # The input count includes the cached tokens, which are charged once at the cached rate.
         input_cost = 500 * PRICE_INPUT_PER_M / 1_000_000
         output_cost = 100 * PRICE_OUTPUT_PER_M / 1_000_000
         cached_cost = 5000 * PRICE_CACHED_PER_M / 1_000_000

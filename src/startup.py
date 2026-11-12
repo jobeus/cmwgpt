@@ -19,6 +19,7 @@ from src.services.gemini_service import GeminiService
 from src.services.irc_log_service import load_irc_log
 from src.services.quote_service import load_quote_file
 from src.services.memory_service import MemoryService
+from src.services.package_update_service import PackageUpdateService
 from src.services.paste_service import PasteService
 from src.services.queue_service import QueueService
 from src.services.reminder_service import ReminderService
@@ -49,6 +50,7 @@ class AppServices:
     memory_service: Any = None
     cost_store: Any = None
     reminder_service: Any = None
+    package_update_service: Any = None
 
 
 def create_services(config: Optional[AppConfig] = None) -> AppServices:
@@ -82,6 +84,12 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         secret=app_config.deploy_webhook_secret,
         host=app_config.deploy_webhook_host,
         port=app_config.deploy_webhook_port,
+    )
+    package_update_service = PackageUpdateService(
+        store=state_store,
+        restart=auto_update_service.trigger_restart,
+        interval_hours=app_config.package_update_check_hours,
+        is_testing=app_config.is_testing,
     )
     announcement_service = AnnouncementService(
         state_service=state_service,
@@ -146,6 +154,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         memory_service=memory_service,
         cost_store=cost_store,
         reminder_service=reminder_service,
+        package_update_service=package_update_service,
     )
 
 
@@ -164,6 +173,8 @@ async def shutdown_services(services: AppServices) -> None:
             logger.error("Shutdown: %s failed: %s", name, e, exc_info=True)
 
     await step("deploy webhook stop", services.auto_update_service.stop)
+    if getattr(services, "package_update_service", None) is not None:
+        await step("package update checks stop", services.package_update_service.stop)
     if services.memory_service is not None:
         await step("memory job stop", services.memory_service.stop)
     if getattr(services, "reminder_service", None) is not None:

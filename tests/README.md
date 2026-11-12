@@ -9,11 +9,10 @@ This repository has a Python-heavy test suite that covers bot startup, commands,
 | Default suite | `make test` |
 | Verbose suite | `make test-verbose` |
 | Coverage run | `make test-coverage` |
-| Single module through helper | `make test-specific TEST=downloader_utils` |
+| Single module through helper | `make test-specific TEST=tests/test_downloader_utils.py` |
 | Direct pytest | `.venv/bin/python -m pytest` |
-| Direct unittest discovery | `.venv/bin/python -m unittest discover tests -v` |
 
-`make test` uses `tests/run_tests.py`, which discovers `test_*.py` modules and prints a summary.
+`make test` runs pytest (configured in `pytest.ini`), which runs both the `unittest.TestCase` classes and the function-style tests. CI and the pre-commit hook use the same command.
 
 ## What the suite covers
 

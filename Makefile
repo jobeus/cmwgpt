@@ -16,7 +16,7 @@ help:
 	@echo "  test          - Run all tests"
 	@echo "  test-verbose  - Run tests with verbose output"
 	@echo "  test-coverage - Run tests with coverage report"
-	@echo "  test-specific - Run specific test (usage: make test-specific TEST=config)"
+	@echo "  test-specific - Run specific test (usage: make test-specific TEST=tests/test_config.py)"
 	@echo "  lint          - Run code linting"
 	@echo "  typecheck     - Run Python type checking"
 	@echo "  autofix       - Auto-fix linting issues"
@@ -52,11 +52,11 @@ install-hooks:
 
 # Run all tests
 test:
-	$(PYTHON) tests/run_tests.py
+	$(PYTHON) -m pytest
 
 # Run tests with verbose output
 test-verbose:
-	$(PYTHON) -m unittest discover tests -v
+	$(PYTHON) -m pytest -v
 
 # Run tests with coverage (requires pytest)
 test-coverage:
@@ -64,7 +64,7 @@ test-coverage:
 
 # Run specific test module
 test-specific:
-	$(PYTHON) tests/run_tests.py $(TEST)
+	$(PYTHON) -m pytest $(TEST)
 
 # Run code linting
 lint:

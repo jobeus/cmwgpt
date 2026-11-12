@@ -209,6 +209,8 @@ class DiscordBotClient:
             await step("message queue", self.services.queue_service.start)
             await step("command sync", sync_commands)
             await step("deploy webhook", self.services.auto_update_service.start)
+            if getattr(self.services, "package_update_service", None) is not None:
+                await step("package update checks", self.services.package_update_service.start)
             await step("death service", self.services.death_service.start)
 
             if getattr(self.services, "memory_service", None) is not None:

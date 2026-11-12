@@ -138,6 +138,19 @@ class TestWatchYoutube(unittest.IsolatedAsyncioTestCase):
 
 
 class TestDownloadVideo(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # No DNS lookups in tests; the guard itself is covered by test_ssrf_guard.
+        guard = patch("src.services.video_service.assert_public_url", new_callable=AsyncMock)
+        self.guard = guard.start()
+        self.addCleanup(guard.stop)
+
+    async def test_non_public_link_is_never_given_to_yt_dlp(self):
+        self.guard.side_effect = ValueError("resolves to private address")
+        with patch("src.services.video_service._ytdlp_video") as mock_ytdlp:
+            with self.assertRaises(VideoError):
+                await download_video("http://169.254.169.254/latest/meta-data", "/tmp/x")
+        mock_ytdlp.assert_not_called()
+
     async def test_tweets_use_the_rapidapi_video_url(self):
         with patch("src.services.video_service.find_tweet_video_url",
                    new=AsyncMock(return_value="https://video.twimg.com/a.mp4")), patch(

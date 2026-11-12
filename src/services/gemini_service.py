@@ -292,29 +292,9 @@ class GeminiService:
         return parts
 
     def _estimate_cost(self, usage: Any) -> float:
-        """Estimate cost from Interactions API usage metadata."""
-        if not usage:
-            return 0.0
-
+        """Estimate a chat reply's cost from Interactions API usage metadata."""
         try:
-            # The usage object has attributes like total_input_tokens, etc.
-            input_tokens = getattr(usage, 'total_input_tokens', 0) or 0
-            output_tokens = getattr(usage, 'total_output_tokens', 0) or 0
-            thought_tokens = getattr(usage, 'total_thought_tokens', 0) or 0
-            cached_tokens = getattr(usage, 'total_cached_tokens', 0) or 0
-
-            # If attributes don't exist, try dict access
-            if isinstance(usage, dict):
-                input_tokens = usage.get('total_input_tokens', 0) or 0
-                output_tokens = usage.get('total_output_tokens', 0) or 0
-                thought_tokens = usage.get('total_thought_tokens', 0) or 0
-                cached_tokens = usage.get('total_cached_tokens', 0) or 0
-
-            input_cost = input_tokens * PRICE_INPUT_PER_M / 1_000_000
-            output_cost = (output_tokens + thought_tokens) * PRICE_OUTPUT_PER_M / 1_000_000
-            cached_cost = cached_tokens * PRICE_CACHED_PER_M / 1_000_000
-
-            return input_cost + output_cost + cached_cost
+            return self._estimate_interaction_cost(usage)
         except Exception as e:
             logger.warning("Failed to estimate Gemini cost: %s", e)
             return 0.0
@@ -413,7 +393,11 @@ class GeminiService:
 
     @staticmethod
     def _estimate_interaction_cost(usage: Any) -> float:
-        """Price Interactions API usage: input (and what agentic tools loaded) at the input rate."""
+        """Price Interactions API usage: input (and what agentic tools loaded) at the input rate.
+
+        ``total_input_tokens`` includes the cached ones, so those come off before pricing it;
+        they're charged once, at the cached rate.
+        """
         if not usage:
             return 0.0
 

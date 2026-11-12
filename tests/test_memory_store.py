@@ -34,6 +34,28 @@ class TestMemoryStore(unittest.IsolatedAsyncioTestCase):
         await self.redis.set("cmwgpt:channel_summary:42:5", "not a profile")
         self.assertEqual(await self.store.list_user_ids(42), [3, 7])
 
+    async def test_list_user_ids_scans_once_then_follows_saves_and_clears(self):
+        await self.store.save_profile(42, 7, "a")
+        self.assertEqual(await self.store.list_user_ids(42), [7])
+
+        with patch.object(self.redis, "scan_iter", side_effect=AssertionError("scanned again")):
+            await self.store.save_profile(42, 3, "b")
+            self.assertEqual(await self.store.list_user_ids(42), [3, 7])
+            await self.store.clear_user(42, 7)
+            self.assertEqual(await self.store.list_user_ids(42), [3])
+            await self.store.save_profile(42, 3, "")
+            self.assertEqual(await self.store.list_user_ids(42), [])
+            # A server with no profiles at all doesn't scan every time either.
+            self.assertEqual(await self.store.list_user_ids(42), [])
+
+    async def test_clearing_every_profile_resets_the_index(self):
+        await self.store.save_profile(42, 7, "a")
+        await self.store.list_user_ids(42)
+        await self.store.clear_learned_profiles(42)
+        self.assertEqual(await self.store.list_user_ids(42), [])
+        await self.store.save_profile(42, 8, "b")
+        self.assertEqual(await self.store.list_user_ids(42), [8])
+
     async def test_saving_again_replaces_the_profile(self):
         await self.store.save_profile(42, 1, "old")
         await self.store.save_profile(42, 1, "new")

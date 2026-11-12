@@ -32,6 +32,7 @@ import hashlib
 import logging
 import os
 import re
+import time
 from typing import Any, Awaitable, Callable, Dict, Iterator, Optional, Sequence, Tuple
 
 import logfire
@@ -103,6 +104,10 @@ _sending = False
 _uploader: Optional[Callable[[bytes, str], Awaitable[str]]] = None
 _links: LRUCache[str] = LRUCache(2000)
 _pending: Dict[str, "asyncio.Task[None]"] = {}
+# When an image's upload may be tried again after failing. Without it, an image the paste
+# service won't take is re-uploaded (and waited on) by every model call that includes it.
+UPLOAD_RETRY_SECONDS = 600
+_retry_at: LRUCache[float] = LRUCache(2000)
 _link_store: Optional[PersistentCache] = None
 
 
@@ -148,6 +153,7 @@ async def _upload(key: str, raw: bytes, media_type: str) -> None:
             _links[key] = link
     except Exception as e:
         logger.warning("[telemetry] Couldn't upload a %s for its trace link: %s", media_type, e)
+        _retry_at[key] = time.monotonic() + UPLOAD_RETRY_SECONDS
     finally:
         _pending.pop(key, None)
 
@@ -163,7 +169,7 @@ def start_image_upload(data: Any, media_type: str) -> "Optional[asyncio.Task[Non
     if not raw:
         return None
     key = _image_key(raw)
-    if key in _links:
+    if key in _links or time.monotonic() < (_retry_at.get(key) or 0.0):
         return None
     task = _pending.get(key)
     if task is None:
