@@ -36,7 +36,7 @@ STATUS_LINES: Dict[str, Tuple[str, ...]] = {
         "consulting the part of me that claims to know things...",
         "pondering, and resenting it slightly...",
     ),
-    "asking opus for advice...": (
+    "asking a smarter model for advice...": (
         "asking a much larger brain, which will be smug about it...",
         "phoning the expensive model. it charges by the sigh...",
         "seeking counsel from a higher, pricier intelligence...",

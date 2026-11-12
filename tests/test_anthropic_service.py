@@ -102,6 +102,17 @@ class TestHelpers(unittest.TestCase):
         self.assertAlmostEqual(_usage_cost(usage, DIRECT_MODELS["sonnet-5.5-direct"]), 2.00 + 1.00 + 0.02)
         self.assertAlmostEqual(_usage_cost(usage, DIRECT_MODELS["opus-5.5-direct"]), 4.00 + 2.00 + 0.02)
 
+    def test_haiku_costs_five_times_as_much_over_100k_prompt_tokens(self):
+        haiku = DIRECT_MODELS["haiku-5.5-direct"]
+        short = _usage(input_tokens=60_000, output_tokens=1_000_000)
+        short.cache_read_input_tokens = 40_000
+        self.assertAlmostEqual(_usage_cost(short, haiku), 0.006 + 0.0004 + 0.50)
+        long = _usage(input_tokens=60_000, output_tokens=1_000_000)
+        long.cache_read_input_tokens = 40_001
+        self.assertAlmostEqual(_usage_cost(long, haiku), 5 * (0.006 + 0.00040001 + 0.50))
+        # The other models cost the same at any length.
+        self.assertAlmostEqual(_usage_cost(long, DIRECT_MODELS["sonnet-5.5-direct"]), 0.12 + 0.0040001 + 10.00)
+
     def test_usage_cost_prices_1h_cache_writes_at_twice_input(self):
         usage = _usage(input_tokens=0, output_tokens=0)
         usage.cache_creation_input_tokens = 3_000_000
@@ -204,6 +215,17 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["output_config"], {"effort": "low"})
         self.assertAlmostEqual(cost, 4.00)
 
+    async def test_haiku_gets_the_same_tools_and_no_fallback(self):
+        service, client = self.make_service(_response("duh", model="claude-haiku-5-5"))
+        await service.get_chat_completion(
+            model="haiku-5.5-direct", messages=[{"role": "user", "content": "q"}])
+        kwargs = client.beta.messages.create.call_args.kwargs
+        self.assertEqual(kwargs["model"], "claude-haiku-5-5")
+        self.assertEqual(kwargs["output_config"], {"effort": "medium"})
+        self.assertEqual(kwargs["tools"][0]["type"], "web_search_20260209")
+        self.assertNotIn("fallbacks", kwargs)
+        self.assertNotIn("server-side-fallback-2026-07-01", kwargs["betas"])
+
     async def test_effort_override_replaces_model_effort(self):
         service, client = self.make_service(_response("deep"))
         await service.get_chat_completion(
@@ -211,23 +233,24 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         kwargs = client.beta.messages.create.call_args.kwargs
         self.assertEqual(kwargs["output_config"], {"effort": "medium"})
 
-    async def test_sonnet_gets_an_opus_advisor_and_opus_does_not(self):
-        service, client = self.make_service(_response("a"), _response("b"), _response("c"))
+    async def test_sonnet_and_haiku_get_a_stronger_advisor_and_opus_does_not(self):
+        service, client = self.make_service(_response("a"), _response("b"), _response("c"), _response("d"))
         for model, channel_id, offered in (
-            ("sonnet-5.5-direct", 7, True),
-            ("sonnet-5.5-direct", None, False),  # a background job
-            ("opus-5.5-direct", 7, False),
+            ("sonnet-5.5-direct", 7, "claude-opus-5-5"),
+            ("sonnet-5.5-direct", None, None),  # a background job
+            ("opus-5.5-direct", 7, None),
+            ("haiku-5.5-direct", 7, "claude-sonnet-5-5"),
         ):
             await service.get_chat_completion(
                 model=model, messages=[{"role": "user", "content": "q"}], channel_id=channel_id)
             kwargs = client.beta.messages.create.call_args.kwargs
             advisors = [t for t in kwargs["tools"] if t.get("name") == "advisor"]
-            self.assertEqual(bool(advisors), offered, (model, channel_id))
-            self.assertEqual(ADVISOR_BETA in kwargs["betas"], offered, (model, channel_id))
+            self.assertEqual(bool(advisors), bool(offered), (model, channel_id))
+            self.assertEqual(ADVISOR_BETA in kwargs["betas"], bool(offered), (model, channel_id))
             self.assertNotIn("think_harder", [t.get("name") for t in kwargs["tools"]])
             if offered:
                 self.assertEqual(advisors[0]["type"], "advisor_20260301")
-                self.assertEqual(advisors[0]["model"], "claude-opus-5-5")
+                self.assertEqual(advisors[0]["model"], offered)
 
     async def test_advisor_runs_are_priced_at_the_advisors_rates(self):
         usage = _usage(input_tokens=1_000_000, output_tokens=0)

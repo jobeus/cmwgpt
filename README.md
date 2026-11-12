@@ -27,7 +27,7 @@ Mention-first Discord bot with URL-aware prompt enrichment, image generation/edi
 | Chat | Users mention the bot in Discord; there is no current `/chat` command |
 | Context building | Recent channel history, reply context, embeds, and attachments are folded into the prompt |
 | URL enrichment | The bot can inject transcripts/context from YouTube, TikTok, Twitter/X, Facebook, Instagram, Reddit, and generic articles |
-| Tools | On the Claude API direct models, the model calls tools itself: draw/edit images, memory, Discord and old IRC log search, viewing posted images, reactions, the old quote bot, reading any URL, watching videos and summarizing YouTube, reminders and time zones, prediction markets, stock and option prices and a paper-trading game on an Alpaca paper account, election results, web search, code execution, Wikipedia pageviews, and on Sonnet an Opus advisor (`docs/architecture.md#claude-api-tools`) |
+| Tools | On the Claude API direct models, the model calls tools itself: draw/edit images, memory, Discord and old IRC log search, viewing posted images, reactions, the old quote bot, reading any URL, watching videos and summarizing YouTube, reminders and time zones, prediction markets, stock and option prices and a paper-trading game on an Alpaca paper account, election results, web search, code execution, Wikipedia pageviews, and a stronger-model advisor (Opus for Sonnet, Sonnet for Haiku) (`docs/architecture.md#claude-api-tools`) |
 | Images | `/draw` and `/edit` use Gemini's image models (banana-2.1, banana-pro, banana-2-lite) with aspect ratio, size, thinking, search grounding and up to 8 reference images |
 | Memory | A nightly job learns short per-user profiles (stored in Redis) and adds them to mentions; `/memory` shows and edits them |
 | Observability | Python logging goes to stdout and `logs/`; every answered mention also gets one JSON line in `logs/mentions.jsonl` (its whole text, model, cost, tokens, tools, web searches, time, errors). With `LOGFIRE_TOKEN` set, calls are also traced in Pydantic Logfire. There is no request log table or log viewer |
@@ -61,7 +61,7 @@ Redis isn't exposed on the host. The bot only listens for the deploy webhook, an
 
 | Group | Commands |
 | --- | --- |
-| General | `/help`, `/model`, `/restart`, `/wikicount`, `/cost` |
+| General | `/help`, `/model`, `/lobotomize`, `/restart`, `/wikicount`, `/cost` |
 | Prompting | `/systemprompt set`, `/systemprompt view`, `/systemprompt reset` |
 | Images | `/draw`, `/edit`, `/imagemodel` |
 | Memory | `/memory show`, `/memory correct`, `/memory clear`, `/fillmemory`, `/botstate` |

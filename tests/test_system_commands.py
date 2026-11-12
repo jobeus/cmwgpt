@@ -2,7 +2,7 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import discord.ext.commands  # noqa: F401
 
@@ -48,6 +48,28 @@ class TestSystemCommands(unittest.IsolatedAsyncioTestCase):
         state_service.mark_channel_active.assert_called_once_with(321)
         state_service.set_model.assert_called_once_with(321, "gpt-test")
         interaction.followup.send.assert_awaited_once_with("Model set to `gpt-test`.", ephemeral=True)
+
+    async def test_lobotomize_sets_channel_to_haiku(self):
+        commands, _, _, state_service = self.make_commands()
+        on_change = Mock()
+        commands._on_model_change = on_change
+        interaction = make_interaction(channel_id=321)
+
+        with patch("src.bot.commands.system.is_model_unavailable", return_value=False):
+            await commands._handle_lobotomize_command(interaction)
+
+        state_service.set_model.assert_called_once_with(321, "haiku-5.5-direct")
+        on_change.assert_called_once_with(321)
+        interaction.followup.send.assert_awaited_once_with("Lobotomized. Model set to `haiku-5.5-direct`.")
+
+    async def test_lobotomize_needs_the_anthropic_key(self):
+        commands, _, _, state_service = self.make_commands()
+        interaction = make_interaction()
+
+        with patch("src.bot.commands.system.is_model_unavailable", return_value=True):
+            await commands._handle_lobotomize_command(interaction)
+
+        state_service.set_model.assert_not_called()
 
     async def test_handle_model_command_calls_on_model_change_only_when_setting(self):
         commands, _, _, state_service = self.make_commands()
@@ -174,7 +196,7 @@ class TestSystemCommands(unittest.IsolatedAsyncioTestCase):
 
         commands.setup_commands()
 
-        self.assertEqual(bot.tree.add_command.call_count, 4)
+        self.assertEqual(bot.tree.add_command.call_count, 5)
 
     async def test_model_command_defers_and_reports_busy_when_queue_is_full(self):
         commands, _, queue_service, _ = self.make_commands()

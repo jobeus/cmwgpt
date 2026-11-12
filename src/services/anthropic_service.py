@@ -36,6 +36,12 @@ class DirectModel:
     price_cache_write: float
     price_cache_read: float
     effort: str
+    # Whether the API can re-run a declined request on a fallback model.
+    fallbacks: bool = True
+    # A request whose prompt (all input tokens, cached or not) is longer than this is billed
+    # at ``long_prompt_factor`` times every rate.
+    long_prompt_tokens: Optional[int] = None
+    long_prompt_factor: float = 1.0
 
     @property
     def price_cache_write_1h(self) -> float:
@@ -50,6 +56,11 @@ DIRECT_MODELS: Dict[str, DirectModel] = {
     "sonnet-5.5-direct": DirectModel("claude-sonnet-5-5", 2.00, 10.00, 2.50, 0.10, effort="medium"),
     # Opus 5.5 can't turn thinking off; its default ``medium`` overthinks chat, so run it at ``low``.
     "opus-5.5-direct": DirectModel("claude-opus-5-5", 4.00, 20.00, 5.00, 0.20, effort="low"),
+    # ``medium`` (its default): Haiku 5.5 is the likeliest to skip a search it needs at ``low``.
+    # It has no server-side fallback, and prompts over 100K tokens cost 5x.
+    "haiku-5.5-direct": DirectModel(
+        "claude-haiku-5-5", 0.10, 0.50, 0.125, 0.01, effort="medium",
+        fallbacks=False, long_prompt_tokens=100_000, long_prompt_factor=5.0),
 }
 _MODELS_BY_API_ID: Dict[str, DirectModel] = {m.api_id: m for m in DIRECT_MODELS.values()}
 
@@ -82,8 +93,9 @@ MAX_TOOL_ROUNDS = 6
 # The API's advisor tool: mid-reply, the model can ask a stronger one for guidance. The API runs
 # that model itself on the whole transcript and hands the advice back within the same request.
 # Bot model alias -> the advisor's API model; only the models listed here get the tool.
-ADVISOR_MODELS = {"sonnet-5.5-direct": "claude-opus-5-5"}
+ADVISOR_MODELS = {"sonnet-5.5-direct": "claude-opus-5-5", "haiku-5.5-direct": "claude-sonnet-5-5"}
 ADVISOR_BETA = "advisor-tool-2026-03-01"
+FALLBACK_BETA = "server-side-fallback-2026-07-01"
 # Advisor calls per reply, across its tool rounds, and the output cap (thinking included) of each.
 ADVISOR_MAX_USES = 2
 ADVISOR_MAX_TOKENS = 2048
@@ -100,7 +112,7 @@ def advisor_tool(advisor_api_model: str) -> Dict[str, Any]:
     }
 
 
-ADVISOR_STATUS = "asking opus for advice..."
+ADVISOR_STATUS = "asking a smarter model for advice..."
 # What the reply preview says while the model is working, by the content block it's on.
 THINKING_STATUS = "thinking..."
 WEB_SEARCH_STATUS = "searching the web..."
@@ -357,13 +369,16 @@ def _token_cost(usage: Any, model: DirectModel) -> float:
     """Price the token counts on ``usage`` (a usage block or one of its iterations) at ``model``'s rates."""
     written = getattr(usage, "cache_creation_input_tokens", 0) or 0
     written_1h = getattr(getattr(usage, "cache_creation", None), "ephemeral_1h_input_tokens", 0) or 0
+    uncached = getattr(usage, "input_tokens", 0) or 0
+    read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    long_prompt = model.long_prompt_tokens is not None and uncached + written + read > model.long_prompt_tokens
     return (
-        (getattr(usage, "input_tokens", 0) or 0) * model.price_input
+        uncached * model.price_input
         + (getattr(usage, "output_tokens", 0) or 0) * model.price_output
         + (written - written_1h) * model.price_cache_write
         + written_1h * model.price_cache_write_1h
-        + (getattr(usage, "cache_read_input_tokens", 0) or 0) * model.price_cache_read
-    ) / 1_000_000
+        + read * model.price_cache_read
+    ) * (model.long_prompt_factor if long_prompt else 1.0) / 1_000_000
 
 
 def _advisor_iterations(usage: Any) -> List[Any]:
@@ -699,10 +714,12 @@ class AnthropicService:
             "model": api_model,
             "max_tokens": max_tokens,
             "output_config": {"effort": effort or direct_model.effort},
-            # On a safety decline, let the API re-run on its recommended fallback model.
-            "betas": ["server-side-fallback-2026-07-01", CACHE_DIAGNOSIS_BETA],
-            "fallbacks": "default",
+            "betas": [CACHE_DIAGNOSIS_BETA],
         }
+        if direct_model.fallbacks:
+            # On a safety decline, let the API re-run on its recommended fallback model.
+            kwargs["betas"] = [FALLBACK_BETA] + kwargs["betas"]
+            kwargs["fallbacks"] = "default"
         # Only mention replies pass a channel; background jobs run hours apart, so they keep
         # the cheaper 5-minute writes.
         cache_control = _EPHEMERAL_1H if channel_id else _EPHEMERAL

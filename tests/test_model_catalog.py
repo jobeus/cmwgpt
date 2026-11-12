@@ -16,7 +16,7 @@ class TestModelCatalog(unittest.TestCase):
 
     def test_all_models_offered_when_all_keys_set(self):
         values = [m.value for m in available_models(self.config("g", "a"))]
-        self.assertEqual(values, ["sonnet-5.5-direct", "opus-5.5-direct", "google", "google-high"])
+        self.assertEqual(values, ["sonnet-5.5-direct", "opus-5.5-direct", "haiku-5.5-direct", "google", "google-high"])
 
     def test_no_models_without_keys(self):
         self.assertEqual(available_models(self.config()), [])

@@ -19,6 +19,7 @@ class ModelOption:
 MODEL_OPTIONS: List[ModelOption] = [
     ModelOption("sonnet-5.5-direct", "sonnet-5.5-direct (Claude API, search, web aware)", "anthropic"),
     ModelOption("opus-5.5-direct", "opus-5.5-direct (Claude API, search, web aware)", "anthropic"),
+    ModelOption("haiku-5.5-direct", "haiku-5.5-direct (Claude API, search, web aware)", "anthropic"),
     ModelOption("google", "google (gemini-3.8-flash, search)", "gemini"),
     ModelOption("google-high", "google-high (gemini-3.8-flash, search, thinking)", "gemini"),
 ]

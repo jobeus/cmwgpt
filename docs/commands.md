@@ -17,6 +17,7 @@ The bot's main chat experience is **mention-based**:
 | --- | --- | --- |
 | `/help` | Shows in-bot help | none |
 | `/model` | Sets the text model for the current channel | persisted per channel |
+| `/lobotomize` | Sets the current channel's text model to `haiku-5.5-direct` | same setting as `/model` |
 | `/systemprompt set` | Stores a custom system prompt | persisted per channel |
 | `/systemprompt view` | Shows the current channel system prompt | reads per-channel state |
 | `/systemprompt reset` | Clears the custom system prompt | persisted per channel |
@@ -94,10 +95,11 @@ missing, or to a model that no longer exists (such as the old OpenRouter ones), 
 | --- | --- |
 | `sonnet-5.5-direct` | `claude-sonnet-5-5` straight from the Claude API (search / web aware, needs `ANTHROPIC_API_KEY`) |
 | `opus-5.5-direct` | `claude-opus-5-5` straight from the Claude API (search / web aware, needs `ANTHROPIC_API_KEY`; 2x Sonnet's price) |
+| `haiku-5.5-direct` | `claude-haiku-5-5` straight from the Claude API (search / web aware, needs `ANTHROPIC_API_KEY`; 1/20 of Sonnet's price, 5x that for prompts over 100K tokens; what `/lobotomize` switches to) |
 | `google` | native Gemini (`gemini-3.8-flash`, search) |
 | `google-high` | native Gemini (`gemini-3.8-flash`, search, thinking) |
 
-`google`/`google-high` route through `GeminiService` and `sonnet-5.5-direct`/`opus-5.5-direct`
+`google`/`google-high` route through `GeminiService` and the `*-direct` models
 through `AnthropicService`. The routing itself lives in `src/services/completion_dispatch.py`.
 
 ### `/systemprompt ...`
@@ -169,7 +171,7 @@ Most command-driven settings are persisted through `StateService`, which means m
 
 | Path | Responsibility |
 | --- | --- |
-| `src/bot/commands/system.py` | `/help`, `/model`, `/systemprompt`, `/restart` |
+| `src/bot/commands/system.py` | `/help`, `/model`, `/lobotomize`, `/systemprompt`, `/restart` |
 | `src/bot/commands/image.py` | `/draw`, `/edit`, `/imagemodel` |
 | `src/bot/commands/death.py` | `/death ...`, `/forcedeath`, `/limerick` |
 | `src/bot/commands/memory.py` | `/memory ...`, `/fillmemory`, `/botstate` |

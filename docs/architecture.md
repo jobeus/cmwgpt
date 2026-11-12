@@ -176,7 +176,7 @@ sequenceDiagram
     M->>S: mark_channel_active(channel)
     M->>M: build_chat_context (history, replies, embeds, attachments)
     M->>S: get_system_prompt(channel)
-    alt model has tools (sonnet/opus-5.5-direct)
+    alt model has tools (the -direct models)
         M->>M: add "Your tools" section, build_mention_tools(message)
     else google / google-high
         M->>D: fetch_all_url_content(text) per message, concurrently
@@ -189,7 +189,7 @@ sequenceDiagram
     alt model is google / google-high
         DP->>G: get_chat_completion(...)
         G-->>DP: reply content
-    else model is sonnet/opus-5.5-direct
+    else model is a -direct model
         DP->>A: get_chat_completion(...)
         loop up to 6 tool rounds
             A->>A: run tool_use blocks (ChatTool.run), send tool_result back
@@ -207,7 +207,7 @@ sequenceDiagram
 - Mentions are **queued**, not processed in parallel ad hoc.
 - Prompt context is more than just the latest message: it includes recent history, reply metadata, embeds, and attachments. The multimodal context array is built by `src/utils/chat_context.py` (`build_chat_context`).
 - The history window grows with the conversation and starts over once it reaches 200 messages. It keeps at most 40 images: past that, `cap_history_images` swaps the oldest for a note, 20 at a time, so a picture-heavy channel can't pass the API's request size limit.
-- Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `sonnet-5.5-direct`/`opus-5.5-direct` go to `AnthropicService` (Claude API). There are no other chat models; a channel set to a retired one falls back to `DEFAULT_MODEL`.
+- Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `sonnet-5.5-direct`/`opus-5.5-direct`/`haiku-5.5-direct` go to `AnthropicService` (Claude API). There are no other chat models; a channel set to a retired one falls back to `DEFAULT_MODEL`.
 - URL enrichment happens **before** the LLM call and can materially change the prompt content. Only the newest 10 history messages fetch links; older messages use cached results only, and the fetches run concurrently.
 - Per-user memory profiles are appended to the end of the mention, so the cached system prompt and history stay unchanged.
 - So is the bot's own state (`<about_you>`: mood, emotion, emoji, interests and what it's wondering about), on every model. It's per server in `cmwgpt:self:<guild_id>`. No background job writes it: only the direct models change it, with `update_self`, when a conversation merits it or a part is blank or stale. The system prompt tells them to keep it up.
@@ -218,7 +218,7 @@ sequenceDiagram
 
 ## Claude API tools
 
-The direct models (`sonnet-5.5-direct`, `opus-5.5-direct`) are offered client tools on top of server-side web search. `MentionHandler._build_tools` calls `build_mention_tools` (`src/services/chat_tools.py`) once per mention; the handlers are closures over that mention's guild, channel and asker, so per-reply limits (like 2 images) and permission checks need no shared state. `AnthropicService.get_chat_completion` runs the tool loop: a round's `tool_use` blocks run concurrently, each `ToolResult` goes back as a `tool_result` in the order the calls were made, costs are added to the reply's cost and files are attached to the reply. Limits that span calls (images, reactions) are counted before each tool's first `await`, so calls running side by side can't overshoot them. After 6 rounds `tool_choice` is set to `none` so the model has to answer.
+The direct models (`sonnet-5.5-direct`, `opus-5.5-direct`, `haiku-5.5-direct`) are offered client tools on top of server-side web search. `MentionHandler._build_tools` calls `build_mention_tools` (`src/services/chat_tools.py`) once per mention; the handlers are closures over that mention's guild, channel and asker, so per-reply limits (like 2 images) and permission checks need no shared state. `AnthropicService.get_chat_completion` runs the tool loop: a round's `tool_use` blocks run concurrently, each `ToolResult` goes back as a `tool_result` in the order the calls were made, costs are added to the reply's cost and files are attached to the reply. Limits that span calls (images, reactions) are counted before each tool's first `await`, so calls running side by side can't overshoot them. After 6 rounds `tool_choice` is set to `none` so the model has to answer.
 
 Requests with client tools also get Anthropic's server-side code execution (`code_execution_20260521`), besides web search. The reply reuses one container across its requests, and files the code saves (`bash_code_execution_output` blocks) are downloaded through the Files API and attached to the reply (`AnthropicService._download_code_files`).
 
@@ -245,7 +245,7 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | `election_results` | `src/services/election_service.py`: civicAPI's public `race/search` (up to 500 fetched, then ranked by votes here, since its own order puts national races after regional ones) and `race/{id}`, retrying its 503s when overloaded. No key, no cache; every result credits civicAPI, which its terms require | — |
 | `how_i_work` | `src/prompts/how_i_work.txt` | — |
 | `query_run`, `query_schema_reference`, `query_find_exceptions_in_file`, `issue_list` (one channel only) | Logfire's MCP server through the Claude API's MCP connector, added by `AnthropicService`, so the bot can read its own logs | `LOGFIRE_READ_TOKEN`, `DISCORD_CHANNEL_ID` |
-| `advisor` (sonnet only) | the Claude API's advisor tool, added by `AnthropicService`: the API runs `claude-opus-5-5` on the transcript and returns its advice within the same request | — |
+| `advisor` (sonnet and haiku) | the Claude API's advisor tool, added by `AnthropicService`: the API runs a stronger model (`claude-opus-5-5` for sonnet, `claude-sonnet-5-5` for haiku) on the transcript and returns its advice within the same request | — |
 
 ### Adding a tool
 

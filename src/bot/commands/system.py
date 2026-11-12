@@ -10,13 +10,16 @@ from discord import app_commands
 from discord.app_commands import Choice
 
 from src.config import get_system_prompt, get_config
-from src.services.model_catalog import available_models
+from src.services.model_catalog import available_models, is_model_unavailable
 from src.utils.discord_helper import get_mention_legend
 from src.utils.discord_error_utils import safe_defer
 from src.utils.async_utils import safe_run
 from src.utils.message_utils import DISCORD_MESSAGE_LIMIT
 
 logger = logging.getLogger(__name__)
+
+# The model /lobotomize switches a channel to.
+LOBOTOMY_MODEL = "haiku-5.5-direct"
 
 
 def _code_block_message(header: str, body: str) -> str:
@@ -57,6 +60,7 @@ class SystemCommands:
     def setup_commands(self) -> None:
         """Set up all system-related commands."""
         self.bot.tree.add_command(self._create_model_command())
+        self.bot.tree.add_command(self._create_lobotomize_command())
         self.bot.tree.add_command(self._create_systemprompt_group())
         self.bot.tree.add_command(self._create_help_command())
         self.bot.tree.add_command(self._create_restart_command())
@@ -90,6 +94,19 @@ class SystemCommands:
                 )
 
         return model_command
+
+    def _create_lobotomize_command(self) -> app_commands.Command:
+        """Create the /lobotomize command."""
+
+        @app_commands.command(name="lobotomize",
+                              description=f"Switch this channel to the smallest chat model ({LOBOTOMY_MODEL})")
+        async def lobotomize_command(interaction: discord.Interaction):
+            if not await safe_defer(interaction, ephemeral=False, thinking=True):
+                return
+
+            await safe_run(interaction, self._handle_lobotomize_command, interaction)
+
+        return lobotomize_command
 
     def _create_systemprompt_group(self) -> app_commands.Group:
         """Create the /systemprompt command group."""
@@ -168,6 +185,20 @@ class SystemCommands:
             current_model = self._state_service.get_model(
                 channel_id) or self._default_model
             await interaction.followup.send(f"Model is `{current_model}`.", ephemeral=True)
+
+    async def _handle_lobotomize_command(self, interaction: discord.Interaction) -> None:
+        """Handle the /lobotomize command: set this channel's model to ``LOBOTOMY_MODEL``."""
+        if is_model_unavailable(LOBOTOMY_MODEL, get_config()):
+            await interaction.followup.send(
+                f"`{LOBOTOMY_MODEL}` isn't available: it needs `ANTHROPIC_API_KEY`.", ephemeral=True)
+            return
+        channel_id = interaction.channel.id
+        self._state_service.mark_channel_active(channel_id)
+        self._state_service.set_model(channel_id, LOBOTOMY_MODEL)
+        if self._on_model_change:
+            self._on_model_change(channel_id)
+        logger.info("[/lobotomize] Channel %s: model set to %s", channel_id, LOBOTOMY_MODEL)
+        await interaction.followup.send(f"Lobotomized. Model set to `{LOBOTOMY_MODEL}`.")
 
     async def _handle_systemprompt_set(
             self,
@@ -303,6 +334,7 @@ class SystemCommands:
             "`/imagemodel [model]` - View or set this channel's image model\n\n"
             "**System & Settings:**\n"
             "`/model [model]` - View or set the AI language model (e.g., sonnet-5.5-direct)\n"
+            "`/lobotomize` - Switch this channel to the smallest model (haiku-5.5-direct)\n"
             "`/systemprompt set [prompt]` - Set a custom AI personality for this channel\n"
             "`/systemprompt view` - View this channel's base system prompt\n"
             "`/systemprompt reset` - Return to the default personality\n"

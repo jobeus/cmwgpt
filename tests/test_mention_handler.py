@@ -763,7 +763,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIn("see https://site.example", fetcher.await_args.args[0])
         self.assertEqual(fetcher.await_args.kwargs, {"cache_only": False})
 
-    async def test_advisor_addon_only_on_sonnet_direct(self):
+    async def test_advisor_addon_only_on_models_with_an_advisor(self):
         handler, _, _, _, _ = self.make_handler()
         channel = MagicMock()
         channel.id = 44
@@ -776,7 +776,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         channel.history = history
 
-        for model, expected in (("sonnet-5.5-direct", True), ("opus-5.5-direct", False), (None, False)):
+        for model, expected in (("sonnet-5.5-direct", True), ("haiku-5.5-direct", True), ("opus-5.5-direct", False), (None, False)):
             _, system_prompt = await handler._prepare_mention_context(
                 mention_msg, SimpleNamespace(id=999), model=model)
             self.assertEqual("## Advisor" in system_prompt, expected, model)
