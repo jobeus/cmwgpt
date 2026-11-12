@@ -239,6 +239,8 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | `read_urls` | `fetch_all_url_content` (same fetchers and cache as enrichment), for any URL, including web search results; used instead of the API's `web_fetch` so links go through the site-specific fetchers | — |
 | `wiki_pageviews` | `DeathService.get_avg_monthly_views` | — |
 | `prediction_markets` | `src/services/prediction_markets.py` runs `polymarket_service.py` (public Gamma search/event API, CLOB price history) and `kalshi_service.py` (kalshi.com's keyless `/v1/search/series`, public Trade API v2 events/markets/candlesticks) concurrently and joins their results; shared fetch/format helpers in `src/utils/market_format.py`. No key, no cache | — |
+| `market_data` | `src/services/alpaca_service.py`: `AlpacaClient` reads Alpaca's Market Data API (stock snapshots and bars, option snapshots and chains), cached in memory (quotes 60s, history 10 min) | `ALPACA_API_KEY`, `ALPACA_API_SECRET` |
+| `paper_trade`, `paper_portfolio` | `src/services/paper_trading_service.py`: the trading game's ledger in Redis (10 players, $100k each, long-only stocks and options) over one Alpaca paper account; orders go only to the paper Trading API (`PAPER_URL` is fixed in code), fills are synced on every tool call and every 60s, and expiring options are sold before the close | `ALPACA_API_KEY`, `ALPACA_API_SECRET`, Redis |
 | `election_results` | `src/services/election_service.py`: civicAPI's public `race/search` (up to 500 fetched, then ranked by votes here, since its own order puts national races after regional ones) and `race/{id}`, retrying its 503s when overloaded. No key, no cache; every result credits civicAPI, which its terms require | — |
 | `how_i_work` | `src/prompts/how_i_work.txt` | — |
 | `query_run`, `query_schema_reference`, `query_find_exceptions_in_file`, `issue_list` (one channel only) | Logfire's MCP server through the Claude API's MCP connector, added by `AnthropicService`, so the bot can read its own logs | `LOGFIRE_READ_TOKEN`, `DISCORD_CHANNEL_ID` |
@@ -343,6 +345,8 @@ flowchart LR
 | `src/services/message_service.py` | Sending to Discord, with retries and the paste fallback for long text | Debug a reply that didn't post |
 | `src/services/paste_service.py` | Uploads long replies and trace images to the paste site | Debug paste links |
 | `src/services/reminder_service.py` | Reminders in Redis and the loop that delivers them | Debug `remind` or a reminder that didn't fire |
+| `src/services/alpaca_service.py` | Alpaca client: cached market data and paper-account orders | Debug `market_data` or an order Alpaca refused |
+| `src/services/paper_trading_service.py` | The paper-trading game: players, holdings, orders, fill syncing, option expiry | Debug a player's cash or holdings, or a ledger that doesn't match Alpaca |
 | `src/services/timezone_service.py` | Saved time zones | Debug `set_timezone` or the `<time_zones>` block |
 | `src/services/video_service.py` | `VideoWatcher`: download, upload and watch a video with Gemini | Debug `watch_video` / `summarize_youtube` |
 | `src/services/death_service.py` | Deathwatch: polls Wikipedia's deaths pages and posts an obituary limerick | Debug a missed or repeated death announcement |

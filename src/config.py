@@ -97,6 +97,9 @@ class AppConfig:
     logfire_mcp_url: str = "https://logfire-us.pydantic.dev/mcp"
     # The one channel where mentions get that logs tool; off everywhere when unset.
     logs_channel_id: Optional[int] = None
+    # Alpaca paper-account keys: market_data and the paper-trading game's tools are off when unset.
+    alpaca_api_key: str = ""
+    alpaca_api_secret: str = ""
 
 
 def load_config(
@@ -140,6 +143,8 @@ def load_config(
         ).strip(),
         logfire_mcp_url=source.get("LOGFIRE_MCP_URL", "").strip() or "https://logfire-us.pydantic.dev/mcp",
         logs_channel_id=_read_optional_int(source.get("DISCORD_CHANNEL_ID")),
+        alpaca_api_key=source.get("ALPACA_API_KEY", "").strip(),
+        alpaca_api_secret=source.get("ALPACA_API_SECRET", "").strip(),
     )
 
 

@@ -494,6 +494,8 @@ class TestStrictSchemaLimits(unittest.TestCase):
             timezone_store=MagicMock(),
             video_summarizer=AsyncMock(),
             video_watcher=AsyncMock(),
+            alpaca=MagicMock(),
+            paper_trading=MagicMock(),
         )
         every_tool = {v["name"] for k, v in vars(chat_tools).items() if k.endswith("_TOOL") and isinstance(v, dict)}
         self.assertEqual(set(tools), every_tool)  # so a new tool can't sneak past this test

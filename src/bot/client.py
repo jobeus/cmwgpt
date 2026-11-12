@@ -172,6 +172,9 @@ class DiscordBotClient:
             if getattr(self.services, "reminder_service", None) is not None:
                 await step("reminder service", self.services.reminder_service.start)
 
+            if getattr(self.services, "paper_trading_service", None) is not None:
+                await step("paper trading", self.services.paper_trading_service.start)
+
             # Read the IRC log's dates and top speakers now, not on the first mention.
             if hasattr(self.mention_handler, "warm_up"):
                 await step("IRC log warm-up", self.mention_handler.warm_up)

@@ -31,6 +31,7 @@ These are loaded by `src/config.py`, except where a row names another file.
 | `IRC_LOG` | empty | No | Path to the channel's old irssi IRC log; enables the direct models' `search_irc_log`/`read_irc_log_day`/`count_irc_log` tools |
 | `IRC_NICKS` | empty | No | irssistats-style nicks file (`canonical regex` per line, first match wins, `<NULL>` drops a nick) that merges aliases in the IRC log tools' nick filters and counts |
 | `OLD_QUOTE_BOT` | empty | No | Path to the old IRC quote bot's quotes (one per line); enables the direct models' `old_quotes` tool |
+| `ALPACA_API_KEY`, `ALPACA_API_SECRET` | empty | No | Keys of an Alpaca **paper** trading account; enable the direct models' `market_data` tool and the paper-trading game (`paper_trade`, `paper_portfolio`). Orders only ever go to Alpaca's paper endpoint |
 | `DEPLOY_WEBHOOK_SECRET` | empty | No | Shared secret for the signed deploy webhook; the listener is off when empty (see `docs/auto-update.md`) |
 | `DEPLOY_WEBHOOK_HOST` | `0.0.0.0` | No | Interface the deploy webhook binds to |
 | `DEPLOY_WEBHOOK_PORT` | `8787` | No | Port the deploy webhook listens on (`POST /deploy`) |

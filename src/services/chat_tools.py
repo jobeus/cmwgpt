@@ -17,6 +17,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tup
 
 import discord
 
+from src.services.alpaca_service import PERIODS as PRICE_PERIODS
+from src.services.alpaca_service import AlpacaError, chain_text, history_text, quote_text
 from src.services.discord_history import (
     AUTHOR_TYPES, EMBED_TYPES, HAS_FILTERS, MAX_FILTER_VALUES, MAX_READ_MESSAGES, MAX_SLOP, SORTS, SearchFilters,
     read_around, readable_channels, search_messages,
@@ -35,6 +37,7 @@ from src.services.image_service import (
     generate_image,
     resolve_image_model,
 )
+from src.services.paper_trading_service import ALLOWANCE, MAX_PLAYERS, PaperTradeError
 from src.services.irc_log_service import MAX_CONTEXT_LINES, MAX_DAY_LINES, MAX_TOP_NICKS, IrcLog
 from src.services.quote_service import MAX_RANDOM, QuoteFile
 from src.services.timezone_service import describe_zone, resolve_zone
@@ -555,6 +558,131 @@ PREDICTION_MARKETS_TOOL = {
     },
 }
 
+MARKET_DATA_TOOL = {
+    "name": "market_data",
+    "description": (
+        "Look up real US stock, ETF and option prices from Alpaca. Use it whenever someone asks what a stock or "
+        "option is trading at, how it has moved, or what options exist on a stock, and before a paper trade when "
+        "you need a price or an option's exact symbol. `quote` gives the current price, change on the day, "
+        "bid/ask and day range for up to 20 stock tickers or option symbols. `history` gives one stock's closes "
+        "over a period with its change, high and low. `option_chain` lists one stock's option contracts for one "
+        "expiration (the nearest when none is given) with each contract's symbol, bid, ask, last, implied "
+        "volatility and delta; by default the strikes within 8% of the stock's price. Stock quotes are IEX's "
+        "(real time, one exchange); option quotes are 15 minutes delayed and per share, so a contract costs 100 "
+        "times the price. Answers are cached for a minute. No crypto, indexes or non-US stocks."
+    ),
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["quote", "history", "option_chain"]},
+            "symbols": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Stock tickers like 'AAPL' or 'BRK.B', or option symbols like 'AAPL261120C00230000' (root, "
+                    "YYMMDD, C or P, strike x 1000 in 8 digits). history and option_chain use the first, a stock."
+                ),
+            },
+            "period": {
+                "type": "string",
+                "enum": list(PRICE_PERIODS),
+                "description": "For history: how far back. Ignored otherwise.",
+            },
+            "option_type": {
+                "type": "string",
+                "enum": ["call", "put", "both"],
+                "description": "For option_chain. Ignored otherwise.",
+            },
+            "expiration": {
+                "type": "string",
+                "description": (
+                    "For option_chain: the expiration date YYYY-MM-DD, or empty for the nearest one in the next "
+                    "5 weeks. Later expirations need their date; monthly ones are the third Friday."
+                ),
+            },
+            "strike_min": {"type": "number", "description": "For option_chain: lowest strike, or 0 for the default."},
+            "strike_max": {"type": "number", "description": "For option_chain: highest strike, or 0 for the default."},
+        },
+        "required": ["action", "symbols", "period", "option_type", "expiration", "strike_min", "strike_max"],
+        "additionalProperties": False,
+    },
+}
+
+PAPER_TRADE_TOOL = {
+    "name": "paper_trade",
+    "description": (
+        "Trade in the channel's paper-trading game: play money on an Alpaca paper account, real market prices. "
+        f"Up to {MAX_PLAYERS} people get ${ALLOWANCE:,.0f} each, and someone joins the first time they ask for a "
+        "trade. Use it when the person asking tells you to buy or sell a stock or option for them, or to cancel "
+        "their order. It always trades for the person who sent the message: nobody can trade for someone else, "
+        "so refuse that in words. Do what they asked, not what you'd pick; if they leave the choice to you, say "
+        "what you chose. `buy` takes a quantity (shares, fractions allowed at market, or whole option contracts) "
+        "or, for a stock at market, a dollar amount. `sell` takes a quantity, or 0 to sell the whole position. "
+        "The game is long-only: no short selling and no writing options, only selling what the player holds. "
+        "Orders are market, or limit when limit_price is set, and all are day orders. A market order during "
+        "market hours usually fills at once and the answer gives the fill price; otherwise the answer says it's "
+        "open, and the player can ask for their portfolio to see what became of it. An order placed while the "
+        "market is closed waits for the next open. A buy sets cash aside until it fills (a market buy: the "
+        "price plus a buffer). An option is one contract of 100 shares, named by its exact symbol from "
+        "market_data's option_chain; options are never exercised, and one still held is sold automatically "
+        "about 30 minutes before the close on its expiration day. `cancel` cancels the player's open order by "
+        "its number. `reset_game` wipes the whole game for everyone and is only for a server admin who "
+        "plainly asks for exactly that. Report the result as the tool gives it; don't claim a fill it didn't report."
+    ),
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["buy", "sell", "cancel", "reset_game"]},
+            "symbol": {
+                "type": "string",
+                "description": "The stock ticker or exact option symbol. Empty for cancel and reset_game.",
+            },
+            "quantity": {
+                "type": "number",
+                "description": "Shares or contracts. 0 when buying by dollars, or to sell the whole position.",
+            },
+            "dollars": {
+                "type": "number",
+                "description": "Dollars of a stock to buy at market, instead of a quantity. 0 otherwise.",
+            },
+            "limit_price": {
+                "type": "number",
+                "description": "The limit price per share for a limit order, or 0 for a market order.",
+            },
+            "order_number": {"type": "integer", "description": "For cancel: the order's number. 0 otherwise."},
+        },
+        "required": ["action", "symbol", "quantity", "dollars", "limit_price", "order_number"],
+        "additionalProperties": False,
+    },
+}
+
+PAPER_PORTFOLIO_TOOL = {
+    "name": "paper_portfolio",
+    "description": (
+        "Read the paper-trading game. `player` gives one player's worth, cash, holdings with their cost and "
+        "current value, open orders and recent finished orders with their fill prices: use it for 'how am I "
+        "doing', 'what do I own', 'did my order fill'. `leaderboard` ranks every player by what they're worth "
+        "with their gain or loss, says how many seats and how much money are still unassigned, and checks the "
+        "game's ledger against the Alpaca account: use it for channel standings or game stats. Anyone can look "
+        "at anyone's holdings. Looking doesn't join the game; only a first trade does."
+    ),
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "view": {"type": "string", "enum": ["player", "leaderboard"]},
+            "user_id": {
+                "type": "string",
+                "description": "For player: their Discord user ID, or empty for the person asking.",
+            },
+        },
+        "required": ["view", "user_id"],
+        "additionalProperties": False,
+    },
+}
+
 ELECTION_RESULTS_TOOL = {
     "name": "election_results",
     "description": (
@@ -991,6 +1119,8 @@ def build_mention_tools(
     timezone_store: Any = None,
     video_summarizer: Optional[Callable[[str, str], Awaitable[Tuple[str, float]]]] = None,
     video_watcher: Optional[Callable[[str, str], Awaitable[Tuple[str, float]]]] = None,
+    alpaca: Any = None,
+    paper_trading: Any = None,
 ) -> List[ChatTool]:
     """The tools for one mention, in a fixed order. Tools without their dependencies are left out.
 
@@ -1332,6 +1462,69 @@ def build_mention_tools(
                 is_error=True)
         return text_result(text)
 
+    async def market_data(args: Dict[str, Any]) -> ToolResult:
+        assert alpaca is not None  # only offered when set
+        action = str(args.get("action") or "quote")
+        symbols = [str(s) for s in _as_list(args.get("symbols")) if str(s).strip()]
+        if not symbols:
+            return text_result("Give at least one symbol.", is_error=True)
+        logger.info("[market_data tool] Channel %s %s %s", channel_id, action, symbols[:20])
+        try:
+            if action == "history":
+                period = str(args.get("period") or "")
+                text = await history_text(alpaca, symbols[0], period if period in PRICE_PERIODS else "1mo", date.today())
+            elif action == "option_chain":
+                expiration = str(args.get("expiration") or "").strip()
+                if expiration:
+                    expiration = date.fromisoformat(expiration).isoformat()
+                text = await chain_text(
+                    alpaca, symbols[0], str(args.get("option_type") or "both"), expiration,
+                    float(args.get("strike_min") or 0), float(args.get("strike_max") or 0), date.today())
+            else:
+                text = await quote_text(alpaca, symbols)
+        except ValueError:
+            return text_result("Give the expiration as YYYY-MM-DD and the strikes as numbers.", is_error=True)
+        except AlpacaError as e:
+            return text_result(str(e), is_error=True)
+        if not text:
+            return text_result(
+                f"Alpaca has nothing for {symbols[0]} there. Check the ticker; for options, try another expiration "
+                "(monthly ones are the third Friday) or a wider strike range.", is_error=True)
+        return text_result(text)
+
+    async def paper_trade(args: Dict[str, Any]) -> ToolResult:
+        assert paper_trading is not None  # only offered when set
+        action = str(args.get("action") or "")
+        logger.info("[paper_trade tool] Channel %s User %s: %s", channel_id, user_id,
+                    {k: v for k, v in args.items() if v})
+        try:
+            if action == "reset_game":
+                if not getattr(getattr(asker, "guild_permissions", None), "administrator", False):
+                    return text_result("Only a server admin can reset the game.", is_error=True)
+                return text_result(await paper_trading.reset())
+            if action == "cancel":
+                return text_result(await paper_trading.cancel(user_id, _int_arg(args, "order_number")))
+            if action not in ("buy", "sell"):
+                return text_result("The action is buy, sell, cancel or reset_game.", is_error=True)
+            return text_result(await paper_trading.trade(
+                user_id, action, str(args.get("symbol") or ""), quantity=args.get("quantity") or 0,
+                dollars=args.get("dollars") or 0, limit_price=args.get("limit_price") or 0))
+        except (PaperTradeError, AlpacaError) as e:
+            return text_result(f"Nothing was traded. {e}", is_error=True)
+
+    async def paper_portfolio(args: Dict[str, Any]) -> ToolResult:
+        assert paper_trading is not None  # only offered when set
+        try:
+            if str(args.get("view") or "") == "leaderboard":
+                return text_result(await paper_trading.leaderboard())
+            ids = _parse_ids([args.get("user_id")])
+            target = ids[0] if ids else user_id
+            text = await paper_trading.portfolio(target)
+        except AlpacaError as e:
+            return text_result(str(e), is_error=True)
+        return text_result(text or f"<@{target}> isn't in the game yet. Someone joins, with ${ALLOWANCE:,.0f} of "
+                           "play money, the first time they ask for a trade.")
+
     async def election_results(args: Dict[str, Any]) -> ToolResult:
         def arg(key: str) -> str:
             return str(args.get(key) or "").strip()
@@ -1518,6 +1711,11 @@ def build_mention_tools(
     if wiki_views:
         tools.append(ChatTool(WIKI_PAGEVIEWS_TOOL, wiki_pageviews, "checking wikipedia..."))
     tools.append(ChatTool(PREDICTION_MARKETS_TOOL, prediction_markets, "checking the odds..."))
+    if alpaca is not None:
+        tools.append(ChatTool(MARKET_DATA_TOOL, market_data, "checking the ticker..."))
+    if paper_trading is not None and asker is not None:
+        tools.append(ChatTool(PAPER_TRADE_TOOL, paper_trade, "calling the broker..."))
+        tools.append(ChatTool(PAPER_PORTFOLIO_TOOL, paper_portfolio, "checking the books..."))
     tools.append(ChatTool(ELECTION_RESULTS_TOOL, election_results, "counting the votes..."))
     tools.append(ChatTool(HOW_I_WORK_TOOL, how_i_work, "checking how I work..."))
     return tools

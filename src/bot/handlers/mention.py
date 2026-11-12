@@ -173,6 +173,8 @@ class MentionHandler:
         video_summarizer: Optional[Callable[[str, str], Awaitable[tuple[str, float]]]] = None,
         video_watcher: Optional[Callable[[str, str], Awaitable[tuple[str, float]]]] = None,
         context_store: Optional[StateStore] = None,
+        alpaca: Any = None,
+        paper_trading: Any = None,
     ):
         self._state_service = state_service
         self._gemini_service = gemini_service
@@ -198,6 +200,8 @@ class MentionHandler:
         self._timezone_store = timezone_store
         self._video_summarizer = video_summarizer
         self._video_watcher = video_watcher
+        self._alpaca = alpaca
+        self._paper_trading = paper_trading
         # Found once and kept, so the system prompt stays the same between requests. Reading
         # them takes seconds on a big log, so it starts with the bot (``warm_up``).
         self._irc_start: Optional[str] = None
@@ -273,6 +277,8 @@ class MentionHandler:
             timezone_store=self._timezone_store,
             video_summarizer=self._video_summarizer,
             video_watcher=self._video_watcher,
+            alpaca=self._alpaca,
+            paper_trading=self._paper_trading,
         )
 
     def _store_history_cache(self, channel_id: int, timestamp: float, oldest_message: discord.Message) -> None:

@@ -9,6 +9,7 @@ Redis holds everything the bot keeps between restarts:
 | `cmwgpt:memory_job:<guild>` | Nightly memory job progress (`processed_through`, last status) | Never |
 | `cmwgpt:costs:<YYYY-MM-DD>` | That day's spending (America/Denver): one field per provider, per person and per channel, for `/cost` | 400 days |
 | `cmwgpt:reminders:due`, `cmwgpt:reminder:<id>`, `cmwgpt:reminders:next_id` | Pending reminders (a sorted set by due time, one hash each) and the ID counter | Removed once posted |
+| `cmwgpt:paper:players`, `cmwgpt:paper:positions:<user>`, `cmwgpt:paper:orders:open`, `cmwgpt:paper:orders:done:<user>`, `cmwgpt:paper:orders:next` | The paper-trading game's ledger: each player's cash, their holdings, orders still open at Alpaca, each player's last 20 finished orders, and the order-number counter | Never (cleared by a game reset) |
 | `cmwgpt:timezones:<guild>` | Each person's saved time zone (IANA name) | Never |
 | `cmwgpt:settings:channels`, `cmwgpt:settings:death` | Each channel's `/model`, `/imagemodel` and `/systemprompt` (one JSON field per channel), and the death-announcement settings | Never |
 | `cmwgpt:death:names` | Names on Wikipedia's recent-deaths page already seen and announced | Never |

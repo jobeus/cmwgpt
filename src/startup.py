@@ -22,6 +22,8 @@ from src.services.memory_service import MemoryService
 from src.services.package_update_service import PackageUpdateService
 from src.services.paste_service import PasteService
 from src.services.queue_service import QueueService
+from src.services.alpaca_service import AlpacaClient
+from src.services.paper_trading_service import PaperTradingService
 from src.services.reminder_service import ReminderService
 from src.services.timezone_service import TimezoneStore
 from src.services.video_service import VideoWatcher
@@ -51,6 +53,8 @@ class AppServices:
     cost_store: Any = None
     reminder_service: Any = None
     package_update_service: Any = None
+    alpaca_client: Any = None
+    paper_trading_service: Any = None
 
 
 def create_services(config: Optional[AppConfig] = None) -> AppServices:
@@ -112,6 +116,12 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         anthropic_service=anthropic_service,
     )
     reminder_service = ReminderService(is_testing=app_config.is_testing)
+    alpaca_client = None
+    if app_config.alpaca_api_key and app_config.alpaca_api_secret:
+        alpaca_client = AlpacaClient(app_config.alpaca_api_key, app_config.alpaca_api_secret)
+    # The game's ledger is in Redis, which tests don't have.
+    paper_trading_service = (
+        PaperTradingService(alpaca_client) if alpaca_client is not None and not app_config.is_testing else None)
     video_watcher = VideoWatcher(gemini_service) if app_config.gemini_api_key else None
     irc_log = load_irc_log(app_config.irc_log_path, app_config.irc_nicks_path)
     mention_handler = MentionHandler(
@@ -136,6 +146,8 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         video_summarizer=video_watcher.summarize_youtube if video_watcher else None,
         video_watcher=video_watcher.watch if video_watcher else None,
         context_store=state_store,
+        alpaca=alpaca_client,
+        paper_trading=paper_trading_service,
     )
 
     return AppServices(
@@ -155,6 +167,8 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         cost_store=cost_store,
         reminder_service=reminder_service,
         package_update_service=package_update_service,
+        alpaca_client=alpaca_client,
+        paper_trading_service=paper_trading_service,
     )
 
 
@@ -179,6 +193,10 @@ async def shutdown_services(services: AppServices) -> None:
         await step("memory job stop", services.memory_service.stop)
     if getattr(services, "reminder_service", None) is not None:
         await step("reminders stop", services.reminder_service.stop)
+    if getattr(services, "paper_trading_service", None) is not None:
+        await step("paper trading stop", services.paper_trading_service.stop)
+    if getattr(services, "alpaca_client", None) is not None:
+        await step("alpaca close", services.alpaca_client.close)
     await step("death service close", services.death_service.close)
     # Lets each channel finish the reply it is working on (bounded by a timeout).
     await step("queue drain", services.queue_service.stop)
