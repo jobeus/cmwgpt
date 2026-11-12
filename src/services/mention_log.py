@@ -4,7 +4,7 @@ Mention Log - One JSON line per mention the bot answers, for looking at cost and
 Each line in ``logs/mentions.jsonl`` holds the mention's whole text, who sent it and where,
 whether it replied to the bot (a hint that it's a follow-up or re-ask), the model, what
 answering cost, the usage stats the cost scope collected (tokens, tools called, web searches,
-tool rounds, ``think_harder``), how long it took and any error. Re-asks can be worked out
+tool rounds, advisor calls), how long it took and any error. Re-asks can be worked out
 afterwards: the same person mentioning the bot again in the same channel soon after a reply.
 
 The file isn't rotated; a line is a few hundred bytes. It's only written once

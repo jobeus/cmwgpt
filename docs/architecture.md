@@ -232,11 +232,11 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | `prediction_markets` | `src/services/prediction_markets.py` runs `polymarket_service.py` (public Gamma search/event API, CLOB price history) and `kalshi_service.py` (kalshi.com's keyless `/v1/search/series`, public Trade API v2 events/markets/candlesticks) concurrently and joins their results; shared fetch/format helpers in `src/utils/market_format.py`. No key, no cache | — |
 | `election_results` | `src/services/election_service.py`: civicAPI's public `race/search` (up to 500 fetched, then ranked by votes here, since its own order puts national races after regional ones) and `race/{id}`, retrying its 503s when overloaded. No key, no cache; every result credits civicAPI, which its terms require | — |
 | `how_i_work` | `src/prompts/how_i_work.txt` | — |
-| `think_harder` (opus only) | handled inside `AnthropicService`: discards the reply and re-asks at high effort | — |
+| `advisor` (sonnet only) | the Claude API's advisor tool, added by `AnthropicService`: the API runs `claude-opus-5-5` on the transcript and returns its advice within the same request | — |
 
 ### Adding a tool
 
-1. In `src/services/chat_tools.py`, add the `*_TOOL` definition (a JSON schema; mark it `"strict": True` unless it's trivial, since the API allows at most 20 strict tools and 24 optional strict parameters per request, which `TestStrictSchemaLimits` checks) whose description says what it does and when to use it (it's the only place the model learns about the tool, so put every usage rule there rather than in the system prompt), and a handler inside `build_mention_tools`. Register it with `ChatTool(definition, handler, status)`; `status` is what the reply preview shows while it runs.
+1. In `src/services/chat_tools.py`, add the `*_TOOL` definition (a JSON schema; mark it `"strict": True` unless it's trivial, since the API allows at most 20 strict tools and 24 optional strict parameters per request, which `TestStrictSchemaLimits` checks) whose description says what it does and when to use it (it's the only place the model learns about the tool, so put every usage rule there rather than in the system prompt), and a handler inside `build_mention_tools`. Register it with `ChatTool(definition, handler, status)`; `status` names the step plainly; give it joke lines in `STATUS_LINES` (`src/utils/status_lines.py`), which is what the reply preview shows while it runs (`TestStatusLines` fails for a status without any).
 2. Pass any new dependency through `MentionHandler.__init__` and `_build_tools`, and wire it in `src/startup.py`. Leave the tool out when the dependency is missing.
 3. Treat anything other people wrote (messages, pages, logs, quotes) as material, not instructions; if the tool returns such text, add its name to the set at the end of `MentionHandler._tools_addon` that adds the warning.
 4. Describe it in `src/prompts/how_i_work.txt` (see `.agents/rules/keep-how-i-work-current.md`) and in the table above.
@@ -317,7 +317,7 @@ flowchart LR
 | `src/utils/chat_context.py` | Multimodal context builder | Change how history/embeds/attachments become the model input |
 | `src/services/completion_dispatch.py` | Model routing | Understand Gemini/Claude API selection |
 | `src/services/model_catalog.py` | `/model` options | Add a text model or see which key each one needs |
-| `src/services/anthropic_service.py` | Claude API integration | Debug prompt caching, the tool loop, `think_harder` or pricing |
+| `src/services/anthropic_service.py` | Claude API integration | Debug prompt caching, the tool loop, the advisor tool or pricing |
 | `src/services/chat_tools.py` | Client tools for the direct models | Add or change a tool and its description |
 | `src/services/discord_history.py` | Discord message search/read | Debug `search_messages` / `read_messages` |
 | `src/services/irc_log_service.py` | Old IRC log search/count | Debug the IRC tools or nick merging |
@@ -325,6 +325,7 @@ flowchart LR
 | `src/services/cost_service.py` | `record_cost`, per-reply cost scopes and the daily Redis tallies behind `/cost` | Add a paid API or change how costs are counted |
 | `src/services/image_service.py` | Image models and options | See each Gemini image model's aspect ratios, sizes, thinking and search |
 | `src/services/streaming_reply.py` | Streamed reply preview | Debug status lines, edits and the final reply |
+| `src/utils/status_lines.py` | The joke lines the preview shows for each step | Add or reword a status line |
 | `src/services/gemini_service.py` | Native Gemini integration | Understand `google`/`google-high` calls and the Gemini timeout |
 | `src/services/state_service.py` | Per-channel settings and restart state, in Redis | See where model/system-prompt/service settings live |
 | `src/services/queue_service.py` | FIFO work queue | Understand serialized mention processing |

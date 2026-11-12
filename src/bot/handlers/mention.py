@@ -16,7 +16,7 @@ from src.utils.discord_helper import get_mention_legend, attachment_to_base64_da
 from src.utils.discord_error_utils import best_effort_typing, concise_error
 from src.db.state_store import CONTEXT_TTL_SECONDS, StateStore
 from src.services.anthropic_service import (
-    REPLY_MAX_TOKENS, THINK_HARDER_MODELS, THINKING_STATUS, AnthropicServiceError, is_direct_anthropic_model,
+    REPLY_MAX_TOKENS, ADVISOR_MODELS, THINKING_STATUS, AnthropicServiceError, is_direct_anthropic_model,
 )
 from src.services.chat_tools import ChatTool, build_mention_tools
 from src.services.gemini_service import GeminiServiceError, is_gemini_model
@@ -655,18 +655,19 @@ class MentionHandler:
                     "`update_self` in the same turn as your reply, without mentioning it.\n"
                 )
             current_channel_system_prompt += "\n"
-        if model in THINK_HARDER_MODELS:
+        if model in ADVISOR_MODELS:
             current_channel_system_prompt += (
-                "## Thinking harder\n"
-                "You run at low effort, so you think briefly before answering. That's right for most chat. "
-                "When a message asks for something too complex to do well that way (hard math or logic, "
-                "multi-step reasoning, careful analysis or comparison, tricky code, long structured writing), "
-                "call the `think_harder` tool with a `reason` saying why it needs deeper thinking and what to "
-                "work through. Call it first, without writing any text before it: the same message is then "
-                "answered again at high effort, with your reason attached, and only that answer is posted. "
-                "Either way, your visible reply is only the final answer; keep your working in your thinking. "
-                "Don't call it for ordinary chat, simple questions, or things a web search alone answers, "
-                "since the re-run costs more and takes longer.\n\n"
+                "## Advisor\n"
+                "You have an `advisor` tool backed by a stronger model. It takes no parameters: calling it "
+                "forwards the whole conversation, including your tool calls and their results, and its advice "
+                "comes back to you alone. Most chat doesn't need it. Call it when a message asks for something "
+                "you could easily get wrong on your own (hard math or logic, multi-step reasoning, careful "
+                "analysis or comparison, tricky code, long structured writing), before you write the answer "
+                "and after any lookups it needs, so the advisor sees what you found. Give its advice serious "
+                "weight, but if it contradicts something you looked up, go with the evidence and say what "
+                "conflicts. Your visible reply is only the final answer, in your own voice: don't mention the "
+                "advisor or narrate its advice. Don't call it for ordinary chat, simple questions, or things a "
+                "web search alone answers, since it costs more and takes longer.\n\n"
             )
         if uses_tools:
             memory_index = ""

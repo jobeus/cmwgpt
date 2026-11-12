@@ -58,8 +58,7 @@ PRICE_WEB_SEARCH = 0.01
 MAX_TOKENS = 16000
 # Output cap per request for a chat reply in Discord, thinking included. Replies aim at Discord's
 # 2000 characters and rarely pass 1,100 tokens, so this leaves room for a long one while a
-# runaway reply stops after a few seconds. A think_harder re-run gets MAX_TOKENS, since high
-# effort can think for longer than this on its own.
+# runaway reply stops after a few seconds. The advisor's output has its own cap.
 REPLY_MAX_TOKENS = 2000
 # Added to a reply that stopped at the cap, so it doesn't read as finished.
 CUT_OFF_NOTE = "\n-# (cut off: that hit my length limit)"
@@ -80,33 +79,28 @@ MAX_CONTINUATIONS = 5
 # Rounds of client tool calls (draw, recall, ...) per reply; the last request after them can't call tools.
 MAX_TOOL_ROUNDS = 6
 
-# Models that run at ``low`` effort but may ask, through the ``think_harder`` tool,
-# for the message to be answered again at ``high``.
-THINK_HARDER_MODELS = {"opus-5.5-direct"}
-THINK_HARDER_EFFORT = "high"
-THINK_HARDER_TOOL = {
-    "name": "think_harder",
-    "description": (
-        "Re-answer the current message with much deeper thinking (high effort). Call this instead of "
-        "answering when the request is too complex to do well with quick thinking: hard math or logic, "
-        "multi-step reasoning, careful analysis, tricky code, or long structured writing. Your reply so "
-        "far is discarded and the same message is answered again at high effort. Don't call it for "
-        "ordinary chat, simple questions, or things a web search alone answers."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "reason": {
-                "type": "string",
-                "description": "Why this needs deeper thinking, and what to work through. Passed to the re-run.",
-            },
-        },
-        "required": ["reason"],
-        "additionalProperties": False,
-    },
-    "strict": True,
-}
-THINKING_HARDER_STATUS = "thinking harder..."
+# The API's advisor tool: mid-reply, the model can ask a stronger one for guidance. The API runs
+# that model itself on the whole transcript and hands the advice back within the same request.
+# Bot model alias -> the advisor's API model; only the models listed here get the tool.
+ADVISOR_MODELS = {"sonnet-5.5-direct": "claude-opus-5-5"}
+ADVISOR_BETA = "advisor-tool-2026-03-01"
+# Advisor calls per reply, across its tool rounds, and the output cap (thinking included) of each.
+ADVISOR_MAX_USES = 2
+ADVISOR_MAX_TOKENS = 2048
+
+
+def advisor_tool(advisor_api_model: str) -> Dict[str, Any]:
+    """The advisor tool's definition, advised by ``advisor_api_model``."""
+    return {
+        "type": "advisor_20260301",
+        "name": "advisor",
+        "model": advisor_api_model,
+        "max_uses": ADVISOR_MAX_USES,
+        "max_tokens": ADVISOR_MAX_TOKENS,
+    }
+
+
+ADVISOR_STATUS = "asking opus for advice..."
 # What the reply preview says while the model is working, by the content block it's on.
 THINKING_STATUS = "thinking..."
 WEB_SEARCH_STATUS = "searching the web..."
@@ -298,33 +292,6 @@ def _without_strict(tool: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in tool.items() if k != "strict"}
 
 
-def _think_harder_reason(response: Any) -> Optional[str]:
-    """Return the ``reason`` if ``response`` stopped to call ``think_harder``, else None."""
-    if getattr(response, "stop_reason", None) != "tool_use":
-        return None
-    for block in response.content:
-        if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == "think_harder":
-            reason = (getattr(block, "input", None) or {}).get("reason")
-            return str(reason or "").strip() or "no reason given"
-    return None
-
-
-def _with_think_harder_note(api_messages: List[Dict[str, Any]], reason: str) -> List[Dict[str, Any]]:
-    """Copy ``api_messages`` with the escalation reason after the mention, as an operator message.
-
-    A system message rather than text on the mention, so it doesn't read as the user asking
-    to see the working; the model otherwise tends to write its reasoning into the reply.
-    """
-    note = (
-        f"You called think_harder on the message above. Your reason: {reason}\n"
-        "You're now at high effort and think_harder is no longer available. Do all of the working in "
-        "your private thinking. Your visible reply is posted to the channel as-is, so it must contain "
-        "only the final answer, written the way you'd normally reply: no scratch work, drafts, "
-        "step-by-step derivation, or narration of your reasoning unless the user asked for it."
-    )
-    return api_messages + [{"role": "system", "content": note}]
-
-
 def _with_assistant_content(api_messages: List[Dict[str, Any]], content: List[Any]) -> List[Dict[str, Any]]:
     """Copy ``api_messages`` with ``content`` added to the assistant turn it ends on, or as a new one."""
     if api_messages and api_messages[-1]["role"] == "assistant":
@@ -374,7 +341,8 @@ def _block_status(block: Any, tool_statuses: Dict[str, str]) -> Optional[str]:
     if kind == "mcp_tool_use":
         return LOGS_STATUS
     if kind == "server_tool_use":
-        return WEB_SEARCH_STATUS if getattr(block, "name", "") == "web_search" else CODE_STATUS
+        name = getattr(block, "name", "")
+        return {"web_search": WEB_SEARCH_STATUS, "advisor": ADVISOR_STATUS}.get(name, CODE_STATUS)
     if kind == "web_search_tool_result":
         return SEARCH_RESULTS_STATUS
     if kind == "tool_use":
@@ -397,19 +365,35 @@ def _code_file_ids(response: Any) -> List[str]:
     return ids
 
 
-def _usage_cost(usage: Any, model: DirectModel) -> float:
-    """Price a response's ``usage`` block in USD at ``model``'s rates."""
-    if usage is None:
-        return 0.0
+def _token_cost(usage: Any, model: DirectModel) -> float:
+    """Price the token counts on ``usage`` (a usage block or one of its iterations) at ``model``'s rates."""
     written = getattr(usage, "cache_creation_input_tokens", 0) or 0
     written_1h = getattr(getattr(usage, "cache_creation", None), "ephemeral_1h_input_tokens", 0) or 0
-    cost = (
+    return (
         (getattr(usage, "input_tokens", 0) or 0) * model.price_input
         + (getattr(usage, "output_tokens", 0) or 0) * model.price_output
         + (written - written_1h) * model.price_cache_write
         + written_1h * model.price_cache_write_1h
         + (getattr(usage, "cache_read_input_tokens", 0) or 0) * model.price_cache_read
     ) / 1_000_000
+
+
+def _advisor_iterations(usage: Any) -> List[Any]:
+    """The advisor's own model runs in ``usage``; the top-level counts leave them out."""
+    return [i for i in getattr(usage, "iterations", None) or () if getattr(i, "type", None) == "advisor_message"]
+
+
+def _usage_cost(usage: Any, model: DirectModel) -> float:
+    """Price a response's ``usage`` block in USD: its tokens at ``model``'s rates, advisor runs at theirs."""
+    if usage is None:
+        return 0.0
+    cost = _token_cost(usage, model)
+    for iteration in _advisor_iterations(usage):
+        advisor = _MODELS_BY_API_ID.get(getattr(iteration, "model", None) or "")
+        if advisor is None:
+            logger.warning("[advisor] No prices for %s; billing it as opus", getattr(iteration, "model", None))
+            advisor = DIRECT_MODELS["opus-5.5-direct"]
+        cost += _token_cost(iteration, advisor)
     server_tool_use = getattr(usage, "server_tool_use", None)
     searches = (getattr(server_tool_use, "web_search_requests", 0) or 0) if server_tool_use else 0
     return cost + searches * PRICE_WEB_SEARCH
@@ -427,6 +411,10 @@ def _note_usage(response: Any) -> None:
         note_stat(name, getattr(usage, name, 0) or 0)
     server_tool_use = getattr(usage, "server_tool_use", None)
     note_stat("web_searches", (getattr(server_tool_use, "web_search_requests", 0) or 0) if server_tool_use else 0)
+    advisor_runs = _advisor_iterations(usage)
+    if advisor_runs:
+        note_stat("advisor_calls", len(advisor_runs))
+        note_stat("advisor_output_tokens", sum(getattr(i, "output_tokens", 0) or 0 for i in advisor_runs))
 
 
 def _cache_read_share(usage: Any) -> float:
@@ -645,8 +633,6 @@ class AnthropicService:
             name = getattr(block, "name", "")
             args = getattr(block, "input", None) or {}
             tool = client_tools.get(name)
-            if name == "think_harder":
-                return text_result("You're already at high effort; answer directly.", is_error=True)
             if tool is None:
                 return text_result(f"There's no tool named {name}.", is_error=True)
             on_status(tool.status)
@@ -709,7 +695,7 @@ class AnthropicService:
         gets code execution, and the files its code saves are attached the same way.
         ``on_status`` hears what the model is doing while there's no new text: thinking,
         searching, running code, or running a tool. ``max_tokens`` caps each request's output,
-        thinking included (a think_harder re-run gets at least ``MAX_TOKENS``).
+        thinking included.
         """
         client = self.get_client()
         resolved_bot_id = resolve_bot_id(bot_id, state_service, self._bot_id_loader)
@@ -751,10 +737,10 @@ class AnthropicService:
             kwargs["mcp_servers"] = mcp["mcp_servers"]
             kwargs["tools"] = kwargs.get("tools", []) + [mcp["toolset"]]
             kwargs["betas"] = kwargs["betas"] + [MCP_BETA]
-        # Only at the model's default effort: a caller that set its own effort gets exactly that.
-        think_harder = model in THINK_HARDER_MODELS and effort is None
-        if think_harder:
-            kwargs["tools"] = kwargs.get("tools", []) + [THINK_HARDER_TOOL]
+        # Mention replies only (they pass a channel): a background job is one fixed task.
+        if model in ADVISOR_MODELS and channel_id:
+            kwargs["tools"] = kwargs.get("tools", []) + [advisor_tool(ADVISOR_MODELS[model])]
+            kwargs["betas"] = kwargs["betas"] + [ADVISOR_BETA]
 
         last_text = api_messages[-1]["content"][0].get("text", "") if api_messages else ""
         snippet = last_text.replace("\n", " ")
@@ -776,9 +762,7 @@ class AnthropicService:
                 on_status(text)
 
         tool_statuses = {name: tool.status for name, tool in client_tools.items()}
-        tool_statuses["think_harder"] = THINKING_HARDER_STATUS
 
-        escalated = False
         cap_raised = False
         strict_dropped = False
         markup_retries = 0
@@ -818,23 +802,6 @@ class AnthropicService:
                     strict_dropped = True
                     continue
                 total_cost += cost
-                reason = _think_harder_reason(response) if think_harder and not escalated else None
-                if reason is not None:
-                    # Throw this response away and ask again at high effort.
-                    escalated = True
-                    note_stat("think_harder", 1)
-                    logger.info("[%s] think_harder requested: %s", api_model, reason[:300])
-                    # Clear any draft it wrote before the call.
-                    show("")
-                    status(THINKING_HARDER_STATUS)
-                    # Same tools so the tools/system cache still reads. Without client tools,
-                    # ``none`` stops a second call; with them, a repeat call gets an error result.
-                    kwargs["output_config"] = {"effort": THINK_HARDER_EFFORT}
-                    kwargs["max_tokens"] = max(max_tokens, MAX_TOKENS)
-                    if not client_tools:
-                        kwargs["tool_choice"] = {"type": "none"}
-                    api_messages = _with_think_harder_note(api_messages, reason)
-                    continue
                 if (response.stop_reason == "max_tokens" and not cap_raised and kwargs["max_tokens"] < MAX_TOKENS
                         and not _response_text(response).strip()):
                     # Thinking used the whole reply cap, so there's nothing to post. Ask once more

@@ -146,7 +146,7 @@ in the service that made the call:
 
 | Provider | Where the cost comes from |
 | --- | --- |
-| `claude-direct` | Token usage and web searches priced at each model's rates, per request (including `think_harder` re-runs and tool rounds) |
+| `claude-direct` | Token usage and web searches priced at each model's rates, per request (including advisor calls and tool rounds) |
 | `gemini-direct` | Token usage priced at Gemini's rates, for chat and for image models (image output tokens at the image rate; search grounding isn't priced, as the first 5,000 a month are free) |
 | `groq` | The audio's duration at Whisper's per-hour price (at least 10 seconds per request) |
 

@@ -485,7 +485,6 @@ class TestStrictSchemaLimits(unittest.TestCase):
 
     def _schemas(self):
         from src.services import chat_tools
-        from src.services.anthropic_service import THINK_HARDER_TOOL
         tools, _ = _full_tools(
             irc_log=MagicMock(),
             quote_file=MagicMock(),
@@ -498,7 +497,7 @@ class TestStrictSchemaLimits(unittest.TestCase):
         )
         every_tool = {v["name"] for k, v in vars(chat_tools).items() if k.endswith("_TOOL") and isinstance(v, dict)}
         self.assertEqual(set(tools), every_tool)  # so a new tool can't sneak past this test
-        return [t.definition for t in tools.values()] + [THINK_HARDER_TOOL]
+        return [t.definition for t in tools.values()]
 
     def test_strict_schemas_stay_under_the_api_limits(self):
         strict = [d for d in self._schemas() if d.get("strict")]

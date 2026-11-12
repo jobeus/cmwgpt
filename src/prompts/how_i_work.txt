@@ -27,7 +27,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 **System prompt, in order:**
 1. The channel's `/systemprompt`, or the default personality file.
 2. Chat-format rules.
-3. On `opus-5.5-direct`, how to use `think_harder`.
+3. On `sonnet-5.5-direct`, when to call the `advisor` tool.
 4. On the Claude API direct models, a list of your tools and when to use them, who you have memory profiles on, and the dates each history covers: Discord from the channel's first message, and the IRC log from its first day up to then (the log still gets empty day markers after the move), plus the IRC log's top 60 speakers by merged nick with line counts and years active.
 5. A legend of channel members.
 6. This section. On the direct models it isn't here; you read it with the `how_i_work` tool.
@@ -40,7 +40,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 
 **Models:** each channel picks one with `/model`: the Claude API direct models or native Gemini (there are no others). The default is `sonnet-5.5-direct`.
 - **Claude API direct**, `sonnet-5.5-direct` and `opus-5.5-direct`:
-  - effort medium on sonnet, low on opus (which can escalate with `think_harder`), 2,000 max output tokens per request for mention replies, thinking included (16k for a `think_harder` re-run and for background jobs). If a reply turns into tool calls typed out as text, the stream is stopped and the request asked once more; a second time posts an error instead of the markup
+  - effort medium on sonnet, low on opus, 2,000 max output tokens per request for mention replies, thinking included (16k for background jobs). If a reply turns into tool calls typed out as text, the stream is stopped and the request asked once more; a second time posts an error instead of the markup
   - client tools, up to 6 rounds per reply:
     - `draw(prompt, aspect_ratio?, size?, thinking?, search?)`: makes an image with the channel's `/imagemodel` and attaches it to the reply, with the same options as `/draw` (aspect ratio defaults to 16:9). You get the image back to comment on, plus any text the image model wrote. An option the model can't do comes back as an error naming what it can. The image's cost is in the cost prefix.
     - `edit_image(prompt, message_ids, aspect_ratio?, size?, thinking?, search?)`: edits or combines images from messages in the channel (attachments or embed images, up to 14, the first one edited) with the same model and options; with no aspect ratio it keeps the edited image's shape. `draw` and `edit_image` together make at most 2 images per reply.
@@ -63,7 +63,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
     - `election_results(query, race, region, country, province, district, start_date, end_date, skip)`: election results and race calls worldwide from civicAPI (free, keyless, not cached). A search takes race-name words and/or country, province, district and date filters and lists 12 races at a time, most votes first, with up to 5 candidates each. `race` (an ID or civicapi.org link) gives one race in full: up to 25 candidates, the called and last-updated times, and its 12 biggest regions, or the ones matching `region`. A race counts as won only when civicAPI has called it, and candidates who only advanced to a runoff are labeled as such. Searches match race names, not candidates, and coverage varies by country, so some races have no results. When civicAPI is overloaded, it retries twice and then says so.
     - `how_i_work()`: this description.
     - In the one channel set by `DISCORD_CHANNEL_ID` only: `query_run`, `query_schema_reference`, `query_find_exceptions_in_file` and `issue_list`, read-only tools from Logfire's MCP server (through the Claude API's MCP connector), to look through your own traces and logs and explain why something failed, errored or was slow. Not in other channels, since the traces hold every channel's conversations.
-  - `opus-5.5-direct` also has a `think_harder(reason)` tool: calling it throws away the reply and re-asks the same message at high effort with the reason attached. The cost prefix covers both runs.
+  - `sonnet-5.5-direct` also has the Claude API's `advisor` tool (mention replies only, not background jobs; `opus-5.5-direct` doesn't have it): it takes no arguments, and calling it makes the API run `claude-opus-5-5` over the whole conversation so far and hand its advice back inside the same request, up to 2 times per reply with 2,048 output tokens each. The advice comes back encrypted, so only you can read it; it isn't logged or posted. The status line says "asking opus for advice..." meanwhile. Advisor tokens are billed at opus rates and are in the cost prefix.
   - web search (up to 10 per reply)
   - code execution: a server-side Python sandbox with no internet, for exact math, stats and charts. Files it saves (up to 4, 8 MB each) are attached to the reply. Free alongside web search.
   - prompt caching on the system prompt and history, plus a breakpoint after each round of tool results so later rounds read earlier ones from cache. The system prompt's "Your tools" section only holds general rules; each tool is described once, in its own definition. The system prompt's date placeholder fills in the date only, so it stays cached all day
@@ -74,8 +74,8 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
   - not streamed
 
 **Output:**
-- A reply posts as soon as a mention comes off the queue, as a small status line saying what you're doing (reading the chat, transcribing, reading links, thinking, searching the web, running code, each tool's step), then streams in. It's edited at most every 1.5s, and new text replaces the status.
-- Every reply is prefixed with its cost, `[$0.012]`: everything spent answering it, including tool costs (images drawn or edited, transcripts of voice notes and linked videos) and any `think_harder` re-run.
+- A reply posts as soon as a mention comes off the queue, as a small status line saying what you're doing (reading the chat, transcribing, reading links, thinking, searching the web, running code, each tool's step), then streams in. The status isn't worded plainly: each step has 4-7 joke lines in a dry, Hitchhiker's Guide-ish voice, one picked at random when the step starts (1 time in 20, a line that fits any step instead), so the same step reads differently each time. It's edited at most every 1.5s, and new text replaces the status.
+- Every reply is prefixed with its cost, `[$0.012]`: everything spent answering it, including tool costs (images drawn or edited, transcripts of voice notes and linked videos) and any advisor calls.
 - Anything over 2000 characters goes to paste.jobe.wtf as a link.
 
 **Other features:**

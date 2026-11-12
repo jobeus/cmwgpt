@@ -9,6 +9,8 @@ import anthropic
 import httpx
 
 from src.services.anthropic_service import (
+    ADVISOR_BETA,
+    ADVISOR_STATUS,
     CACHE_DIAGNOSIS_BETA,
     CODE_EXECUTION_TOOL,
     CODE_STATUS,
@@ -17,7 +19,6 @@ from src.services.anthropic_service import (
     MAX_TOKENS,
     MAX_TOOL_ROUNDS,
     SEARCH_RESULTS_STATUS,
-    THINKING_HARDER_STATUS,
     THINKING_STATUS,
     WEB_SEARCH_STATUS,
     AnthropicService,
@@ -210,46 +211,52 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         kwargs = client.beta.messages.create.call_args.kwargs
         self.assertEqual(kwargs["output_config"], {"effort": "medium"})
 
-    async def test_opus_offers_think_harder_and_sonnet_does_not(self):
+    async def test_sonnet_gets_an_opus_advisor_and_opus_does_not(self):
         service, client = self.make_service(_response("a"), _response("b"), _response("c"))
-        for model, effort, offered in (
-            ("opus-5.5-direct", None, True),
-            ("opus-5.5-direct", "medium", False),
-            ("sonnet-5.5-direct", None, False),
+        for model, channel_id, offered in (
+            ("sonnet-5.5-direct", 7, True),
+            ("sonnet-5.5-direct", None, False),  # a background job
+            ("opus-5.5-direct", 7, False),
         ):
             await service.get_chat_completion(
-                model=model, messages=[{"role": "user", "content": "q"}], effort=effort)
-            names = [t.get("name") for t in client.beta.messages.create.call_args.kwargs["tools"]]
-            self.assertEqual("think_harder" in names, offered, (model, effort))
+                model=model, messages=[{"role": "user", "content": "q"}], channel_id=channel_id)
+            kwargs = client.beta.messages.create.call_args.kwargs
+            advisors = [t for t in kwargs["tools"] if t.get("name") == "advisor"]
+            self.assertEqual(bool(advisors), offered, (model, channel_id))
+            self.assertEqual(ADVISOR_BETA in kwargs["betas"], offered, (model, channel_id))
+            self.assertNotIn("think_harder", [t.get("name") for t in kwargs["tools"]])
+            if offered:
+                self.assertEqual(advisors[0]["type"], "advisor_20260301")
+                self.assertEqual(advisors[0]["model"], "claude-opus-5-5")
 
-    async def test_think_harder_reruns_the_question_at_high_effort(self):
-        call = SimpleNamespace(type="tool_use", id="toolu_1", name="think_harder",
-                               input={"reason": "multi-step proof"})
-        first = _response(stop_reason="tool_use", content=[SimpleNamespace(type="text", text="hmm"), call],
-                          id="msg_1", model="claude-opus-5-5")
-        second = _response("the careful answer", id="msg_2", model="claude-opus-5-5")
-        service, client = self.make_service(first, second)
+    async def test_advisor_runs_are_priced_at_the_advisors_rates(self):
+        usage = _usage(input_tokens=1_000_000, output_tokens=0)
+        usage.iterations = [
+            SimpleNamespace(type="message", input_tokens=1_000_000, output_tokens=0),
+            SimpleNamespace(type="advisor_message", model="claude-opus-5-5", input_tokens=1_000_000,
+                            output_tokens=100_000, cache_read_input_tokens=0, cache_creation_input_tokens=0),
+        ]
+        service, _ = self.make_service(_response("advised", usage=usage))
+        _, cost = await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}])
+        # Sonnet's own million input tokens, plus opus's million in and 100k out.
+        self.assertAlmostEqual(cost, 2.00 + 4.00 + 2.00)
 
-        text, cost = await service.get_chat_completion(
-            model="opus-5.5-direct", messages=[{"role": "user", "content": "prove it"}], channel_id=7)
+    async def test_advisor_blocks_go_back_unchanged_when_a_turn_resumes(self):
+        call = SimpleNamespace(type="server_tool_use", id="srvtoolu_1", name="advisor", input={})
+        advice = SimpleNamespace(type="advisor_tool_result", tool_use_id="srvtoolu_1",
+                                 content=SimpleNamespace(type="advisor_redacted_result", encrypted_content="x"))
+        service, client = self.make_service(
+            _response(stop_reason="pause_turn", content=[call]),
+            _response(content=[advice, SimpleNamespace(type="text", text="answer")]))
 
-        self.assertEqual(text, "the careful answer")
-        self.assertAlmostEqual(cost, 2 * _usage_cost(_usage(), DIRECT_MODELS["opus-5.5-direct"]))
-        first_call, second_call = (c.kwargs for c in client.beta.messages.create.call_args_list)
-        self.assertEqual(first_call["output_config"], {"effort": "low"})
-        self.assertNotIn("tool_choice", first_call)
-        self.assertEqual(second_call["output_config"], {"effort": "high"})
-        self.assertEqual(second_call["tool_choice"], {"type": "none"})
-        # Same tools, so the cached tools/system prefix still reads.
-        self.assertEqual(second_call["tools"], first_call["tools"])
-        # The question is resent, not the discarded tool call, followed by an operator note with the reason.
-        mention, note = second_call["messages"]
-        self.assertEqual(mention, first_call["messages"][0])
-        self.assertEqual(note["role"], "system")
-        self.assertIn("multi-step proof", note["content"])
-        self.assertIn("only the final answer", note["content"])
-        self.assertEqual(len(first_call["messages"]), 1)
-        self.assertEqual(second_call["diagnostics"], {"previous_message_id": "msg_1"})
+        text, _ = await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}])
+
+        self.assertEqual(text, "answer")
+        first_call, resumed = (c.kwargs for c in client.beta.messages.create.call_args_list)
+        self.assertEqual(resumed["messages"][-1], {"role": "assistant", "content": [call]})
+        self.assertEqual(resumed["tools"], first_call["tools"])
 
     async def test_fallback_turn_is_priced_at_the_serving_model(self):
         usage = _usage(input_tokens=1_000_000, output_tokens=0)
@@ -555,20 +562,16 @@ class TestToolMarkupInReplies(unittest.IsolatedAsyncioTestCase):
 
 
 class TestReplyMaxTokens(unittest.IsolatedAsyncioTestCase):
-    async def test_max_tokens_is_passed_and_think_harder_gets_the_full_cap(self):
-        from src.services.anthropic_service import MAX_TOKENS, REPLY_MAX_TOKENS
-        call = SimpleNamespace(type="tool_use", id="toolu_1", name="think_harder", input={"reason": "hard"})
+    async def test_max_tokens_is_passed(self):
+        from src.services.anthropic_service import REPLY_MAX_TOKENS
         service = AnthropicService(api_key="test-key")
         client = MagicMock()
-        client.beta.messages.create = AsyncMock(side_effect=[
-            _response(stop_reason="tool_use", content=[call], model="claude-opus-5-5"),
-            _response("answer", model="claude-opus-5-5")])
+        client.beta.messages.create = AsyncMock(return_value=_response("answer"))
         service.set_client(client)
 
-        await service.get_chat_completion(model="opus-5.5-direct", messages=USER, max_tokens=REPLY_MAX_TOKENS)
+        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, max_tokens=REPLY_MAX_TOKENS)
 
-        caps = [c.kwargs["max_tokens"] for c in client.beta.messages.create.await_args_list]
-        self.assertEqual(caps, [REPLY_MAX_TOKENS, MAX_TOKENS])
+        self.assertEqual(client.beta.messages.create.call_args.kwargs["max_tokens"], REPLY_MAX_TOKENS)
 
     async def test_default_is_the_full_cap(self):
         from src.services.anthropic_service import MAX_TOKENS
@@ -582,7 +585,7 @@ class TestReplyMaxTokens(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.beta.messages.create.call_args.kwargs["max_tokens"], MAX_TOKENS)
 
 
-class TestThinkHarderStreaming(unittest.IsolatedAsyncioTestCase):
+class TestStreamingStatuses(unittest.IsolatedAsyncioTestCase):
     async def test_statuses_follow_what_the_model_starts(self):
         call = SimpleNamespace(type="tool_use", id="toolu_1", name="recall_channel", input={})
         first = _response(stop_reason="tool_use", content=[call])
@@ -610,25 +613,9 @@ class TestThinkHarderStreaming(unittest.IsolatedAsyncioTestCase):
             THINKING_STATUS,   # the next request
         ])
 
-    async def test_preview_shows_thinking_harder_then_the_new_answer(self):
-        call = SimpleNamespace(type="tool_use", id="toolu_1", name="think_harder", input={"reason": "hard"})
-        first = _response(stop_reason="tool_use", content=[call], model="claude-opus-5-5")
-        second = _response("answer", model="claude-opus-5-5")
-        service = AnthropicService(api_key="test-key")
-        client = MagicMock()
-        client.beta.messages.stream = MagicMock(
-            side_effect=[FakeMessageStream([], first), FakeMessageStream(["answer"], second)])
-        service.set_client(client)
-        seen, statuses = [], []
-
-        text, _ = await service.get_chat_completion(
-            model="opus-5.5-direct", messages=[{"role": "user", "content": "q"}], on_text=seen.append,
-            on_status=statuses.append)
-
-        self.assertEqual(text, "answer")
-        # The discarded first answer is cleared, then the re-run streams in.
-        self.assertEqual(seen, ["", "answer"])
-        self.assertEqual(statuses, [THINKING_STATUS, THINKING_HARDER_STATUS, THINKING_STATUS])
+    def test_advisor_call_has_its_own_status(self):
+        block = SimpleNamespace(type="server_tool_use", name="advisor")
+        self.assertEqual(_block_status(block, {}), ADVISOR_STATUS)
 
 
 class TestDispatchRoutes(unittest.IsolatedAsyncioTestCase):
@@ -961,27 +948,6 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(calls), MAX_TOOL_ROUNDS + 1)
         self.assertNotIn("tool_choice", calls[-2].kwargs)
         self.assertEqual(calls[-1].kwargs["tool_choice"], {"type": "none"})
-
-    async def test_think_harder_with_client_tools_keeps_them_available(self):
-        think = SimpleNamespace(type="tool_use", id="toolu_1", name="think_harder", input={"reason": "hard"})
-        again = SimpleNamespace(type="tool_use", id="toolu_2", name="think_harder", input={"reason": "still"})
-        service, client = self.make_service(
-            _response(stop_reason="tool_use", content=[think], model="claude-opus-5-5"),
-            _response(stop_reason="tool_use", content=[again], model="claude-opus-5-5"),
-            _response("answer", model="claude-opus-5-5"),
-        )
-
-        text, _ = await service.get_chat_completion(
-            model="opus-5.5-direct", messages=USER, tools=[self.tool()])
-
-        self.assertEqual(text, "answer")
-        _, rerun, final = (c.kwargs for c in client.beta.messages.create.call_args_list)
-        self.assertEqual(rerun["output_config"], {"effort": "high"})
-        self.assertNotIn("tool_choice", rerun)
-        # A second think_harder is answered with an error instead of escalating again.
-        result = final["messages"][-1]["content"][0]
-        self.assertEqual(result["tool_use_id"], "toolu_2")
-        self.assertTrue(result["is_error"])
 
 
 class TestCodeExecution(unittest.IsolatedAsyncioTestCase):

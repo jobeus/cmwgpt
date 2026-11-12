@@ -736,11 +736,11 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIn("see https://site.example", fetcher.await_args.args[0])
         self.assertEqual(fetcher.await_args.kwargs, {"cache_only": False})
 
-    async def test_think_harder_addon_only_on_opus_direct(self):
+    async def test_advisor_addon_only_on_sonnet_direct(self):
         handler, _, _, _, _ = self.make_handler()
         channel = MagicMock()
         channel.id = 44
-        channel.name = "think"
+        channel.name = "advise"
         mention_msg = self._simple_msg(1, channel)
         mention_msg.guild = None
 
@@ -749,12 +749,12 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         channel.history = history
 
-        for model, expected in (("opus-5.5-direct", True), ("sonnet-5.5-direct", False), (None, False)):
+        for model, expected in (("sonnet-5.5-direct", True), ("opus-5.5-direct", False), (None, False)):
             _, system_prompt = await handler._prepare_mention_context(
                 mention_msg, SimpleNamespace(id=999), model=model)
-            self.assertEqual("## Thinking harder" in system_prompt, expected, model)
+            self.assertEqual("## Advisor" in system_prompt, expected, model)
             if expected:
-                self.assertIn("`think_harder`", system_prompt)
+                self.assertIn("`advisor`", system_prompt)
 
     async def test_direct_models_get_tools_instead_of_injected_memory(self):
         handler, _, _, _, _ = self.make_handler(anthropic_service=MagicMock())
