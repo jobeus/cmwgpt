@@ -185,6 +185,40 @@ class TestReminderService(unittest.IsolatedAsyncioTestCase):
         self.assertIn("8:00 PM MDT", saved.describe())
         self.assertEqual(saved.due_at, reminder.due_at)
 
+    async def test_a_task_interrupted_by_a_restart_runs_afterwards_without_a_second_ping(self):
+        bot, channel = _bot_with_channel()
+        channel.fetch_message = AsyncMock(return_value=SimpleNamespace(id=99))
+        started = asyncio.Event()
+
+        async def never_finishes(_reminder, _request):
+            started.set()
+            await asyncio.Event().wait()
+
+        self.service.set_bot(bot)
+        self.service.set_task_runner(never_finishes)
+        await self.add(task="look up the final score")
+        self.now[0] = NOW + timedelta(minutes=30)
+        self.assertEqual(await self.service.deliver_due(), 1)
+        await started.wait()
+        # A poll while it's being handed over doesn't start it again.
+        self.assertEqual(await self.service.deliver_due(), 0)
+        # The restart: the hand-over is cancelled, and a new process picks the reminder up.
+        for running in list(self.service._running):
+            running.cancel()
+        await asyncio.gather(*self.service._running, return_exceptions=True)
+        self.assertEqual(await self.service.pending(20), [])  # not listed as waiting
+
+        runner = AsyncMock()
+        restarted = ReminderService(store=ReminderStore(redis_getter=lambda: self.redis), now=lambda: self.now[0])
+        restarted.set_bot(bot)
+        restarted.set_task_runner(runner)
+        self.assertEqual(await restarted.deliver_due(), 0)
+        await asyncio.gather(*restarted._running)
+
+        runner.assert_awaited_once()
+        channel.send.assert_awaited_once()
+        self.assertEqual(await self.redis.zcard("cmwgpt:reminders:due"), 0)
+
     async def test_a_task_runs_after_the_ping_with_the_asking_message(self):
         bot, channel = _bot_with_channel()
         request = SimpleNamespace(id=99)

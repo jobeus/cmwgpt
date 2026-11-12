@@ -110,6 +110,8 @@ class Reminder:
     due_at: datetime
     tz: str = ""
     task: str = ""
+    # The ping is out and only the task is still owed (set when a restart got between them).
+    pinged: bool = False
 
     @property
     def zone(self) -> Optional[ZoneInfo]:
@@ -138,6 +140,7 @@ def _from_hash(reminder_id: int, fields: Dict[str, str]) -> Optional[Reminder]:
             due_at=datetime.fromtimestamp(float(fields["due_at"]), timezone.utc),
             tz=fields.get("tz", ""),
             task=fields.get("task", ""),
+            pinged=fields.get("pinged") == "1",
         )
     except (KeyError, ValueError):
         logger.warning("Skipping malformed reminder %s: %s", reminder_id, fields)
@@ -200,7 +203,11 @@ class ReminderStore:
     async def pending(self, channel_id: Optional[int] = None) -> List[Reminder]:
         """Every reminder not yet posted (in one channel, if given), soonest first."""
         reminders = await self._load(await self._redis_getter().zrange(_DUE_KEY, 0, -1))
-        return [r for r in reminders if channel_id is None or r.channel_id == channel_id]
+        return [r for r in reminders if not r.pinged and (channel_id is None or r.channel_id == channel_id)]
+
+    async def mark_pinged(self, reminder_id: int) -> None:
+        """Note that a reminder's ping is out and only its task is still owed."""
+        await self._redis_getter().hset(_reminder_key(reminder_id), "pinged", "1")
 
     async def get(self, reminder_id: int) -> Optional[Reminder]:
         fields = await self._redis_getter().hgetall(_reminder_key(reminder_id))
@@ -247,6 +254,8 @@ class ReminderService:
         self._task_runner: Optional[TaskRunner] = None
         # Reminder tasks being handed to the runner, kept so they aren't garbage collected.
         self._running: Set[asyncio.Task] = set()
+        # IDs of the reminders those tasks are for, so a poll doesn't hand one over twice.
+        self._handing_over: Set[int] = set()
 
     def set_bot(self, bot: discord.Client) -> None:
         self._bot = bot
@@ -344,6 +353,13 @@ class ReminderService:
                 logger.warning("[reminder] Dropping #%s: channel %s is gone", reminder.id, reminder.channel_id)
                 await self._store.remove(reminder.id)
                 return False
+        if reminder.pinged:
+            # The ping went out before a restart; only the task is still owed.
+            if reminder.task and self._task_runner:
+                self._start_task(reminder, channel)
+            else:
+                await self._store.remove(reminder.id)
+            return False
         content = reminder_message(reminder, now)
         # Ping only the people it's for, not whoever set it.
         mentions = discord.AllowedMentions(
@@ -366,27 +382,47 @@ class ReminderService:
                 return False
             logger.warning("[reminder] Couldn't post #%s, will retry: %s", reminder.id, concise_error(e))
             return False
-        await self._store.remove(reminder.id)
         logger.info("[reminder] Posted %s", reminder.describe())
         if reminder.task and self._task_runner:
-            # Its own task, so a long answer doesn't hold up other reminders.
-            running = asyncio.create_task(self._run_task(reminder, channel))
-            self._running.add(running)
-            running.add_done_callback(self._running.discard)
+            # Kept, marked as pinged, until its task is handed over: a restart in between
+            # then runs the task instead of losing it.
+            await self._store.mark_pinged(reminder.id)
+            self._start_task(reminder, channel)
+        else:
+            await self._store.remove(reminder.id)
         return True
 
+    def _start_task(self, reminder: Reminder, channel: Any) -> None:
+        """Run a pinged reminder's task in its own asyncio task, so a slow one doesn't hold up other reminders."""
+        if reminder.id in self._handing_over:
+            return
+        self._handing_over.add(reminder.id)
+        running = asyncio.create_task(self._run_task(reminder, channel))
+        self._running.add(running)
+        running.add_done_callback(self._running.discard)
+
     async def _run_task(self, reminder: Reminder, channel: Any) -> None:
-        """Hand a posted reminder's task to the runner, with the message that asked for it."""
+        """Hand a posted reminder's task to the runner, with the message that asked for it.
+
+        The reminder is removed once that's settled either way. Cancelled by a shutdown, it
+        stays, and the next start hands the task over.
+        """
         assert self._task_runner is not None and reminder.message_id
         try:
-            request = await channel.fetch_message(reminder.message_id)
-        except (discord.NotFound, discord.Forbidden):
-            logger.warning("[reminder] Skipping the task of #%s: the message that set it is gone", reminder.id)
-            return
-        except discord.HTTPException as e:
-            logger.warning("[reminder] Couldn't fetch the message for #%s's task: %s", reminder.id, concise_error(e))
-            return
-        try:
-            await self._task_runner(reminder, request)
-        except Exception:
-            logger.exception("[reminder] Task of #%s failed", reminder.id)
+            try:
+                request = await channel.fetch_message(reminder.message_id)
+            except (discord.NotFound, discord.Forbidden):
+                logger.warning("[reminder] Skipping the task of #%s: the message that set it is gone", reminder.id)
+                request = None
+            except discord.HTTPException as e:
+                logger.warning(
+                    "[reminder] Couldn't fetch the message for #%s's task: %s", reminder.id, concise_error(e))
+                request = None
+            if request is not None:
+                try:
+                    await self._task_runner(reminder, request)
+                except Exception:
+                    logger.exception("[reminder] Task of #%s failed", reminder.id)
+            await self._store.remove(reminder.id)
+        finally:
+            self._handing_over.discard(reminder.id)

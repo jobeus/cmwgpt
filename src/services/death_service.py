@@ -19,7 +19,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from urllib.parse import unquote
 
 import httpx
@@ -110,7 +110,9 @@ class DeathService:
         model: Optional[str] = None,
         gemini_service=None,
         anthropic_service=None,
+        now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ):
+        self._now = now
         self._state_service = state_service
         self._death_channel_id = death_channel_id
         self._store = store or StateStore(None)
@@ -127,8 +129,10 @@ class DeathService:
         # from the deaths page and later reappears.
         self._announced_titles: Set[str] = set()
         self._http: Optional[httpx.AsyncClient] = None
-        # Validator for the deaths page, so an unchanged page isn't re-parsed.
-        self._deaths_page_etag: Optional[str] = None
+        # Per deaths page (by year): its validator, so an unchanged page isn't re-parsed,
+        # and the names it last had, to combine with the other page's in January.
+        self._page_etags: Dict[int, Optional[str]] = {}
+        self._page_names: Dict[int, Set[Tuple[str, str]]] = {}
         self._first_poll = True
 
         self._load_state()
@@ -247,20 +251,34 @@ class DeathService:
 
     async def _poll_once(self) -> None:
         """Single poll iteration."""
-        year = datetime.now(timezone.utc).year
-        url = f"https://en.wikipedia.org/api/rest_v1/page/html/Deaths_in_{year}"
+        now = self._now()
+        year = now.year
+        # Deaths from the last days of December are added to last year's page after New
+        # Year, so that page is still watched through January.
+        years = [year - 1, year] if now.month == 1 else [year]
+        for old_year in [y for y in self._page_names if y not in years]:
+            self._page_names.pop(old_year, None)
+            self._page_etags.pop(old_year, None)
 
-        headers = {"If-None-Match": self._deaths_page_etag} if self._deaths_page_etag else {}
-        resp = await self._client().get(url, headers=headers)
-        if resp.status_code == 304:
+        changed = False
+        for page_year in years:
+            url = f"https://en.wikipedia.org/api/rest_v1/page/html/Deaths_in_{page_year}"
+            etag = self._page_etags.get(page_year)
+            resp = await self._client().get(url, headers={"If-None-Match": etag} if etag else {})
+            if resp.status_code == 304:
+                continue
+            if resp.status_code != 200:
+                logger.warning("Deaths page for %s returned %s", page_year, resp.status_code)
+                continue
+            self._page_etags[page_year] = resp.headers.get("etag")
+            # The page is large and grows all year; parse it off the event loop.
+            self._page_names[page_year] = set(await asyncio.to_thread(parse_deaths_html, resp.text))
+            changed = True
+        # Without every page, the names of the missing one would look removed now and new
+        # again once it loads; wait for the next poll.
+        if not changed or any(y not in self._page_names for y in years):
             return
-        if resp.status_code != 200:
-            logger.warning("Deaths page returned %s", resp.status_code)
-            return
-        self._deaths_page_etag = resp.headers.get("etag")
-
-        # The page is large and grows all year; parse it off the event loop.
-        current = set(await asyncio.to_thread(parse_deaths_html, resp.text))
+        current: Set[Tuple[str, str]] = set().union(*(self._page_names[y] for y in years))
 
         if self._first_poll:
             # Baseline — don't announce anything
@@ -347,7 +365,7 @@ class DeathService:
         self._known_names = current - unchecked
         if unchecked:
             # Or the next poll gets a 304 and returns before retrying them.
-            self._deaths_page_etag = None
+            self._page_etags.clear()
         self._save_state()
 
     # -- person check -------------------------------------------------------

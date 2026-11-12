@@ -6,6 +6,7 @@ Tests HTML parsing, name diffing, pageview threshold, announcements, and state p
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 import asyncio
+from datetime import datetime, timezone
 import os
 import sys
 
@@ -110,6 +111,8 @@ class TestDeathService(unittest.TestCase):
             state_service=self.state_service,
             store=self.store,
             death_channel_id="12345",
+            # Mid-year, so only one deaths page is polled whatever today's date is.
+            now=lambda: datetime(2026, 6, 15, tzinfo=timezone.utc),
         )
 
         self.mock_bot = MagicMock()
@@ -648,7 +651,7 @@ class TestDeathService(unittest.TestCase):
                 await self.service._poll_once()
                 self.assertNotIn("Famous_One", self.service._announced_titles)
                 self.assertEqual(self.service._known_names, set())
-                self.assertIsNone(self.service._deaths_page_etag)
+                self.assertEqual(self.service._page_etags, {})
 
                 await self.service._poll_once()
                 self.assertEqual(mock_announce.await_count, 2)
@@ -719,6 +722,50 @@ class TestDeathService(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
+    def test_january_also_watches_last_years_page(self):
+        async def run_test():
+            self.service._now = lambda: datetime(2027, 1, 3, tzinfo=timezone.utc)
+            self.service._first_poll = False
+            self.service._known_names = {("Old Name", "Old_Name")}
+            http = self._fake_http(
+                httpx.Response(200, text="last year"), httpx.Response(200, text="this year"),
+                # Next poll: only last year's page changed.
+                httpx.Response(200, text="last year, edited"), httpx.Response(304),
+            )
+            pages = {
+                "last year": [("Old Name", "Old_Name")],
+                "this year": [("New Year", "New_Year")],
+                "last year, edited": [("Old Name", "Old_Name"), ("Late December", "Late_December")],
+            }
+            with patch.object(self.service, "_save_state"), \
+                patch.object(self.service, "_announce", AsyncMock(return_value=True)) as mock_announce, \
+                patch.object(self.service, "get_avg_monthly_views", AsyncMock(return_value=5_000_000)), \
+                patch("src.services.death_service.parse_deaths_html", side_effect=lambda html: pages[html]):
+                await self.service._poll_once()
+                urls = [c.args[0] for c in http.get.await_args_list]
+                self.assertTrue(urls[0].endswith("Deaths_in_2026") and urls[1].endswith("Deaths_in_2027"))
+                mock_announce.assert_awaited_once_with("New Year", "New_Year", 5_000_000)
+
+                await self.service._poll_once()
+                self.assertEqual(mock_announce.await_args.args[0], "Late December")
+                self.assertEqual(len(self.service._known_names), 3)
+
+        self.loop.run_until_complete(run_test())
+
+    def test_a_page_that_fails_to_load_puts_off_the_diff(self):
+        async def run_test():
+            self.service._now = lambda: datetime(2027, 1, 3, tzinfo=timezone.utc)
+            self.service._first_poll = False
+            self.service._known_names = {("Old Name", "Old_Name")}
+            self._fake_http(httpx.Response(503), httpx.Response(200, text="this year"))
+            with patch.object(self.service, "_announce", AsyncMock()) as mock_announce, \
+                patch("src.services.death_service.parse_deaths_html", return_value=[("New Year", "New_Year")]):
+                await self.service._poll_once()
+            mock_announce.assert_not_awaited()
+            self.assertEqual(self.service._known_names, {("Old Name", "Old_Name")})
+
+        self.loop.run_until_complete(run_test())
+
     def test_poll_once_sends_etag_and_skips_parse_on_304(self):
         async def run_test():
             http = self._fake_http(
@@ -728,7 +775,7 @@ class TestDeathService(unittest.TestCase):
             with patch("src.services.death_service.parse_deaths_html",
                        return_value=[("John Doe", "John_Doe")]) as mock_parse:
                 await self.service._poll_once()
-                self.assertEqual(self.service._deaths_page_etag, '"v1"')
+                self.assertEqual(self.service._page_etags, {2026: '"v1"'})
                 self.assertEqual(http.get.await_args_list[0].kwargs["headers"], {})
 
                 await self.service._poll_once()

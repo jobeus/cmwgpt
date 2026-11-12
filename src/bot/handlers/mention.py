@@ -26,7 +26,7 @@ from src.services.completion_dispatch import dispatch_completion
 from src.services.mention_log import log_mention, mention_record
 from src.services.cost_service import CostLedger, cost_scope
 from src.services.streaming_reply import StreamingReply, is_status_only
-from src.utils.chat_context import COST_PREFIX_PATTERN, build_chat_context
+from src.utils.chat_context import COST_PREFIX_PATTERN, build_chat_context, cap_history_images
 from src.utils.message_utils import format_discord_timestamp
 from src.utils.downloader_utils import fetch_all_url_content
 
@@ -704,6 +704,9 @@ class MentionHandler:
             transcriber=transcriber,
             url_content_fetcher=url_content_fetcher,
         )
+        dropped = cap_history_images(chat_context)
+        if dropped:
+            logger.info("Left the %s oldest images out of #%s's history", dropped, message.channel)
         if not uses_tools:
             await self._append_user_notes(chat_context, message, history_msgs, bot_user)
         await self._append_self_state(chat_context, message, history_msgs, bot_user)
@@ -835,10 +838,7 @@ class MentionHandler:
         block = await self._self_state_provider(message.guild.id)
         if not block:
             return
-        for entry in reversed(chat_context):
-            if entry.get("role") == "user" and isinstance(entry.get("content"), list):
-                entry["content"].append({"type": "text", "text": block})
-                return
+        _append_to_mention(chat_context, block)
 
     async def _reply_chain(
         self, message: discord.Message, history_msgs: List[discord.Message]
@@ -895,10 +895,7 @@ class MentionHandler:
             "The message that mentioned you replies to a thread that started before the messages you were "
             "sent. Its earlier messages, oldest first:\n" + "\n".join(lines) + "\n</reply_thread>"
         )
-        for entry in reversed(chat_context):
-            if entry.get("role") == "user" and isinstance(entry.get("content"), list):
-                entry["content"].append({"type": "text", "text": block})
-                return
+        _append_to_mention(chat_context, block)
 
     async def _append_time_zones(
         self,
@@ -921,10 +918,7 @@ class MentionHandler:
             return
         if not block:
             return
-        for entry in reversed(chat_context):
-            if entry.get("role") == "user" and isinstance(entry.get("content"), list):
-                entry["content"].append({"type": "text", "text": block})
-                return
+        _append_to_mention(chat_context, block)
 
     async def _append_user_notes(
         self,
@@ -944,7 +938,4 @@ class MentionHandler:
             message.guild.id, _conversation_user_ids(message, history_msgs, bot_user))
         if not notes:
             return
-        for entry in reversed(chat_context):
-            if entry.get("role") == "user" and isinstance(entry.get("content"), list):
-                entry["content"].append({"type": "text", "text": notes})
-                return
+        _append_to_mention(chat_context, notes)

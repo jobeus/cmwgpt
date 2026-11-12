@@ -7,7 +7,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.utils import chat_context
-from src.utils.chat_context import build_chat_context
+from src.utils.chat_context import (
+    DROPPED_IMAGE_NOTE, HISTORY_IMAGE_DROP_STEP, MAX_HISTORY_IMAGES, build_chat_context, cap_history_images,
+)
 
 BOT_ID = 999
 WHEN = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
@@ -261,6 +263,40 @@ class TestBuildChatContext(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[7] <@999>:", result[1]["content"][0]["text"])
         self.assertEqual(result[1]["content"][1]["image_url"]["url"], "data:image/jpeg;base64,EMBED")
 
+
+
+class TestCapHistoryImages(unittest.TestCase):
+    def history(self, count):
+        return [
+            {"role": "user", "content": [
+                {"type": "text", "text": f"[{i}] <@1>:"},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{i}"}},
+            ]}
+            for i in range(count)
+        ]
+
+    def shown(self, context):
+        return [p["image_url"]["url"][-2:].lstrip(",") for e in context for p in e["content"] if p["type"] == "image_url"]
+
+    def test_leaves_a_history_within_the_limit_alone(self):
+        context = self.history(MAX_HISTORY_IMAGES)
+        self.assertEqual(cap_history_images(context), 0)
+        self.assertEqual(len(self.shown(context)), MAX_HISTORY_IMAGES)
+
+    def test_drops_the_oldest_in_steps_and_keeps_the_newest(self):
+        context = self.history(MAX_HISTORY_IMAGES + 1)
+        self.assertEqual(cap_history_images(context), HISTORY_IMAGE_DROP_STEP)
+        self.assertEqual(context[0]["content"][1], {"type": "text", "text": DROPPED_IMAGE_NOTE})
+        self.assertEqual(context[-1]["content"][1]["type"], "image_url")
+        self.assertEqual(len(self.shown(context)), MAX_HISTORY_IMAGES + 1 - HISTORY_IMAGE_DROP_STEP)
+
+    def test_the_same_images_stay_dropped_as_the_history_grows(self):
+        # Until the next step, one more image changes nothing earlier (so the cache still reads).
+        for count in range(MAX_HISTORY_IMAGES + 1, MAX_HISTORY_IMAGES + HISTORY_IMAGE_DROP_STEP + 1):
+            self.assertEqual(cap_history_images(self.history(count)), HISTORY_IMAGE_DROP_STEP)
+        self.assertEqual(
+            cap_history_images(self.history(MAX_HISTORY_IMAGES + HISTORY_IMAGE_DROP_STEP + 1)),
+            2 * HISTORY_IMAGE_DROP_STEP)
 
 if __name__ == "__main__":
     unittest.main()

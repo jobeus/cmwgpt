@@ -8,7 +8,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 - Mentions go into a FIFO queue per channel (max 100). Each channel answers one mention at a time, and different channels run in parallel. When a channel's queue is full, you reply that you're backed up.
 
 **Context you get for each mention:**
-- The last 10 channel messages. If another mention arrives within an hour, the window grows from the same oldest message instead of resetting, so the prompt cache (kept an hour) stays warm. The window's start and Claude's cache breakpoints are saved in Redis, so a restart or deploy within the hour sends the same prompt and still reads the cache. Nothing older is summarized for you: search the chat for it. It resets once it holds 200 messages, counted from its first one.
+- The last 10 channel messages. If another mention arrives within an hour, the window grows from the same oldest message instead of resetting, so the prompt cache (kept an hour) stays warm. The window's start and Claude's cache breakpoints are saved in Redis, so a restart or deploy within the hour sends the same prompt and still reads the cache. Nothing older is summarized for you: search the chat for it. The history carries at most 40 images; past that the oldest 20 are swapped for a note saying an image was there (`view_images` can still show them). It resets once it holds 200 messages, counted from its first one.
 - Each message is turned into a turn with a `[time] [id] <@user>:` header.
 - Reply targets are quoted, and embeds are added as text.
 - When the mention replies to a thread that started before the history window, a `<reply_thread>` block on the mention gives that thread's earlier messages (up to 8, text only), oldest first.

@@ -29,6 +29,33 @@ COST_PREFIX_PATTERN = re.compile(r'^\[\$[\d.]+(?:\s*@\s*[^\]]+)?\]\s*')
 FRESH_FETCH_RECENT_MESSAGES = 10
 # How many messages are converted (downloads, transcriptions) at once.
 MAX_CONCURRENT_MESSAGES = 8
+# The history keeps at most this many images. A window can grow to 200 messages, and enough
+# pictures in it would pass the API's request size limit and fail every mention until it reset.
+MAX_HISTORY_IMAGES = 40
+# Past the limit, the oldest images are dropped this many at a time rather than one by one:
+# dropping one changes the history from that point, which the prompt cache then re-writes.
+HISTORY_IMAGE_DROP_STEP = 20
+DROPPED_IMAGE_NOTE = "[An image was here. It's left out because this conversation has a lot of images.]"
+
+
+def cap_history_images(chat_context: List[Dict[str, Any]]) -> int:
+    """Replace the oldest images in ``chat_context`` with a note once there are too many.
+
+    Returns how many were dropped. Which ones go depends only on how many images there are,
+    so the same history always loses the same images and the cached prefix stays the same.
+    """
+    images = [
+        (entry, index)
+        for entry in chat_context if isinstance(entry.get("content"), list)
+        for index, part in enumerate(entry["content"]) if isinstance(part, dict) and part.get("type") == "image_url"
+    ]
+    if len(images) <= MAX_HISTORY_IMAGES:
+        return 0
+    over = len(images) - MAX_HISTORY_IMAGES
+    drop = -(-over // HISTORY_IMAGE_DROP_STEP) * HISTORY_IMAGE_DROP_STEP
+    for entry, index in images[:drop]:
+        entry["content"][index] = {"type": "text", "text": DROPPED_IMAGE_NOTE}
+    return drop
 
 
 async def build_chat_context(
