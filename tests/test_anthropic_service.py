@@ -295,6 +295,23 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         second_messages = client.beta.messages.create.call_args.kwargs["messages"]
         self.assertEqual(second_messages[-1]["role"], "assistant")
 
+    async def test_keeps_text_written_before_a_pause(self):
+        search = SimpleNamespace(type="server_tool_use")
+        paused = _response(stop_reason="pause_turn", content=[SimpleNamespace(type="text", text="Looking. "), search])
+        service, _ = self.make_service(paused, _response("Found it."))
+        text, _ = await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "search something"}])
+        self.assertEqual(text, "Looking. Found it.")
+
+    async def test_text_before_a_pause_counts_when_the_cap_is_hit(self):
+        paused = _response(stop_reason="pause_turn", content=[SimpleNamespace(type="text", text="So far")])
+        service, client = self.make_service(paused, _response(stop_reason="max_tokens", content=[]))
+        text, _ = await service.get_chat_completion(
+            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}])
+        # Not asked again as if nothing was written: there is text to post.
+        self.assertEqual(client.beta.messages.create.await_count, 2)
+        self.assertTrue(text.startswith("So far"))
+
     async def test_joins_multiple_text_blocks(self):
         content = [
             SimpleNamespace(type="server_tool_use"),

@@ -417,12 +417,16 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
         mock_client.aio.interactions.create = mock_create
         service._client = mock_client
 
-        with self.assertRaises(GeminiServiceError):
-            await service.get_chat_completion(
-                model="google",
-                messages=[{"role": "user", "content": "Hi"}],
-                system_prompt="",
-            )
+        with patch("src.services.gemini_service.record_cost", AsyncMock()) as record:
+            with self.assertRaises(GeminiServiceError):
+                await service.get_chat_completion(
+                    model="google",
+                    messages=[{"role": "user", "content": "Hi"}],
+                    system_prompt="",
+                )
+        # An empty response is still billed, so its cost is recorded.
+        record.assert_awaited_once()
+        self.assertGreater(record.await_args.args[1], 0)
 
     async def test_get_chat_completion_google_search_output_skipped(self):
         service = self.make_service()

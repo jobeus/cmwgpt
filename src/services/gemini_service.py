@@ -576,6 +576,14 @@ class GeminiService:
 
                 response_text = "\n".join(text_parts) if text_parts else ""
 
+                # Record the cost first: an empty response is still billed.
+                cost = 0.0
+                usage = getattr(interaction, 'usage', None)
+                if usage:
+                    cost = self._estimate_cost(usage)
+                    logger.info("[gemini] Usage: %s, Estimated cost: $%.4f", usage, cost)
+                    await record_cost(GEMINI_DIRECT, cost)
+
                 if not response_text and not image_files:
                     logger.error("Gemini response had no text or images. Raw keys: %s", list(interaction_dict.keys()))
                     raise ValueError("Gemini returned an empty response.")
@@ -583,14 +591,6 @@ class GeminiService:
                 if response_text:
                     response_text = clean_reply(
                         response_text, bot_id=resolve_bot_id(bot_id, None, self._bot_id_loader))
-
-                # Calculate cost
-                cost = 0.0
-                usage = getattr(interaction, 'usage', None)
-                if usage:
-                    cost = self._estimate_cost(usage)
-                    logger.info("[gemini] Usage: %s, Estimated cost: $%.4f", usage, cost)
-                    await record_cost(GEMINI_DIRECT, cost)
 
                 # Log snippet
                 text_snippet = response_text.strip().replace("\n", " ")[:150] if response_text else "(empty)"

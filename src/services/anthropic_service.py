@@ -327,10 +327,12 @@ def _is_marked_tool_result(block: Any) -> bool:
     return isinstance(block, dict) and block.get("type") == "tool_result" and "cache_control" in block
 
 
+def _content_text(content: List[Any]) -> str:
+    return "".join(block.text for block in content if getattr(block, "type", None) == "text")
+
+
 def _response_text(response: Any) -> str:
-    return "".join(
-        block.text for block in response.content if getattr(block, "type", None) == "text"
-    ).strip()
+    return _content_text(response.content).strip()
 
 
 def _block_status(block: Any, tool_statuses: Dict[str, str]) -> Optional[str]:
@@ -545,11 +547,12 @@ class AnthropicService:
         on_status: Optional[Callable[[str], None]] = None,
         tool_statuses: Optional[Dict[str, str]] = None,
         code_file_ids: Optional[List[str]] = None,
-    ) -> Tuple[Any, float, Optional[str], List[Dict[str, Any]]]:
+    ) -> Tuple[Any, float, Optional[str], List[Dict[str, Any]], str]:
         """Run one request, resuming ``pause_turn``s.
 
-        Returns ``(response, cost, last message id, messages)``; ``messages`` ends with the
-        paused assistant content when the turn was resumed. While streaming, ``on_status``
+        Returns ``(response, cost, last message id, messages, text)``; ``messages`` ends with the
+        paused assistant content when the turn was resumed, and ``text`` is everything the turn
+        wrote, before a pause as well as after: ``response`` is only its last part. While streaming, ``on_status``
         hears what the model started on: thinking, a web search, code, or a tool call (its
         status from ``tool_statuses``). IDs of files code execution saved are added to
         ``code_file_ids``, and its container is reused by the requests after this one.
@@ -557,6 +560,7 @@ class AnthropicService:
         api_model = direct_model.api_id
         cost = 0.0
         streamed = ""
+        text = ""
         response = None
         # So the request's span can link to its images instead of carrying them.
         await image_links_ready(api_messages)
@@ -591,6 +595,7 @@ class AnthropicService:
             await record_cost(CLAUDE_DIRECT, response_cost)
             if TOOL_MARKUP.search(_response_text(response)):
                 raise _ToolMarkupError(cost)
+            text += _content_text(response.content)
             _note_usage(response)
             _log_cache_diagnostics(api_model, channel_id, response)
             previous_message_id = getattr(response, "id", None) or previous_message_id
@@ -603,7 +608,7 @@ class AnthropicService:
                 break
             # Resume a paused server-tool turn by sending its content back.
             api_messages = _with_assistant_content(api_messages, response.content)
-        return response, cost, previous_message_id, api_messages
+        return response, cost, previous_message_id, api_messages, text.strip()
 
     async def _download_code_files(self, client: Any, file_ids: List[str]) -> List[discord.File]:
         """Download the files code execution saved, as Discord attachments. Failures are skipped."""
@@ -763,6 +768,7 @@ class AnthropicService:
 
         tool_statuses = {name: tool.status for name, tool in client_tools.items()}
 
+        response_text = ""
         cap_raised = False
         strict_dropped = False
         markup_retries = 0
@@ -771,7 +777,7 @@ class AnthropicService:
             while True:
                 status(THINKING_STATUS)
                 try:
-                    response, cost, previous_message_id, sent_messages = await self._send(
+                    response, cost, previous_message_id, sent_messages, response_text = await self._send(
                         client, api_messages, kwargs, direct_model, channel_id, previous_message_id,
                         resolved_bot_id, show if on_text else None, status, tool_statuses, code_file_ids,
                     )
@@ -803,7 +809,7 @@ class AnthropicService:
                     continue
                 total_cost += cost
                 if (response.stop_reason == "max_tokens" and not cap_raised and kwargs["max_tokens"] < MAX_TOKENS
-                        and not _response_text(response).strip()):
+                        and not response_text):
                     # Thinking used the whole reply cap, so there's nothing to post. Ask once more
                     # with room to answer; max_tokens isn't part of the cache key.
                     cap_raised = True
@@ -814,9 +820,8 @@ class AnthropicService:
                     continue
                 if response.stop_reason != "tool_use" or not client_tools:
                     break
-                text = _response_text(response)
-                if text:
-                    texts.append(clean_reply(text, bot_id=resolved_bot_id))
+                if response_text:
+                    texts.append(clean_reply(response_text, bot_id=resolved_bot_id))
                 results, cost, new_files = await self._run_tool_calls(response, client_tools, status)
                 total_cost += cost
                 files += new_files
@@ -861,7 +866,6 @@ class AnthropicService:
             logger.warning("[%s] Request declined (category=%s)", api_model, category)
             raise AnthropicServiceError(f"Claude declined this request (category: {category or 'unknown'}).")
 
-        response_text = _response_text(response)
         usage = getattr(response, "usage", None)
         logger.info(
             "[%s] stop_reason=%s cost=$%.4f cache_read=%s cache_write=%s tool_rounds=%s response snippet: %s", response.model, response.stop_reason, total_cost, getattr(usage, 'cache_read_input_tokens', 0), getattr(usage, 'cache_creation_input_tokens', 0), tool_rounds, response_text.replace(chr(10), ' ')[:150]
