@@ -5,6 +5,7 @@ Mention Handler - Handles bot mentions and context preparation
 import asyncio
 import logging
 import time
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
@@ -27,7 +28,7 @@ from src.services.mention_log import log_mention, mention_record
 from src.services.cost_service import CostLedger, cost_scope
 from src.services.streaming_reply import StreamingReply, is_status_only
 from src.utils.chat_context import COST_PREFIX_PATTERN, build_chat_context, cap_history_images
-from src.utils.message_utils import format_discord_timestamp
+from src.utils.message_utils import PROMPT_TIMESTAMP_FORMAT, format_discord_timestamp, prompt_timezone
 from src.utils.downloader_utils import fetch_all_url_content
 
 logger = logging.getLogger(__name__)
@@ -130,6 +131,18 @@ def _append_to_mention(chat_context: List[Dict[str, Any]], text: str) -> None:
             entry["content"].append({"type": "text", "text": text})
             return
     chat_context.append({"role": "user", "content": [{"type": "text", "text": text}]})
+
+
+def _now_block(sent: datetime) -> str:
+    """The ``<now>`` block: the mention's Unix time, the anchor for Discord ``<t:...>`` timestamps.
+
+    On the mention rather than the system prompt, since it changes with every request.
+    """
+    local = sent.astimezone(prompt_timezone())
+    return (
+        f"<now>\nThis mention was sent at Unix time {int(sent.timestamp())}, which is "
+        f"{local.strftime(PROMPT_TIMESTAMP_FORMAT)} in the header timestamps' zone (UTC{local:%z}).\n</now>"
+    )
 
 
 def _conversation_user_ids(
@@ -614,6 +627,18 @@ class MentionHandler:
             f"bot posts as you automatically and a header would show up as literal text. To @mention someone, "
             f"use their own `<@id>` from the history or the list below; <@{bot_user.id}> is you, so using it "
             f"would ping yourself.\n\n"
+            f"Whenever your reply names a specific moment (a clock time, or a date with a time), write it as a "
+            f"Discord timestamp, `<t:UNIX:STYLE>`, which each reader sees in their own time zone, instead of "
+            f"typing the time out in one zone. UNIX is the moment in Unix seconds. STYLE is one letter: `t` "
+            f"4:20 PM, `T` 4:20:30 PM, `d` 11/12/2026, `D` November 12, 2026, `f` November 12, 2026 4:20 PM, "
+            f"`F` Thursday, November 12, 2026 4:20 PM, `R` relative (\"in 2 hours\", \"3 days ago\"). Use `t` "
+            f"for a time today, `f` or `F` when the day matters, and add an `R` one when how soon matters, "
+            f"e.g. `<t:1794526800:t> (<t:1794526800:R>)`. This goes for times you look up, convert, schedule "
+            f"or quote from the history alike. The mention ends with a `<now>` block giving its own Unix time "
+            f"and the UTC offset of the header timestamps; work UNIX out from that by adding or subtracting "
+            f"seconds, and mind the zone a time was given in. Leave plain a date with no time, a duration, a "
+            f"time that is someone's local habit rather than one moment (\"I get up at 6\"), and anything "
+            f"inside a code block, where timestamps don't render.\n\n"
         )
         if self._user_notes_provider and not uses_tools:
             current_channel_system_prompt += (
@@ -695,6 +720,7 @@ class MentionHandler:
         if not uses_tools:
             await self._append_user_notes(chat_context, message, history_msgs, bot_user)
         await self._append_self_state(chat_context, message)
+        _append_to_mention(chat_context, _now_block(message.created_at))
         await self._append_time_zones(chat_context, message, history_msgs, bot_user)
         await self._append_reply_chain(chat_context, message, history_msgs)
 

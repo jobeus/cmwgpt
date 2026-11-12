@@ -23,6 +23,11 @@ class AsyncTyping:
         return False
 
 
+def _without_now(content):
+    """A turn's parts minus the ``<now>`` block every mention ends with."""
+    return [part for part in content if not part.get("text", "").startswith("<now>")]
+
+
 class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
     def make_handler(self, *, attachment_converter=None, url_converter=None, url_content_fetcher=None,
                      gemini_service=None, anthropic_service=None, context_store=None):
@@ -172,7 +177,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(context), 1)
         self.assertEqual(context[0]["role"], "user")
-        self.assertEqual(len(context[0]["content"]), 1)
+        self.assertEqual(len(_without_now(context[0]["content"])), 1)
 
     async def test_prepare_context_marks_empty_messages_and_non_image_files(self):
         handler, _, _, _, _ = self.make_handler(
@@ -312,7 +317,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context[0]["role"], "user")
         
         # Checking that the content has only the text payload, no audio_url payload
-        payload = context[0]["content"]
+        payload = _without_now(context[0]["content"])
         self.assertEqual(len(payload), 1)
         self.assertEqual(payload[0]["type"], "text")
         
@@ -355,7 +360,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
             context, _ = await handler._prepare_mention_context(empty_msg, bot_user)
 
         self.assertIn("[Embeds:", context[0]["content"][0]["text"])
-        self.assertEqual(len(context[0]["content"]), 1)
+        self.assertEqual(len(_without_now(context[0]["content"])), 1)
         mock_warning.assert_called_once()
 
         truly_empty = SimpleNamespace(
@@ -695,6 +700,28 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         channel.fetch_message.assert_not_awaited()
         self.assertFalse(any("<reply_thread>" in p.get("text", "") for p in context[-1]["content"]))
+
+    async def test_mention_carries_its_unix_time_for_discord_timestamps(self):
+        handler, _, _, _, _ = self.make_handler()
+        channel = MagicMock()
+        channel.id = 47
+        channel.name = "now"
+        mention = self._simple_msg(61, channel, content="<@999> when is kickoff?")
+        mention.mentions = []
+        mention.author.bot = False
+
+        async def history(limit=None, after=None):
+            yield mention
+
+        channel.history = history
+        with patch.dict("os.environ", {"TZ": "America/Denver"}):
+            context, system_prompt = await handler._prepare_mention_context(mention, SimpleNamespace(id=999))
+
+        now_blocks = [p["text"] for p in context[-1]["content"] if p.get("text", "").startswith("<now>")]
+        self.assertEqual(len(now_blocks), 1)
+        self.assertIn(f"Unix time {int(mention.created_at.timestamp())}", now_blocks[0])
+        self.assertIn("(UTC-0700)", now_blocks[0])
+        self.assertIn("<t:UNIX:STYLE>", system_prompt)
 
     async def test_saved_time_zones_ride_on_the_mention(self):
         handler, _, _, _, _ = self.make_handler()

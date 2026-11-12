@@ -90,8 +90,8 @@ class TimezoneStore:
         lines = "\n".join(f"<@{uid}>: {describe_zone(zone)}" for uid, zone in zones.items())
         return (
             "<time_zones>\n"
-            "Saved time zones of people in this conversation. Use them for anyone's local time, and say "
-            "the zone when you give a time.\n"
+            "Saved time zones of people in this conversation. Use them to work out what moment "
+            "someone's clock time means; in your reply, give that moment as a Discord timestamp.\n"
             f"{lines}\n"
             "</time_zones>"
         )

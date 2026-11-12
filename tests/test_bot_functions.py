@@ -4,6 +4,7 @@ Tests helper functions and logic that can be tested without Discord integration.
 """
 
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 import asyncio
 import sys
@@ -51,6 +52,7 @@ class TestBotFunctions(unittest.TestCase):
             mock_message.author = MagicMock()
             mock_message.author.id = 12345
             mock_message.id = 33333
+            mock_message.created_at = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
             mock_message.content = "Hey @bot, can you help me?"
             mock_message.channel = MagicMock()
             mock_message.reference = None

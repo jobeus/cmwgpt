@@ -123,9 +123,13 @@ class Reminder:
             return None
 
     def describe(self) -> str:
-        """One line for the model: ``#3 Sat 2026-10-31 8:00 PM MDT for <@1> (set by <@2>): trash``."""
+        """One line for the model: ``#3 Sat 2026-10-31 8:00 PM MDT (Unix 1793498400) for <@1> (set by <@2>): trash``.
+
+        The Unix time is there so the model can write the time as a Discord ``<t:...>`` timestamp.
+        """
         people = ", ".join(f"<@{uid}>" for uid in self.user_ids)
-        line = f"#{self.id} {format_when(self.due_at, self.zone)} for {people} (set by <@{self.set_by}>): {self.text}"
+        when = f"{format_when(self.due_at, self.zone)} (Unix {int(self.due_at.timestamp())})"
+        line = f"#{self.id} {when} for {people} (set by <@{self.set_by}>): {self.text}"
         return f"{line} (then you: {self.task})" if self.task else line
 
 

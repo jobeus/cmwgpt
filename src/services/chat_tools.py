@@ -299,7 +299,7 @@ REMIND_TOOL = {
         "someone else. It fires within a minute of the time, any time of day, however far ahead. When something "
         "should be done at that time, like looking up a result or checking on something, give it a `task`: "
         "right after the ping you get the asking message again, with the task, and answer it with all your tools."
-        " A clock time like '8pm' means the asker's time: pass their zone from <time_zones>, and if it isn't saved, ask them or work it out from their memory, then save it with set_timezone. When you confirm, give the time with its zone, e.g. '8:00 PM Mountain'. To move a reminder, cancel it and set it again."
+        " A clock time like '8pm' means the asker's time: pass their zone from <time_zones>, and if it isn't saved, ask them or work it out from their memory, then save it with set_timezone. When you confirm, give the time as a Discord timestamp (`<t:UNIX:f>`), using the Unix time in the result. To move a reminder, cancel it and set it again."
     ),
     "input_schema": {
         "type": "object",

@@ -183,6 +183,7 @@ class TestReminderService(unittest.IsolatedAsyncioTestCase):
         [saved] = await self.service.pending(20)
         self.assertEqual(saved.tz, "America/Denver")
         self.assertIn("8:00 PM MDT", saved.describe())
+        self.assertIn(f"(Unix {int(saved.due_at.timestamp())})", saved.describe())
         self.assertEqual(saved.due_at, reminder.due_at)
 
     async def test_a_task_interrupted_by_a_restart_runs_afterwards_without_a_second_ping(self):
