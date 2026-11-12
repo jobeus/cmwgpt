@@ -324,22 +324,30 @@ def test_http_bodies_are_captured_only_when_small():
     assert calls == ["request", "response"]
 
 
-def test_gemini_is_not_instrumented_when_its_instrumentation_is_behind(monkeypatch, caplog):
-    called = []
-    monkeypatch.setattr(telemetry.logfire, "instrument_google_genai", lambda: called.append(True))
-    monkeypatch.setattr(
-        "opentelemetry.instrumentation.dependencies.get_dependency_conflicts",
-        lambda deps: "only instruments google-genai<3",
-    )
+def _gemini_calls(monkeypatch, conflict):
+    calls = []
+    monkeypatch.setattr(telemetry.logfire, "instrument_google_genai", lambda **kwargs: calls.append(kwargs))
+    monkeypatch.setattr("opentelemetry.instrumentation.dependencies.get_dependency_conflicts", lambda deps: conflict)
+    return calls
+
+
+def test_gemini_is_traced_past_the_version_check_when_its_instrumentation_is_behind(monkeypatch, caplog):
+    monkeypatch.delenv("GEMINI_TRACING_STRICT", raising=False)
+    calls = _gemini_calls(monkeypatch, "only instruments google-genai<3")
     with caplog.at_level("WARNING"):
         telemetry.instrument_gemini()
-    assert called == []
-    assert "aren't traced" in caplog.text
+    assert calls == [{"skip_dep_check": True}]
+    assert "hasn't declared" in caplog.text
 
 
-def test_gemini_is_instrumented_when_versions_match(monkeypatch):
-    called = []
-    monkeypatch.setattr(telemetry.logfire, "instrument_google_genai", lambda: called.append(True))
-    monkeypatch.setattr("opentelemetry.instrumentation.dependencies.get_dependency_conflicts", lambda deps: None)
+def test_gemini_strict_mode_leaves_an_undeclared_version_untraced(monkeypatch):
+    monkeypatch.setenv("GEMINI_TRACING_STRICT", "true")
+    calls = _gemini_calls(monkeypatch, "only instruments google-genai<3")
     telemetry.instrument_gemini()
-    assert called == [True]
+    assert calls == []
+
+
+def test_gemini_is_instrumented_normally_when_versions_match(monkeypatch):
+    calls = _gemini_calls(monkeypatch, None)
+    telemetry.instrument_gemini()
+    assert calls == [{}]

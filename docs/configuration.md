@@ -54,6 +54,7 @@ These are loaded by `src/config.py`.
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `LOGFIRE_TOKEN` | empty | Logfire project write token (`LOGFIRE_API_KEY` is read too). Set it and the bot sends traces and INFO+ logs; leave it empty and nothing is sent |
+| `GEMINI_TRACING_STRICT` | `false` | Gemini SDK calls are traced even when the tracing plugin hasn't declared support for the installed `google-genai` (the bot always runs the newest). Set to `true` to trace only declared versions, if a new SDK ever breaks the plugin's hooks |
 | `LOGFIRE_READ_TOKEN` | the tracing key | A Logfire key with `project:read`, for the logs tool below. Only needed when the tracing key can't read |
 | `LOGFIRE_MCP_URL` | `https://logfire-us.pydantic.dev/mcp` | Logfire's MCP server (`logfire-eu` for an EU project) |
 | `DISCORD_CHANNEL_ID` | empty | The one channel where mentions get the logs tool below; unset, it's off everywhere |

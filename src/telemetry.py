@@ -319,13 +319,17 @@ async def _httpx_async_response_hook(span: Any, request: Any, response: Any) -> 
 
 
 def instrument_gemini() -> None:
-    """Trace the Gemini SDK, unless its instrumentation doesn't support the installed version.
+    """Trace the Gemini SDK, even when its instrumentation hasn't declared support for the installed version.
 
-    The bot always runs the newest google-genai, and the instrumentation can lag a major
-    version behind. It then instruments nothing and logs an error; this says so once, as a
-    warning. Gemini's requests are still traced as HTTP calls, and tracing comes back by
-    itself when a release that supports the new version is installed.
+    The bot always runs the newest google-genai, and the instrumentation's declared range can
+    lag a major version behind; by default it then instruments nothing and logs an error. Its
+    hooks are on SDK methods that have kept their names and shapes (checked against
+    google-genai 3.2 with instrumentation 1.3b0: generate_content and interactions.create both
+    return normally and produce spans with token counts), so the version check is skipped,
+    with a warning saying so. If a future SDK does break the hooks, set
+    GEMINI_TRACING_STRICT=true to go back to tracing only declared versions.
     """
+    kwargs: Dict[str, Any] = {}
     try:
         from opentelemetry.instrumentation.dependencies import get_dependency_conflicts
         from opentelemetry.instrumentation.google_genai import GoogleGenAiSdkInstrumentor
@@ -334,9 +338,12 @@ def instrument_gemini() -> None:
     except Exception:
         conflict = None  # can't tell; let Logfire try
     if conflict:
-        logger.warning("[telemetry] Gemini SDK calls aren't traced until its instrumentation catches up: %s", conflict)
-        return
-    logfire.instrument_google_genai()
+        if os.environ.get("GEMINI_TRACING_STRICT", "").lower() in ("true", "1"):
+            logger.warning("[telemetry] Gemini SDK calls aren't traced (GEMINI_TRACING_STRICT is on): %s", conflict)
+            return
+        logger.warning("[telemetry] Tracing Gemini SDK calls on a version its instrumentation hasn't declared: %s", conflict)
+        kwargs["skip_dep_check"] = True
+    logfire.instrument_google_genai(**kwargs)
 
 
 def instrument_http() -> None:
