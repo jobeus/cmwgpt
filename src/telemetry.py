@@ -318,6 +318,27 @@ async def _httpx_async_response_hook(span: Any, request: Any, response: Any) -> 
     _httpx_response_hook(span, request, response)
 
 
+def instrument_gemini() -> None:
+    """Trace the Gemini SDK, unless its instrumentation doesn't support the installed version.
+
+    The bot always runs the newest google-genai, and the instrumentation can lag a major
+    version behind. It then instruments nothing and logs an error; this says so once, as a
+    warning. Gemini's requests are still traced as HTTP calls, and tracing comes back by
+    itself when a release that supports the new version is installed.
+    """
+    try:
+        from opentelemetry.instrumentation.dependencies import get_dependency_conflicts
+        from opentelemetry.instrumentation.google_genai import GoogleGenAiSdkInstrumentor
+
+        conflict = get_dependency_conflicts(GoogleGenAiSdkInstrumentor().instrumentation_dependencies())
+    except Exception:
+        conflict = None  # can't tell; let Logfire try
+    if conflict:
+        logger.warning("[telemetry] Gemini SDK calls aren't traced until its instrumentation catches up: %s", conflict)
+        return
+    logfire.instrument_google_genai()
+
+
 def instrument_http() -> None:
     logfire.instrument_httpx(
         capture_headers=True,
@@ -471,7 +492,7 @@ def setup_telemetry(env_file: Optional[str] = None) -> bool:
 
     for name, instrument in (
         ("anthropic", logfire.instrument_anthropic),
-        ("google-genai", logfire.instrument_google_genai),
+        ("google-genai", instrument_gemini),
         ("httpx", instrument_http),
         # discord.py talks to Discord's REST API through aiohttp: every send, edit, reaction and
         # history fetch, with Discord's X-RateLimit-* headers. The bot token header is scrubbed.

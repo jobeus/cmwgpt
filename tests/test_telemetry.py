@@ -322,3 +322,24 @@ def test_http_bodies_are_captured_only_when_small():
         telemetry._httpx_request_hook(None, info)
         telemetry._httpx_response_hook(None, info, info)
     assert calls == ["request", "response"]
+
+
+def test_gemini_is_not_instrumented_when_its_instrumentation_is_behind(monkeypatch, caplog):
+    called = []
+    monkeypatch.setattr(telemetry.logfire, "instrument_google_genai", lambda: called.append(True))
+    monkeypatch.setattr(
+        "opentelemetry.instrumentation.dependencies.get_dependency_conflicts",
+        lambda deps: "only instruments google-genai<3",
+    )
+    with caplog.at_level("WARNING"):
+        telemetry.instrument_gemini()
+    assert called == []
+    assert "aren't traced" in caplog.text
+
+
+def test_gemini_is_instrumented_when_versions_match(monkeypatch):
+    called = []
+    monkeypatch.setattr(telemetry.logfire, "instrument_google_genai", lambda: called.append(True))
+    monkeypatch.setattr("opentelemetry.instrumentation.dependencies.get_dependency_conflicts", lambda deps: None)
+    telemetry.instrument_gemini()
+    assert called == [True]
