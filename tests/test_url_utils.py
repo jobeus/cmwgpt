@@ -105,6 +105,7 @@ class TestGetArticleText(unittest.IsolatedAsyncioTestCase):
 
         def factory(*args, **kwargs):
             kwargs.pop("proxy", None)
+            kwargs.pop("transport", None)
             return _RealAsyncClient(*args, transport=httpx.MockTransport(handler), **kwargs)
 
         patches = [

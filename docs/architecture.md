@@ -287,7 +287,7 @@ flowchart LR
 
 ### Fetching and caching
 
-- Outbound fetches of user-supplied URLs go through `fetch_public` / `download_public` in `src/utils/http_client.py`. The SSRF guard (`src/utils/ssrf_guard.py`, which blocks every non-global address) is re-checked on each redirect hop, response bodies are size-capped, and each fetch has an overall timeout.
+- Outbound fetches of user-supplied URLs go through `fetch_public` / `download_public` in `src/utils/http_client.py`. The SSRF guard (`src/utils/ssrf_guard.py`, which blocks every non-global address) is re-checked on each redirect hop, and the connection is opened to an address the guard checked rather than to a second DNS lookup (so DNS rebinding can't get past it; through a proxy the proxy does the lookup and only the check applies), response bodies are size-capped, and each fetch has an overall timeout.
 - Results are kept in Redis (`cmwgpt:cache:<name>:<key>`), each entry expiring 30 days after it was last used; image data URLs expire after 7 days. Tweet and Instagram caches still store images as base64. If Redis is down they fall back to memory.
 
 ## Diagram: docker/runtime layout

@@ -83,6 +83,24 @@ class TestAssertPublicUrlSync(unittest.TestCase):
             ssrf_guard.assert_public_url_sync("http:///just-a-path")
 
 
+class TestPublicAddresses(unittest.TestCase):
+    def test_returns_each_checked_address_once(self):
+        twice = addrinfo("93.184.216.34") + addrinfo("93.184.216.34") + addrinfo("1.1.1.1")
+        with patch("src.utils.ssrf_guard.socket.getaddrinfo", return_value=twice):
+            self.assertEqual(ssrf_guard.public_addresses_sync("example.com"), ["93.184.216.34", "1.1.1.1"])
+
+    def test_one_private_address_refuses_the_host(self):
+        mixed = addrinfo("93.184.216.34") + addrinfo("10.1.2.3")
+        with patch("src.utils.ssrf_guard.socket.getaddrinfo", return_value=mixed):
+            with self.assertRaises(ValueError):
+                ssrf_guard.public_addresses_sync("example.com")
+
+    def test_a_dns_failure_is_raised(self):
+        with patch("src.utils.ssrf_guard.socket.getaddrinfo", side_effect=socket.gaierror("nxdomain")):
+            with self.assertRaises(socket.gaierror):
+                ssrf_guard.public_addresses_sync("example.com")
+
+
 class TestAssertPublicUrlAsync(unittest.IsolatedAsyncioTestCase):
     async def test_blocks_loopback(self):
         with self.assertRaises(ValueError):

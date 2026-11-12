@@ -6,7 +6,8 @@ reserved, ...), so a user-supplied link can't be used to probe the local
 network or cloud metadata endpoints. Public URLs pass through unchanged.
 
 This only checks one URL; ``src.utils.http_client.fetch_public`` re-runs it
-on every redirect hop.
+on every redirect hop, and connects only to addresses ``public_addresses``
+checked, so a host can't pass the check and then resolve somewhere else.
 """
 
 import asyncio
@@ -68,17 +69,29 @@ def assert_public_url_sync(url: str) -> None:
         raise ValueError(f"Cannot determine host for URL: {url}")
 
     try:
-        addresses = _resolve_addresses(host)
+        public_addresses_sync(host, url)
     except socket.gaierror as e:
         logger.debug("DNS resolution failed during SSRF check for %s: %s", host, e)
-        return
 
+
+def public_addresses_sync(host: str, url: Optional[str] = None) -> List[str]:
+    """Every address ``host`` resolves to, or ValueError if any of them is non-public.
+
+    A DNS failure raises ``socket.gaierror``.
+    """
+    addresses = _resolve_addresses(host)
     for addr in addresses:
         reason = _blocked_reason(addr)
         if reason:
             raise ValueError(
-                f"Refusing to fetch non-public URL {url}: host {host} resolves to {reason} address {addr}"
+                f"Refusing to fetch non-public URL {url or host}: host {host} resolves to {reason} address {addr}"
             )
+    return list(dict.fromkeys(str(addr) for addr in addresses))
+
+
+async def public_addresses(host: str) -> List[str]:
+    """Async wrapper around public_addresses_sync; DNS runs in a thread."""
+    return await asyncio.to_thread(public_addresses_sync, host)
 
 
 async def assert_public_url(url: str) -> None:

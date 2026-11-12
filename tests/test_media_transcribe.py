@@ -62,6 +62,7 @@ def ydl_sequence(*factories):
 class TestTranscribeAudio(unittest.IsolatedAsyncioTestCase):
     def use_handler(self, handler):
         def factory(*args, **kwargs):
+            kwargs.pop("transport", None)
             return _RealAsyncClient(*args, transport=httpx.MockTransport(handler), **kwargs)
         patcher = patch("src.utils.media_transcribe.httpx.AsyncClient", factory)
         patcher.start()

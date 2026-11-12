@@ -21,6 +21,7 @@ def _client_factory(handler, captured=None):
         if captured is not None:
             captured.append(dict(kwargs))
         kwargs.pop("proxy", None)
+        kwargs.pop("transport", None)
         return _RealAsyncClient(*args, transport=httpx.MockTransport(handler), **kwargs)
     return factory
 
@@ -180,6 +181,68 @@ class TestFetchPublic(HttpClientTestCase):
         await fetch_public("https://example.com/", proxy="http://proxy:8080")
 
         self.assertEqual(captured[0]["proxy"], "http://proxy:8080")
+
+
+class TestConnectsOnlyToCheckedAddresses(unittest.IsolatedAsyncioTestCase):
+    """Real connections to a local server: what the fake clients above can't show."""
+
+    async def asyncSetUp(self):
+        self.connections = 0
+
+        async def serve(reader, writer):
+            self.connections += 1
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_server(serve, "127.0.0.1", 0)
+        self.addAsyncCleanup(server.wait_closed)
+        self.addCleanup(server.close)
+        self.port = server.sockets[0].getsockname()[1]
+        # No proxy from the environment, so the pinned transport is used.
+        patcher = patch("src.utils.http_client.urllib.request.getproxies", return_value={})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    async def test_a_host_that_passed_the_check_but_resolves_privately_is_not_connected_to(self):
+        # DNS rebinding: the check before the request saw a public address...
+        with patch("src.utils.http_client.assert_public_url"):
+            # ...but by the time of the connection the name points at this machine.
+            with self.assertRaises(ValueError):
+                await fetch_public(f"http://localhost:{self.port}/")
+        self.assertEqual(self.connections, 0)
+
+    async def test_connects_to_the_address_the_guard_returned(self):
+        async def checked(host):
+            self.assertEqual(host, "rebind.example")
+            return ["127.0.0.1"]
+
+        with patch("src.utils.http_client.assert_public_url"), \
+                patch("src.utils.http_client.public_addresses", side_effect=checked):
+            response = await fetch_public(f"http://rebind.example:{self.port}/")
+        self.assertEqual(response.text, "ok")
+        self.assertEqual(self.connections, 1)
+
+    async def test_falls_through_to_the_next_address_when_one_refuses(self):
+        async def checked(host):
+            return ["::1", "127.0.0.1"]  # the server only listens on IPv4
+
+        with patch("src.utils.http_client.assert_public_url"), \
+                patch("src.utils.http_client.public_addresses", side_effect=checked):
+            response = await fetch_public(f"http://two.example:{self.port}/")
+        self.assertEqual(response.text, "ok")
+
+    async def test_a_name_that_does_not_resolve_is_a_connect_error(self):
+        with patch("src.utils.http_client.assert_public_url"):
+            with self.assertRaises(httpx.ConnectError):
+                await fetch_public("http://no-such-host.invalid/")
+
+    def test_a_proxy_connects_for_itself(self):
+        self.assertIsNone(http_client._transport("http://proxy:8080"))
+        with patch("src.utils.http_client.urllib.request.getproxies", return_value={"https": "http://proxy:8080"}):
+            self.assertIsNone(http_client._transport(None))
+        self.assertIsNotNone(http_client._transport(None))
 
 
 class TestDownloadPublic(HttpClientTestCase):
