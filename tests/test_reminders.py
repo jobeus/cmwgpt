@@ -126,7 +126,7 @@ class TestReminderService(unittest.IsolatedAsyncioTestCase):
     async def test_a_late_reminder_says_when_it_was_meant_for(self):
         reminder = await self.add(when="2026-10-30 20:00", zone=DENVER)
         late = reminder_message(reminder, reminder.due_at + timedelta(minutes=10))
-        self.assertIn("meant for Fri 2026-10-30 8:00 PM MDT", late)
+        self.assertIn(f"meant for <t:{int(reminder.due_at.timestamp())}:f>", late)
         self.assertNotIn("set by", late)
 
     async def test_failed_posts_are_retried_and_missing_channels_dropped(self):

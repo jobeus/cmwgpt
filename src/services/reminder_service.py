@@ -233,7 +233,7 @@ def reminder_message(reminder: Reminder, now: datetime) -> str:
     if reminder.set_by not in reminder.user_ids:
         notes.append(f"set by <@{reminder.set_by}>")
     if now - reminder.due_at > LATE_AFTER:
-        notes.append(f"meant for {format_when(reminder.due_at, reminder.zone)}, sorry I'm late")
+        notes.append(f"meant for <t:{int(reminder.due_at.timestamp())}:f>, sorry I'm late")
     if notes:
         lines.append(f"-# {', '.join(notes)}")
     return "\n".join(lines)
