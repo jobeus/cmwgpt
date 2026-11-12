@@ -1,19 +1,18 @@
-"""
-Message formatting utility functions.
-
-Extracted from service classes to follow the principle of separating
-stateless utility functions from stateful service classes.
-"""
-
-import os
-from datetime import datetime, tzinfo
-
-import discord
-import re
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+"""Message formatting utility functions."""
 
 import logging
-from typing import Any, Callable, List, Optional, Union
+import os
+import re
+from datetime import datetime, tzinfo
+from typing import Callable, List, Optional, Union
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+import discord
+
+# The most characters Discord takes in one message.
+DISCORD_MESSAGE_LIMIT = 2000
+# For replies that quote text which may contain mentions.
+NO_PINGS = discord.AllowedMentions.none()
 
 
 PROMPT_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -93,8 +92,7 @@ def clean_reply(response: str, bot_id: Optional[int] = None) -> str:
     cleaned = re.sub(r"<@(\d+)([^0-9>])", r"<@\1>\2", cleaned)
     cleaned = re.sub(r"<@(\d+)$", r"<@\1>", cleaned)
 
-    # Restore old generic pattern stripping for ALL responses:
-    # Matches patterns like:
+    # Strip a header the model echoed back, like:
     # [2024-01-01 12:00:00] [123456] <@12345>:
     # [123456] <@12345>:
     # <@12345>:
@@ -147,15 +145,12 @@ def clean_reply(response: str, bot_id: Optional[int] = None) -> str:
 
 def resolve_bot_id(
     bot_id: Optional[int],
-    state_service: Any = None,
     bot_id_loader: Optional[Callable[[], Optional[int]]] = None,
 ) -> Optional[int]:
-    """The bot's user ID for reply cleaning: explicit, else from state, else the loader."""
+    """The bot's user ID for reply cleaning: explicit, else from the loader."""
     if bot_id:
         return bot_id
     try:
-        if state_service is not None and getattr(state_service, "bot_id", None):
-            return state_service.bot_id
         if bot_id_loader:
             return bot_id_loader()
     except Exception as e:

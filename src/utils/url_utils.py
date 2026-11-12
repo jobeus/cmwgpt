@@ -10,7 +10,7 @@ import trafilatura
 from src.config import get_config
 from src.utils.cache_utils import PersistentCache, skip_recent_failures
 from src.utils.http_client import fetch_public
-from src.utils.reddit_utils import is_reddit_post_url
+from src.utils.reddit_utils import TRAILING_PUNCTUATION, is_reddit_post_url
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +19,6 @@ _article_cache = PersistentCache('articles')
 
 MAX_HTML_BYTES = 5 * 1024 * 1024
 
-# Punctuation that ends a sentence around a link rather than belonging to it,
-# e.g. "(see https://example.org/x)." -> "https://example.org/x".
-_TRAILING_PUNCTUATION = ').,;:!?\'"]>'
 
 _BROWSER_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -40,17 +37,18 @@ _BROWSER_HEADERS = {
 }
 
 
+# Hosts with their own fetcher, or Discord's media hosts. Subdomains are covered too.
 EXCLUDED_DOMAINS = {
     'youtube.com', 'youtu.be',
-    'tiktok.com', 'vm.tiktok.com',
-    'instagram.com', 'www.instagram.com',
-    'facebook.com', 'www.facebook.com', 'fb.watch',
-    'x.com', 'www.x.com', 'twitter.com', 'www.twitter.com',
-    'xcancel.com', 'www.xcancel.com',
+    'tiktok.com',
+    'instagram.com',
+    'facebook.com', 'fb.watch',
+    'x.com', 'twitter.com',
+    'xcancel.com',
     'cdn.discordapp.com', 'media.discordapp.net',
     'images-ext-1.discordapp.net', 'images-ext-2.discordapp.net',
-    'threads.com', 'www.threads.com',
-    'threads.net', 'www.threads.net',
+    'threads.com',
+    'threads.net',
 }
 
 EXCLUDED_MEDIA_EXTENSIONS = {
@@ -70,7 +68,7 @@ def _is_excluded_media_url(parsed) -> bool:
 
 
 def _strip_trailing_punctuation(url: str) -> str:
-    while url and url[-1] in _TRAILING_PUNCTUATION:
+    while url and url[-1] in TRAILING_PUNCTUATION:
         # Keep a closing paren that balances one inside the URL (Wikipedia-style links).
         if url[-1] == ')' and url.count('(') >= url.count(')'):
             break

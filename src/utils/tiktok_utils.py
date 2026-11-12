@@ -1,11 +1,8 @@
 import re
-import logging
 from typing import List, Optional
 
 from src.utils.cache_utils import PersistentCache, skip_recent_failures
 from src.utils.media_transcribe import download_and_transcribe_video
-
-logger = logging.getLogger(__name__)
 
 # Redis cache for TikTok transcripts: url -> transcript text
 _tiktok_cache = PersistentCache('tiktok_transcripts')

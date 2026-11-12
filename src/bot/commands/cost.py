@@ -1,5 +1,5 @@
 """
-Cost Commands - /cost: what the bot has spent today, this week and this month, by provider.
+Cost Commands - /cost: what the bot has spent today, over the last 7 days and this month, by provider.
 """
 
 import logging
@@ -11,11 +11,11 @@ import discord
 from src.services.cost_service import CostStore, CostTotals, cost_day
 from src.utils.async_utils import safe_run
 from src.utils.discord_error_utils import safe_defer
+from src.utils.message_utils import NO_PINGS
 
 logger = logging.getLogger(__name__)
 
 # The report names people by <@id>; it shouldn't ping them.
-NO_PINGS = discord.AllowedMentions.none()
 # How many of this month's biggest spenders the report lists.
 TOP_USERS = 5
 

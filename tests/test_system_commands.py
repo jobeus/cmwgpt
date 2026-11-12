@@ -30,8 +30,8 @@ class TestSystemCommands(unittest.IsolatedAsyncioTestCase):
         state_service.get_system_prompt.return_value = current_prompt
         commands = SystemCommands(
             bot,
-            queue_service_instance=queue_service,
-            state_service_instance=state_service,
+            queue_service=queue_service,
+            state_service=state_service,
             auto_update_service=auto_update_service,
             system_prompt_loader=lambda: "base prompt",
             default_model=default_model,
@@ -102,7 +102,7 @@ class TestSystemCommands(unittest.IsolatedAsyncioTestCase):
         sent_content = interaction.followup.send.await_args.args[0]
         self.assertIn("[truncated]", sent_content)
         self.assertLessEqual(len(sent_content), 2000)
-        self.assertTrue(sent_content.startswith("**Full system prompt"))
+        self.assertTrue(sent_content.startswith("**Base system prompt"))
 
     async def test_handle_systemprompt_set_without_prompt_truncates_long_content(self):
         commands, _, _, _ = self.make_commands(current_prompt="y" * 3000)

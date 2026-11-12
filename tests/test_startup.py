@@ -70,10 +70,9 @@ class TestStartupIntegration(unittest.TestCase):
         fake_module = types.ModuleType("src.bot.client")
 
         class FakeDiscordBotClient:
-            def __init__(self, *, config, services, mention_handler):
+            def __init__(self, *, config, services):
                 self.config = config
                 self.services = services
-                self.mention_handler = mention_handler
 
         fake_module.DiscordBotClient = FakeDiscordBotClient
 
@@ -84,7 +83,6 @@ class TestStartupIntegration(unittest.TestCase):
 
         self.assertIs(client.config, fake_config)
         self.assertIs(client.services, fake_services)
-        self.assertEqual(client.mention_handler, "mention-handler")
 
 
 class TestShutdownServices(unittest.TestCase):

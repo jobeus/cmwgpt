@@ -1,6 +1,6 @@
 # Configuration reference
 
-This page focuses on the env vars that matter in the **current** runtime: the Python bot and the Redis instance that stores per-user memory and content caches.
+This page focuses on the env vars that matter in the **current** runtime: the Python bot and the Redis instance that holds everything it keeps between restarts.
 
 ## Which env file should you edit?
 
@@ -9,16 +9,18 @@ This page focuses on the env vars that matter in the **current** runtime: the Py
 | Local bot-only development | `.env` (usually copied from `env.example`) |
 | Docker dev stack | `.env.development` (copied from `.env.development.example`) |
 
+The bot reads the file named by `CMWGPT_ENV_FILE` if that's set, else `.env.production` if it exists, else `.env`.
+
 ## Bot/runtime variables
 
-These are loaded by `src/config.py`.
+These are loaded by `src/config.py`, except where a row names another file.
 
 | Variable | Default | Required | Notes |
 | --- | --- | --- | --- |
 | `DISCORD_BOT_TOKEN` | `test-token-for-ci` | Yes in real use | Discord authentication |
 | `GEMINI_API_KEY` | empty | For `google`/`google-high` and image commands | Native Gemini (`GeminiService`) requests and image generation |
 | `ANTHROPIC_API_KEY` | empty | Yes in real use (default model) | Claude API (`AnthropicService`) requests |
-| `GEMINI_TIMEOUT_SECONDS` | `120` | No | Client-side request timeout for Gemini calls |
+| `GEMINI_TIMEOUT_SECONDS` | `120` | No | Client-side request timeout for Gemini calls (read in `src/services/gemini_service.py`) |
 | `DEFAULT_MODEL` | `sonnet-5.5-direct` | No | Fallback text model (one of the `/model` choices) |
 | `MEMORY_MODEL` | `sonnet-5.5-direct` | No | Model the nightly user-memory job uses; the job is off when this model's API key is missing |
 | `DEFAULT_IMAGE_MODEL` | `gemini-nano-banana-2.1` | No | Image model for `/draw`, `/edit` and the draw tools when a channel hasn't set one with `/imagemodel` |

@@ -16,12 +16,11 @@ from src.services.memory_service import (
 )
 from src.utils.async_utils import safe_run
 from src.utils.discord_error_utils import safe_defer
+from src.utils.message_utils import DISCORD_MESSAGE_LIMIT, NO_PINGS
 
 logger = logging.getLogger(__name__)
 
 # Profiles mention other people by <@id>; showing one shouldn't ping them.
-NO_PINGS = discord.AllowedMentions.none()
-DISCORD_MESSAGE_LIMIT = 2000
 
 
 def format_memory(user_id: int, profile: str) -> str:

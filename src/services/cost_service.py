@@ -75,10 +75,6 @@ def cost_scope(*, user_id: Optional[int] = None, channel_id: Optional[int] = Non
         _current.reset(token)
 
 
-def current_ledger() -> Optional[CostLedger]:
-    return _current.get()
-
-
 def note_stat(name: str, value: Any) -> None:
     """Add ``value`` to the open scope's ``name`` stat: a number adds up, anything else is appended."""
     ledger = _current.get()

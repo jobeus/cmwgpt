@@ -1,7 +1,7 @@
 """
 Downloader Utilities
 Unifies URL content fetching from YouTube, TikTok, Twitter, Facebook,
-Instagram/Threads and general websites.
+Instagram/Threads, Reddit and general websites.
 """
 
 import asyncio

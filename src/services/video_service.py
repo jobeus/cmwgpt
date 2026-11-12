@@ -42,7 +42,7 @@ from src.utils.cache_utils import PersistentCache
 from src.utils.http_client import download_public
 from src.utils.ssrf_guard import assert_public_url
 from src.utils.instagram_utils import extract_instagram_urls, find_instagram_video_url
-from src.utils.media_transcribe import DOWNLOAD_TIMEOUT_SECONDS, _download_deadline_hook
+from src.utils.media_transcribe import DOWNLOAD_TIMEOUT_SECONDS, download_deadline_hook
 from src.utils.twitter_utils import extract_twitter_urls, find_tweet_video_url
 from src.utils.youtube_utils import extract_video_ids, video_url as youtube_url
 
@@ -121,7 +121,7 @@ def _youtube_seconds(url: str) -> Optional[float]:
 
 def _ytdlp_video(url: str, temp_dir: str, proxy: Optional[str]) -> Optional[str]:
     opts: dict = {
-        # Small is fine: it's re-encoded to 480p.
+        # Small is fine: Gemini watches at low resolution.
         "format": "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b",
         "merge_output_format": "mp4",
         "outtmpl": os.path.join(temp_dir, "video_%(id)s.%(ext)s"),
@@ -129,7 +129,7 @@ def _ytdlp_video(url: str, temp_dir: str, proxy: Optional[str]) -> Optional[str]
         "no_warnings": True,
         "socket_timeout": 60,
         "max_filesize": MAX_DOWNLOAD_BYTES,
-        "progress_hooks": [_download_deadline_hook()],
+        "progress_hooks": [download_deadline_hook()],
     }
     if proxy:
         opts["proxy"] = proxy

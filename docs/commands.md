@@ -170,6 +170,7 @@ Most command-driven settings are persisted through `StateService`, which means m
 | --- | --- |
 | `src/bot/commands/system.py` | `/help`, `/model`, `/systemprompt`, `/restart` |
 | `src/bot/commands/image.py` | `/draw`, `/edit`, `/imagemodel` |
-| `src/bot/commands/death.py` | `/death ...` |
+| `src/bot/commands/death.py` | `/death ...`, `/forcedeath`, `/limerick` |
+| `src/bot/commands/memory.py` | `/memory ...`, `/fillmemory`, `/botstate` |
 | `src/bot/commands/wikicount.py` | `/wikicount` |
 | `src/bot/commands/cost.py` | `/cost` |

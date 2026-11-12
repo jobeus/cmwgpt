@@ -12,9 +12,10 @@ Redis holds everything the bot keeps between restarts:
 | `cmwgpt:timezones:<guild>` | Each person's saved time zone (IANA name) | Never |
 | `cmwgpt:settings:channels`, `cmwgpt:settings:death` | Each channel's `/model`, `/imagemodel` and `/systemprompt` (one JSON field per channel), and the death-announcement settings | Never |
 | `cmwgpt:death:names` | Names on Wikipedia's recent-deaths page already seen and announced | Never |
+| `cmwgpt:package_update_trigger` | The package releases the last update restart was for, so an upgrade that didn't install doesn't restart the bot again | Never |
 | `cmwgpt:restart_state` | Active channels, last git SHA and why the bot stopped, written on shutdown and taken by the next start | 1 day |
 | `cmwgpt:context:history_window`, `cmwgpt:context:anthropic`, `cmwgpt:context:gemini` | Per channel: where the mention history window starts, Claude's cache breakpoint and previous response id, and Gemini's interaction id. A restart within the hour sends the same prompt, so the prompt cache still reads | 1 hour after the last mention (Gemini 10 minutes) |
-| `cmwgpt:cache:<name>:<key>` | Fetched content: articles, YouTube/TikTok/Facebook transcripts, Gemini's YouTube summaries and `watch_video` answers, tweets and Instagram posts (with base64 images), image data URLs, voice-note transcripts | 30 days after last use (images 7 days, failed fetches 1 hour) |
+| `cmwgpt:cache:<name>:<key>` | Fetched content: articles, YouTube/TikTok/Facebook transcripts, Gemini's YouTube summaries and `watch_video` answers, tweets, Instagram and Reddit posts (with base64 images), image data URLs, voice-note transcripts, Gemini video uploads | 30 days after last use (images 7 days, Gemini video uploads 47 hours, failed fetches 1 hour) |
 
 If Redis is down the bot still replies: content caches fall back to memory and refetch, settings and conversation state are kept in memory only (changes made meanwhile are lost on restart), and `/memory` and the nightly job fail until it's back.
 

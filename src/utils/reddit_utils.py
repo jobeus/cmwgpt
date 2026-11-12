@@ -30,8 +30,9 @@ _POST_RE = re.compile(
     r'|https?://redd\.it/(?P<short>[a-z0-9]+)',
     re.IGNORECASE,
 )
-# Punctuation that ends a sentence around a link rather than belonging to it.
-_TRAILING_PUNCTUATION = ').,;:!?\'"]>'
+# Punctuation that ends a sentence around a link rather than belonging to it,
+# e.g. "(see https://example.org/x)." -> "https://example.org/x".
+TRAILING_PUNCTUATION = ').,;:!?\'"]>'
 
 
 def is_reddit_post_url(url: str) -> bool:
@@ -49,7 +50,7 @@ def extract_reddit_urls(text: str) -> List[str]:
         else:
             sub = re.search(r'/r/(\w+)/comments/', match.group(0))
             prefix = f"/r/{sub.group(1)}" if sub else ""
-            rest = (match.group("rest") or "/").rstrip(_TRAILING_PUNCTUATION)
+            rest = (match.group("rest") or "/").rstrip(TRAILING_PUNCTUATION)
             url = f"https://www.reddit.com{prefix}/comments/{match.group('id').lower()}{rest}"
             url = url if url.endswith("/") else url + "/"
         if url not in urls:

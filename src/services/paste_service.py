@@ -23,7 +23,7 @@ class PasteService:
         self._cache_injector = cache_injector
         self._client_factory = client_factory
 
-    async def upload_text(self, text: str) -> str:
+    async def upload_markdown(self, text: str) -> str:
         """
         Upload text to paste service.
 
@@ -67,16 +67,4 @@ class PasteService:
         url = response.text.strip()
         # The server adds the extension itself for images; older versions didn't.
         return url if "." in url.rsplit("/", 1)[-1] else url + extension
-
-    async def upload_markdown(self, markdown_text: str) -> str:
-        """
-        Upload markdown text to paste service.
-
-        Args:
-            markdown_text: The markdown content to upload
-
-        Returns:
-            URL of the uploaded paste
-        """
-        return await self.upload_text(markdown_text)
 

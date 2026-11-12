@@ -139,7 +139,7 @@ async def transcribe_video_url(video_url: str) -> Optional[str]:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-def _download_deadline_hook() -> Callable[[dict], None]:
+def download_deadline_hook() -> Callable[[dict], None]:
     """A yt-dlp progress hook that aborts the download after DOWNLOAD_TIMEOUT_SECONDS."""
     started = time.monotonic()
 
@@ -157,7 +157,7 @@ def _build_ydl_opts(file_prefix: str, temp_dir: str) -> dict:
         "quiet": True,
         "no_warnings": True,
         "socket_timeout": 60,
-        "progress_hooks": [_download_deadline_hook()],
+        "progress_hooks": [download_deadline_hook()],
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
@@ -239,7 +239,7 @@ async def download_and_transcribe_video(
             try:
                 audio_file = await asyncio.to_thread(
                     _download_audio, url,
-                    {**ydl_opts, "proxy": cfg.transcript_proxy, "progress_hooks": [_download_deadline_hook()]})
+                    {**ydl_opts, "proxy": cfg.transcript_proxy, "progress_hooks": [download_deadline_hook()]})
             except Exception as e2:
                 logger.warning("Proxy download also failed for %s: %s. URL may not be a video.", url, e2)
                 return None

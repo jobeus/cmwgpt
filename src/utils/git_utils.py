@@ -1,8 +1,5 @@
 """
 Git utility functions for repository operations.
-
-Extracted from service classes to follow the principle of separating
-stateless utility functions from stateful service classes.
 """
 
 import logging

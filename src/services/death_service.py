@@ -8,8 +8,9 @@ Wikidata must confirm the article is about a human, so vandal entries such as
 a football club added to the page are skipped.
 
 State (the set of known names, plus the set of names that have already been
-announced) is persisted to a temp file on shutdown and reloaded on startup so
-deaths that occur while the bot is offline are still detected. Once a name has
+announced) is kept in Redis (``cmwgpt:death:names``), saved whenever new names
+are processed and on shutdown, and reloaded on startup so deaths that occur
+while the bot is offline are still detected. Once a name has
 been announced it is never announced again, even if it drops off the deaths
 page and later reappears. A name whose pageview lookup fails is never recorded
 as seen, so the next poll picks it up and tries again.
@@ -20,7 +21,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 import httpx
 import discord
@@ -33,10 +34,6 @@ from src.telemetry import routine_span
 from src.utils.url_utils import get_article_text, wiki_title_candidates
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 
 POLL_INTERVAL_SECONDS = 15
 
@@ -59,7 +56,6 @@ NO_LIMERICK = "NO_LIMERICK"
 WIKIDATA_INSTANCE_OF = "P31"
 WIKIDATA_HUMAN = "Q5"
 
-# Temp file for persisting known-names across restarts
 # Known names and announced titles, in Redis (cmwgpt:death:names).
 STATE_KEY = "death:names"
 # The JSON file they lived in before Redis, imported once.
@@ -71,9 +67,8 @@ def parse_deaths_html(html: str) -> list[Tuple[str, str]]:
     results = []
     soup = BeautifulSoup(html, "html.parser")
 
-    # Restrict to list items within the main content area to avoid nav menus
+    # Every list item; nav links are dropped by the age check below.
     for li in soup.find_all("li"):
-        # The primary link is usually the first anchor tag
         a_tag = li.find("a")
         if not a_tag:
             continue
@@ -92,10 +87,6 @@ def parse_deaths_html(html: str) -> list[Tuple[str, str]]:
 
     return results
 
-
-# ---------------------------------------------------------------------------
-# Service
-# ---------------------------------------------------------------------------
 
 class DeathService:
     """Background service that monitors Wikipedia for notable deaths."""
@@ -461,7 +452,7 @@ class DeathService:
         Return the average monthly pageviews for *article_title* over the
         last PAGEVIEW_MONTHS months, or None on failure.
         """
-        now = datetime.now(timezone.utc)
+        now = self._now()
         months = self._get_setting("pageview_months", PAGEVIEW_MONTHS)
 
         # End = last full month
@@ -471,7 +462,6 @@ class DeathService:
             end_month = 12
             end_year -= 1
 
-        # Start = months before end
         start_month = end_month - months + 1
         start_year = end_year
         while start_month < 1:
@@ -482,8 +472,6 @@ class DeathService:
         start = f"{start_year}{start_month:02d}0100"
         end = f"{end_year}{end_month:02d}0100"
 
-        # Properly URL-encode the title (e.g., handling accented characters)
-        from urllib.parse import quote
         safe_title = article_title.replace(" ", "_")
         encoded_title = quote(safe_title, safe='')
 
@@ -562,7 +550,7 @@ class DeathService:
         logger.info("Announcing death: %s (%s avg monthly views)", message, f"{avg_views:,}")
 
         # Post the RIP line with the Wikipedia URL as-is first, so Discord can
-        # unfurl the link embed, then follow up with the AI summary as a
+        # unfurl the link embed, then follow up with the limerick as a
         # separate message.
         try:
             await channel.send(message)
@@ -570,14 +558,14 @@ class DeathService:
             logger.error("Failed to send death announcement: %s", exc)
             return False
 
-        summary = await self._summarize_person(display_name, wiki_link, channel.id)
-        if not summary:
+        limerick = await self._write_limerick(display_name, wiki_link, channel.id)
+        if not limerick:
             return True
 
         try:
-            await channel.send(summary)
+            await channel.send(limerick)
         except discord.HTTPException as exc:
-            logger.error("Failed to send death summary follow-up: %s", exc)
+            logger.error("Failed to send the limerick after a death announcement: %s", exc)
         return True
 
     def _channel_model(self, channel_id: Optional[int]) -> Optional[str]:
@@ -588,7 +576,7 @@ class DeathService:
                 return model
         return self._model
 
-    async def _summarize_person(
+    async def _write_limerick(
         self, display_name: str, wiki_link: Optional[str], channel_id: Optional[int] = None
     ) -> Optional[str]:
         """Ask the chat model for a limerick about the deceased.
@@ -634,7 +622,7 @@ class DeathService:
                 return None
             return text or None
         except Exception:
-            logger.exception("Failed to summarize %s for death announcement", display_name)
+            logger.exception("Failed to write a limerick for %s", display_name)
             return None
 
     async def write_limerick(self, target: str, channel_id: Optional[int] = None) -> Tuple[bool, str]:
@@ -655,7 +643,7 @@ class DeathService:
         display_name = (article_title or candidates[0]).replace("_", " ")
         wiki_link = f"https://en.wikipedia.org/wiki/{article_title}" if article_title else None
 
-        limerick = await self._summarize_person(display_name, wiki_link, channel_id)
+        limerick = await self._write_limerick(display_name, wiki_link, channel_id)
         if not limerick:
             return False, f"The model failed to produce a limerick for **{display_name}**."
         return True, limerick

@@ -44,9 +44,7 @@ class QueuedMessage:
 
     message_type: MessageType
     handler: Callable[..., Awaitable[None]]
-    timestamp: float
     channel_id: int = 0
-    # Additional data for different message types
     discord_message: Optional[discord.Message] = None
     bot_user: Optional[discord.User] = None
     model: Optional[str] = None
@@ -95,13 +93,11 @@ class QueueService:
         logger.info("Stopping QueueService...")
         self._is_running = False
 
-        # Send shutdown signal to all active channel queues
         for channel_id, queue in self._channel_queues.items():
             try:
                 shutdown_msg = QueuedMessage(
                     message_type=MessageType.SHUTDOWN,
                     handler=_shutdown_handler,
-                    timestamp=asyncio.get_event_loop().time(),
                     channel_id=channel_id,
                 )
                 queue.put_nowait(shutdown_msg)
@@ -109,7 +105,6 @@ class QueueService:
                 logger.warning(
                     "Queue full for channel %s, forcing shutdown", channel_id)
 
-        # Wait for all channel workers to complete
         if self._channel_workers:
             workers = list(self._channel_workers.values())
             try:
@@ -183,7 +178,6 @@ class QueueService:
         queued_msg = QueuedMessage(
             message_type=MessageType.MENTION,
             handler=handler,
-            timestamp=asyncio.get_event_loop().time(),
             channel_id=channel_id,
             discord_message=message,
             bot_user=bot_user,
@@ -231,7 +225,6 @@ class QueueService:
         queued_msg = QueuedMessage(
             message_type=MessageType.COMMAND,
             handler=handler,
-            timestamp=asyncio.get_event_loop().time(),
             channel_id=channel_id,
             interaction=interaction,
             args=args,
@@ -277,7 +270,6 @@ class QueueService:
         queued_msg = QueuedMessage(
             message_type=MessageType.RESTART,
             handler=handler,
-            timestamp=asyncio.get_event_loop().time(),
             channel_id=0,
         )
 
@@ -302,27 +294,23 @@ class QueueService:
 
         while self._is_running:
             try:
-                # Get next message from this channel's queue
                 queued_msg = await queue.get()
 
-                # Check for shutdown signal
                 if queued_msg.message_type == MessageType.SHUTDOWN:
                     logger.debug(
                         "Channel %s received shutdown signal", channel_id)
                     queue.task_done()
                     break
 
-                # Check for restart signal
+                # A restart runs here, not through _handle_queued_message: it isn't a
+                # message to count or to blame on a user.
                 if queued_msg.message_type == MessageType.RESTART:
                     logger.info("Received restart signal")
                     await queued_msg.handler()
                     queue.task_done()
                     continue
 
-                # Process the message
                 await self._handle_queued_message(queued_msg)
-
-                # Mark task as done
                 queue.task_done()
 
             except asyncio.CancelledError:
@@ -354,7 +342,6 @@ class QueueService:
         start_time = asyncio.get_event_loop().time()
 
         try:
-            # Log processing start
             if queued_msg.message_type == MessageType.MENTION:
                 logger.debug(
                     "Processing %s message from %s", queued_msg.message_type.value, getattr(queued_msg.discord_message, "author", None)
@@ -363,19 +350,11 @@ class QueueService:
                 logger.debug(
                     "Processing %s from %s", queued_msg.message_type.value, getattr(queued_msg.interaction, "user", None)
                 )
-            elif queued_msg.message_type == MessageType.RESTART:
-                logger.debug(
-                    "Processing %s signal", queued_msg.message_type.value
-                )
 
-            # Call the appropriate handler directly - they should be properly
-            # async
             if queued_msg.message_type == MessageType.MENTION:
                 await queued_msg.handler(queued_msg.discord_message, queued_msg.bot_user, queued_msg.model)
             elif queued_msg.message_type == MessageType.COMMAND:
                 await queued_msg.handler(queued_msg.interaction, *queued_msg.args, **queued_msg.kwargs)
-            elif queued_msg.message_type == MessageType.RESTART:
-                await queued_msg.handler()
 
             processing_time = asyncio.get_event_loop().time() - start_time
             self._stats["messages_processed"] += 1
@@ -390,8 +369,6 @@ class QueueService:
                 user_info = f"{getattr(queued_msg.discord_message, "author", None)}"
             elif queued_msg.message_type == MessageType.COMMAND:
                 user_info = f"{getattr(queued_msg.interaction, "user", None)}"
-            elif queued_msg.message_type == MessageType.RESTART:
-                user_info = "system"
             else:
                 user_info = "unknown"
 
@@ -408,12 +385,6 @@ class QueueService:
     def get_queue_size(self) -> int:
         """Get total queue size across all channels."""
         return sum(q.qsize() for q in self._channel_queues.values())
-
-    def get_channel_queue_size(self, channel_id: int) -> int:
-        """Get queue size for a specific channel."""
-        if channel_id in self._channel_queues:
-            return self._channel_queues[channel_id].qsize()
-        return 0
 
     def get_stats(self) -> Dict[str, Any]:
         """

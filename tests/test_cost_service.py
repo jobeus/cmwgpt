@@ -80,8 +80,8 @@ class TestCostDay(unittest.TestCase):
 
     def test_scope_is_reset_after_the_block(self):
         with cost_scope():
-            self.assertIsNotNone(cost_service.current_ledger())
-        self.assertIsNone(cost_service.current_ledger())
+            self.assertIsNotNone(cost_service._current.get())
+        self.assertIsNone(cost_service._current.get())
 
 
 class TestStartupWiring(unittest.TestCase):

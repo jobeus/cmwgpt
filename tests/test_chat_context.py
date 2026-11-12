@@ -309,7 +309,7 @@ class TestCostPrefixStripping(unittest.IsolatedAsyncioTestCase):
         bot_msg = MagicMock()
         bot_msg.id = 2
         bot_msg.author.id = 999
-        bot_msg.content = "[$0.012 @ z-image] here you go"
+        bot_msg.content = "[$0.034 @ banana-2.1, 9:16] here you go"
         bot_msg.created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
         bot_msg.reference = None
         bot_msg.embeds = []

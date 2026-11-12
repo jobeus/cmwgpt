@@ -64,9 +64,9 @@ HISTORY_CACHE_MAX_CHANNELS = 200
 # in Redis so a restart within the hour sends the same history and still reads the prompt cache.
 HISTORY_WINDOW_KEY = "context:history_window"
 
-# The bot's description of its own architecture, added to every mention's system
-# prompt (whatever the channel's prompt is) so it can explain how it works. Models
-# with tools read it through the ``how_i_work`` tool instead.
+# The bot's description of its own architecture, so it can explain how it works. Models
+# without tools get it in the system prompt (whatever the channel's prompt is); models
+# with tools read it through the ``how_i_work`` tool.
 HOW_I_WORK_PATH = Path(__file__).resolve().parents[2] / "prompts" / "how_i_work.txt"
 
 
@@ -339,7 +339,6 @@ class MentionHandler:
             note: str = "") -> None:
         async with best_effort_typing(message.channel):
             try:
-                # Mark channel as active
                 self._state_service.mark_channel_active(message.channel.id)
 
                 # Shows what the bot is doing, then the reply as it streams in, then the final
@@ -387,14 +386,11 @@ class MentionHandler:
                     )
                     return
 
-                # Handle different response formats
                 if isinstance(reply_content, dict) and "text" in reply_content:
-                    # Response includes files (from image generation or other
-                    # tools)
+                    # A reply with files (images the tools made, code execution output).
                     reply_text = reply_content["text"]
                     files_to_upload = reply_content.get("files", [])
                 else:
-                    # Regular text response
                     reply_text = str(reply_content)
                     files_to_upload = []
 
@@ -528,7 +524,6 @@ class MentionHandler:
             if on_status:
                 on_status(text)
 
-        # Gather message history
         status(READING_CHAT_STATUS)
         history_msgs = []
 
@@ -536,7 +531,17 @@ class MentionHandler:
         channel_id = message.channel.id
         cache_entry = self._history_cache.get(channel_id)
 
-        limit_lines = self._include_num_chatlines
+        async def start_fresh_window() -> List[discord.Message]:
+            """The newest messages as a new window. The providers' per-channel continuation
+            state no longer matches what's about to be sent, so it's dropped."""
+            for service in (self._gemini_service, self._anthropic_service):
+                if service:
+                    service.clear_channel_cache(channel_id)
+            fresh = [msg async for msg in message.channel.history(limit=self._include_num_chatlines)]
+            fresh.reverse()
+            if fresh:
+                self._store_history_cache(channel_id, current_time, fresh[0])
+            return fresh
 
         oldest_message = None
         if cache_entry and (current_time - cache_entry["timestamp"]) <= HISTORY_WINDOW_SECONDS:
@@ -544,8 +549,6 @@ class MentionHandler:
 
         if oldest_message is not None:
             history_msgs.append(oldest_message)
-            
-            # Fetch up to MAX_HISTORY_WINDOW messages after the oldest message
             async for msg in message.channel.history(limit=MAX_HISTORY_WINDOW, after=oldest_message):
                 history_msgs.append(msg)
 
@@ -557,43 +560,19 @@ class MentionHandler:
                     "History window of #%s reached %s messages (started %.1fh ago). Resetting context.",
                     message.channel.name, MAX_HISTORY_WINDOW, age_hours,
                 )
-                history_msgs = []
-                for service in (self._gemini_service, self._anthropic_service):
-                    if service:
-                        service.clear_channel_cache(channel_id)
-                    
-                async for msg in message.channel.history(limit=limit_lines):
-                    history_msgs.append(msg)
-                history_msgs.reverse()
-
-                if history_msgs:
-                    self._store_history_cache(channel_id, current_time, history_msgs[0])
+                history_msgs = await start_fresh_window()
             else:
-                # Update timestamp for this channel
                 self._history_cache[channel_id]["timestamp"] = current_time
                 self._save_history_window(channel_id)
         else:
-            # History window reset: the providers' per-channel continuation
-            # state no longer matches what we're about to send.
-            for service in (self._gemini_service, self._anthropic_service):
-                if service:
-                    service.clear_channel_cache(channel_id)
-
-            async for msg in message.channel.history(limit=limit_lines):
-                history_msgs.append(msg)
-            history_msgs.reverse()
-
-            if history_msgs:
-                self._store_history_cache(channel_id, current_time, history_msgs[0])
+            history_msgs = await start_fresh_window()
 
         history_msgs = _mention_last(_without_status_previews(history_msgs, bot_user.id), message)
         # Models with tools look up memory and how_i_work themselves instead of getting them every time.
         uses_tools = self._uses_tools(model)
 
-        # Get user legend for the channel
         legend_section = await self._mention_legend_provider(message.channel, bot_user)
 
-        # Prepare system prompt
         channel_system_prompt = self._state_service.get_system_prompt(
             message.channel.id)
         if channel_system_prompt:
@@ -680,8 +659,7 @@ class MentionHandler:
         if how_i_work:
             current_channel_system_prompt += f"{how_i_work}\n\n"
 
-        # Build the native multimodal messages array. The mention path enriches
-        # user messages with fetched URL content via the injected fetcher.
+        # Build the multimodal messages array.
         async def transcriber(attachment: discord.Attachment) -> Optional[str]:
             status(TRANSCRIBING_STATUS)
             return await transcribe_audio_attachment(attachment)
@@ -710,7 +688,7 @@ class MentionHandler:
             logger.info("Left the %s oldest images out of #%s's history", dropped, message.channel)
         if not uses_tools:
             await self._append_user_notes(chat_context, message, history_msgs, bot_user)
-        await self._append_self_state(chat_context, message, history_msgs, bot_user)
+        await self._append_self_state(chat_context, message)
         await self._append_time_zones(chat_context, message, history_msgs, bot_user)
         await self._append_reply_chain(chat_context, message, history_msgs)
 
@@ -826,8 +804,6 @@ class MentionHandler:
         self,
         chat_context: List[Dict[str, Any]],
         message: discord.Message,
-        history_msgs: List[discord.Message],
-        bot_user: discord.User,
     ) -> None:
         """Add the bot's ``<about_you>`` block to the end of the mention.
 

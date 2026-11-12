@@ -38,7 +38,7 @@ class TestBotFunctions(unittest.TestCase):
     def _set_mock_paste_service(self, upload_mock):
         paste_service = MagicMock()
         paste_service.upload_markdown = upload_mock
-        self._message_service.set_paste_service(paste_service)
+        self._message_service._paste_service = paste_service
 
     def test_prepare_mention_context(self):
         """Test mention handler _prepare_mention_context function."""
@@ -220,90 +220,6 @@ class TestBotFunctions(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    def test_send_interaction_followup_short_message(self):
-        """Test message service send_interaction_followup with short message."""
-
-        async def run_test():
-            message_service = self._message_service
-            mock_upload = AsyncMock()
-            self._set_mock_paste_service(mock_upload)
-
-            mock_interaction = MagicMock()
-            mock_interaction.followup = AsyncMock()
-
-            await message_service.send_interaction_followup(mock_interaction, "Short reply")
-
-            mock_interaction.followup.send.assert_called_once_with(
-                content="Short reply", files=[], suppress_embeds=True, ephemeral=False)
-            mock_upload.assert_not_called()
-
-        self.loop.run_until_complete(run_test())
-
-    def test_send_interaction_followup_long_message(self):
-        """Test message service send_interaction_followup with long message that needs pasting."""
-
-        async def run_test():
-            message_service = self._message_service
-            mock_upload = AsyncMock(return_value="https://paste.jobe.wtf/xyz789.md")
-            self._set_mock_paste_service(mock_upload)
-
-            mock_interaction = MagicMock()
-            mock_interaction.followup = AsyncMock()
-
-            reply_text = "C" * 2500
-            await message_service.send_interaction_followup(mock_interaction, reply_text, ephemeral=True)
-
-            mock_upload.assert_called_once_with(reply_text)
-            expected_content = (
-                "My response was too long to post here, so I've uploaded it to: https://paste.jobe.wtf/xyz789.md"
-            )
-            mock_interaction.followup.send.assert_called_once_with(
-                content=expected_content, files=[], suppress_embeds=True, ephemeral=True)
-
-        self.loop.run_until_complete(run_test())
-
-    def test_message_length_calculation(self):
-        """Test message length calculations for Discord limits."""
-        # Test exact limit
-        base_content = "> Test prompt"
-        reply_text = "A" * (2000 - len(base_content) - 1)  # Exactly at limit
-        total_length = len(base_content + f"\n{reply_text}")
-        self.assertEqual(total_length, 2000)
-
-        # Test over limit
-        reply_text_over = "A" * (2000 - len(base_content))  # Over limit
-        total_length_over = len(base_content + f"\n{reply_text_over}")
-        self.assertGreater(total_length_over, 2000)
-
-    def test_username_formatting(self):
-        """Test username formatting for chat messages."""
-        # Mock user
-        mock_user = MagicMock()
-        mock_user.display_name = "TestUser"
-
-        # Test message formatting
-        original_message = "Hello, how are you?"
-        formatted_message = f"""{
-            mock_user.display_name} says: {original_message}"""
-
-        expected = "TestUser says: Hello, how are you?"
-        self.assertEqual(formatted_message, expected)
-
-    def test_attachment_url_formatting(self):
-        """Test attachment URL formatting in messages."""
-        message_service = self._message_service
-
-        # Mock attachment
-        mock_attachment = MagicMock()
-        mock_attachment.url = "https://cdn.discord.com/attachments/123/456/image.png"
-
-        # Test formatting
-        message = "Analyze this image"
-        formatted = message_service.format_attachment_message(
-            mock_attachment, message)
-
-        expected = "> https://cdn.discord.com/attachments/123/456/image.png\n> Analyze this image"
-        self.assertEqual(formatted, expected)
 
 
 if __name__ == "__main__":

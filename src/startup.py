@@ -76,7 +76,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     paste_service = PasteService(cache_injector=inject_article_cache)
     # Links to the images in the traces; only used while tracing is on.
     set_image_uploader(paste_service.upload_image)
-    message_service = MessageService(paste_service_instance=paste_service)
+    message_service = MessageService(paste_service=paste_service)
 
     restart_handler = RestartHandler(state_service=state_service)
     auto_update_service = AutoUpdateService(
@@ -195,5 +195,4 @@ def create_bot_client(config: Optional[AppConfig] = None):
     return DiscordBotClient(
         config=app_config,
         services=services,
-        mention_handler=services.mention_handler,
     )

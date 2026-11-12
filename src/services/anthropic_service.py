@@ -20,7 +20,7 @@ import logfire
 
 from src.config import get_config
 from src.db.state_store import CONTEXT_TTL_SECONDS, StateStore
-from src.services.chat_tools import ChatTool, ToolResult, text_result
+from src.services.chat_tools import ChatTool, ToolResult, image_block, text_result
 from src.services.cost_service import CLAUDE_DIRECT, note_stat, record_cost
 from src.telemetry import image_links_ready, without_blobs
 from src.utils.message_utils import clean_reply, resolve_bot_id
@@ -147,8 +147,6 @@ CACHE_DIAGNOSIS_BETA = "cache-diagnosis-2026-04-07"
 # A reported miss is only worth a warning when less than this share of the prompt was read from the cache.
 CACHE_READ_SHARE_TO_WARN = 0.8
 
-_DATA_URL_RE = re.compile(r"^data:(?P<mime>[\w/+.-]+);base64,(?P<data>.+)$", re.DOTALL)
-_SUPPORTED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 
 
 def _aborted_stream_cost(stream: Any, streamed: str, model: DirectModel) -> float:
@@ -202,19 +200,7 @@ def _convert_part(part: Any, role: str) -> Optional[Dict[str, Any]]:
 
     # Images are only allowed in user turns.
     if part.get("type") == "image_url" and role == "user":
-        url = (part.get("image_url") or {}).get("url", "")
-        match = _DATA_URL_RE.match(url)
-        if match:
-            mime = match.group("mime").lower()
-            if mime not in _SUPPORTED_IMAGE_TYPES:
-                logger.debug("[anthropic] Skipping unsupported image type %s", mime)
-                return None
-            return {
-                "type": "image",
-                "source": {"type": "base64", "media_type": mime, "data": match.group("data")},
-            }
-        if url.startswith(("http://", "https://")):
-            return {"type": "image", "source": {"type": "url", "url": url}}
+        return image_block(part)
     return None
 
 
@@ -681,7 +667,6 @@ class AnthropicService:
         messages: List[Dict[str, Any]],
         system_prompt: Optional[str] = None,
         channel_id: Optional[int] = None,
-        state_service: Any = None,
         bot_id: Optional[int] = None,
         discord_user_id: Optional[int] = None,  # noqa: ARG002 - identity kwarg shared by all services
         search: bool = True,
@@ -703,7 +688,7 @@ class AnthropicService:
         thinking included.
         """
         client = self.get_client()
-        resolved_bot_id = resolve_bot_id(bot_id, state_service, self._bot_id_loader)
+        resolved_bot_id = resolve_bot_id(bot_id, self._bot_id_loader)
         direct_model = DIRECT_MODELS.get(model) or DIRECT_MODELS["sonnet-5.5-direct"]
         api_model = direct_model.api_id
         api_messages = build_anthropic_messages(messages)

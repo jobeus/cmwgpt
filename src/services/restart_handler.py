@@ -71,9 +71,6 @@ class RestartHandler:
         # run the shutdown as its own task instead of awaiting it here.
         self._shutdown_task = asyncio.get_running_loop().create_task(self._shutdown())
 
-    def is_restart_in_progress(self) -> bool:
-        return self._restart_in_progress
-
     async def perform_graceful_shutdown(self) -> None:
         """Save state before a non-restart shutdown (Ctrl-C, SIGTERM)."""
         if self._state_service.save_restart_state({"manual_restart": False, "graceful_shutdown": True}):

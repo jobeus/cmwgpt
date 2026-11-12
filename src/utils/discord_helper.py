@@ -137,16 +137,7 @@ async def attachment_to_base64_data_url(attachment: discord.Attachment) -> str:
         return cached
 
     try:
-        file_bytes = await attachment.read()
-        audio_type = _audio_content_type(attachment)
-
-        if audio_type:
-            if audio_type == "audio/s16le":
-                file_bytes = pcm_to_wav(file_bytes)
-                audio_type = "audio/wav"
-            data_url = f"data:{audio_type};base64,{base64.b64encode(file_bytes).decode('ascii')}"
-        else:
-            data_url = await _image_bytes_to_data_url(file_bytes)
+        data_url = await _image_bytes_to_data_url(await attachment.read())
 
         await _attachment_base64_cache.set(attachment.id, data_url)
         return data_url

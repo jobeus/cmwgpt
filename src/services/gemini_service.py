@@ -2,7 +2,8 @@
 Gemini Service - Handles Google Gemini API interactions via the Interactions API.
 
 Uses the google-genai SDK's Interactions API (client.aio.interactions.create)
-to talk to Google's Gemini models, and GenerateContent for the image models.
+to talk to Google's Gemini models, and GenerateContent for the image models and
+for summarizing short YouTube videos.
 """
 
 import asyncio
@@ -44,7 +45,7 @@ FILE_READY_TIMEOUT_SECONDS = 600
 FILE_POLL_SECONDS = 3.0
 INTERACTION_POLL_SECONDS = 5.0
 VIDEO_SUMMARY_PROMPT = (
-    "Watch this YouTube video and write a summary for people in a group chat who won't watch it. Cover: what "
+    "Watch this video and write a summary for people in a group chat who won't watch it. Cover: what "
     "it is (title and channel if shown); the main points or story in order, with rough [mm:ss] timestamps; "
     "notable quotes, word for word; anything shown on screen that matters, not just what's said; and how it "
     "ends or what it concludes. Scale the length to the video: a few sentences for a short clip, up to about "
@@ -65,7 +66,6 @@ except ValueError:
 
 class GeminiServiceError(Exception):
     """Custom exception for Gemini service errors."""
-    pass
 
 
 def _interaction_text(interaction: Any) -> str:
@@ -124,7 +124,6 @@ class GeminiService:
         if not cached:
             return None
         if time.time() - cached["timestamp"] > INTERACTION_CACHE_TTL:
-            # Expired — discard
             del self._interaction_cache[channel_id]
             logger.info("[gemini] Interaction cache expired for channel %s", channel_id)
             return None
@@ -159,36 +158,22 @@ class GeminiService:
         return self._client
 
     def _build_input(self, messages: List[Dict[str, Any]], has_prev_interaction: bool) -> list:
-        """
-        Build the input array for Gemini 3 Interactions API.
-        The Interactions API only expects the *current* user turn.
-        If we don't have a previous_interaction_id but we have conversation history,
-        we synthesize the history into the current turn.
+        """Build the input for the Interactions API, which takes only the current user turn.
+
+        Earlier messages go in front of it as a transcript: with a previous interaction, only
+        those since the bot's last reply (the API already has the rest); without one, all of them.
         """
         if not messages:
             return [{"type": "text", "text": " "}]
-            
+
         current_msg = messages[-1]
-        
-        # If no previous interaction but we have history, prepend transcript
-        messages_to_transcript = []
+        earlier = messages[:-1]
         if has_prev_interaction:
-            # Find the last 'assistant' or 'model' message
-            last_bot_idx = -1
-            for i in range(len(messages) - 1, -1, -1):
-                if messages[i].get("role") in ("assistant", "model"):
-                    last_bot_idx = i
-                    break
-            
-            if last_bot_idx != -1:
-                # Include everything AFTER the last bot message, EXCEPT the current message
-                messages_to_transcript = messages[last_bot_idx + 1:-1]
-            else:
-                messages_to_transcript = messages[:-1]
-        else:
-            if len(messages) > 1:
-                # Include ALL past messages EXCEPT the current message
-                messages_to_transcript = messages[:-1]
+            last_bot_idx = next(
+                (i for i in range(len(earlier) - 1, -1, -1) if earlier[i].get("role") in ("assistant", "model")),
+                -1,
+            )
+            earlier = earlier[last_bot_idx + 1:]
 
         parts: List[Dict[str, Any]] = []
 
@@ -200,95 +185,52 @@ class GeminiService:
             else:
                 parts.append({"type": "text", "text": text_val})
 
-        # Helper to process a message dict into parts
-        def append_msg_parts(msg: Dict[str, Any], is_history: bool):
+        def append_msg_parts(msg: Dict[str, Any]):
             role = "User" if msg.get("role") == "user" else "Assistant"
             content = msg.get("content", "")
-            
             first_text = True
-            
+
             def add_text_part(text_val: str):
                 nonlocal first_text
                 if not text_val:
                     return
                 if first_text:
-                    # Prepend role prefix
                     text_val = f"{role}: {text_val}"
                     first_text = False
                 add_text(text_val)
 
-            if isinstance(content, list):
-                for part in content:
-                    if isinstance(part, dict):
-                        if part.get("type") == "text":
-                            add_text_part(part.get("text", ""))
-                        elif part.get("type") == "image_url":
-                            image_url = part.get("image_url", {}).get("url", "")
-                            if image_url.startswith("data:"):
-                                try:
-                                    header, b64data = image_url.split(",", 1)
-                                    mime_type = header.split(":")[1].split(";")[0]
-                                    parts.append({
-                                        "type": "image",
-                                        "data": b64data,
-                                        "mime_type": mime_type,
-                                    })
-                                except (ValueError, IndexError):
-                                    pass
-                            else:
-                                parts.append({
-                                    "type": "image",
-                                    "uri": image_url,
-                                    "mime_type": "image/jpeg",
-                                })
-                        elif part.get("type") == "audio_url":
-                            audio_url = part.get("audio_url", {}).get("url", "")
-                            if audio_url.startswith("data:"):
-                                try:
-                                    header, b64data = audio_url.split(",", 1)
-                                    mime_type = header.split(":")[1].split(";")[0]
-                                    mime_type = mime_type.split(";")[0].strip().lower()
-                                    
-                                    supported_audio_types = {
-                                        "audio/wav", "audio/mp3", "audio/aiff", "audio/aac",
-                                        "audio/ogg", "audio/flac"
-                                    }
-                                    if mime_type not in supported_audio_types:
-                                        mime_type = "audio/ogg"
-                                        
-                                    parts.append({
-                                        "type": "audio",
-                                        "data": b64data,
-                                        "mime_type": mime_type,
-                                    })
-                                except (ValueError, IndexError):
-                                    pass
-                            else:
-                                parts.append({
-                                    "type": "audio",
-                                    "uri": audio_url,
-                                    "mime_type": "audio/ogg",
-                                })
-                    elif isinstance(part, str):
-                        add_text_part(part)
-            else:
+            if not isinstance(content, list):
                 add_text_part(str(content))
+                return
+            for part in content:
+                if isinstance(part, str):
+                    add_text_part(part)
+                elif not isinstance(part, dict):
+                    continue
+                elif part.get("type") == "text":
+                    add_text_part(part.get("text", ""))
+                elif part.get("type") == "image_url":
+                    image_url = part.get("image_url", {}).get("url", "")
+                    if not image_url.startswith("data:"):
+                        parts.append({"type": "image", "uri": image_url, "mime_type": "image/jpeg"})
+                        continue
+                    try:
+                        header, b64data = image_url.split(",", 1)
+                        mime_type = header.split(":")[1].split(";")[0]
+                    except (ValueError, IndexError):
+                        continue
+                    parts.append({"type": "image", "data": b64data, "mime_type": mime_type})
 
-        # Add history messages
-        if messages_to_transcript:
+        if earlier:
             if has_prev_interaction:
                 add_text("The following messages occurred since your last response:\n\n")
-            
-            for msg in messages_to_transcript:
-                append_msg_parts(msg, is_history=True)
+            for msg in earlier:
+                append_msg_parts(msg)
                 add_text("\n\n")
-            
             if has_prev_interaction:
                 add_text("--- End missed context ---\n\n")
 
-        # Add the current message
-        append_msg_parts(current_msg, is_history=False)
-            
+        append_msg_parts(current_msg)
         return parts
 
     def _estimate_cost(self, usage: Any) -> float:
@@ -457,8 +399,6 @@ class GeminiService:
         bot_id: Optional[int] = None,
         thinking_level: Optional[str] = None,
         disable_cache: bool = False,
-        # Accept and ignore extra kwargs for compatibility
-        state_service: Any = None,
     ) -> tuple[Union[str, Dict[str, Any], None], float]:
         """
         Get a chat completion using the Gemini Interactions API.
@@ -471,28 +411,18 @@ class GeminiService:
         max_retries = 3
         base_delay = 1.0
 
-        # Check for a cached previous interaction ID for this channel
         prev_interaction_id = None if disable_cache else self._get_previous_interaction_id(channel_id)
         if prev_interaction_id:
             logger.info("[gemini] Continuing conversation with previous_interaction_id=%s...", prev_interaction_id[:20])
 
-        # Build input for the current turn
         input_parts = self._build_input(messages, bool(prev_interaction_id))
 
         for attempt in range(max_retries):
             try:
-                # Check if input has audio parts
-                has_audio = any(part.get("type") == "audio" for part in input_parts)
-                
-                tools = [{"type": "google_search"}, {"type": "url_context"}]
-                if not has_audio:
-                    tools.append({"type": "code_execution"})
-
-                # Build kwargs for interactions.create
                 kwargs = {
                     "model": GEMINI_MODEL,
                     "input": input_parts,
-                    "tools": tools,
+                    "tools": [{"type": "google_search"}, {"type": "url_context"}, {"type": "code_execution"}],
                     "store": True,
                 }
 
@@ -502,14 +432,9 @@ class GeminiService:
                 if prev_interaction_id:
                     kwargs["previous_interaction_id"] = prev_interaction_id
 
-                # Build generation_config
-                gen_config = {}
                 if thinking_level:
-                    gen_config["thinking_level"] = thinking_level
-                if gen_config:
-                    kwargs["generation_config"] = gen_config
+                    kwargs["generation_config"] = {"thinking_level": thinking_level}
 
-                # Log the prompt snippet
                 last_content = input_parts[-1].get("text", "") if input_parts else ""
                 snippet_trunc = str(last_content).replace("\n", " ")[:150]
                 logger.info("[gemini/%s] Prompt Snippet: %s%s", GEMINI_MODEL, snippet_trunc, '...' if len(str(last_content)) > 150 else '')
@@ -519,7 +444,7 @@ class GeminiService:
                 if interaction is None:
                     raise GeminiServiceError("Interactions API returned None")
 
-                # Convert to dict to robustly handle API structure variations (steps vs outputs)
+                # As a dict, so both shapes the API has used (steps, outputs) read the same way.
                 try:
                     interaction_dict = interaction.model_dump()
                 except AttributeError:
@@ -528,7 +453,6 @@ class GeminiService:
                     except AttributeError:
                         interaction_dict = vars(interaction)
 
-                # Extract outputs
                 text_parts = []
                 image_files = []
 
@@ -565,12 +489,12 @@ class GeminiService:
                             logger.info("[gemini] Thinking: %s", summary[:200])
 
                 if "steps" in interaction_dict and interaction_dict["steps"]:
-                    # Gemini 3.1 Interactions API docs suggest content is nested in steps
+                    # The Interactions API nests content in steps.
                     last_step = interaction_dict["steps"][-1]
                     for item in last_step.get("content", []):
                         process_output_item(item)
                 elif "outputs" in interaction_dict and interaction_dict["outputs"]:
-                    # Fallback for alternative or legacy schema
+                    # The older shape.
                     for item in interaction_dict["outputs"]:
                         process_output_item(item)
 
@@ -590,28 +514,24 @@ class GeminiService:
 
                 if response_text:
                     response_text = clean_reply(
-                        response_text, bot_id=resolve_bot_id(bot_id, None, self._bot_id_loader))
+                        response_text, bot_id=resolve_bot_id(bot_id, self._bot_id_loader))
 
-                # Log snippet
                 text_snippet = response_text.strip().replace("\n", " ")[:150] if response_text else "(empty)"
                 logger.info("[gemini/%s] response snippet: %s%s", GEMINI_MODEL, text_snippet, '...' if len(response_text or '') > 150 else '')
 
-                # Cache the interaction ID for future turns
                 interaction_id = getattr(interaction, 'id', None)
                 if interaction_id and channel_id and not disable_cache:
                     self._update_interaction_cache(channel_id, interaction_id)
                     logger.info("[gemini] Cached interaction_id=%s... for channel %s", interaction_id[:20], channel_id)
 
-                # Return according to response format
                 if image_files:
                     return {"text": response_text or "Here's what I generated:", "files": image_files}, cost
                 return response_text, cost
 
             except GeminiServiceError:
-                # On error, clear the cache in case the interaction ID is stale
+                # Start the next mention fresh rather than continuing from this interaction.
                 if prev_interaction_id and channel_id:
                     self.clear_channel_cache(channel_id)
-                    prev_interaction_id = None
                 raise
 
             except Exception as e:
@@ -706,7 +626,6 @@ def _image_mime_type(data: bytes) -> str:
     return "image/jpeg"
 
 
-# Helper to check if a model string should route to Gemini
 GEMINI_MODEL_ALIASES = {"google", "google-high"}
 
 

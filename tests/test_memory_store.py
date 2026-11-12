@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import fakeredis
 
-from src.db.memory_store import MAX_PROFILE_BYTES, MemoryStore, _self_key, cap_profile
+from src.db.memory_store import MAX_PROFILE_BYTES, MemoryStore, cap_profile
 from tests.config_helpers import cfg
 
 
@@ -88,17 +88,6 @@ class TestMemoryStore(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("interests_updated", state)
         self.assertEqual(await self.store.get_self_state(43), {})
 
-        # Left from before.
-        await self.store._redis_getter().hset(_self_key(42), mapping={"follow_ups": "[]", "refreshed_at": "x"})
-        await self.store.clear_retired(42)
-        state = await self.store.get_self_state(42)
-        self.assertNotIn("follow_ups", state)
-        self.assertNotIn("refreshed_at", state)
-        self.assertEqual(state["mood"], "chipper")
-
-        await self.store.clear_self_state(42)
-        self.assertEqual(await self.store.get_self_state(42), {})
-
     def test_cap_profile_never_splits_a_character(self):
         capped = cap_profile("a" + "€" * MAX_PROFILE_BYTES)
         capped.encode("utf-8")  # valid UTF-8
@@ -122,17 +111,6 @@ class TestMemoryStore(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(await self.store.get_processed_through(42), when)
         self.assertEqual(len(await self.redis.hget("cmwgpt:memory_job:42", "last_status")), 255)
-
-    async def test_clear_retired_removes_only_that_servers_old_summaries(self):
-        await self.redis.set("cmwgpt:channel_summary:42:5", "tacos (2026-10-15)")
-        await self.redis.set("cmwgpt:channel_summary:43:5", "other server")
-        await self.store.save_profile(42, 1, "profile")
-
-        await self.store.clear_retired(42)
-
-        self.assertFalse(await self.redis.exists("cmwgpt:channel_summary:42:5"))
-        self.assertTrue(await self.redis.exists("cmwgpt:channel_summary:43:5"))
-        self.assertEqual(await self.store.get(42, 1), "profile")
 
 
 class TestRedisClient(unittest.TestCase):

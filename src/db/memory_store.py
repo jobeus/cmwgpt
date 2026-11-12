@@ -125,16 +125,6 @@ class MemoryStore:
             await client.delete(*keys)
         await client.delete(_index_key(guild_id))
 
-    async def clear_retired(self, guild_id: int) -> None:
-        """Remove what the bot no longer keeps for a server: channel summaries, and the
-        follow-up list and refresh time in its own state."""
-        client = self._redis_getter()
-        match = f"{KEY_PREFIX}channel_summary:{guild_id}:*"
-        keys = [key async for key in client.scan_iter(match=match, count=500)]
-        if keys:
-            await client.delete(*keys)
-        await client.hdel(_self_key(guild_id), "follow_ups", "refreshed_at")
-
     async def get_self_state(self, guild_id: int) -> Dict[str, str]:
         """The bot's own state in a server (aspects and their ``_updated`` stamps), or ``{}``."""
         return await self._redis_getter().hgetall(_self_key(guild_id)) or {}
@@ -154,9 +144,6 @@ class MemoryStore:
             await client.hset(_self_key(guild_id), mapping=mapping)
         if removed:
             await client.hdel(_self_key(guild_id), *removed, *(f"{name}_updated" for name in removed))
-
-    async def clear_self_state(self, guild_id: int) -> None:
-        await self._redis_getter().delete(_self_key(guild_id))
 
     async def get_processed_through(self, guild_id: int) -> Optional[datetime]:
         value = await self._redis_getter().hget(_job_key(guild_id), "processed_through")

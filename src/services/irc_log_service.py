@@ -13,7 +13,6 @@ and gives up on a pattern that runs too long.
 """
 
 import bisect
-import hashlib
 import logging
 import mmap
 import re
@@ -68,8 +67,6 @@ class NickMap:
     """
 
     def __init__(self, rules: Sequence[Tuple[str, str]]):
-        # Identifies these rules, so an index built with them is rebuilt when they change.
-        self.signature = hashlib.sha1(repr(list(rules)).encode("utf-8")).hexdigest()
         self._rules: List[Tuple[str, re.Pattern]] = []
         for canonical, pattern in rules:
             try:
@@ -170,6 +167,10 @@ class IrcLog:
         name = self._canonical(nick)
         return name.lower() if name is not None else None
 
+    def _day_at(self, offset: int) -> Optional[date]:
+        i = bisect.bisect_right(self._marker_offsets, offset) - 1
+        return self._marker_days[i] if i >= 0 else None
+
     def _speaker(self, data: mmap.mmap, line_start: int, line_end: int) -> Tuple[Optional[str], str, int]:
         """``(nick key, nick as shown, offset where the said text starts)`` for a chat or action line.
 
@@ -181,10 +182,6 @@ class IrcLog:
         raw = (head.group(1) or head.group(2)).decode("utf-8", "replace")
         shown = self._canonical(raw)
         return (shown.lower() if shown is not None else None), shown or raw, head.end()
-
-    def _date_at(self, offset: int) -> str:
-        i = bisect.bisect_right(self._marker_offsets, offset) - 1
-        return _day_label(self._marker_days[i] if i >= 0 else None)
 
     def search(
         self,
@@ -247,16 +244,16 @@ class IrcLog:
                     break
                 nxt = data.find(b"\n", end + 1)
                 end = len(data) if nxt < 0 else nxt
-            date = self._date_at(match.start)
+            day_label = _day_label(self._day_at(match.start))
             lines = [_decode_line(raw) for raw in data[start:end].split(b"\n") if raw]
             # Hits from the same day share a header; "…" marks a gap between excerpts.
-            if blocks and blocks[-1][0] == date:
+            if blocks and blocks[-1][0] == day_label:
                 if not newest_first and start <= last_end + 1:
                     blocks[-1][1].extend(lines[_overlap(blocks[-1][1], lines):])
                 else:
                     blocks[-1][1].extend((["…"] if context else []) + lines)
             else:
-                blocks.append((date, lines))
+                blocks.append((day_label, lines))
             last_end = end
 
         shown_to = skip + len(matches)
@@ -264,13 +261,9 @@ class IrcLog:
         if shown_to < total:
             header += f" Use skip={shown_to} for more, or narrow the query."
         parts = [header]
-        for date, lines in blocks:
-            parts.append(f"\n[{date}]\n" + "\n".join(lines))
+        for day_label, lines in blocks:
+            parts.append(f"\n[{day_label}]\n" + "\n".join(lines))
         return "\n".join(parts)
-
-    def _day_at(self, offset: int) -> Optional[date]:
-        i = bisect.bisect_right(self._marker_offsets, offset) - 1
-        return self._marker_days[i] if i >= 0 else None
 
     def count(
         self,
@@ -443,7 +436,7 @@ class IrcLog:
             line_start = data.rfind(b"\n", 0, pos) + 1
             line = data[line_start:pos].strip()
             if line and not line.startswith(b"--- "):
-                return f"{_day_label(first)} to {self._date_at(line_start)}"
+                return f"{_day_label(first)} to {_day_label(self._day_at(line_start))}"
             pos = line_start - 1
         return _day_label(first)
 

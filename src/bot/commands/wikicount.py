@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 class WikiCountCommands:
     """Handles the /wikicount Discord command."""
 
-    def __init__(self, bot: discord.ext.commands.Bot, *, death_service_instance, state_service_instance):
+    def __init__(self, bot: discord.ext.commands.Bot, *, death_service, state_service):
         self.bot = bot
-        self._death_service = death_service_instance
-        self._state_service = state_service_instance
+        self._death_service = death_service
+        self._state_service = state_service
 
     def setup_commands(self) -> None:
         """Set up all wikicount-related commands."""

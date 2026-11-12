@@ -2,7 +2,7 @@
 
 This page explains the bot's **git-aware restart model** so it feels predictable instead of spooky.
 
-## The three moving parts
+## The four moving parts
 
 | Component | Responsibility |
 | --- | --- |
@@ -32,7 +32,7 @@ Relevant code:
 
 ```mermaid
 flowchart LR
-    Trigger[Manual restart or auto-update trigger] --> Save[Save state to temp file]
+    Trigger[Manual restart or auto-update trigger] --> Save[Save state to Redis]
     Save --> Pull[git pull]
     Pull --> Shutdown[shutdown_services<br/>stop jobs, drain queue, close clients, close Redis]
     Shutdown --> Exit[Exit with code 42]
@@ -46,7 +46,7 @@ flowchart LR
 The restart path is intentional and stateful:
 
 1. the bot marks restart as in progress
-2. it saves state to a temp file
+2. it saves state to Redis (`cmwgpt:restart_state`)
 3. it performs `git pull`
 4. it runs the normal shutdown sequence (`startup.shutdown_services`): stop background jobs, drain the queue for up to 90 seconds so in-flight replies finish, close the model/HTTP clients, and close Redis
 5. `main.py` exits with code `42`

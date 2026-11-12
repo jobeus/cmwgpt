@@ -33,7 +33,6 @@ class ColoredEmojiFormatter(logging.Formatter):
     def format(self, record):
         color = COLORS.get(record.levelname, COLORS['RESET'])
         emoji = EMOJIS.get(record.levelname, '')
-        # Only add colors if not already ANSI formatted
         msg = str(record.msg)
 
         # We modify a copy of the record to not affect the file logger
@@ -98,7 +97,6 @@ def setup_logger():
 
     # Silence noisy loggers in terminal & file
     logging.getLogger("discord").setLevel(logging.WARNING)
-    logging.getLogger("discord.gateway").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     # The Anthropic SDK's own copy of httpx (each request is a span in Logfire anyway).

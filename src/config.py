@@ -143,8 +143,8 @@ def load_config(
     )
 
 
-def load_system_prompt(prompt_path: str = "system_prompt.txt") -> str:
-    """Load the system prompt file with dynamic timestamp replacement."""
+def get_system_prompt(prompt_path: str = "system_prompt.txt") -> str:
+    """Read the system prompt file, replacing ``[[CURRENT_DATE_AND_TIME]]`` with today's date."""
     try:
         with open(prompt_path, "r", encoding="utf-8") as f:
             content = f.read().strip()
@@ -158,15 +158,10 @@ def load_system_prompt(prompt_path: str = "system_prompt.txt") -> str:
             _missing_prompt_files_warned.add(prompt_path)
             logger.warning(
                 "System prompt file '%s' not found; falling back to default system prompt.", prompt_path)
-    except (OSError, UnicodeDecodeError, PermissionError) as e:
+    except (OSError, UnicodeDecodeError) as e:
         logger.warning("Couldn't read system prompt file '%s', using the default: %s", prompt_path, e)
 
     return DEFAULT_SYSTEM_PROMPT
-
-
-def get_system_prompt(prompt_path: str = "system_prompt.txt") -> str:
-    """Return the current system prompt without module import side effects."""
-    return load_system_prompt(prompt_path)
 
 
 # Process-wide config, loaded lazily on first use. Consumers that have no DI seam
@@ -182,9 +177,3 @@ def get_config() -> AppConfig:
     if _cached_config is None:
         _cached_config = load_config()
     return _cached_config
-
-
-def reset_config_cache() -> None:
-    """Clear the cached config (primarily for tests)."""
-    global _cached_config
-    _cached_config = None

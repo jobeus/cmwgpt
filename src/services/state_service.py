@@ -95,7 +95,7 @@ class StateService:
     def clear_system_prompt(self, channel_id: int) -> None:
         self._set_channel_setting(channel_id, "system_prompt", None)
 
-    # -- global settings ----------------------------------------------------
+    # -- death settings, active channels, git SHA ---------------------------
 
     def get_death_settings(self) -> Optional[Dict[str, Any]]:
         with self._lock:
@@ -128,12 +128,12 @@ class StateService:
         with self._lock:
             self._last_git_sha = sha
 
+    # -- restart state --------------------------------------------------------
+
     @property
     def restart_info(self) -> Dict[str, Any]:
         """Restart info saved by the previous process (empty if none)."""
         return dict(self._restart_info)
-
-    # -- restart state --------------------------------------------------------
 
     def save_restart_state(self, restart_info: Optional[dict] = None) -> bool:
         """Save the state the next process picks up after a restart. True if it reached Redis."""

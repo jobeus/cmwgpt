@@ -84,7 +84,7 @@ autofix:
 	@$(PYTHON) -m ruff check --fix main.py src/ tests/
 	@echo "✅ Auto-fix complete! Run 'make lint' to verify."
 
-# Format code (if black is installed)
+# Format code
 format:
 	@$(PYTHON) -m black main.py src/ tests/ --line-length=120
 	@echo "✅ Code formatting complete!"
@@ -96,7 +96,6 @@ clean:
 	rm -rf htmlcov/
 	rm -rf .coverage
 	rm -rf .pytest_cache/
-	rm -f debug.txt
 
 # Run security scans
 security:

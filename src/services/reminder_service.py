@@ -16,11 +16,13 @@ Redis keys:
   (Unix seconds)
 - ``cmwgpt:reminder:<id>`` - hash with the reminder: ``guild_id``, ``channel_id``,
   ``message_id`` (the message that asked), ``user_ids`` (comma-separated), ``set_by``,
-  ``text``, ``due_at``, ``tz`` (the zone its time was given in, for showing it) and
-  ``task`` (what the bot should do when it fires, or empty)
+  ``text``, ``due_at``, ``tz`` (the zone its time was given in, for showing it),
+  ``task`` (what the bot should do when it fires, or empty) and ``pinged`` (set once
+  a reminder with a task has been posted, until the task is handed over)
 - ``cmwgpt:reminders:next_id`` - counter for new IDs
 
-A reminder is removed once it's posted, or if its channel is gone. If posting fails
+A reminder is removed once it's posted (one with a task, once the task has been handed
+to the runner too), or if its channel is gone. If posting fails
 for another reason it's tried again on the next check.
 """
 
@@ -94,7 +96,7 @@ def parse_when(when: str, now: datetime, zone: Optional[Any] = None) -> datetime
 
 
 def format_when(due: datetime, zone: Optional[Any] = None) -> str:
-    """``Sat 2026-10-31 08:00 PM MDT``: ``due`` in ``zone``, or the chat's timezone."""
+    """``Sat 2026-10-31 8:00 PM MDT``: ``due`` in ``zone``, or the chat's timezone."""
     return due.astimezone(zone or prompt_timezone()).strftime(SHOWN_FORMAT).replace(" 0", " ", 1)
 
 
@@ -260,7 +262,7 @@ class ReminderService:
     def set_bot(self, bot: discord.Client) -> None:
         self._bot = bot
 
-    def set_task_runner(self, runner: "TaskRunner") -> None:
+    def set_task_runner(self, runner: TaskRunner) -> None:
         """Set what answers a reminder's task: it gets the reminder and the message that asked for it."""
         self._task_runner = runner
 

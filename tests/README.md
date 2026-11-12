@@ -9,7 +9,7 @@ This repository has a Python-heavy test suite that covers bot startup, commands,
 | Default suite | `make test` |
 | Verbose suite | `make test-verbose` |
 | Coverage run | `make test-coverage` |
-| Single module through helper | `make test-specific TEST=tests/test_downloader_utils.py` |
+| Single module | `make test-specific TEST=tests/test_downloader_utils.py` |
 | Direct pytest | `.venv/bin/python -m pytest` |
 
 `make test` runs pytest (configured in `pytest.ini`), which runs both the `unittest.TestCase` classes and the function-style tests. CI and the pre-commit hook use the same command.
@@ -21,10 +21,11 @@ This repository has a Python-heavy test suite that covers bot startup, commands,
 | Startup and client wiring | `test_main.py`, `test_startup.py`, `test_bot_client.py` |
 | Slash commands | `test_system_commands.py`, `test_image_commands.py`, `test_death_commands.py` |
 | Core services | `test_queue_service.py`, `test_state_service.py`, `test_message_service.py`, `test_image_service.py` |
-| Background features | `test_death_service.py`, `test_auto_update.py` |
-| Mention/prompt handling | `test_mention_handler.py`, `test_openai_handler.py`, `test_message_utils.py`, `test_discord_helper.py` |
-| Downloader/media helpers | `test_downloader_utils.py`, `test_youtube_utils.py`, `test_tiktok_utils.py`, `test_twitter_utils.py`, `test_facebook_utils.py`, `test_url_utils.py` |
-| Database/logging | `test_db_connection.py`, `test_db_logger.py` |
+| Background features | `test_death_service.py`, `test_auto_update.py`, `test_package_update_service.py`, `test_reminders.py`, `test_memory_service.py` |
+| Model services and tools | `test_anthropic_service.py`, `test_gemini_service.py`, `test_chat_tools.py`, `test_streaming_reply.py` |
+| Mention/prompt handling | `test_mention_handler.py`, `test_chat_context.py`, `test_message_utils.py`, `test_discord_helper.py` |
+| Downloader/media helpers | `test_downloader_utils.py`, `test_youtube_utils.py`, `test_tiktok_utils.py`, `test_twitter_utils.py`, `test_facebook_utils.py`, `test_url_utils.py`, `test_http_client.py`, `test_ssrf_guard.py` |
+| Redis stores and logging | `test_memory_store.py`, `test_state_store.py`, `test_cache_utils.py`, `test_logger.py`, `test_mention_log.py`, `test_telemetry.py` |
 
 ## Downloader/provider flow reflected by the tests
 
@@ -34,7 +35,7 @@ This repository has a Python-heavy test suite that covers bot startup, commands,
 | TikTok | `yt-dlp` -> ffmpeg -> Groq transcription, with fallback/proxy behavior |
 | Twitter/X | RapidAPI context lookup plus optional video-transcription path |
 | Facebook | `yt-dlp` -> ffmpeg -> Groq transcription |
-| Articles | `httpx` + `trafilatura` + `newspaper3k` fallback |
+| Articles | `fetch_public`, then `trafilatura` (retried with `favor_recall`) |
 
 `test_downloader_utils.py` covers the orchestration layer, while the source-specific modules cover the provider helpers themselves.
 

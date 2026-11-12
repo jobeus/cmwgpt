@@ -33,7 +33,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         anthropic_service = anthropic_service or MagicMock()
         message_service = MagicMock()
         message_service.send_channel_reply = AsyncMock()
-        message_service.send_channel_reply_with_files = AsyncMock()
+        message_service.send_channel_reply = AsyncMock()
         handler = MentionHandler(
             state_service=state_service,
             message_service=message_service,
@@ -390,7 +390,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         await handler.handle_mention(message, bot_user, "gpt-test")
 
         state_service.mark_channel_active.assert_called_once_with(1)
-        message_service.send_channel_reply.assert_awaited_once_with(channel, "hello there")
+        message_service.send_channel_reply.assert_awaited_once_with(channel, "hello there", None)
 
     async def test_a_reminder_task_answers_the_asking_message_with_the_task_added(self):
         handler, _, queue_service, claude_service, _ = self.make_handler()
@@ -479,7 +479,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         await handler.handle_mention(message, SimpleNamespace(id=999), "gpt-test")
 
-        message_service.send_channel_reply_with_files.assert_awaited_once_with(channel, "here you go", ["file-a"])
+        message_service.send_channel_reply.assert_awaited_once_with(channel, "here you go", ["file-a"])
 
     async def test_handle_mention_sends_text_reply_when_response_dict_has_no_files(self):
         handler, _, _, claude_service, message_service = self.make_handler()
@@ -492,7 +492,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         await handler.handle_mention(message, SimpleNamespace(id=999), "gpt-test")
 
-        message_service.send_channel_reply.assert_awaited_once_with(channel, "just text")
+        message_service.send_channel_reply.assert_awaited_once_with(channel, "just text", None)
 
     async def test_handle_mention_handles_none_response(self):
         handler, _, _, claude_service, message_service = self.make_handler()

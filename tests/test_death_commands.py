@@ -25,9 +25,9 @@ class TestDeathCommands(unittest.IsolatedAsyncioTestCase):
         state_service.get_death_settings.return_value = current_settings
         commands = DeathCommands(
             MagicMock(),
-            state_service_instance=state_service,
+            state_service=state_service,
             death_channel_id=death_channel_id,
-            death_service_instance=death_service,
+            death_service=death_service,
         )
         return commands, state_service
 

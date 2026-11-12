@@ -53,11 +53,6 @@ class StreamingReply:
         self._closed = False
         self._failed = False
 
-    @property
-    def started(self) -> bool:
-        """Whether a preview message has been posted."""
-        return self._message is not None
-
     def push(self, text: str) -> None:
         """Record the reply so far and schedule a preview update.
 
@@ -140,10 +135,7 @@ class StreamingReply:
             except Exception as e:
                 logger.warning("Couldn't finish the streamed reply, posting it fresh: %s", concise_error(e))
                 await self.discard()
-        if files:
-            await self._message_service.send_channel_reply_with_files(self._channel, text, files)
-        else:
-            await self._message_service.send_channel_reply(self._channel, text)
+        await self._message_service.send_channel_reply(self._channel, text, files or None)
 
     async def discard(self) -> None:
         """Stop previewing and delete the preview, if one was posted."""

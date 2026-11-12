@@ -28,10 +28,10 @@ from src.services.image_service import (
 )
 from src.utils.async_utils import safe_run
 from src.utils.discord_error_utils import best_effort_typing, safe_defer
+from src.utils.message_utils import DISCORD_MESSAGE_LIMIT, format_attachment_message, format_prompt_message
 
 logger = logging.getLogger(__name__)
 
-DISCORD_MESSAGE_LIMIT = 2000
 
 MODEL_CHOICES = [Choice(name=m.name, value=m.id) for m in IMAGE_MODELS.values()]
 ASPECT_RATIO_CHOICES = [
@@ -43,7 +43,10 @@ ASPECT_RATIO_CHOICES = [
 ]
 SIZE_CHOICES = [Choice(name=f"{s} (banana-2.1, banana-pro)" if s != "1K" else "1K (default)", value=s)
                 for s in IMAGE_SIZES]
-THINKING_CHOICES = [Choice(name=f"{level} (banana-2.1)", value=level) for level in THINKING_LEVELS]
+THINKING_CHOICES = [
+    Choice(name=f"{level} (banana-2.1)" if level == "medium" else f"{level} (banana-2.1, banana-2-lite)", value=level)
+    for level in THINKING_LEVELS
+]
 SEARCH_CHOICES = [
     Choice(name="web (banana-2.1, banana-pro)", value="web"),
     Choice(name="web + images (banana-2.1)", value="web+image"),
@@ -191,16 +194,16 @@ class ImageCommands:
         filename = "edited.png" if edit else "image.png"
         header = _result_header(result.cost, active_model, options, prompt)
         if edit:
-            header = self._message_service.format_attachment_message(attachments, header)
+            header = format_attachment_message(attachments, header)
         else:
-            header = self._message_service.format_prompt_message(header)
+            header = format_prompt_message(header)
         await interaction.followup.send(
             content=_with_model_text(header, result.text),
             file=discord.File(io.BytesIO(result.image), filename=filename),
         )
 
     async def _send_error(self, interaction: discord.Interaction, prompt: str, error: str) -> None:
-        content = f"{self._message_service.format_prompt_message(prompt)}\n\nSorry, I couldn't make that image: {error}"
+        content = f"{format_prompt_message(prompt)}\n\nSorry, I couldn't make that image: {error}"
         try:
             await interaction.followup.send(content=content[:DISCORD_MESSAGE_LIMIT])
         except Exception as discord_error:

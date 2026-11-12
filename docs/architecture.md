@@ -25,7 +25,7 @@ What it shows:
 
 - the Python bot as the center of Discord interaction
 - Gemini (chat and images), the Claude API, and downloader work around the mention path
-- Redis for per-user memory and content caches
+- Redis for everything the bot keeps between restarts
 
 ```mermaid
 flowchart LR
@@ -76,7 +76,7 @@ flowchart LR
     Tools --> Downloader
     Tools --> Images
 
-    Cache[(Redis<br/>memory + URL caches)]:::data
+    Cache[(Redis<br/>memory, settings,<br/>reminders, costs, caches)]:::data
     Files[(IRC log, nicks,<br/>quote file)]:::data
     Memory --> Cache
     Downloader --> Cache
@@ -101,6 +101,8 @@ flowchart TB
     Main[main.py]:::core --> Startup[src/startup.py]:::core
     Startup --> Config[load_config AppConfig]:::core
     Startup --> Factory[create_services]:::core
+    Factory --> StateStore[StateStore]:::aux
+    Factory --> Cost[CostStore]:::aux
     Factory --> State[StateService]:::svc
     Factory --> Queue[QueueService]:::svc
     Factory --> Gemini[GeminiService]:::svc
@@ -109,37 +111,43 @@ flowchart TB
     Factory --> Message[MessageService]:::svc
     Factory --> Restart[RestartHandler]:::aux
     Factory --> AutoUpdate[AutoUpdateService]:::aux
+    Factory --> PackageUpdate[PackageUpdateService]:::aux
     Factory --> Announce[AnnouncementService]:::aux
-
     Factory --> Death[DeathService]:::aux
     Factory --> MemStore[MemoryStore]:::aux
     Factory --> Memory[MemoryService]:::aux
+    Factory --> Reminders[ReminderService]:::aux
+    Factory --> Video[VideoWatcher]:::aux
     Factory --> Mention[MentionHandler]:::svc
     Factory --> IrcLog[load_irc_log / load_quote_file]:::aux
     IrcLog -->|IRC log, quotes| Mention
 
+    StateStore --> State
+    StateStore -->|conversation state| Gemini
+    StateStore -->|conversation state| Anthropic
+    StateStore --> PackageUpdate
+    AutoUpdate -->|trigger_restart| PackageUpdate
     MemStore --> Memory
-    Memory -->|user notes| Mention
-
+    Memory -->|user notes, bot state| Mention
+    Gemini --> Video
 
     State --> Death
     State --> Mention
     Queue --> Mention
-
-    OpenAI --> Mention
-
     Gemini --> Mention
-
     Anthropic --> Mention
-
     Message --> Mention
+    Reminders --> Mention
+    Video --> Mention
 
     Startup --> Client[DiscordBotClient]:::core
     Client --> Mention
     Client --> AutoUpdate
+    Client --> PackageUpdate
     Client --> Announce
-
     Client --> Death
+    Client --> Memory
+    Client --> Reminders
 ```
 
 ## Diagram: mention pipeline
@@ -188,9 +196,9 @@ sequenceDiagram
         end
         A-->>DP: reply content (+ files from draw/edit_image)
     end
-    Note over DP,A: Claude API replies stream: on_text(text so far) posts, then edits, a preview
+    Note over M,A: StreamingReply shows a status preview; Claude API replies stream into it
     DP-->>M: reply content
-    M->>MS: StreamingReply.finish: edit preview into final reply (or send it)
+    M->>MS: StreamingReply.finish: edit the preview into the final reply (send it if there's none)
     MS-->>U: Discord reply
 ```
 
@@ -198,13 +206,14 @@ sequenceDiagram
 
 - Mentions are **queued**, not processed in parallel ad hoc.
 - Prompt context is more than just the latest message: it includes recent history, reply metadata, embeds, and attachments. The multimodal context array is built by `src/utils/chat_context.py` (`build_chat_context`).
+- The history window grows with the conversation and starts over once it reaches 200 messages. It keeps at most 40 images: past that, `cap_history_images` swaps the oldest for a note, 20 at a time, so a picture-heavy channel can't pass the API's request size limit.
 - Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `sonnet-5.5-direct`/`opus-5.5-direct` go to `AnthropicService` (Claude API). There are no other chat models; a channel set to a retired one falls back to `DEFAULT_MODEL`.
 - URL enrichment happens **before** the LLM call and can materially change the prompt content. Only the newest 10 history messages fetch links; older messages use cached results only, and the fetches run concurrently.
 - Per-user memory profiles are appended to the end of the mention, so the cached system prompt and history stay unchanged.
 - So is the bot's own state (`<about_you>`: mood, emotion, emoji, interests and what it's wondering about), on every model. It's per server in `cmwgpt:self:<guild_id>`. No background job writes it: only the direct models change it, with `update_self`, when a conversation merits it or a part is blank or stale. The system prompt tells them to keep it up.
 - The Claude API direct models get none of the on-demand context filled in (links, memory notes, `how_i_work`). They get a short "Your tools" section in the system prompt instead (general rules, such as making independent calls in one turn; each tool is described only in its own definition, so nothing is sent twice) and fetch what they need with tools; see [Claude API tools](#claude-api-tools).
-- Claude API replies stream: `StreamingReply` (`src/services/streaming_reply.py`) posts the reply as it arrives and edits it at most every 1.5 seconds, then edits in the final text with the cost. If the request fails, the partial message is deleted before the error reply. Gemini replies arrive whole.
-- There is no request/pipeline log table: the SDK clients use their default HTTP clients, and diagnostics go to the normal Python log (stdout and `logs/`).
+- Claude API replies stream: `StreamingReply` (`src/services/streaming_reply.py`) posts the reply as it arrives and edits it at most every 1.5 seconds, then edits in the final text with the cost. If the request fails, the partial message is deleted before the error reply. Gemini replies arrive whole and are edited into the same status preview.
+- There is no request/pipeline log table. Diagnostics go to the Python log (stdout and `logs/`), one JSON line per mention in `logs/mentions.jsonl` (`src/services/mention_log.py`) and, when `LOGFIRE_TOKEN` is set, traces in Logfire (`src/telemetry.py`).
 
 ## Claude API tools
 
@@ -232,6 +241,7 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | `prediction_markets` | `src/services/prediction_markets.py` runs `polymarket_service.py` (public Gamma search/event API, CLOB price history) and `kalshi_service.py` (kalshi.com's keyless `/v1/search/series`, public Trade API v2 events/markets/candlesticks) concurrently and joins their results; shared fetch/format helpers in `src/utils/market_format.py`. No key, no cache | — |
 | `election_results` | `src/services/election_service.py`: civicAPI's public `race/search` (up to 500 fetched, then ranked by votes here, since its own order puts national races after regional ones) and `race/{id}`, retrying its 503s when overloaded. No key, no cache; every result credits civicAPI, which its terms require | — |
 | `how_i_work` | `src/prompts/how_i_work.txt` | — |
+| `query_run`, `query_schema_reference`, `query_find_exceptions_in_file`, `issue_list` (one channel only) | Logfire's MCP server through the Claude API's MCP connector, added by `AnthropicService`, so the bot can read its own logs | `LOGFIRE_READ_TOKEN`, `DISCORD_CHANNEL_ID` |
 | `advisor` (sonnet only) | the Claude API's advisor tool, added by `AnthropicService`: the API runs `claude-opus-5-5` on the transcript and returns its advice within the same request | — |
 
 ### Adding a tool
@@ -283,7 +293,7 @@ flowchart LR
 | Instagram | `src/utils/instagram_utils.py` | Post lookup through RapidAPI (with images), videos through `media_transcribe.py` |
 | Reddit | `src/utils/reddit_utils.py` | Post details through RapidAPI (`reddit34` `getPostDetails`): title, subreddit, author, score, flair, text, linked URL and up to 4 images (gallery or preview). Post links skip the article fetcher; other Reddit pages still use it |
 | Generic articles | `src/utils/url_utils.py` | `fetch_public` fetch, then `trafilatura` extraction (retried with `favor_recall` if the first pass finds nothing) |
-| Shared media pipeline | `src/utils/media_transcribe.py` | yt-dlp or direct video download (3-minute limit) + proxy fallback, audio encoded at 16 kHz mono 32 kbps (what Whisper uses anyway; ~1h50m per 25 MB upload), longer audio split into 30-minute chunks, Groq Whisper transcription (near-instant). No length limit. Used by TikTok/Facebook/Twitter/Instagram and big Discord audio attachments |
+| Shared media pipeline | `src/utils/media_transcribe.py` | yt-dlp or direct video download (the download gets 3 minutes) + proxy fallback, audio encoded at 16 kHz mono 32 kbps (what Whisper uses anyway; ~1h50m per 25 MB upload), longer audio split into 30-minute chunks, Groq Whisper transcription (near-instant). No length limit. Used by TikTok/Facebook/Twitter/Instagram and big Discord audio attachments |
 
 ### Fetching and caching
 
@@ -299,7 +309,7 @@ flowchart LR
     classDef db fill:#7c3aed,color:#f5f3ff,stroke:#6d28d9,stroke-width:1.4px;
 
     Discord[Discord API]:::ext --> Bot[bot container<br/>python main.py]:::ctr
-    Bot --> Redis[(redis container<br/>Redis 7.4 :6379<br/>user memory + caches)]:::db
+    Bot --> Redis[(redis container<br/>Redis 8 :6379<br/>everything kept<br/>between restarts)]:::db
 
     Env[.env.development]:::ext --> Bot
 ```
@@ -308,7 +318,7 @@ flowchart LR
 
 | Path | Role | Open this when you need to... |
 | --- | --- | --- |
-| `main.py` | Boot entrypoint | See how process startup/shutdown begins |
+| `main.py` | Boot entrypoint | See how process startup/shutdown begins (logging, the mention log, telemetry, signals, the exit code) |
 | `src/startup.py` | Service factory | Understand the dependency graph |
 | `src/config.py` | Config loading/defaults | Confirm env vars and defaults |
 | `src/bot/client.py` | Discord client orchestration | See event handlers, command setup, service startup/shutdown |
@@ -328,18 +338,33 @@ flowchart LR
 | `src/utils/status_lines.py` | The joke lines the preview shows for each step | Add or reword a status line |
 | `src/services/gemini_service.py` | Native Gemini integration | Understand `google`/`google-high` calls and the Gemini timeout |
 | `src/services/state_service.py` | Per-channel settings and restart state, in Redis | See where model/system-prompt/service settings live |
+| `src/db/state_store.py` | The Redis hash behind settings, restart state and each channel's conversation state | Debug a setting that didn't survive a restart |
 | `src/services/queue_service.py` | FIFO work queue | Understand serialized mention processing |
+| `src/services/message_service.py` | Sending to Discord, with retries and the paste fallback for long text | Debug a reply that didn't post |
+| `src/services/paste_service.py` | Uploads long replies and trace images to the paste site | Debug paste links |
+| `src/services/reminder_service.py` | Reminders in Redis and the loop that delivers them | Debug `remind` or a reminder that didn't fire |
+| `src/services/timezone_service.py` | Saved time zones | Debug `set_timezone` or the `<time_zones>` block |
+| `src/services/video_service.py` | `VideoWatcher`: download, upload and watch a video with Gemini | Debug `watch_video` / `summarize_youtube` |
+| `src/services/death_service.py` | Deathwatch: polls Wikipedia's deaths pages and posts an obituary limerick | Debug a missed or repeated death announcement |
+| `src/services/auto_update_service.py` | Deploy webhook | Debug a deploy that didn't restart the bot |
+| `src/services/package_update_service.py` | Restarts the bot when newer package releases are out | Debug package update restarts |
+| `src/services/restart_handler.py` | Saves state, `git pull`s and exits with code 42 | Debug `/restart` |
+| `src/services/announcement_service.py` | The "I'm back" message after a restart, with what changed | Debug restart announcements |
+| `src/services/mention_log.py` | One JSON line per mention in `logs/mentions.jsonl` | See what a mention cost and which tools it used |
+| `src/telemetry.py` | Logfire/OpenTelemetry tracing of the model, Discord and HTTP calls | Debug missing or noisy traces |
 | `src/services/memory_service.py` | Per-user memory | Understand the nightly job, `/memory` edits, and the notes added to mentions |
 | `src/db/memory_store.py` | Memory in Redis | Understand the memory keys and the 100 KB cap |
 | `src/db/redis_client.py` | Redis clients | Debug Redis connectivity |
 | `src/utils/http_client.py` | Guarded outbound fetches | Debug redirects, size caps, and fetch timeouts |
+| `src/utils/ssrf_guard.py` | Refuses URLs that resolve to non-public addresses | Debug a link the bot refused to fetch |
+| `src/utils/downloader_utils.py` | `fetch_all_url_content`: picks the fetcher for each link | Add a link source |
 | `src/utils/cache_utils.py` | Redis-backed caches | Understand cache keys, TTLs and the in-memory fallback |
 
 ## End-to-end narrative
 
 ### Startup
 
-1. `main.py` loads configuration and starts the app.
+1. `main.py` sets up logging, the mention log and telemetry, loads configuration and starts the app.
 2. `src/startup.py` constructs the service graph.
 3. `DiscordBotClient` receives those services, sets callbacks, registers commands, and boots Discord event handling.
 
@@ -350,7 +375,7 @@ flowchart LR
 3. `MentionHandler` gathers recent message history and reply context (via `build_chat_context`).
 4. For most models, the handler enriches user text with downloader output for supported URLs, and appends the memory profiles of the people involved. The Claude API direct models get a tools section and the tools instead.
 5. `dispatch_completion` routes the assembled context to `GeminiService` (native Gemini) or `AnthropicService` (Claude API), based on the channel's model. `AnthropicService` runs any tool calls before the final answer.
-6. For Claude API models the reply streams into a Discord message as it's written (`StreamingReply`); the final text, with its cost, is edited in at the end. Gemini replies are sent whole by `MessageService`.
+6. For Claude API models the reply streams into a Discord message as it's written (`StreamingReply`); the final text, with its cost, is edited in at the end. Gemini replies arrive whole and are edited into the status preview the same way.
 
 ### Memory
 
@@ -367,5 +392,5 @@ flowchart LR
 
 - **Mention-first UX:** the primary conversational surface is normal Discord chat, not a slash command.
 - **Service composition over globals:** `src/startup.py` explicitly wires the main collaborators.
-- **Small storage footprint:** Redis holds per-user memory (one key per user), URL results, channel settings, restart state and each channel's conversation state.
+- **Small storage footprint:** Redis holds everything kept between restarts: per-user memory (one key per user), URL results, channel settings, restart state, each channel's conversation state, reminders, time zones and costs (keys in `docs/redis_setup.md`).
 - **Python only:** the whole runtime is the Python bot; there is no separate web UI.

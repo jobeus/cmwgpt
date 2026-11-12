@@ -1,5 +1,5 @@
 """
-Kalshi Service - Read-only lookups of Kalshi prediction markets for the ``kalshi`` chat tool.
+Kalshi Service - Read-only lookups of Kalshi prediction markets for the ``prediction_markets`` chat tool.
 
 Keyword search uses the keyless search endpoint kalshi.com's own site uses (``/v1/search/series``,
 undocumented); event details, markets and candlesticks use the public, keyless Trade API v2. Prices are
@@ -7,7 +7,6 @@ dollars per $1 contract, so a price is the market's probability. Volumes are in 
 """
 
 import asyncio
-import logging
 import re
 import time
 from datetime import datetime, timezone
@@ -16,8 +15,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 from src.utils.market_format import amount, get_json, num, pct
-
-logger = logging.getLogger(__name__)
 
 API_URL = "https://api.elections.kalshi.com"
 TRADE_URL = f"{API_URL}/trade-api/v2"

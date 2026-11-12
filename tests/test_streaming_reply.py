@@ -18,7 +18,7 @@ def make_streamer(*, send_side_effect=None):
     message_service.DISCORD_MESSAGE_LIMIT = 2000
     message_service.fit_to_discord = AsyncMock(side_effect=lambda text: text)
     message_service.send_channel_reply = AsyncMock()
-    message_service.send_channel_reply_with_files = AsyncMock()
+    message_service.send_channel_reply = AsyncMock()
     return StreamingReply(channel, message_service), channel, sent, message_service
 
 
@@ -41,7 +41,7 @@ class TestStreamingReply(unittest.IsolatedAsyncioTestCase):
         await settle()
 
         channel.send.assert_awaited_once_with(content="Hello" + CURSOR, suppress_embeds=True)
-        self.assertTrue(streamer.started)
+        self.assertIsNotNone(streamer._message)
 
     async def test_pushes_within_interval_coalesce_into_one_edit(self):
         streamer, channel, sent, _ = make_streamer()
@@ -102,7 +102,7 @@ class TestStreamingReply(unittest.IsolatedAsyncioTestCase):
 
         await streamer.finish("whole reply")
 
-        message_service.send_channel_reply.assert_awaited_once_with(channel, "whole reply")
+        message_service.send_channel_reply.assert_awaited_once_with(channel, "whole reply", None)
         channel.send.assert_not_awaited()
 
     async def test_finish_right_after_push_posts_only_once(self):
@@ -114,7 +114,7 @@ class TestStreamingReply(unittest.IsolatedAsyncioTestCase):
         await settle()
 
         channel.send.assert_not_awaited()
-        message_service.send_channel_reply_with_files.assert_awaited_once_with(channel, "whole reply", ["file-a"])
+        message_service.send_channel_reply.assert_awaited_once_with(channel, "whole reply", ["file-a"])
 
     async def test_failed_preview_stops_updates_and_reply_still_sends(self):
         streamer, channel, _, message_service = make_streamer(send_side_effect=RuntimeError("discord down"))
@@ -126,7 +126,7 @@ class TestStreamingReply(unittest.IsolatedAsyncioTestCase):
         await streamer.finish("Hello again!")
 
         channel.send.assert_awaited_once()
-        message_service.send_channel_reply.assert_awaited_once_with(channel, "Hello again!")
+        message_service.send_channel_reply.assert_awaited_once_with(channel, "Hello again!", None)
 
     async def test_failed_final_edit_replaces_preview_with_fresh_message(self):
         streamer, channel, sent, message_service = make_streamer()
@@ -137,7 +137,7 @@ class TestStreamingReply(unittest.IsolatedAsyncioTestCase):
         await streamer.finish("Hello, world")
 
         sent.delete.assert_awaited_once()
-        message_service.send_channel_reply.assert_awaited_once_with(channel, "Hello, world")
+        message_service.send_channel_reply.assert_awaited_once_with(channel, "Hello, world", None)
 
     async def test_discard_deletes_preview(self):
         streamer, _, sent, _ = make_streamer()
@@ -147,7 +147,7 @@ class TestStreamingReply(unittest.IsolatedAsyncioTestCase):
         await streamer.discard()
 
         sent.delete.assert_awaited_once()
-        self.assertFalse(streamer.started)
+        self.assertIsNone(streamer._message)
 
     async def test_whitespace_push_posts_nothing(self):
         streamer, channel, _, _ = make_streamer()

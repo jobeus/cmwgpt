@@ -1,6 +1,7 @@
 """Shared model-routing for chat completions.
 
-The mention handler turns a prepared message array into a reply by routing to:
+Callers (the mention handler, the memory job, deathwatch) turn a prepared message array
+into a reply by routing to:
 
 * a Gemini model  — single Gemini call;
 * anything else   — single Claude API call (``AnthropicService``).
@@ -9,12 +10,9 @@ This module owns that routing (and the identity kwargs threaded into each
 service call) so the decision lives in exactly one place.
 """
 
-import logging
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from src.services.gemini_service import is_gemini_model, get_thinking_level
-
-logger = logging.getLogger(__name__)
 
 ReplyContent = Union[str, Dict[str, Any], None]
 
@@ -41,7 +39,7 @@ async def dispatch_completion(
         messages: The prepared multimodal message array.
         system_prompt: System prompt for the call.
         gemini_service / anthropic_service: The completion services.
-        identity: Kwargs (``channel_id``/``bot_id``/``discord_user_id``) splatted
+        identity: Kwargs (``channel_id``/``discord_user_id``) splatted
             into every service call. Each caller supplies its own set.
         search: Whether the Claude API route may use web search.
         on_text: Called with the reply so far while it streams in. The Claude API route

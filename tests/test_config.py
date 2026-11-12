@@ -7,7 +7,7 @@ import src.config as config_module
 from src.config import (
     DEFAULT_SYSTEM_PROMPT,
     load_config,
-    load_system_prompt,
+    get_system_prompt,
     resolve_env_file_path,
 )
 
@@ -57,7 +57,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(result, "/tmp/.env")
 
     def test_get_config_loads_once_and_caches(self):
-        config_module.reset_config_cache()
+        config_module._cached_config = None
         try:
             with patch.object(
                 config_module, "load_config", wraps=config_module.load_config
@@ -68,26 +68,26 @@ class TestConfig(unittest.TestCase):
             self.assertIs(first, second)
             mock_load.assert_called_once()
         finally:
-            config_module.reset_config_cache()
+            config_module._cached_config = None
 
-    def test_load_system_prompt_replaces_timestamp(self):
+    def test_get_system_prompt_replaces_timestamp(self):
         with patch(
             "builtins.open",
             mock_open(read_data="Today is [[CURRENT_DATE_AND_TIME]]"),
         ):
-            result = load_system_prompt()
+            result = get_system_prompt()
 
         self.assertNotIn("[[CURRENT_DATE_AND_TIME]]", result)
         # The date only, so the cached system prompt stays the same all day.
         self.assertRegex(result, r"^Today is \d{4}-\d{2}-\d{2} \(\w+day\)$")
 
-    def test_load_system_prompt_falls_back_when_file_missing(self):
+    def test_get_system_prompt_falls_back_when_file_missing(self):
         with patch("builtins.open", side_effect=FileNotFoundError):
-            result = load_system_prompt()
+            result = get_system_prompt()
 
         self.assertEqual(result, DEFAULT_SYSTEM_PROMPT)
 
-    def test_load_system_prompt_warns_once_per_missing_file(self):
+    def test_get_system_prompt_warns_once_per_missing_file(self):
         import src.config as config_module
 
         config_module._missing_prompt_files_warned.discard("missing_prompt.txt")
@@ -95,8 +95,8 @@ class TestConfig(unittest.TestCase):
             with patch("builtins.open", side_effect=FileNotFoundError), patch.object(
                 config_module.logger, "warning"
             ) as mock_warning:
-                first = load_system_prompt("missing_prompt.txt")
-                second = load_system_prompt("missing_prompt.txt")
+                first = get_system_prompt("missing_prompt.txt")
+                second = get_system_prompt("missing_prompt.txt")
 
             self.assertEqual(first, DEFAULT_SYSTEM_PROMPT)
             self.assertEqual(second, DEFAULT_SYSTEM_PROMPT)

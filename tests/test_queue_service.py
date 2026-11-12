@@ -446,15 +446,9 @@ class TestQueueService(unittest.TestCase):
 
             # Channel 100 should have 1 queued (msg2 waiting, msg1 processing)
             # Channel 200 should have 0 queued (msg3 processing)
-            ch100_size = self.queue_service.get_channel_queue_size(100)
-            ch200_size = self.queue_service.get_channel_queue_size(200)
-
-            self.assertGreaterEqual(ch100_size, 0)
-            self.assertGreaterEqual(ch200_size, 0)
-
-            # Total should be sum
-            total = self.queue_service.get_queue_size()
-            self.assertEqual(total, ch100_size + ch200_size)
+            self.assertEqual(self.queue_service._channel_queues[100].qsize(), 1)
+            self.assertEqual(self.queue_service._channel_queues[200].qsize(), 0)
+            self.assertEqual(self.queue_service.get_queue_size(), 1)
 
             await self.queue_service.stop()
 
@@ -551,7 +545,6 @@ class TestQueueService(unittest.TestCase):
             await queue.put(QueuedMessage(
                 message_type=MessageType.RESTART,
                 handler=slow_handler,
-                timestamp=0.0,
                 channel_id=100,
             ))
             await started.wait()
@@ -573,13 +566,11 @@ class TestQueueService(unittest.TestCase):
             await queue.put(QueuedMessage(
                 message_type=MessageType.RESTART,
                 handler=restart_handler,
-                timestamp=0.0,
                 channel_id=100,
             ))
             await queue.put(QueuedMessage(
                 message_type=MessageType.SHUTDOWN,
                 handler=None,
-                timestamp=0.0,
                 channel_id=100,
             ))
             await self.queue_service._process_channel_messages(100)
@@ -592,7 +583,6 @@ class TestQueueService(unittest.TestCase):
             await queue.put(QueuedMessage(
                 message_type=MessageType.SHUTDOWN,
                 handler=None,
-                timestamp=0.0,
                 channel_id=200,
             ))
             with patch.object(self.queue_service, "_handle_queued_message", new=AsyncMock(side_effect=RuntimeError("boom"))):
@@ -683,25 +673,14 @@ class TestQueueService(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
-    def test_handle_queued_message_restart_and_unknown_failure_branch(self):
+    def test_a_failing_command_handler_is_counted_not_raised(self):
         async def run_test():
             from src.services.queue_service import MessageType, QueuedMessage
 
             await self.queue_service.start()
-            restart_handler = AsyncMock()
-            restart_msg = QueuedMessage(
-                message_type=MessageType.RESTART,
-                handler=restart_handler,
-                timestamp=0.0,
-                channel_id=0,
-            )
-            await self.queue_service._handle_queued_message(restart_msg)
-            restart_handler.assert_awaited_once()
-
             command_msg = QueuedMessage(
                 message_type=MessageType.COMMAND,
                 handler=AsyncMock(side_effect=TypeError("bad")),
-                timestamp=0.0,
                 channel_id=0,
                 interaction=self._make_mock_interaction(),
             )

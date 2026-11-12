@@ -32,8 +32,8 @@ class TestInteractionDefer(unittest.TestCase):
         self.mock_state_service = MagicMock()
         self.system_commands = SystemCommands(
             self.mock_bot,
-            queue_service_instance=self.mock_queue_service,
-            state_service_instance=self.mock_state_service,
+            queue_service=self.mock_queue_service,
+            state_service=self.mock_state_service,
         )
         self.image_commands = ImageCommands(
             self.mock_bot,

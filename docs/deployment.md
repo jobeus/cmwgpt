@@ -86,7 +86,7 @@ Recommended supervisors include:
 
 | Service | Purpose |
 | --- | --- |
-| `redis` | Redis 7.4 |
+| `redis` | Redis 8 |
 | `bot` | Python Discord bot |
 
 Bring it up with:
@@ -95,10 +95,8 @@ Bring it up with:
 docker compose --env-file .env.development up --build
 ```
 
-### Default dev ports
+### Ports
 
-| Port | Service |
-| --- | --- |
 The bot only listens on a port when `DEPLOY_WEBHOOK_SECRET` is set (the deploy webhook, `DEPLOY_WEBHOOK_PORT`, default `8787`).
 
 ## Production-minded checklist

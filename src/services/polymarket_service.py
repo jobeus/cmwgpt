@@ -1,5 +1,5 @@
 """
-Polymarket Service - Read-only lookups of Polymarket prediction markets for the ``polymarket`` chat tool.
+Polymarket Service - Read-only lookups of Polymarket prediction markets for the ``prediction_markets`` chat tool.
 
 Uses Polymarket's public, keyless APIs: Gamma (``gamma-api.polymarket.com``) for search and event
 details, and the CLOB (``clob.polymarket.com``) for price history. Everything comes back as plain text
@@ -8,7 +8,6 @@ for the model.
 
 import asyncio
 import json
-import logging
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -16,8 +15,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import httpx
 
 from src.utils.market_format import amount, get_json, num, pct
-
-logger = logging.getLogger(__name__)
 
 GAMMA_URL = "https://gamma-api.polymarket.com"
 CLOB_URL = "https://clob.polymarket.com"
@@ -52,10 +49,6 @@ def _json_list(value: Any) -> List[Any]:
             return []
         return parsed if isinstance(parsed, list) else []
     return []
-
-
-def _money(value: Any) -> str:
-    return amount(value)
 
 
 def _day(value: Any) -> Optional[str]:
@@ -95,7 +88,7 @@ def _market_line(market: Dict[str, Any], *, multi: bool) -> str:
         parts.append(f"bid {pct(bid)}/ask {pct(ask)}")
     volume = num(market.get("volumeNum")) or num(market.get("volume"))
     if volume:
-        parts.append(f"vol {_money(volume)}")
+        parts.append(f"vol {amount(volume)}")
     if not multi and market.get("question"):
         return f"{market['question']}: " + " · ".join(parts)
     return f"{label}: " + " · ".join(parts)
@@ -103,13 +96,13 @@ def _market_line(market: Dict[str, Any], *, multi: bool) -> str:
 
 def _event_header(event: Dict[str, Any]) -> str:
     title = event.get("title") or event.get("slug") or "?"
-    bits = [f"volume {_money(event.get('volume'))}"]
+    bits = [f"volume {amount(event.get('volume'))}"]
     if not event.get("closed") and num(event.get("volume24hr")):
-        bits.append(f"24h {_money(event.get('volume24hr'))}")
+        bits.append(f"24h {amount(event.get('volume24hr'))}")
     if num(event.get("liquidity")):
-        bits.append(f"liquidity {_money(event.get('liquidity'))}")
+        bits.append(f"liquidity {amount(event.get('liquidity'))}")
     if num(event.get("openInterest")):
-        bits.append(f"open interest {_money(event.get('openInterest'))}")
+        bits.append(f"open interest {amount(event.get('openInterest'))}")
     end = _day(event.get("endDate"))
     if event.get("closed"):
         bits.append(f"closed (ended {end})" if end else "closed")

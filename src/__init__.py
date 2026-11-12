@@ -1,3 +1,1 @@
-"""
-Discord Bot - Refactored Architecture
-"""
+"""cmwgpt: the Discord bot."""

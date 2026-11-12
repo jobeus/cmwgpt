@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from src.bot.commands.memory import MemoryCommands, build_self_embed, format_memory, resolve_target
 from src.bot.handlers.mention import MentionHandler
 from src.services.memory_service import (
-    parse_corrected_profile,
+    parse_profile_reply,
     parse_extracted_facts,
     MemoryService,
     format_self_state,
@@ -46,7 +46,6 @@ class FakeStore:
         self.job_states = []
         self.cleared_guilds = []
         self.processed_through = None
-        self.cleared_retired = []
         self.self_state = {}
 
     async def get(self, guild_id, user_id):
@@ -66,10 +65,6 @@ class FakeStore:
     async def list_user_ids(self, guild_id):
         return sorted(uid for uid, profile in self.rows.items() if profile)
 
-    async def clear_retired(self, guild_id):
-        self.cleared_retired.append(guild_id)
-        self.self_state.pop("follow_ups", None)
-        self.self_state.pop("refreshed_at", None)
 
     async def get_self_state(self, guild_id):
         return dict(self.self_state)
@@ -264,8 +259,6 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         bot.guilds = [self.make_guild([])]
         await service.run_nightly()
         self.assertEqual(len(store.job_states), 7)
-        # What the bot no longer keeps is cleared out.
-        self.assertEqual(store.cleared_retired, [42])
 
     async def test_notes_block_orders_users_and_skips_empty(self):
         store = FakeStore({1: "Current: truck shopping", 2: "Style: likes short answers", 3: ""})
@@ -328,12 +321,12 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parse_extracted_facts(json.dumps({"123": ["old style"]})), {123: ["old style"]})
 
     def test_correction_replies_are_read_as_plain_text_or_old_json(self):
-        self.assertEqual(parse_corrected_profile("```\nStable: bald\nStyle: brief\n```"), "Stable: bald\nStyle: brief")
-        self.assertEqual(parse_corrected_profile("(none)"), "")
-        self.assertEqual(parse_corrected_profile(json.dumps({"profile": "Current: moving (2026-10-30)"})),
+        self.assertEqual(parse_profile_reply("```\nStable: bald\nStyle: brief\n```"), "Stable: bald\nStyle: brief")
+        self.assertEqual(parse_profile_reply("(none)"), "")
+        self.assertEqual(parse_profile_reply(json.dumps({"profile": "Current: moving (2026-10-30)"})),
                          "Current: moving (2026-10-30)")
-        self.assertIsNone(parse_corrected_profile("Sorry, I can't do that."))
-        self.assertIsNone(parse_corrected_profile(""))
+        self.assertIsNone(parse_profile_reply("Sorry, I can't do that."))
+        self.assertIsNone(parse_profile_reply(""))
 
     async def test_correct_leaves_memory_alone_on_bad_reply(self):
         store = FakeStore({1: "keep me"})
@@ -507,8 +500,7 @@ class TestMentionNotes(unittest.IsolatedAsyncioTestCase):
         ]
 
         message = SimpleNamespace(guild=SimpleNamespace(id=42), author=SimpleNamespace(id=1), mentions=[])
-        history = [make_msg(3, "earlier"), make_msg(BOT_ID, "bot", bot=True)]
-        await handler._append_self_state(chat_context, message, history, SimpleNamespace(id=BOT_ID))
+        await handler._append_self_state(chat_context, message)
 
         provider.assert_awaited_once_with(42)
         self.assertEqual(chat_context[0]["content"][-1]["text"], "<about_you>\nMood: fine\n</about_you>")

@@ -19,7 +19,7 @@ RAPIDAPI_HOST = "instagram-downloader-download-instagram-videos-stories1.p.rapid
 
 def extract_instagram_urls(text: str) -> List[str]:
     """
-    Extract instagram.com and threads.com URLs from text.
+    Extract instagram.com, threads.com and threads.net URLs from text.
     """
     if not text:
         return []

@@ -52,6 +52,8 @@ logger = logging.getLogger(__name__)
 MAX_DRAWS_PER_REPLY = 2
 # Most user IDs one ``recall_users`` call looks up.
 MAX_RECALL_USERS = 8
+# Most IDs read from any other list argument.
+MAX_IDS_PER_CALL = 8
 # Most links one ``read_urls`` call fetches, and most images it returns.
 MAX_READ_URLS = 5
 MAX_URL_IMAGES = 8
@@ -303,7 +305,7 @@ REMIND_TOOL = {
                 "type": "string",
                 "description": (
                     "Either a time from now, like 'in 20 minutes', '2h30m' or '3 days', or a date and time "
-                    "'YYYY-MM-DD HH:MM' in the same timezone as the chat's timestamps. Work out dates like "
+                    "'YYYY-MM-DD HH:MM' in the zone given by `timezone`. Work out dates like "
                     "'Friday at 9am' from the mention's timestamp."
                 ),
             },
@@ -655,7 +657,6 @@ SEARCH_IRC_LOG_TOOL = {
     },
 }
 
-# Covers read_irc_log_day and count_irc_log too.
 COUNT_IRC_LOG_TOOL = {
     "name": "count_irc_log",
     "description": (
@@ -894,7 +895,7 @@ REACT_TOOL = {
     "strict": True,
 }
 
-def _image_block(part: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def image_block(part: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """An ``image_url`` content part as a Messages API image block, or None when it can't be one."""
     url = (part.get("image_url") or {}).get("url", "")
     match = _DATA_URL_RE.match(url)
@@ -920,7 +921,7 @@ def _int_arg(args: Dict[str, Any], key: str) -> int:
         return 0
 
 
-def _parse_ids(values: Any, limit: int = MAX_RECALL_USERS) -> List[int]:
+def _parse_ids(values: Any, limit: int = MAX_IDS_PER_CALL) -> List[int]:
     """Discord snowflakes (user, message, role or channel IDs) from a tool argument, deduped, at most ``limit``."""
     ids: List[int] = []
     for value in _as_list(values):
@@ -1099,10 +1100,11 @@ def build_mention_tools(
         )
 
     async def recall_users(args: Dict[str, Any]) -> ToolResult:
-        ids = _parse_ids(args.get("user_ids"))
+        assert user_notes_provider is not None and guild_id is not None  # only offered when set
+        ids = _parse_ids(args.get("user_ids"), limit=MAX_RECALL_USERS)
         if not ids:
             return text_result("No valid Discord user IDs given.", is_error=True)
-        notes = await user_notes_provider(guild_id, ids) if user_notes_provider and guild_id else ""
+        notes = await user_notes_provider(guild_id, ids)
         return text_result(notes or "No memory notes for those users.")
 
     async def remember(args: Dict[str, Any]) -> ToolResult:
@@ -1264,7 +1266,7 @@ def build_mention_tools(
                 continue
             urls = [await attachment_to_base64_data_url(a) for a in _image_attachments(source)]
             urls += [await url_to_base64_data_url(u) for u in _embed_image_urls(source)]
-            blocks = [b for b in (_image_block({"image_url": {"url": u}}) for u in urls) if b]
+            blocks = [b for b in (image_block({"image_url": {"url": u}}) for u in urls) if b]
             blocks = blocks[:MAX_VIEW_IMAGES - count]
             count += len(blocks)
             content.append({"type": "text", "text": (
@@ -1370,7 +1372,7 @@ def build_mention_tools(
         text, image_parts = await url_content_fetcher("\n".join(urls), cache_only=False)
         if not text and not image_parts:
             return text_result("Couldn't read any of those links.", is_error=True)
-        images = [b for b in (_image_block(p) for p in image_parts) if b][:MAX_URL_IMAGES]
+        images = [b for b in (image_block(p) for p in image_parts) if b][:MAX_URL_IMAGES]
         return ToolResult(content=[{"type": "text", "text": text or "Only images came back."}] + images)
 
     def youtube_id(args: Dict[str, Any]) -> Optional[str]:

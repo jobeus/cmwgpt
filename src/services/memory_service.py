@@ -17,13 +17,14 @@ mention.
 
 The nightly run sends its calls through the Message Batches API when the memory model
 is a Claude API model: half price, but each round of calls can take minutes (rarely
-hours), so a day's profile extraction runs in one round and the merges in the next. A call that fails in a batch is retried normally.
-Everything else (``/fillmemory``, ``/memory correct``) calls the
+hours), so a day's profile extraction runs in one round and the merges in the next. A call that
+fails in a batch is retried normally. Everything else (``/fillmemory``, ``/memory correct``) calls the
 model directly, since someone may be waiting on it.
 
 ``/fillmemory`` rebuilds every learned profile from the last seven days the same way. At
 reply time, :meth:`MemoryService.get_notes_block` returns the profiles of the people in the
-conversation, for the mention handler to add to the prompt.
+conversation, for the mention handler to add to the prompt on models without tools; the
+Claude models look profiles up themselves with the ``recall_users`` tool.
 
 Only message text, reply targets, embed titles/descriptions and attachment names are
 read: no URL fetching, transcription or images.
@@ -312,7 +313,7 @@ def clean_profile(text: str) -> str:
 _PROFILE_SECTIONS = ("Stable:", "Current:", "Style:")
 
 
-def parse_corrected_profile(reply: str) -> Optional[str]:
+def parse_profile_reply(reply: str) -> Optional[str]:
     """The profile in a correction reply, ``""`` for "(none)", or ``None`` if the reply isn't one.
 
     The reply is plain text in the profile format. Asking for JSON broke whenever the
@@ -430,10 +431,6 @@ class MemoryService:
             token = _batcher.set(MessageBatcher(self._anthropic_service) if batched else None)
             try:
                 for guild in self._bot.guilds:
-                    try:
-                        await self._store.clear_retired(guild.id)
-                    except Exception as e:
-                        logger.warning("Couldn't clear retired memory keys for guild %s: %s", guild.id, e)
                     now = self._now()
                     stored = await self._store.get_processed_through(guild.id)
                     start = _to_aware_utc(stored) if stored else now - WINDOW
@@ -625,7 +622,7 @@ class MemoryService:
             f"Current profile:\n{profile or '(none)'}\n\n"
             f"New facts from today's chat:\n{new_facts}",
         )
-        return parse_corrected_profile(reply), cost
+        return parse_profile_reply(reply), cost
 
     async def correct(
         self, guild_id: int, user_id: int, name: str, correction: str
@@ -644,7 +641,7 @@ class MemoryService:
             f"Current profile:\n{profile or '(none)'}\n\n"
             f"Correction:\n{correction}",
         )
-        new_profile = parse_corrected_profile(reply)
+        new_profile = parse_profile_reply(reply)
         if new_profile is None:
             logger.warning("Memory correction for <@%s> got an unusable reply: %r", user_id, reply[:500])
             raise ValueError("The model didn't return a usable memory.")

@@ -4,7 +4,6 @@ Discord Bot Client - Main bot setup and event handling
 
 import asyncio
 import logging
-import subprocess
 from typing import Any, Optional
 
 import discord
@@ -19,6 +18,7 @@ from src.bot.commands.memory import MemoryCommands
 from src.bot.commands.wikicount import WikiCountCommands
 from src.services.model_catalog import is_model_unavailable
 from src.telemetry import instrument_command_tree
+from src.utils.git_utils import get_current_commit_hash
 
 logger = logging.getLogger(__name__)
 
@@ -26,17 +26,16 @@ logger = logging.getLogger(__name__)
 class DiscordBotClient:
     """Main Discord bot client with event handling and command setup."""
 
-    def __init__(self, *, config: Optional[AppConfig] = None, services: Any, mention_handler=None):
+    def __init__(self, *, config: Optional[AppConfig] = None, services: Any):
         self.config = config or load_config()
         self.services = services
-        self.mention_handler = mention_handler or services.mention_handler
+        self.mention_handler = services.mention_handler
 
         # on_ready fires again on every gateway reconnect; this flag ensures
         # once-only work (command sync, service starts, announcements) only
         # runs on the first ready event.
         self._ready_once_completed = False
 
-        # Configure Discord bot with intents
         intents = discord.Intents.default()
         intents.message_content = True
         intents.members = True
@@ -47,22 +46,13 @@ class DiscordBotClient:
             service.set_bot_id_loader(lambda: self.bot.user.id if self.bot.user else None)
         self.services.restart_handler.set_shutdown_callback(self.shutdown)
 
-        # Load any saved state from previous restart
         self._load_saved_state()
-
-        # Set current git SHA for comparison on next restart
         self._set_current_git_sha()
-
-        # Set up auto-update service
-        self._setup_auto_update()
-
-        # Set up announcement service
+        self.services.auto_update_service.set_restart_callback(self.services.restart_handler.perform_restart)
         self.services.announcement_service.set_bot(self.bot)
-
-        # Set up death service
         self.services.death_service.set_bot(self.bot)
 
-        # Set up the nightly user-memory job
+        # The nightly user-memory job
         if getattr(self.services, "memory_service", None) is not None:
             self.services.memory_service.set_bot(self.bot)
 
@@ -71,10 +61,7 @@ class DiscordBotClient:
             self.services.reminder_service.set_bot(self.bot)
             self.services.reminder_service.set_task_runner(self._run_reminder_task)
 
-        # Set up event handlers
         self._setup_events()
-
-        # Set up commands
         self._setup_commands()
 
     def _load_saved_state(self) -> None:
@@ -86,22 +73,20 @@ class DiscordBotClient:
                 logger.info("No saved state from a restart; starting fresh")
         except Exception as e:
             logger.error("Couldn't restore the saved state, starting fresh: %s", e, exc_info=True)
-            # Continue with fresh state if loading fails
 
     def _set_current_git_sha(self) -> None:
-        """Set the current git SHA in state for future comparison."""
+        """Record the running commit, unless a SHA was restored from before the restart.
+
+        A restored SHA is the previous process's: the announcement service compares it with
+        the running commit to decide what to announce, then updates it.
+        """
         try:
-            current_sha = self._get_current_git_sha()
+            current_sha = get_current_commit_hash()
             if current_sha:
-                # Only update if we don't already have a SHA (from loaded state)
-                # This preserves the previous SHA for comparison by the
-                # announcement service
                 if not self.services.state_service.get_last_git_sha():
                     self.services.state_service.set_last_git_sha(current_sha)
                     logger.info("Set initial git SHA: %s", current_sha[:7])
                 else:
-                    # Don't update - let the announcement service handle the
-                    # comparison and update
                     logger.debug(
                         "Current git SHA: %s, preserving previous SHA for comparison", current_sha[:7])
             else:
@@ -109,52 +94,20 @@ class DiscordBotClient:
         except Exception as e:
             logger.error("Error setting current git SHA: %s", e, exc_info=True)
 
-    def _get_current_git_sha(self) -> Optional[str]:
-        """
-        Get the current git commit SHA.
-
-        Returns:
-            Git commit SHA or None if unable to determine
-        """
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
-            if result.returncode == 0:
-                return result.stdout.strip()
-            else:
-                logger.error("Failed to get git SHA: %s", result.stderr)
-                return None
-        except Exception as e:
-            logger.error("Error getting git SHA: %s", e, exc_info=True)
-            return None
-
-    def _setup_auto_update(self) -> None:
-        """Set up the auto-update service."""
-        try:
-            # Set the restart callback
-            self.services.auto_update_service.set_restart_callback(
-                self.services.restart_handler.perform_restart)
-            logger.info("Auto-update service configured")
-        except Exception as e:
-            logger.error("Error setting up auto-update service: %s", e, exc_info=True)
-
     async def _send_update_announcement_if_needed(self) -> None:
         """Send update announcement if this was a restart."""
         try:
-            # Check if we have active channels and this looks like a restart
+            # Nothing to announce to if no channel is active.
             active_channels = self.services.state_service.get_active_channels()
             if not active_channels:
                 logger.info(
                     "No active channels found, skipping update announcement")
                 return
 
-            # Small delay to ensure bot is fully ready
+            # Give the bot a moment to finish connecting.
             await asyncio.sleep(2)
 
-            # Check for restart info to determine if it was manual
             was_manual = self._check_for_restart_info()
-
-            # Send announcement
             await self.services.announcement_service.announce_update(was_manual=was_manual)
             logger.info(
                 "Sent update announcements to active channels (manual: %s)", was_manual)
@@ -256,8 +209,8 @@ class DiscordBotClient:
 
         system_commands = SystemCommands(
             self.bot,
-            queue_service_instance=self.services.queue_service,
-            state_service_instance=self.services.state_service,
+            queue_service=self.services.queue_service,
+            state_service=self.services.state_service,
             auto_update_service=self.services.auto_update_service,
             system_prompt_loader=lambda: get_system_prompt(self.config.system_prompt_path),
             default_model=self.config.default_model,
@@ -267,16 +220,16 @@ class DiscordBotClient:
 
         death_commands = DeathCommands(
             self.bot,
-            state_service_instance=self.services.state_service,
+            state_service=self.services.state_service,
             death_channel_id=self.config.death_channel_id,
-            death_service_instance=self.services.death_service,
+            death_service=self.services.death_service,
         )
         death_commands.setup_commands()
 
         wikicount_commands = WikiCountCommands(
             self.bot,
-            death_service_instance=self.services.death_service,
-            state_service_instance=self.services.state_service,
+            death_service=self.services.death_service,
+            state_service=self.services.state_service,
         )
         wikicount_commands.setup_commands()
 
@@ -327,11 +280,9 @@ class DiscordBotClient:
                 message.channel, discord.TextChannel):
             return
 
-        # Handle bot mentions
         if self.bot.user and self.bot.user in message.mentions and self.config.reply_to_mentions:
             model = self._channel_model(message.channel)
 
-            # Queue the mention for FIFO processing
             queued = await self.mention_handler.queue_mention(message, self.bot.user, model)
 
             if not queued:
@@ -365,10 +316,3 @@ class DiscordBotClient:
         """Start the Discord bot; returns once the bot has been closed."""
         logger.info("Starting the Discord bot")
         self.bot.run(self.config.discord_bot_token)
-
-
-def create_bot() -> DiscordBotClient:
-    """Create and return a new Discord bot client."""
-    from src.startup import create_bot_client
-
-    return create_bot_client()

@@ -105,11 +105,9 @@ class AutoUpdateService:
         restart_type = "manual" if manual else "automatic"
         logger.info("Triggering %s restart", restart_type)
 
-        # Create a wrapper that passes the manual flag
         async def restart_wrapper():
             await self._restart_callback(manual=manual)
 
-        # Queue the restart through the queue service
         return await self._queue_service.queue_restart(restart_wrapper)
 
     def _verify(self, request_timestamp: str, signature: str, body: bytes) -> bool:
@@ -144,12 +142,3 @@ class AutoUpdateService:
         if not await self.trigger_restart(manual=False):
             return web.json_response({"error": "restart could not be queued"}, status=503)
         return web.json_response({"status": "restarting", "sha": sha}, status=202)
-
-    def get_status(self) -> dict:
-        """Get the current status of the auto-update service."""
-        return {
-            "enabled": self.enabled,
-            "running": self._runner is not None,
-            "host": self._host,
-            "port": self._port,
-        }

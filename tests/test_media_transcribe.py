@@ -181,7 +181,7 @@ class TestYdlOptions(unittest.TestCase):
 
     def test_deadline_hook_aborts_after_download_timeout(self):
         with patch("src.utils.media_transcribe.time.monotonic", side_effect=[0.0, 10.0, 1000.0]):
-            hook = media_transcribe._download_deadline_hook()
+            hook = media_transcribe.download_deadline_hook()
             hook({"status": "downloading"})
             with self.assertRaises(media_transcribe.DownloadTimeout):
                 hook({"status": "downloading"})

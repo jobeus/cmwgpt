@@ -29,9 +29,6 @@ class TestImageCommands(unittest.IsolatedAsyncioTestCase):
         state_service = MagicMock()
         state_service.get_image_model.return_value = saved_model
         message_service = MagicMock()
-        message_service.format_prompt_message.side_effect = lambda text: f"> {text}"
-        message_service.format_attachment_message.side_effect = (
-            lambda attachments, text: "\n".join(f"> {a.url}" for a in attachments) + f"\n> {text}")
         gemini_service = MagicMock()
         gemini_service.generate_image = AsyncMock(
             return_value=result or ImageResult(image=b"png-bytes", text="", cost=0.1234), side_effect=error)

@@ -8,6 +8,8 @@
 # 2. Auto-fix issues where possible
 # 3. Re-stage fixed files
 # 4. Fail the commit if issues can't be auto-fixed
+# 5. Run mypy
+# 6. Run the test suite
 #
 
 set -e

@@ -104,17 +104,17 @@ class TestAutoUpdateService(unittest.IsolatedAsyncioTestCase):
 
         await service.start()
 
-        self.assertFalse(service.get_status()["running"])
-        self.assertFalse(service.get_status()["enabled"])
+        self.assertFalse((service._runner is not None))
+        self.assertFalse(service.enabled)
 
     async def test_start_and_stop_listener(self):
         service = AutoUpdateService(queue_service=self.queue_service, secret="x", host="127.0.0.1", port=0)
 
         await service.start()
-        self.assertTrue(service.get_status()["running"])
+        self.assertTrue((service._runner is not None))
         await service.start()  # duplicate start is ignored
         await service.stop()
-        self.assertFalse(service.get_status()["running"])
+        self.assertFalse((service._runner is not None))
         await service.stop()  # stopping twice is harmless
 
     async def test_start_survives_bind_failure(self):
@@ -123,14 +123,14 @@ class TestAutoUpdateService(unittest.IsolatedAsyncioTestCase):
         with patch("src.services.auto_update_service.web.TCPSite.start", side_effect=OSError("in use")):
             await service.start()
 
-        self.assertFalse(service.get_status()["running"])
+        self.assertFalse((service._runner is not None))
 
 
 class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
     async def test_restart_status_defaults(self):
         handler = RestartHandler(state_service=MagicMock(), git_pull=MagicMock())
 
-        self.assertFalse(handler.is_restart_in_progress())
+        self.assertFalse(handler._restart_in_progress)
         self.assertIsNone(handler.exit_code)
         self.assertFalse(hasattr(handler, "should_skip_cleanup"))
 
@@ -179,7 +179,7 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(RESTART_EXIT_CODE, 42)
         state_service.save_restart_state.assert_called_once_with({"manual_restart": True})
         git_pull.assert_called_once_with()
-        self.assertTrue(handler.is_restart_in_progress())
+        self.assertTrue(handler._restart_in_progress)
         # Shutdown runs as its own task, not inline in perform_restart.
         shutdown.assert_not_awaited()
         await handler._shutdown_task
@@ -234,31 +234,6 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
 
 
 class TestAnnouncementService(unittest.IsolatedAsyncioTestCase):
-    def test_get_current_git_sha_success_and_exception(self):
-        state_service = MagicMock()
-        service = AnnouncementService(state_service=state_service)
-
-        with patch(
-            "src.services.announcement_service.subprocess.run",
-            return_value=SimpleNamespace(returncode=0, stdout="abc123\n", stderr=""),
-        ):
-            self.assertEqual(service._get_current_git_sha(), "abc123")
-
-        with patch("src.services.announcement_service.subprocess.run", side_effect=RuntimeError("boom")):
-            self.assertIsNone(service._get_current_git_sha())
-
-    def test_get_current_git_sha_returns_none_on_subprocess_failure(self):
-        state_service = MagicMock()
-        service = AnnouncementService(state_service=state_service)
-
-        with patch(
-            "src.services.announcement_service.subprocess.run",
-            return_value=SimpleNamespace(returncode=1, stdout="", stderr="fatal"),
-        ):
-            result = service._get_current_git_sha()
-
-        self.assertIsNone(result)
-
     def test_get_complete_changelog_formats_matching_commits(self):
         state_service = MagicMock()
         service = AnnouncementService(state_service=state_service)

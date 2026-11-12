@@ -26,7 +26,7 @@ class FakeClientContext:
 
 
 class TestPasteService(unittest.IsolatedAsyncioTestCase):
-    async def test_upload_text_returns_markdown_url_and_injects_cache(self):
+    async def test_upload_markdown_returns_markdown_url_and_injects_cache(self):
         injected = []
 
         class FakeClient:
@@ -41,14 +41,14 @@ class TestPasteService(unittest.IsolatedAsyncioTestCase):
             client_factory=lambda timeout: FakeClientContext(fake_client),
         )
 
-        result = await service.upload_text("hello world")
+        result = await service.upload_markdown("hello world")
 
         self.assertEqual(result, "https://paste.jobe.wtf/abc123.md")
         self.assertEqual(fake_client.last_url, "https://paste.jobe.wtf")
         self.assertEqual(fake_client.last_content, b"hello world")
         self.assertEqual(injected, [("https://paste.jobe.wtf/abc123.md", "hello world")])
 
-    async def test_upload_text_raises_on_non_201_status(self):
+    async def test_upload_markdown_raises_on_non_201_status(self):
         class FakeClient:
             async def post(self, url, content):
                 return FakeResponse(500, "nope")
@@ -56,11 +56,11 @@ class TestPasteService(unittest.IsolatedAsyncioTestCase):
         service = PasteService(client_factory=lambda timeout: FakeClientContext(FakeClient()))
 
         with self.assertRaises(Exception) as ctx:
-            await service.upload_text("bad")
+            await service.upload_markdown("bad")
 
         self.assertIn("Paste service error: 500 - nope", str(ctx.exception))
 
-    async def test_upload_text_wraps_request_errors(self):
+    async def test_upload_markdown_wraps_request_errors(self):
         request = httpx.Request("POST", "https://paste.jobe.wtf")
 
         class FakeClient:
@@ -70,20 +70,9 @@ class TestPasteService(unittest.IsolatedAsyncioTestCase):
         service = PasteService(client_factory=lambda timeout: FakeClientContext(FakeClient()))
 
         with self.assertRaises(Exception) as ctx:
-            await service.upload_text("boom")
+            await service.upload_markdown("boom")
 
         self.assertIn("Failed to upload to paste service", str(ctx.exception))
-
-    async def test_upload_markdown_delegates_to_upload_text(self):
-        class FakeClient:
-            async def post(self, url, content):
-                return FakeResponse(201, "https://paste.jobe.wtf/xyz789")
-
-        service = PasteService(client_factory=lambda timeout: FakeClientContext(FakeClient()))
-
-        result = await service.upload_markdown("# title")
-
-        self.assertEqual(result, "https://paste.jobe.wtf/xyz789.md")
 
     async def test_default_client_factory_is_httpx_async_client(self):
         service = PasteService()
@@ -101,5 +90,5 @@ class TestPasteService(unittest.IsolatedAsyncioTestCase):
             client_factory=lambda timeout: httpx.AsyncClient(timeout=timeout, transport=transport)
         )
 
-        self.assertEqual(await service.upload_text("hi"), "https://paste.jobe.wtf/real.md")
+        self.assertEqual(await service.upload_markdown("hi"), "https://paste.jobe.wtf/real.md")
         self.assertEqual(seen, {"url": "https://paste.jobe.wtf", "body": b"hi"})

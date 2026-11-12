@@ -1,5 +1,5 @@
 """
-Death Commands - Configure the death service (restricted to DEATH_CHANNEL_ID).
+Death Commands - /death settings (death channel only), /forcedeath (admins) and /limerick.
 """
 
 import logging
@@ -18,11 +18,11 @@ logger = logging.getLogger(__name__)
 class DeathCommands:
     """Handles /death Discord commands."""
 
-    def __init__(self, bot: discord.ext.commands.Bot, *, state_service_instance, death_channel_id: str, death_service_instance=None):
+    def __init__(self, bot: discord.ext.commands.Bot, *, state_service, death_channel_id: str, death_service=None):
         self.bot = bot
-        self._state_service = state_service_instance
+        self._state_service = state_service
         self._death_channel_id = death_channel_id
-        self._death_service = death_service_instance
+        self._death_service = death_service
 
     def setup_commands(self) -> None:
         """Set up all death-related commands."""

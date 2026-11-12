@@ -4,7 +4,6 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import src.startup
 from src.bot.client import DiscordBotClient
 
 
@@ -38,9 +37,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         client.services.queue_service.stop = AsyncMock()
         client.services.auto_update_service.start = AsyncMock()
         client.services.auto_update_service.stop = AsyncMock()
-        client.services.auto_update_service.get_status = MagicMock(
-            return_value={"enabled": False, "running": False, "port": 8787}
-        )
         client.services.death_service.start = MagicMock()
         client.services.death_service.stop = MagicMock()
         client.services.announcement_service.announce_update = AsyncMock()
@@ -286,7 +282,7 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
 
         with patch("src.bot.client.discord.Intents.default", return_value=intents), patch(
             "src.bot.client.commands.Bot", return_value=fake_bot
-        ), patch.object(DiscordBotClient, "_get_current_git_sha", return_value="abc123"), patch(
+        ), patch("src.bot.client.get_current_commit_hash", return_value="abc123"), patch(
             "src.bot.client.ImageCommands"
         ) as mock_image, patch("src.bot.client.SystemCommands") as mock_system, patch(
             "src.bot.client.DeathCommands"
@@ -405,37 +401,13 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Couldn't restore the saved state", logs.output[-1])
 
         client.services.state_service.get_last_git_sha.return_value = "existing"
-        client._get_current_git_sha = MagicMock(return_value="newsha")
-        client._set_current_git_sha()
+        with patch("src.bot.client.get_current_commit_hash", return_value="newsha"):
+            client._set_current_git_sha()
         client.services.state_service.set_last_git_sha.assert_not_called()
 
         client.services.state_service.get_last_git_sha.return_value = None
-        client._get_current_git_sha = MagicMock(return_value=None)
-        client._set_current_git_sha()
-
-        client._get_current_git_sha = MagicMock(side_effect=RuntimeError("boom"))
-        client._set_current_git_sha()
-
-    async def test_get_current_git_sha_and_setup_auto_update_error_paths(self):
-        client = object.__new__(DiscordBotClient)
-        client.services = SimpleNamespace(
-            auto_update_service=MagicMock(),
-            restart_handler=MagicMock(),
-        )
-
-        with patch("src.bot.client.subprocess.run", return_value=SimpleNamespace(returncode=1, stdout="", stderr="fatal")):
-            self.assertIsNone(client._get_current_git_sha())
-
-        with patch("src.bot.client.subprocess.run", side_effect=RuntimeError("boom")):
-            self.assertIsNone(client._get_current_git_sha())
-
-        client.services.auto_update_service.set_restart_callback.side_effect = RuntimeError("boom")
-        client._setup_auto_update()
-
-    async def test_create_bot_delegates_to_startup_factory(self):
-        with patch.object(src.startup, "create_bot_client", return_value="bot-client"):
-            from src.bot.client import create_bot
-
-            result = create_bot()
-
-        self.assertEqual(result, "bot-client")
+        with patch("src.bot.client.get_current_commit_hash", return_value=None):
+            client._set_current_git_sha()
+        with patch("src.bot.client.get_current_commit_hash", side_effect=RuntimeError("boom")):
+            client._set_current_git_sha()
+        client.services.state_service.set_last_git_sha.assert_not_called()

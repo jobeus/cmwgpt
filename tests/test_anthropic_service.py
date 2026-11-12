@@ -405,7 +405,7 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         with patch("src.services.anthropic_service.resolve_bot_id", return_value=None) as mock_resolve:
             await service.get_chat_completion(
                 model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}], bot_id=7)
-        mock_resolve.assert_called_once_with(7, None, service._bot_id_loader)
+        mock_resolve.assert_called_once_with(7, service._bot_id_loader)
 
     def test_get_client_uses_stock_sdk_with_retries_and_timeout(self):
         service = AnthropicService(api_key="test-key")

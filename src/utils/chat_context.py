@@ -1,11 +1,9 @@
-"""Shared multimodal chat-context builder for Discord message history.
+"""Multimodal chat-context builder for Discord message history.
 
-The mention handler turns a list of
-``discord.Message`` objects into the native multimodal ``messages`` array
-expected by the chat-completion services (text prefixed with timestamp/ID/sender,
-reply resolution, embed text, image attachments, audio transcription, embed
-image previews, and assistant-image splitting). This module is the single
-source of truth for that transformation.
+The mention handler turns a list of ``discord.Message`` objects into the multimodal
+``messages`` array the chat-completion services take: text prefixed with
+timestamp/ID/sender, reply resolution, embed text, image attachments, audio
+transcripts, embed image previews, and assistant-image splitting.
 """
 
 import asyncio
@@ -20,7 +18,7 @@ from src.utils.message_utils import format_discord_timestamp
 
 logger = logging.getLogger(__name__)
 
-# Pattern to strip cost prefixes like [$0.011] or [$0.005 @ z-image] from the
+# Pattern to strip cost prefixes like [$0.011] or [$0.034 @ banana-2.1, 9:16] from the
 # start of bot messages so the model doesn't parrot them back.
 COST_PREFIX_PATTERN = re.compile(r'^\[\$[\d.]+(?:\s*@\s*[^\]]+)?\]\s*')
 
@@ -78,8 +76,8 @@ async def build_chat_context(
         url_converter: Async image URL -> data URL (for embed previews).
         transcriber: Async audio attachment -> transcript text (or ``None``).
         url_content_fetcher: Optional async ``(text, *, cache_only) -> (extra_text, image_parts)``.
-            When provided, user messages are enriched with fetched URL content
-            (the mention path); when ``None`` the enrichment is skipped. Only
+            When provided (models without tools), user messages are enriched with fetched
+            URL content; when ``None`` the enrichment is skipped. Only
             the last ``FRESH_FETCH_RECENT_MESSAGES`` messages may fetch.
     """
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_MESSAGES)
@@ -118,10 +116,9 @@ async def _convert_message(
 ) -> List[Dict[str, Any]]:
     """Turn one Discord message into one or two chat-completion entries."""
     chat_context: List[Dict[str, Any]] = []
-    # Determine role
     role = "assistant" if msg.author.id == bot_id else "user"
 
-    # 1. Start with the text component, prefixed with timestamp, message ID
+    # Start with the text component, prefixed with timestamp, message ID
     # and Discord ID so the bot knows who is speaking and can map replies.
     text_lines = []
     timestamp_str = format_discord_timestamp(msg.created_at)
@@ -196,7 +193,7 @@ async def _convert_message(
     text_payload = [{"type": "text", "text": final_text}]
     file_payloads = []
 
-    # Fetch all supported URLs automatically (mention path only). Not the links in a
+    # Fetch all supported URLs automatically (models without tools only). Not the links in a
     # quoted reply of the bot's: those are often from logs or quotes its tools returned.
     if role == "user" and url_content_fetcher is not None:
         fetch_text = " ".join(text_lines[1:]).strip() if quotes_bot else final_text
@@ -207,7 +204,7 @@ async def _convert_message(
         if url_images:
             file_payloads.extend(url_images)
 
-    # 2. Add native image and file components
+    # Image and file attachments
     for attach in msg.attachments:
         try:
             # We only convert attachments for user messages
@@ -222,7 +219,7 @@ async def _convert_message(
                         {"type": "image_url", "image_url": {"url": file_data_url}}
                     )
                 elif is_audio:
-                    # Send audio to Groq instead and get a transcript
+                    # Audio goes in as a transcript.
                     transcript = await transcriber(attach)
                     duration_str = f" ({attach.duration}s)" if getattr(attach, "duration", None) else ""
                     if transcript:
@@ -234,7 +231,7 @@ async def _convert_message(
         except Exception as e:
             logger.error("Failed to convert attachment context for msg %s: %s", msg.id, e, exc_info=True)
 
-    # 3. Add native embed image previews
+    # Embed image previews
     for embed in msg.embeds:
         logger.debug("Checking embed for image previews: %s", embed.title)
         # Prefer Discord's media proxy: it's always reachable, already
@@ -255,9 +252,8 @@ async def _convert_message(
             except Exception as ex:
                 logger.warning("Failed to fetch embed preview context for msg %s: %s", msg.id, ex)
 
-    # Chat completions API doesn't support image_url parts in the 'assistant'
-    # role natively. So if it's an assistant message with images, send text
-    # as assistant and images as a follow-up 'user'.
+    # Assistant turns can't carry images, so an assistant message with images goes
+    # in as its text, then the images in a follow-up user turn.
     if role == "assistant" and file_payloads:
         chat_context.append({"role": "assistant", "content": text_payload})
         chat_context.append({

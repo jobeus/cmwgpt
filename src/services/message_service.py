@@ -4,13 +4,13 @@ Message Service - Handles message formatting and sending
 
 import asyncio
 import logging
-from typing import Awaitable, Callable, List, Optional, Protocol, Union
+from typing import Awaitable, Callable, List, Optional, Protocol
 
 import discord
 from discord import HTTPException, Forbidden, NotFound
 
 from src.utils.discord_error_utils import concise_error
-from src.utils.message_utils import format_attachment_message, format_prompt_message
+from src.utils.message_utils import DISCORD_MESSAGE_LIMIT
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +26,10 @@ class PasteUploader(Protocol):
 class MessageService:
     """Service for handling message operations."""
 
-    DISCORD_MESSAGE_LIMIT = 2000
+    DISCORD_MESSAGE_LIMIT = DISCORD_MESSAGE_LIMIT
 
-    def __init__(self, paste_service_instance: Optional[PasteUploader] = None):
-        self._paste_service = paste_service_instance
-
-    def set_paste_service(self, paste_service_instance: Optional[PasteUploader]) -> None:
-        self._paste_service = paste_service_instance
+    def __init__(self, paste_service: Optional[PasteUploader] = None):
+        self._paste_service = paste_service
 
     async def _upload_to_paste(self, reply_text: str) -> str:
         if not self._paste_service:
@@ -95,36 +92,14 @@ class MessageService:
                 logger.warning("Unexpected error sending message on attempt %s: %s", attempt, e)
             await asyncio.sleep(RETRY_BASE_DELAY_SECONDS * 2 ** (attempt - 1))
 
-    async def send_channel_reply(self, channel: discord.TextChannel, reply_text: str) -> None:
-        """Send a reply to a channel, via the paste service if it's too long."""
-        await self._send_with_retry(channel.send, await self.fit_to_discord(reply_text))
-
-    async def send_channel_reply_with_files(
+    async def send_channel_reply(
             self,
             channel: discord.TextChannel,
             reply_text: str,
             files: Optional[List[discord.File]] = None) -> None:
-        """Send a reply with optional file attachments, via the paste service if it's too long."""
-        await self._send_with_retry(channel.send, await self.fit_to_discord(reply_text), files=files)
-
-    async def send_interaction_followup(
-            self,
-            interaction: discord.Interaction,
-            text: str,
-            *,
-            ephemeral: bool = False) -> None:
-        """Send an interaction followup, via the paste service if it's too long."""
-        await self._send_with_retry(
-            interaction.followup.send, await self.fit_to_discord(text), ephemeral=ephemeral)
-
-    # Delegate to utility functions for message formatting
-    def format_attachment_message(
-            self,
-            attachment: Union[discord.Attachment, List[discord.Attachment]],
-            message: str) -> str:
-        """Format a message with one or more attachment URLs."""
-        return format_attachment_message(attachment, message)
-
-    def format_prompt_message(self, message: str) -> str:
-        """Format a prompt message."""
-        return format_prompt_message(message)
+        """Send a reply to a channel, with any files, via the paste service if it's too long."""
+        content = await self.fit_to_discord(reply_text)
+        if files:
+            await self._send_with_retry(channel.send, content, files=files)
+        else:
+            await self._send_with_retry(channel.send, content)

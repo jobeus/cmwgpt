@@ -14,10 +14,9 @@ from src.services.model_catalog import available_models
 from src.utils.discord_helper import get_mention_legend
 from src.utils.discord_error_utils import safe_defer
 from src.utils.async_utils import safe_run
+from src.utils.message_utils import DISCORD_MESSAGE_LIMIT
 
 logger = logging.getLogger(__name__)
-
-DISCORD_MESSAGE_LIMIT = 2000
 
 
 def _code_block_message(header: str, body: str) -> str:
@@ -37,8 +36,8 @@ class SystemCommands:
         self,
         bot: discord.ext.commands.Bot,
         *,
-        queue_service_instance,
-        state_service_instance,
+        queue_service,
+        state_service,
         auto_update_service=None,
         system_prompt_loader=get_system_prompt,
         default_model: Optional[str] = None,
@@ -46,8 +45,8 @@ class SystemCommands:
         on_model_change: Optional[Callable[[int], None]] = None,
     ):
         self.bot = bot
-        self._queue_service = queue_service_instance
-        self._state_service = state_service_instance
+        self._queue_service = queue_service
+        self._state_service = state_service
         self._auto_update_service = auto_update_service
         self._system_prompt_loader = system_prompt_loader
         self._default_model = get_config().default_model if default_model is None else default_model
@@ -77,12 +76,9 @@ class SystemCommands:
         async def model_command(
                 interaction: discord.Interaction,
                 model: Optional[str] = None):
-            # Immediately defer the interaction to avoid Discord's 3-second
-            # timeout
             if not await safe_defer(interaction, ephemeral=False, thinking=True):
                 return
 
-            # Queue the command for FIFO processing
             queued = await self._queue_service.queue_command(interaction, self._handle_model_command, model)
 
             if not queued:
@@ -108,12 +104,9 @@ class SystemCommands:
         async def systemprompt_set(
                 interaction: discord.Interaction,
                 prompt_text: Optional[str] = None):
-            # Immediately defer the interaction to avoid Discord's 3-second
-            # timeout
             if not await safe_defer(interaction, ephemeral=True, thinking=True):
                 return
 
-            # Queue the command for FIFO processing
             queued = await self._queue_service.queue_command(interaction, self._handle_systemprompt_set, prompt_text)
 
             if not queued:
@@ -128,12 +121,9 @@ class SystemCommands:
             name="reset",
             description="Reset the system prompt for this channel to the default")
         async def systemprompt_reset(interaction: discord.Interaction):
-            # Immediately defer the interaction to avoid Discord's 3-second
-            # timeout
             if not await safe_defer(interaction, ephemeral=True, thinking=True):
                 return
 
-            # Queue the command for FIFO processing
             queued = await self._queue_service.queue_command(interaction, self._handle_systemprompt_reset)
 
             if not queued:
@@ -146,7 +136,7 @@ class SystemCommands:
 
         @systemprompt_group.command(
             name="view",
-            description="View the composed base system prompt for this channel")
+            description="View this channel's base system prompt")
         async def systemprompt_view(interaction: discord.Interaction):
             if not await safe_defer(interaction, ephemeral=True, thinking=True):
                 return
@@ -166,9 +156,6 @@ class SystemCommands:
             model: Optional model name to set
         """
         channel_id = interaction.channel.id
-        # Interaction already deferred in slash command handler
-
-        # Mark channel as active
         self._state_service.mark_channel_active(channel_id)
 
         if model:
@@ -194,15 +181,11 @@ class SystemCommands:
             prompt_text: Optional new system prompt text
         """
         channel_id = interaction.channel.id
-        # Interaction already deferred in slash command handler
-
-        # Mark channel as active
         self._state_service.mark_channel_active(channel_id)
 
         legend_section = await self._mention_legend_provider(interaction.channel, self.bot.user)
 
         if prompt_text:
-            # Set new system prompt (no longer stored in conversation arrays)
             self._state_service.set_system_prompt(channel_id, prompt_text)
 
             logger.info(
@@ -212,7 +195,6 @@ class SystemCommands:
                 ephemeral=True,
             )
         else:
-            # Show current system prompt
             current_prompt = self._state_service.get_system_prompt(channel_id)
             if not current_prompt:
                 current_prompt = self._system_prompt_loader() + "\n" + legend_section
@@ -226,7 +208,8 @@ class SystemCommands:
             self, interaction: discord.Interaction) -> None:
         """
         Handle the /systemprompt view command.
-        Shows the composed base system prompt used for channel-scoped bot behavior.
+        Shows the channel's base prompt and member legend. The model gets more than this:
+        the mention handler adds its own sections (chat format, tools, and so on) after it.
 
         Args:
             interaction: The Discord interaction
@@ -235,7 +218,6 @@ class SystemCommands:
 
         legend_section = await self._mention_legend_provider(interaction.channel, self.bot.user)
 
-        # Compose the channel base prompt with the current mention legend.
         channel_system_prompt = self._state_service.get_system_prompt(channel_id)
         if channel_system_prompt:
             full_prompt = channel_system_prompt + "\n" + legend_section
@@ -243,10 +225,10 @@ class SystemCommands:
             full_prompt = self._system_prompt_loader() + "\n" + legend_section
 
         logger.info(
-            "[/systemprompt view] Channel %s: displayed full composed system prompt.", channel_id)
+            "[/systemprompt view] Channel %s: displayed the base system prompt.", channel_id)
 
         await interaction.followup.send(
-            _code_block_message("**Full system prompt for this channel (as sent to the model):**", full_prompt),
+            _code_block_message("**Base system prompt for this channel (the bot adds its own sections after it):**", full_prompt),
             ephemeral=True,
         )
 
@@ -259,17 +241,9 @@ class SystemCommands:
             interaction: The Discord interaction
         """
         channel_id = interaction.channel.id
-        # Interaction already deferred in slash command handler
-
-        # Mark channel as active
         self._state_service.mark_channel_active(channel_id)
 
-        # Remove custom prompt (system prompts no longer stored in conversation
-        # arrays)
         self._state_service.clear_system_prompt(channel_id)
-        logger.info(
-            "[/systemprompt reset] Channel %s: custom prompt removed, reverting to default.", channel_id)
-
         logger.info(
             "[/systemprompt reset] Channel %s: system prompt reset to default.", channel_id)
         await interaction.followup.send("System prompt for this channel has been reset to the default.", ephemeral=True)
@@ -287,12 +261,9 @@ class SystemCommands:
                 )
                 return
 
-            # Immediately defer the interaction to avoid Discord's 3-second
-            # timeout
             if not await safe_defer(interaction, ephemeral=False, thinking=True):
                 return
 
-            # Queue the command for FIFO processing
             queued = await self._queue_service.queue_command(interaction, self._handle_restart_command)
 
             if not queued:
@@ -333,16 +304,21 @@ class SystemCommands:
             "**System & Settings:**\n"
             "`/model [model]` - View or set the AI language model (e.g., sonnet-5.5-direct)\n"
             "`/systemprompt set [prompt]` - Set a custom AI personality for this channel\n"
-            "`/systemprompt view` - View the current custom personality\n"
+            "`/systemprompt view` - View this channel's base system prompt\n"
             "`/systemprompt reset` - Return to the default personality\n"
-            "`/cost` - See what the bot has spent today, this week and this month, by provider\n\n"
+            "`/cost` - See what the bot has spent today, over the last 7 days and this month, by provider\n\n"
             "**Memory:**\n"
             "`/memory show` - Privately see what the bot remembers about you\n"
             "`/memory correct [correction]` - Fix something the bot remembers about you\n"
             "`/memory clear` - Make the bot forget about you\n"
-            "`/fillmemory` - Rebuild everyone's memory from the last week (admin only)\n\n"
+            "`/fillmemory` - Rebuild everyone's memory from the last week (admin only)\n"
+            "`/botstate` - Privately see the bot's own mood and interests\n\n"
             "**Server Features:**\n"
-            "`/death set|view|reset` - Manage global death announcements (death channel only)\n\n"
+            "`/death set|view|reset` - Manage global death announcements (death channel only)\n"
+            "`/limerick [person]` - A limerick about a person (name or Wikipedia URL)\n"
+            "`/wikicount [target]` - A Wikipedia article's average monthly pageviews\n"
+            "`/forcedeath [url]` - Post a death announcement for an article, for testing (admin only)\n"
+            "`/restart` - Pull the latest code and restart (admin only)\n\n"
             "*Note: Commands may be queued if the bot is busy processing other requests.*")
         await interaction.followup.send(help_text, ephemeral=True)
 
@@ -358,12 +334,10 @@ class SystemCommands:
             "[/restart] Manual restart requested by %s in #%s", interaction.user, interaction.channel
         )
 
-        # Send confirmation message
         await interaction.followup.send(
             "\U0001f504 Restarting bot... I'll be back shortly with any available updates!", ephemeral=False
         )
 
-        # Trigger restart through auto-update service
         if not self._auto_update_service:
             await interaction.followup.send("❌ Restart service is not configured.", ephemeral=True)
             return
