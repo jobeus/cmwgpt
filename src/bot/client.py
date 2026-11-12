@@ -11,6 +11,7 @@ from discord.ext import commands
 
 from src.config import AppConfig, get_system_prompt, load_config
 from src.bot.commands.image import ImageCommands
+from src.bot.commands.market import MarketCommands
 from src.bot.commands.system import SystemCommands
 from src.bot.commands.cost import build_cost_commands
 from src.bot.commands.death import DeathCommands
@@ -247,6 +248,9 @@ class DiscordBotClient:
                 memory_store=self.services.memory_store,
             )
             memory_commands.setup_commands()
+
+        if getattr(self.services, "paper_trading_service", None) is not None:
+            MarketCommands(self.bot, paper_trading_service=self.services.paper_trading_service).setup_commands()
 
     def _clear_model_caches(self, channel_id: int) -> None:
         """Drop per-channel provider state that a model switch makes stale."""

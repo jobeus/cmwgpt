@@ -627,17 +627,16 @@ PAPER_TRADE_TOOL = {
         "price plus a buffer). An option is one contract of 100 shares, named by its exact symbol from "
         "market_data's option_chain; options are never exercised, and one still held is sold automatically "
         "about 30 minutes before the close on its expiration day. `cancel` cancels the player's open order by "
-        "its number. `reset_game` wipes the whole game for everyone and is only for a server admin who "
-        "plainly asks for exactly that. Report the result as the tool gives it; don't claim a fill it didn't report."
+        "its number. Report the result as the tool gives it; don't claim a fill it didn't report."
     ),
     "strict": True,
     "input_schema": {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["buy", "sell", "cancel", "reset_game"]},
+            "action": {"type": "string", "enum": ["buy", "sell", "cancel"]},
             "symbol": {
                 "type": "string",
-                "description": "The stock ticker or exact option symbol. Empty for cancel and reset_game.",
+                "description": "The stock ticker or exact option symbol. Empty for cancel.",
             },
             "quantity": {
                 "type": "number",
@@ -1498,14 +1497,10 @@ def build_mention_tools(
         logger.info("[paper_trade tool] Channel %s User %s: %s", channel_id, user_id,
                     {k: v for k, v in args.items() if v})
         try:
-            if action == "reset_game":
-                if not getattr(getattr(asker, "guild_permissions", None), "administrator", False):
-                    return text_result("Only a server admin can reset the game.", is_error=True)
-                return text_result(await paper_trading.reset())
             if action == "cancel":
                 return text_result(await paper_trading.cancel(user_id, _int_arg(args, "order_number")))
             if action not in ("buy", "sell"):
-                return text_result("The action is buy, sell, cancel or reset_game.", is_error=True)
+                return text_result("The action is buy, sell or cancel.", is_error=True)
             return text_result(await paper_trading.trade(
                 user_id, action, str(args.get("symbol") or ""), quantity=args.get("quantity") or 0,
                 dollars=args.get("dollars") or 0, limit_price=args.get("limit_price") or 0))

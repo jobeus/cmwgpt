@@ -34,6 +34,7 @@ The bot's main chat experience is **mention-based**:
 | `/fillmemory` | Rebuilds everyone's learned memory from the last 7 days (admin only) | rewrites every memory key |
 | `/botstate` | Privately shows the bot's own mood, emotion, emoji, interests and wonderings | reads `cmwgpt:self:<guild>` in Redis |
 | `/wikicount` | Looks up a Wikipedia article's average monthly pageviews | runtime action |
+| `/resetmarketgame` | Wipes the paper-trading game: cancels every order and sells every position at Alpaca, forgets every player (admin only, needs `confirm:True`; only registered when Alpaca keys are set) | clears `cmwgpt:paper:*` in Redis |
 | `/cost` | Shows what the bot has spent today, in the last 7 days and this month, by provider | reads `cmwgpt:costs:<day>` in Redis |
 | `/restart` | Triggers restart flow and `git pull` | runtime action |
 
@@ -174,3 +175,4 @@ Most command-driven settings are persisted through `StateService`, which means m
 | `src/bot/commands/memory.py` | `/memory ...`, `/fillmemory`, `/botstate` |
 | `src/bot/commands/wikicount.py` | `/wikicount` |
 | `src/bot/commands/cost.py` | `/cost` |
+| `src/bot/commands/market.py` | `/resetmarketgame` |

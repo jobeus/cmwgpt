@@ -5,10 +5,13 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import fakeredis
 
+import discord.ext.commands  # noqa: F401
+
+from src.bot.commands.market import MarketCommands
 from src.services.alpaca_service import AlpacaError
 from src.services.chat_tools import build_mention_tools
 from src.services.paper_trading_service import PaperStore, PaperTradeError, PaperTradingService
@@ -265,8 +268,8 @@ class TestReading(GameCase):
 
 
 class TestTools(GameCase):
-    def tools(self, user_id: int, *, admin: bool = False) -> Dict[str, Any]:
-        author = SimpleNamespace(id=user_id, guild_permissions=SimpleNamespace(administrator=admin))
+    def tools(self, user_id: int) -> Dict[str, Any]:
+        author = SimpleNamespace(id=user_id)
         message = SimpleNamespace(id=1, guild=None, author=author, channel=SimpleNamespace(id=5))
         built = build_mention_tools(
             guild_id=None, channel_id=5, user_id=user_id, user_notes_provider=None, how_i_work_loader=lambda: "",
@@ -295,14 +298,6 @@ class TestTools(GameCase):
         self.assertTrue(result.is_error)
         self.assertTrue(result.content[0]["text"].startswith("Nothing was traded."))
 
-    async def test_only_admins_reset(self):
-        await self.tools(ALICE)["paper_trade"](self.trade_args(quantity=10))
-        refused = await self.tools(ALICE)["paper_trade"](self.trade_args(action="reset_game", symbol=""))
-        self.assertTrue(refused.is_error)
-        self.assertEqual(list(await self.store.players()), [ALICE])
-        await self.tools(BOB, admin=True)["paper_trade"](self.trade_args(action="reset_game", symbol=""))
-        self.assertEqual(await self.store.players(), {})
-
     def test_tools_are_off_without_alpaca(self):
         built = build_mention_tools(
             guild_id=None, channel_id=5, user_id=ALICE, user_notes_provider=None, how_i_work_loader=lambda: "",
@@ -310,3 +305,37 @@ class TestTools(GameCase):
         names = [t.definition["name"] for t in built]
         self.assertNotIn("market_data", names)
         self.assertNotIn("paper_trade", names)
+
+
+class TestResetCommand(GameCase):
+    def command(self) -> Any:
+        bot = MagicMock()
+        bot.tree.command.return_value = lambda fn: fn
+        commands = MarketCommands(bot, paper_trading_service=self.game)
+        registered: Dict[str, Any] = {}
+        bot.tree.command.side_effect = lambda **_: lambda fn: registered.setdefault("run", fn) or fn
+        commands.setup_commands()
+        return getattr(registered["run"], "callback", registered["run"])
+
+    def interaction(self, *, admin: bool) -> Any:
+        interaction = MagicMock()
+        interaction.user.guild_permissions.administrator = admin
+        interaction.response = AsyncMock()
+        interaction.response.is_done = MagicMock(return_value=False)
+        interaction.followup = AsyncMock()
+        return interaction
+
+    async def test_only_a_confirming_admin_resets(self):
+        await self.game.trade(ALICE, "buy", "AAPL", quantity=10)
+        run = self.command()
+
+        await run(self.interaction(admin=False), True)
+        await run(self.interaction(admin=True), False)
+        self.assertEqual(list(await self.store.players()), [ALICE])
+        self.assertFalse(self.alpaca.closed_everything)
+
+        interaction = self.interaction(admin=True)
+        await run(interaction, True)
+        self.assertEqual(await self.store.players(), {})
+        self.assertTrue(self.alpaca.closed_everything)
+        self.assertIn("The game is reset", interaction.followup.send.await_args.args[0])
