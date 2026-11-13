@@ -206,10 +206,24 @@ class TestBuildChatContext(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[Attached file: blob]", text_of(result[0]))
         self.transcriber.assert_not_awaited()
 
-    async def test_bot_attachments_are_not_converted(self):
+    async def test_bot_image_attachments_follow_in_a_user_entry(self):
         attachments = [SimpleNamespace(content_type="image/png", filename="a.png")]
-        await self.build([make_msg(1, "x", author_id=BOT_ID, attachments=attachments)])
-        self.attachment_converter.assert_not_awaited()
+
+        result = await self.build([make_msg(1, "here it is", author_id=BOT_ID, attachments=attachments)])
+
+        self.assertEqual([e["role"] for e in result], ["assistant", "user"])
+        self.assertEqual(len(result[0]["content"]), 1)
+        self.assertIn("[1] <@999>:", result[1]["content"][0]["text"])
+        self.assertEqual(result[1]["content"][1]["image_url"]["url"], "data:image/jpeg;base64,ATT")
+
+    async def test_bot_file_attachments_are_not_converted(self):
+        attachments = [SimpleNamespace(content_type="text/plain", filename="memory.md")]
+
+        result = await self.build([make_msg(1, "x", author_id=BOT_ID, attachments=attachments)])
+
+        self.assertEqual([e["role"] for e in result], ["assistant"])
+        self.assertNotIn("memory.md", text_of(result[0]))
+        self.transcriber.assert_not_awaited()
 
     async def test_attachment_conversion_failure_is_logged_not_raised(self):
         self.attachment_converter.side_effect = RuntimeError("boom")

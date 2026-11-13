@@ -207,18 +207,18 @@ async def _convert_message(
     # Image and file attachments
     for attach in msg.attachments:
         try:
-            # We only convert attachments for user messages
-            if role == "user":
-                is_image = attach.content_type and attach.content_type.startswith('image/')
-
+            is_image = attach.content_type and attach.content_type.startswith('image/')
+            if is_image:
+                # The bot's own images too (what its draw tool attached): without them the model
+                # sees its description of a picture and no picture, and decides it never drew one.
+                file_data_url = await attachment_converter(attach)
+                file_payloads.append(
+                    {"type": "image_url", "image_url": {"url": file_data_url}}
+                )
+            elif role == "user":
                 is_audio = (attach.content_type and attach.content_type.startswith('audio/')) or is_voice_message(attach)
 
-                if is_image:
-                    file_data_url = await attachment_converter(attach)
-                    file_payloads.append(
-                        {"type": "image_url", "image_url": {"url": file_data_url}}
-                    )
-                elif is_audio:
+                if is_audio:
                     # Audio goes in as a transcript.
                     transcript = await transcriber(attach)
                     duration_str = f" ({attach.duration}s)" if getattr(attach, "duration", None) else ""
