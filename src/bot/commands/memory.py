@@ -3,7 +3,6 @@ Memory Commands - /memory (view and edit your own memory), /fillmemory (rebuild 
 last week) and /botstate (see the bot's own mood, emotion, emoji, interests and wonderings).
 """
 
-import io
 import logging
 import re
 from typing import Any, Dict, Optional
@@ -92,10 +91,12 @@ class MemoryCommands:
         *,
         memory_service: MemoryService,
         memory_store,
+        paste_service,
     ):
         self.bot = bot
         self._memory_service = memory_service
         self._store = memory_store
+        self._paste_service = paste_service
 
     def setup_commands(self) -> None:
         self.bot.tree.add_command(self._create_memory_group())
@@ -170,18 +171,14 @@ class MemoryCommands:
         await interaction.followup.send(embed=embed, ephemeral=True, allowed_mentions=NO_PINGS)
 
     async def _send_memory(self, interaction: discord.Interaction, text: str, *, updated: bool = False) -> None:
-        """Privately send a memory reply, as a .md attachment when it's too long for one Discord message.
-
-        Kept in Discord rather than on a pastebin, since the reply is meant to be private.
-        """
-        prefix = "Updated 👍 " if updated else ""
+        """Privately send a memory reply, as a paste.jobe.wtf link when it's too long for one Discord message."""
         if len(text) <= DISCORD_MESSAGE_LIMIT:
             await interaction.followup.send(text, ephemeral=True, allowed_mentions=NO_PINGS)
             return
-        file = discord.File(io.BytesIO(text.encode("utf-8")), filename="memory.md")
+        prefix = "Updated 👍 " if updated else ""
+        url = await self._paste_service.upload_markdown(text)
         await interaction.followup.send(
-            f"{prefix}It's too long for one Discord message, so here it is as a file.",
-            file=file,
+            f"{prefix}It's too long for one Discord message, so I've uploaded it to: {url}",
             ephemeral=True,
             allowed_mentions=NO_PINGS,
         )

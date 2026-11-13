@@ -385,7 +385,10 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
 
 class TestSendMemory(unittest.IsolatedAsyncioTestCase):
     def make(self):
-        commands = MemoryCommands(MagicMock(), memory_service=MagicMock(), memory_store=MagicMock())
+        paste_service = SimpleNamespace(upload_markdown=AsyncMock(return_value="https://paste.jobe.wtf/mem.md"))
+        commands = MemoryCommands(
+            MagicMock(), memory_service=MagicMock(), memory_store=MagicMock(), paste_service=paste_service
+        )
         interaction = SimpleNamespace(followup=SimpleNamespace(send=AsyncMock()))
         return commands, interaction
 
@@ -396,14 +399,16 @@ class TestSendMemory(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
         self.assertNotIn("file", interaction.followup.send.await_args.kwargs)
 
-    async def test_long_reply_is_attached_as_a_file(self):
+    async def test_long_reply_is_sent_as_a_paste_link(self):
         commands, interaction = self.make()
         await commands._send_memory(interaction, "x" * 2500, updated=True)
         kwargs = interaction.followup.send.await_args.kwargs
-        self.assertTrue(interaction.followup.send.await_args.args[0].startswith("Updated"))
+        message = interaction.followup.send.await_args.args[0]
+        self.assertTrue(message.startswith("Updated"))
+        self.assertIn("https://paste.jobe.wtf/mem.md", message)
         self.assertTrue(kwargs["ephemeral"])
-        self.assertEqual(kwargs["file"].filename, "memory.md")
-        self.assertEqual(kwargs["file"].fp.read(), b"x" * 2500)
+        self.assertNotIn("file", kwargs)
+        commands._paste_service.upload_markdown.assert_awaited_once_with("x" * 2500)
 
 
 class TestBotStateEmbed(unittest.TestCase):
