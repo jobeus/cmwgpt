@@ -1,8 +1,8 @@
 """
 Reminder Service - Reminders the bot sets when asked, posted in their channel when due.
 
-The direct models set them with the ``remind`` tool, for the asker or anyone else in the
-server. Each is posted in the channel it was set in, pinging the people it's for, as a
+The direct models set them with the ``remind`` tool, for the asker, anyone else in the
+server, or the whole channel (``@here`` or ``@channel``). Each is posted in the channel it was set in, pinging the people it's for, as a
 reply to the message that asked for it. They're checked every ``POLL_SECONDS``, so one
 fires within a minute of its time, and there's no limit on how far ahead one can be.
 
@@ -16,6 +16,7 @@ Redis keys:
   (Unix seconds)
 - ``cmwgpt:reminder:<id>`` - hash with the reminder: ``guild_id``, ``channel_id``,
   ``message_id`` (the message that asked), ``user_ids`` (comma-separated), ``set_by``,
+  ``audience`` (``here`` or ``channel`` when it pings the whole channel, else empty),
   ``text``, ``due_at``, ``tz`` (the zone its time was given in, for showing it),
   ``task`` (what the bot should do when it fires, or empty) and ``pinged`` (set once
   a reminder with a task has been posted, until the task is handed over)
@@ -57,6 +58,10 @@ SHOWN_FORMAT = "%a %Y-%m-%d %I:%M %p %Z"
 
 _DUE_KEY = f"{KEY_PREFIX}reminders:due"
 _NEXT_ID_KEY = f"{KEY_PREFIX}reminders:next_id"
+
+# Whole-channel reminders: what the tool calls the audience, and the ping Discord takes for it.
+# Discord has no @channel; @everyone in a channel reaches everyone who can see it.
+AUDIENCE_PINGS = {"here": "@here", "channel": "@everyone"}
 
 _UNIT_SECONDS = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
 # A unit ends at anything but a letter, so "2h30m" splits into 2h and 30m.
@@ -114,6 +119,8 @@ class Reminder:
     task: str = ""
     # The ping is out and only the task is still owed (set when a restart got between them).
     pinged: bool = False
+    # "here" or "channel" when it pings the whole channel as well as ``user_ids``.
+    audience: str = ""
 
     @property
     def zone(self) -> Optional[ZoneInfo]:
@@ -127,7 +134,8 @@ class Reminder:
 
         The Unix time is there so the model can write the time as a Discord ``<t:...>`` timestamp.
         """
-        people = ", ".join(f"<@{uid}>" for uid in self.user_ids)
+        people = ", ".join(
+            ([f"@{self.audience}"] if self.audience else []) + [f"<@{uid}>" for uid in self.user_ids])
         when = f"{format_when(self.due_at, self.zone)} (Unix {int(self.due_at.timestamp())})"
         line = f"#{self.id} {when} for {people} (set by <@{self.set_by}>): {self.text}"
         return f"{line} (then you: {self.task})" if self.task else line
@@ -147,6 +155,7 @@ def _from_hash(reminder_id: int, fields: Dict[str, str]) -> Optional[Reminder]:
             tz=fields.get("tz", ""),
             task=fields.get("task", ""),
             pinged=fields.get("pinged") == "1",
+            audience=fields.get("audience", ""),
         )
     except (KeyError, ValueError):
         logger.warning("Skipping malformed reminder %s: %s", reminder_id, fields)
@@ -161,12 +170,13 @@ class ReminderStore:
 
     async def add(
         self, *, guild_id: int, channel_id: int, message_id: Optional[int], user_ids: Sequence[int],
-        set_by: int, text: str, due_at: datetime, tz: str = "", task: str = "",
+        set_by: int, text: str, due_at: datetime, tz: str = "", task: str = "", audience: str = "",
     ) -> Reminder:
         client = self._redis_getter()
         reminder_id = int(await client.incr(_NEXT_ID_KEY))
         reminder = Reminder(
-            reminder_id, guild_id, channel_id, message_id, list(user_ids), set_by, text, due_at, tz, task)
+            reminder_id, guild_id, channel_id, message_id, list(user_ids), set_by, text, due_at, tz, task,
+            audience=audience)
         await client.hset(_reminder_key(reminder_id), mapping={
             "guild_id": str(guild_id),
             "channel_id": str(channel_id),
@@ -177,6 +187,7 @@ class ReminderStore:
             "due_at": str(due_at.timestamp()),
             "tz": tz,
             "task": task,
+            "audience": audience,
         })
         await client.zadd(_DUE_KEY, {str(reminder_id): due_at.timestamp()})
         return reminder
@@ -227,7 +238,9 @@ class ReminderStore:
 
 def reminder_message(reminder: Reminder, now: datetime) -> str:
     """What the bot posts when a reminder is due."""
-    people = " ".join(f"<@{uid}>" for uid in reminder.user_ids)
+    people = " ".join(
+        ([AUDIENCE_PINGS[reminder.audience]] if reminder.audience in AUDIENCE_PINGS else [])
+        + [f"<@{uid}>" for uid in reminder.user_ids])
     lines = [f"⏰ {people} {reminder.text}".strip()]
     notes = []
     if reminder.set_by not in reminder.user_ids:
@@ -296,8 +309,12 @@ class ReminderService:
     async def add(
         self, *, guild_id: int, channel_id: int, message_id: Optional[int], user_ids: Sequence[int],
         set_by: int, text: str, when: str, zone: Optional[ZoneInfo] = None, task: str = "",
+        audience: str = "",
     ) -> Reminder:
         """Set a reminder. ``zone`` is what an absolute ``when`` is in (default: the chat's).
+
+        ``audience`` is ``here`` or ``channel`` to ping the whole channel; ``user_ids`` may
+        then be empty.
 
         ``task`` is what the bot should do when it fires; it needs ``message_id``, since
         that message is answered again then. Raises ``ValueError`` with a reason the model
@@ -309,13 +326,15 @@ class ReminderService:
             raise ValueError("Say what the reminder is about.")
         if len(text) > MAX_REMINDER_CHARS or len(task) > MAX_REMINDER_CHARS:
             raise ValueError(f"Keep the reminder and its task under {MAX_REMINDER_CHARS} characters each.")
+        if audience and audience not in AUDIENCE_PINGS:
+            raise ValueError("`audience` is 'here', 'channel' or empty.")
         if task and not message_id:
             raise ValueError("A reminder with a task has to be set from a message.")
         due_at = parse_when(when, self._now(), zone)
         reminder = await self._store.add(
             guild_id=guild_id, channel_id=channel_id, message_id=message_id,
-            user_ids=list(dict.fromkeys(user_ids or [set_by])), set_by=set_by, text=text, due_at=due_at,
-            tz=zone.key if zone else "", task=task,
+            user_ids=list(dict.fromkeys(user_ids or ([] if audience else [set_by]))), set_by=set_by,
+            text=text, due_at=due_at, tz=zone.key if zone else "", task=task, audience=audience,
         )
         logger.info("[reminder] Set %s", reminder.describe())
         return reminder
@@ -367,9 +386,9 @@ class ReminderService:
                 await self._store.remove(reminder.id)
             return False
         content = reminder_message(reminder, now)
-        # Ping only the people it's for, not whoever set it.
+        # Ping only the people it's for (or the whole channel, if it's for that), not whoever set it.
         mentions = discord.AllowedMentions(
-            everyone=False, roles=False, users=[discord.Object(id=uid) for uid in reminder.user_ids])
+            everyone=reminder.audience in AUDIENCE_PINGS, roles=False, users=[discord.Object(id=uid) for uid in reminder.user_ids])
         reference = None
         if reminder.message_id:
             reference = discord.MessageReference(

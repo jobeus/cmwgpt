@@ -123,6 +123,34 @@ class TestReminderService(unittest.IsolatedAsyncioTestCase):
         reminder = await self.add(user_ids=[], set_by=7)
         self.assertEqual(reminder.user_ids, [7])
 
+    async def test_here_and_channel_ping_the_whole_channel(self):
+        bot, channel = _bot_with_channel()
+        self.service.set_bot(bot)
+        here = await self.add(user_ids=[], set_by=7, audience="here")
+        await self.add(user_ids=[2], set_by=7, audience="channel")
+        self.assertEqual(here.user_ids, [])
+        self.assertIn("for @here (set by <@7>)", here.describe())
+
+        self.now[0] = NOW + timedelta(minutes=30)
+        self.assertEqual(await self.service.deliver_due(), 2)
+
+        first, second = channel.send.await_args_list
+        self.assertTrue(first.args[0].startswith("⏰ @here check the Tacoma listing"))
+        self.assertIn("set by <@7>", first.args[0])
+        self.assertTrue(first.kwargs["allowed_mentions"].everyone)
+        self.assertTrue(second.args[0].startswith("⏰ @everyone <@2> check the Tacoma listing"))
+        self.assertTrue(second.kwargs["allowed_mentions"].everyone)
+
+    async def test_a_plain_reminder_cannot_ping_everyone(self):
+        bot, channel = _bot_with_channel()
+        self.service.set_bot(bot)
+        await self.add(text="@everyone wake up")
+        self.now[0] = NOW + timedelta(minutes=30)
+        await self.service.deliver_due()
+        self.assertFalse(channel.send.await_args.kwargs["allowed_mentions"].everyone)
+        with self.assertRaises(ValueError):
+            await self.add(audience="server")
+
     async def test_a_late_reminder_says_when_it_was_meant_for(self):
         reminder = await self.add(when="2026-10-30 20:00", zone=DENVER)
         late = reminder_message(reminder, reminder.due_at + timedelta(minutes=10))
@@ -296,6 +324,12 @@ class TestReminderTools(unittest.IsolatedAsyncioTestCase):
         [reminder] = await self.reminders.pending(20)
         self.assertEqual(reminder.user_ids, [222222222])
         self.assertEqual(reminder.due_at, datetime(2026, 10, 31, 0, 0, tzinfo=UTC))
+
+    async def test_remind_takes_an_audience(self):
+        await self.tools["remind"].run({
+            "when": "in 1 hour", "about": "standup", "user_ids": [], "audience": "@Here", "timezone": ""})
+        [reminder] = await self.reminders.pending(20)
+        self.assertEqual((reminder.audience, reminder.user_ids), ("here", []))
 
     async def test_remind_saves_the_task(self):
         await self.tools["remind"].run({
