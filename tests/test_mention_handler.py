@@ -723,6 +723,31 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIn("(UTC-0700)", now_blocks[0])
         self.assertIn("<t:UNIX:STYLE>", system_prompt)
 
+    async def test_owner_note_rides_on_mentions_from_that_person_only(self):
+        handler, _, _, _, _ = self.make_handler()
+        channel = MagicMock()
+        channel.id = 48
+        channel.name = "notes"
+        mention = self._simple_msg(62, channel, content="<@999> hi")
+        mention.mentions = []
+        mention.author.bot = False
+
+        async def history(limit=None, after=None):
+            yield mention
+
+        channel.history = history
+        notes = {mention.author.id: "be short with him"}
+        with patch("src.bot.handlers.mention.get_owner_note", side_effect=lambda uid: notes.get(uid, "")):
+            context, system_prompt = await handler._prepare_mention_context(mention, SimpleNamespace(id=999))
+            last = context[-1]["content"][-1]["text"]
+            self.assertTrue(last.startswith("<owner_note>"))
+            self.assertIn("be short with him", last)
+            self.assertNotIn("be short with him", system_prompt)
+
+            notes.clear()
+            context, _ = await handler._prepare_mention_context(mention, SimpleNamespace(id=999))
+            self.assertFalse(any("<owner_note>" in p.get("text", "") for p in context[-1]["content"]))
+
     async def test_saved_time_zones_ride_on_the_mention(self):
         handler, _, _, _, _ = self.make_handler()
         handler._timezone_store = MagicMock()

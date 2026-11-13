@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -182,3 +183,24 @@ def get_config() -> AppConfig:
     if _cached_config is None:
         _cached_config = load_config()
     return _cached_config
+
+
+def get_owner_note(user_id: int, notes_path: str = "owner_notes.json") -> str:
+    """The owner's private note for mentions from ``user_id``, or "" when there is none.
+
+    ``owner_notes.json`` sits beside ``system_prompt.txt`` (untracked, like it) and maps a
+    Discord user ID to text. It is read on every mention, so edits apply without a restart.
+    """
+    try:
+        with open(notes_path, "r", encoding="utf-8") as f:
+            notes = json.load(f)
+    except FileNotFoundError:
+        return ""
+    except (OSError, ValueError) as e:
+        logger.warning("Couldn't read '%s': %s", notes_path, e)
+        return ""
+    if not isinstance(notes, dict):
+        logger.warning("'%s' should be a JSON object of user ID to note text; ignoring it.", notes_path)
+        return ""
+    note = notes.get(str(user_id))
+    return note.strip() if isinstance(note, str) else ""

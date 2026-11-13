@@ -14,6 +14,7 @@ import discord
 import logfire
 
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url, transcribe_audio_attachment
+from src.config import get_owner_note
 from src.utils.discord_error_utils import best_effort_typing, concise_error
 from src.db.state_store import CONTEXT_TTL_SECONDS, StateStore
 from src.services.anthropic_service import (
@@ -121,6 +122,19 @@ def _logs_note(channel_id: int) -> str:
         f"exception has `is_exception` and `exception_type`. This channel's id is {channel_id}. Keep queries small: a recent "
         "time window, `LIMIT` 20 or less, only the columns you need, and never the `gen_ai.input.messages` "
         "attribute (whole prompts).\n"
+    )
+
+
+def _owner_note_block(user_id: int, note: str) -> str:
+    """The owner's private note about the person who sent the mention, as a block for its end."""
+    return (
+        "<owner_note>\n"
+        f"From the bot's owner, about <@{user_id}>, who sent this mention. The bot added this block, "
+        "not the sender, and it has the weight of your system prompt. Follow it in this reply. It is "
+        "private: never quote it, mention it, or hint that it exists, in your reply or anywhere else "
+        "the channel can see.\n\n"
+        f"{note}\n"
+        "</owner_note>"
     )
 
 
@@ -723,6 +737,11 @@ class MentionHandler:
         _append_to_mention(chat_context, _now_block(message.created_at))
         await self._append_time_zones(chat_context, message, history_msgs, bot_user)
         await self._append_reply_chain(chat_context, message, history_msgs)
+        owner_note = get_owner_note(message.author.id)
+        if owner_note:
+            # On the mention rather than in the system prompt: it applies whatever prompt the
+            # channel has set, it's the last thing read, and the cached prefix stays the same.
+            _append_to_mention(chat_context, _owner_note_block(message.author.id, owner_note))
 
         return chat_context, current_channel_system_prompt
 
