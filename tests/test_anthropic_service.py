@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import anthropic
 import httpx
 
+from src.services import anthropic_service
 from src.services.anthropic_service import (
     ADVISOR_BETA,
     ADVISOR_STATUS,
@@ -381,9 +382,15 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
             model="sonnet-5.5-direct", messages=_history(3), channel_id=7)
         self.assertEqual(service._history_breakpoints, {7: 1})
 
+        self.assertEqual(service.history_tokens(7), anthropic_service._prompt_tokens(_usage()))
+        self.assertEqual(anthropic_service.history_token_budget("sonnet-5.5-direct"), 150_000)
+        self.assertEqual(anthropic_service.history_token_budget("haiku-5.5-direct"), 80_000)
+        self.assertGreater(service.history_tokens(7), 0)
+
         service.clear_channel_cache(7)
         service.clear_channel_cache(999)  # unknown channel is a no-op
         self.assertEqual(service._history_breakpoints, {})
+        self.assertEqual(service.history_tokens(7), 0)
 
         await service.get_chat_completion(
             model="sonnet-5.5-direct", messages=_history(30), channel_id=7)

@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 
 from src.services.anthropic_service import AnthropicServiceError
-from src.bot.handlers.mention import MAX_HISTORY_WINDOW, MentionHandler
+from src.bot.handlers.mention import MAX_HISTORY_WINDOW, RESET_HISTORY_MESSAGES, MentionHandler
 from src.services.cost_service import CLAUDE_DIRECT, record_cost
 
 
@@ -1066,3 +1066,47 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         gemini_service.clear_channel_cache.assert_called_once_with(78)
         anthropic_service.clear_channel_cache.assert_called_once_with(78)
         self.assertIs(handler._history_cache[78]["oldest_message"], mention_msg)
+
+    async def _mention_in_a_window(self, prompt_tokens, model):
+        """A mention in a small, still-warm window whose last Claude reply began with ``prompt_tokens``."""
+        anthropic_service = MagicMock()
+        anthropic_service.history_tokens.return_value = prompt_tokens
+        handler, _, _, _, _ = self.make_handler(anthropic_service=anthropic_service)
+        channel = MagicMock()
+        channel.id = 79
+        channel.name = "wordy"
+        oldest = self._simple_msg(1, channel)
+        mention_msg = self._simple_msg(3, channel)
+        limits = []
+
+        async def history(limit=None, after=None, **_kwargs):
+            limits.append((limit, after))
+            for msg in ([self._simple_msg(2, channel), mention_msg] if after is not None else [mention_msg]):
+                yield msg
+
+        channel.history = history
+        handler._history_cache[79] = {"timestamp": 1000, "oldest_message": oldest}
+        with patch("src.bot.handlers.mention.time", MagicMock(time=MagicMock(return_value=1001))), \
+                patch.object(handler, "_tools_addon", MagicMock(return_value="")):
+            context, _ = await handler._prepare_mention_context(mention_msg, SimpleNamespace(id=999), model=model)
+        return handler, anthropic_service, limits, str(context[-1]["content"]), oldest
+
+    async def test_a_window_over_the_token_budget_starts_over_and_tells_the_model(self):
+        handler, anthropic_service, limits, mention_text, _ = await self._mention_in_a_window(
+            150_000, "sonnet-5.5-direct")
+        anthropic_service.clear_channel_cache.assert_called_once_with(79)
+        self.assertIn((RESET_HISTORY_MESSAGES, None), limits)
+        self.assertIn("<context_reset>", mention_text)
+        self.assertIn(f"last {RESET_HISTORY_MESSAGES} messages", mention_text)
+
+    async def test_a_window_under_the_token_budget_keeps_growing(self):
+        handler, anthropic_service, _, mention_text, oldest = await self._mention_in_a_window(
+            90_000, "sonnet-5.5-direct")
+        anthropic_service.clear_channel_cache.assert_not_called()
+        self.assertNotIn("<context_reset>", mention_text)
+        self.assertIs(handler._history_cache[79]["oldest_message"], oldest)
+
+    async def test_haiku_starts_over_before_its_long_prompt_surcharge(self):
+        _, anthropic_service, _, mention_text, _ = await self._mention_in_a_window(90_000, "haiku-5.5-direct")
+        anthropic_service.clear_channel_cache.assert_called_once_with(79)
+        self.assertIn("<context_reset>", mention_text)

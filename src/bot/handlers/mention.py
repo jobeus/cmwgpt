@@ -18,7 +18,8 @@ from src.config import get_owner_note
 from src.utils.discord_error_utils import best_effort_typing, concise_error
 from src.db.state_store import CONTEXT_TTL_SECONDS, StateStore
 from src.services.anthropic_service import (
-    REPLY_MAX_TOKENS, ADVISOR_MODELS, THINKING_STATUS, AnthropicServiceError, is_direct_anthropic_model,
+    REPLY_MAX_TOKENS, ADVISOR_MODELS, THINKING_STATUS, AnthropicServiceError, history_token_budget,
+    is_direct_anthropic_model,
 )
 from src.services.chat_tools import ChatTool, build_mention_tools
 from src.services.gemini_service import GeminiServiceError, is_gemini_model
@@ -49,9 +50,14 @@ IRC_ROSTER_SIZE = 60
 MAX_LISTED_EMOJI = 80
 
 # How many messages a channel's growing history window may hold, counted from its first
-# message however recently the bot was used, before it resets to the last
-# INCLUDE_NUM_CHATLINES messages. The window can't slide: that would break the cached prompt.
-MAX_HISTORY_WINDOW = 200
+# message however recently the bot was used, before it starts over. The window can't slide:
+# that would break the cached prompt, and starting over rewrites the whole cache, so it's
+# kept rare. On the Claude API models the window also starts over once the prompt nears the
+# model's token budget (``history_token_budget``), which usually comes first.
+MAX_HISTORY_WINDOW = 1000
+# How many of the newest messages a window that got too big starts over with. More than an
+# idle channel's INCLUDE_NUM_CHATLINES, since the conversation it cuts off is still going.
+RESET_HISTORY_MESSAGES = 25
 
 # How many earlier messages of a reply thread from before the history window a mention
 # gets, and how much of each.
@@ -145,6 +151,16 @@ def _append_to_mention(chat_context: List[Dict[str, Any]], text: str) -> None:
             entry["content"].append({"type": "text", "text": text})
             return
     chat_context.append({"role": "user", "content": [{"type": "text", "text": text}]})
+
+
+def _context_reset_block(kept: int) -> str:
+    """Tells the model its history was just cut down, on the mention where that happened."""
+    return (
+        "<context_reset>\n"
+        f"The chat history you were being sent had grown too large, so it was just cut down to the last "
+        f"{kept} messages. Earlier messages of this conversation are no longer in front of you; if you "
+        "need one, look it up or ask.\n</context_reset>"
+    )
 
 
 def _now_block(sent: datetime) -> str:
@@ -284,6 +300,11 @@ class MentionHandler:
     def _uses_tools(self, model: Optional[str]) -> bool:
         """Whether ``model`` gets client tools: memory, how_i_work and drawing are then looked up on demand."""
         return model is not None and is_direct_anthropic_model(model) and self._anthropic_service is not None
+
+    def _history_tokens(self, channel_id: int) -> int:
+        """How many prompt tokens the channel's last Claude API reply started with (0 when unknown)."""
+        tokens = self._anthropic_service.history_tokens(channel_id) if self._anthropic_service else 0
+        return tokens if isinstance(tokens, int) else 0
 
     def _build_tools(self, message: discord.Message) -> List[ChatTool]:
         return build_mention_tools(
@@ -567,19 +588,20 @@ class MentionHandler:
         channel_id = message.channel.id
         cache_entry = self._history_cache.get(channel_id)
 
-        async def start_fresh_window() -> List[discord.Message]:
+        async def start_fresh_window(limit: int = self._include_num_chatlines) -> List[discord.Message]:
             """The newest messages as a new window. The providers' per-channel continuation
             state no longer matches what's about to be sent, so it's dropped."""
             for service in (self._gemini_service, self._anthropic_service):
                 if service:
                     service.clear_channel_cache(channel_id)
-            fresh = [msg async for msg in message.channel.history(limit=self._include_num_chatlines)]
+            fresh = [msg async for msg in message.channel.history(limit=limit)]
             fresh.reverse()
             if fresh:
                 self._store_history_cache(channel_id, current_time, fresh[0])
             return fresh
 
         oldest_message = None
+        context_reset = False
         if cache_entry and (current_time - cache_entry["timestamp"]) <= HISTORY_WINDOW_SECONDS:
             oldest_message = await self._window_start(message.channel, cache_entry)
 
@@ -588,15 +610,20 @@ class MentionHandler:
             async for msg in message.channel.history(limit=MAX_HISTORY_WINDOW, after=oldest_message):
                 history_msgs.append(msg)
 
-            if len(history_msgs) >= MAX_HISTORY_WINDOW:
-                # The window is full. To save cost and avoid giant context windows, we abandon
-                # it and start a fresh context from the most recent messages.
+            prompt_tokens = self._history_tokens(channel_id) if self._uses_tools(model) else 0
+            too_long = len(history_msgs) >= MAX_HISTORY_WINDOW
+            if too_long or (model and prompt_tokens >= history_token_budget(model)):
+                # The window is full, or the prompt is nearing what the model takes. It can't
+                # slide, so it starts over from the most recent messages.
                 age_hours = (current_time - discord.utils.snowflake_time(oldest_message.id).timestamp()) / 3600
                 logger.info(
-                    "History window of #%s reached %s messages (started %.1fh ago). Resetting context.",
-                    message.channel.name, MAX_HISTORY_WINDOW, age_hours,
+                    "History window of #%s reached %s (started %.1fh ago). Resetting context.",
+                    message.channel.name,
+                    f"{MAX_HISTORY_WINDOW} messages" if too_long else f"{prompt_tokens} prompt tokens",
+                    age_hours,
                 )
-                history_msgs = await start_fresh_window()
+                history_msgs = await start_fresh_window(RESET_HISTORY_MESSAGES)
+                context_reset = True
             else:
                 self._history_cache[channel_id]["timestamp"] = current_time
                 self._save_history_window(channel_id)
@@ -737,6 +764,8 @@ class MentionHandler:
         if not uses_tools:
             await self._append_user_notes(chat_context, message, history_msgs, bot_user)
         await self._append_self_state(chat_context, message)
+        if context_reset:
+            _append_to_mention(chat_context, _context_reset_block(RESET_HISTORY_MESSAGES))
         _append_to_mention(chat_context, _now_block(message.created_at))
         await self._append_time_zones(chat_context, message, history_msgs, bot_user)
         await self._append_reply_chain(chat_context, message, history_msgs)

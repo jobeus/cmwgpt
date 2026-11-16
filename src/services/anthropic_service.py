@@ -66,6 +66,26 @@ _MODELS_BY_API_ID: Dict[str, DirectModel] = {m.api_id: m for m in DIRECT_MODELS.
 
 PRICE_WEB_SEARCH = 0.01
 
+# How big a channel's prompt (system prompt, tools and history, cached or not) may get before the
+# mention handler starts its history window over. Well under the models' context windows, since
+# tool results and the reply are added on top of it within one reply.
+HISTORY_TOKEN_BUDGET = 150_000
+
+
+def history_token_budget(model: str) -> int:
+    """The prompt size at which ``model``'s history window should start over. A model that
+    bills long prompts at a higher rate gets a budget safely under that threshold."""
+    direct_model = DIRECT_MODELS.get(model)
+    if direct_model is not None and direct_model.long_prompt_tokens:
+        return min(HISTORY_TOKEN_BUDGET, int(direct_model.long_prompt_tokens * 0.8))
+    return HISTORY_TOKEN_BUDGET
+
+
+def _prompt_tokens(usage: Any) -> int:
+    """Every input token of a request, cached or not."""
+    return sum(getattr(usage, name, 0) or 0
+               for name in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+
 MAX_TOKENS = 16000
 # Output cap per request for a chat reply in Discord, thinking included. Replies aim at Discord's
 # 2000 characters and rarely pass 1,100 tokens, so this leaves room for a long one while a
@@ -472,6 +492,8 @@ class AnthropicService:
         self._history_breakpoints: Dict[int, int] = {}
         # channel_id -> id of the previous response, for cache diagnostics
         self._last_message_ids: Dict[int, str] = {}
+        # channel_id -> prompt tokens of the previous reply's first request: how big the history has got
+        self._prompt_tokens: Dict[int, int] = {}
         self._context_store = context_store or StateStore(None)
         self._restore_context()
 
@@ -484,6 +506,8 @@ class AnthropicService:
                     self._history_breakpoints[channel_id] = saved["breakpoint"]
                 if saved.get("message_id"):
                     self._last_message_ids[channel_id] = str(saved["message_id"])
+                if isinstance(saved.get("prompt_tokens"), int):
+                    self._prompt_tokens[channel_id] = saved["prompt_tokens"]
             except (AttributeError, ValueError):
                 logger.warning("Ignoring unreadable cache state for channel %s: %s", channel, saved)
         if self._history_breakpoints or self._last_message_ids:
@@ -522,7 +546,12 @@ class AnthropicService:
         """
         self._history_breakpoints.pop(channel_id, None)
         self._last_message_ids.pop(channel_id, None)
+        self._prompt_tokens.pop(channel_id, None)
         self._context_store.delete_field(CONTEXT_KEY, channel_id)
+
+    def history_tokens(self, channel_id: int) -> int:
+        """How many prompt tokens the channel's previous reply started with (0 when unknown)."""
+        return self._prompt_tokens.get(channel_id, 0)
 
     async def close(self) -> None:
         """Close the Anthropic client and clean up resources."""
@@ -775,6 +804,7 @@ class AnthropicService:
         strict_dropped = False
         markup_retries = 0
         tool_rounds = 0
+        first_prompt_tokens: Optional[int] = None
         try:
             while True:
                 status(THINKING_STATUS)
@@ -783,6 +813,9 @@ class AnthropicService:
                         client, api_messages, kwargs, direct_model, channel_id, previous_message_id,
                         resolved_bot_id, show if on_text else None, status, tool_statuses, code_file_ids,
                     )
+                    if first_prompt_tokens is None:
+                        # Before any tool results were added: the size the next mention starts from.
+                        first_prompt_tokens = _prompt_tokens(getattr(response, "usage", None))
                 except _ToolMarkupError as e:
                     total_cost += e.cost
                     note_stat("tool_markup", 1)
@@ -856,10 +889,13 @@ class AnthropicService:
             self._history_breakpoints[channel_id] = history_index
         if channel_id and previous_message_id:
             self._last_message_ids[channel_id] = previous_message_id
+        if channel_id and first_prompt_tokens:
+            self._prompt_tokens[channel_id] = first_prompt_tokens
         if channel_id and (history_index is not None or previous_message_id):
             self._context_store.set_field(CONTEXT_KEY, channel_id, {
                 "breakpoint": self._history_breakpoints.get(channel_id),
                 "message_id": self._last_message_ids.get(channel_id),
+                "prompt_tokens": self._prompt_tokens.get(channel_id),
             }, ttl_seconds=CONTEXT_TTL_SECONDS)
 
         if response.stop_reason == "refusal":
