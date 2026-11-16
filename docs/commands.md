@@ -33,7 +33,6 @@ The bot's main chat experience is **mention-based**:
 | `/memory correct` | Privately has the memory model fix or add to your memory | persisted per user, per server |
 | `/memory clear` | Privately forgets everything about you | persisted per user, per server |
 | `/fillmemory` | Rebuilds everyone's learned memory from the last 7 days (admin only) | rewrites every memory key |
-| `/botstate` | Privately shows the bot's own mood, emotion, emoji, interests and wonderings | reads `cmwgpt:self:<guild>` in Redis |
 | `/wikicount` | Looks up a Wikipedia article's average monthly pageviews | runtime action |
 | `/resetmarketgame` | Wipes the paper-trading game: cancels every order and sells every position at Alpaca, forgets every player (admin only, needs `confirm:True`; only registered when Alpaca keys are set) | clears `cmwgpt:paper:*` in Redis |
 | `/cost` | Shows what the bot has spent today, in the last 7 days and this month, by provider | reads `cmwgpt:costs:<day>` in Redis |
@@ -72,13 +71,6 @@ there is no history of earlier versions.
 Requires the same administrator permission as `/restart`. It wipes every learned profile
 in the server and rebuilds them from the last 7 days, posting progress after each day. The
 nightly job then picks up from where the fill ended.
-
-### `/botstate`
-
-Anyone can use it; the reply is visible only to them. Shows the bot's own state in this
-server as an embed: its mood, emotion (one or two words), feels emoji, interests and what it's wondering about (each with the date
-it last changed). It only reads; nothing changes. The bot itself changes its state while
-chatting, with the `update_self` tool, and fills in any part that's missing.
 
 ## Model and prompt commands
 
@@ -174,7 +166,7 @@ Most command-driven settings are persisted through `StateService`, which means m
 | `src/bot/commands/system.py` | `/help`, `/model`, `/lobotomize`, `/systemprompt`, `/restart` |
 | `src/bot/commands/image.py` | `/draw`, `/edit`, `/imagemodel` |
 | `src/bot/commands/death.py` | `/death ...`, `/forcedeath`, `/limerick` |
-| `src/bot/commands/memory.py` | `/memory ...`, `/fillmemory`, `/botstate` |
+| `src/bot/commands/memory.py` | `/memory ...`, `/fillmemory` |
 | `src/bot/commands/wikicount.py` | `/wikicount` |
 | `src/bot/commands/cost.py` | `/cost` |
 | `src/bot/commands/market.py` | `/resetmarketgame` |

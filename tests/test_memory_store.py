@@ -77,17 +77,6 @@ class TestMemoryStore(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(stored.encode("utf-8")), MAX_PROFILE_BYTES)
         self.assertTrue(stored.startswith("éé"))
 
-    async def test_self_state_stamps_aspects_and_removes_empty_ones(self):
-        await self.store.save_self_state(42, {"mood": "chipper", "interests": "trucks"})
-        await self.store.save_self_state(42, {"interests": ""})
-
-        state = await self.store.get_self_state(42)
-        self.assertEqual(state["mood"], "chipper")
-        self.assertIn("mood_updated", state)
-        self.assertNotIn("interests", state)
-        self.assertNotIn("interests_updated", state)
-        self.assertEqual(await self.store.get_self_state(43), {})
-
     def test_cap_profile_never_splits_a_character(self):
         capped = cap_profile("a" + "€" * MAX_PROFILE_BYTES)
         capped.encode("utf-8")  # valid UTF-8

@@ -1,18 +1,15 @@
 """
-Memory Commands - /memory (view and edit your own memory), /fillmemory (rebuild from the
-last week) and /botstate (see the bot's own mood, emotion, emoji, interests and wonderings).
+Memory Commands - /memory (view and edit your own memory) and /fillmemory (rebuild from the
+last week).
 """
 
 import logging
-import re
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import discord
 from discord import app_commands
 
-from src.services.memory_service import (
-    FILL_DAYS, SELF_ASPECTS, MemoryService,
-)
+from src.services.memory_service import FILL_DAYS, MemoryService
 from src.utils.async_utils import safe_run
 from src.utils.discord_error_utils import safe_defer
 from src.utils.message_utils import DISCORD_MESSAGE_LIMIT, NO_PINGS
@@ -27,41 +24,6 @@ def format_memory(user_id: int, profile: str) -> str:
     if not profile:
         return f"I don't remember anything about <@{user_id}> yet."
     return f"**What I remember about <@{user_id}>**\n\n{profile}"
-
-
-
-# Discord's limit on one embed field's value.
-EMBED_FIELD_LIMIT = 1024
-SELF_ASPECT_EMOJI = {"mood": "🌤️", "emotion": "💭", "emoji": "🫥", "interests": "✨", "wondering": "🤔"}
-# Aspects short enough to sit side by side in the embed.
-INLINE_SELF_ASPECTS = {"emotion", "emoji"}
-
-
-def _bullets(name: str, value: str) -> str:
-    """An aspect's text as a bullet list: interests split on semicolons, wonderings after each question."""
-    if name not in ("interests", "wondering"):
-        return value
-    parts = value.split(";") if name == "interests" else re.split(r"(?<=\?)\s+", value)
-    return "\n".join(f"• {part.strip()}" for part in parts if part.strip())
-
-
-def build_self_embed(guild_name: str, state: Dict[str, str]) -> discord.Embed:
-    """The /botstate reply: each aspect as its own section."""
-    embed = discord.Embed(title=f"🧠 My inner life in {guild_name}", color=discord.Color.blurple())
-    for name, (label, _limit) in SELF_ASPECTS.items():
-        value = state.get(name)
-        if not value:
-            continue
-        since = (state.get(f"{name}_updated") or "")[:10]
-        heading = f"{SELF_ASPECT_EMOJI.get(name, '•')} {label}" + (f" · since {since}" if since else "")
-        embed.add_field(
-            name=heading, value=_bullets(name, value)[:EMBED_FIELD_LIMIT], inline=name in INLINE_SELF_ASPECTS
-        )
-
-    if not embed.fields:
-        embed.description = "Nothing yet. I fill it in myself as conversations give me reason to."
-    embed.set_footer(text="Only I change it, while chatting.")
-    return embed
 
 
 async def resolve_target(
@@ -83,7 +45,7 @@ async def resolve_target(
 
 
 class MemoryCommands:
-    """Handles the /memory group, /fillmemory and /botstate."""
+    """Handles the /memory group and /fillmemory."""
 
     def __init__(
         self,
@@ -101,7 +63,6 @@ class MemoryCommands:
     def setup_commands(self) -> None:
         self.bot.tree.add_command(self._create_memory_group())
         self.bot.tree.add_command(self._create_fillmemory_command())
-        self.bot.tree.add_command(self._create_botstate_command())
 
     def _create_memory_group(self) -> app_commands.Group:
         group = app_commands.Group(name="memory", description="See or change what the bot remembers about you")
@@ -152,23 +113,6 @@ class MemoryCommands:
             await safe_run(interaction, self._handle_fill, interaction)
 
         return fillmemory_command
-
-    def _create_botstate_command(self) -> app_commands.Command:
-        @app_commands.command(
-            name="botstate",
-            description="Privately see the bot's own mood, emotion, emoji, interests and wonderings",
-        )
-        async def botstate_command(interaction: discord.Interaction):
-            if not await safe_defer(interaction, ephemeral=True, thinking=True):
-                return
-            await safe_run(interaction, self._handle_botstate, interaction)
-
-        return botstate_command
-
-    async def _handle_botstate(self, interaction: discord.Interaction) -> None:
-        state = await self._store.get_self_state(interaction.guild_id)
-        embed = build_self_embed(getattr(interaction.guild, "name", "this server"), state)
-        await interaction.followup.send(embed=embed, ephemeral=True, allowed_mentions=NO_PINGS)
 
     async def _send_memory(self, interaction: discord.Interaction, text: str, *, updated: bool = False) -> None:
         """Privately send a memory reply, as a paste.jobe.wtf link when it's too long for one Discord message."""

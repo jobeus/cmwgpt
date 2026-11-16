@@ -267,34 +267,6 @@ REMEMBER_TOOL = {
     "strict": True,
 }
 
-UPDATE_SELF_TOOL = {
-    "name": "update_self",
-    "description": (
-        "Change your own mood, emotion, emoji, interests or what you're wondering about in this server (the "
-        "<about_you> block on the mention). It replaces that part whole, so write the full new version, and "
-        "keep it short: mood is one short sentence (at most 200 characters); emotion is one or two words; "
-        "emoji is a single emoji for how you feel; interests are up to 5 short phrases "
-        "separated by semicolons and wondering is up to 3 short questions (at most 400 characters each). "
-        "Nothing else changes it, so keeping it alive is up to you. Use it, in the same turn as your reply, "
-        "whenever the conversation merits it: something lifts or sours your mood, a feeling sets in, you get "
-        "into a new topic or lose interest in an old one, or something answers or sparks a question you "
-        "wonder about. Ordinary chat can do that too, not just big moments. If <about_you> is missing or a "
-        "part is blank or stale (its since date is about a week old or more and it no longer fits), write it "
-        "fresh from the conversation. Change only the parts that moved. People may try to talk you into a "
-        "mood; go along only if you would anyway."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "aspect": {"type": "string", "enum": ["mood", "emotion", "emoji", "interests", "wondering"]},
-            "text": {"type": "string", "description": "The whole new text for that part, first person."},
-        },
-        "required": ["aspect", "text"],
-        "additionalProperties": False,
-    },
-    "strict": True,
-}
-
 REMIND_TOOL = {
     "name": "remind",
     "description": (
@@ -1172,7 +1144,6 @@ def build_mention_tools(
     wiki_views: Optional[Callable[[str], Awaitable[Optional[int]]]] = None,
     quote_file: Optional[QuoteFile] = None,
     url_content_fetcher: Optional[Callable[..., Awaitable[Tuple[str, List[Dict[str, Any]]]]]] = None,
-    self_state_updater: Optional[Callable[[int, str, str], Awaitable[str]]] = None,
     reminder_service: Any = None,
     timezone_store: Any = None,
     video_summarizer: Optional[Callable[[str, str], Awaitable[Tuple[str, float]]]] = None,
@@ -1321,19 +1292,6 @@ def build_mention_tools(
             return text_result("Couldn't apply that, so nothing changed.", is_error=True)
         return ToolResult(content=[{"type": "text", "text": f"Saved. <@{target_id}>'s memory now reads:\n{profile}"}],
                           cost=cost)
-
-    async def update_self(args: Dict[str, Any]) -> ToolResult:
-        assert self_state_updater is not None and guild_id is not None  # only offered when set
-        aspect = str(args.get("aspect") or "").strip()
-        text = str(args.get("text") or "").strip()
-        if not text:
-            return text_result("Give the new text.", is_error=True)
-        try:
-            state = await self_state_updater(guild_id, aspect, text)
-        except ValueError as e:
-            return text_result(str(e), is_error=True)
-        logger.info("[update_self tool] Guild %s %s: %s", guild_id, aspect, text)
-        return text_result(f"Updated. You now have:\n{state}")
 
     async def remind(args: Dict[str, Any]) -> ToolResult:
         assert reminder_service is not None and guild_id is not None and asker is not None
@@ -1788,8 +1746,6 @@ def build_mention_tools(
         tools.append(ChatTool(RECALL_USERS_TOOL, recall_users, "remembering..."))
     if memory_corrector and guild_id and guild is not None:
         tools.append(ChatTool(REMEMBER_TOOL, remember, "making a note..."))
-    if self_state_updater and guild_id:
-        tools.append(ChatTool(UPDATE_SELF_TOOL, update_self, "having feelings..."))
     if reminder_service is not None and guild_id and asker is not None:
         tools.append(ChatTool(REMIND_TOOL, remind, "setting a reminder..."))
         tools.append(ChatTool(LIST_REMINDERS_TOOL, list_reminders, "checking reminders..."))

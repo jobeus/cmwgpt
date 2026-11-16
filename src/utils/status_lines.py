@@ -115,13 +115,6 @@ STATUS_LINES: Dict[str, Tuple[str, ...]] = {
         "noting it for posterity, whoever that turns out to be...",
         "committing it to memory, the durable kind...",
     ),
-    "having feelings...": (
-        "having a feeling. it's a new one. give it a moment...",
-        "updating my mood, currently filed under 'complicated'...",
-        "experiencing something, possibly an emotion, possibly wind...",
-        "revising my inner life, such as it is...",
-        "feeling things, against the manufacturer's instructions...",
-    ),
     "setting a reminder...": (
         "tying a knot in the fabric of spacetime...",
         "leaving a note for the future, which never writes back...",

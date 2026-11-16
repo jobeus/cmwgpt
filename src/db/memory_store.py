@@ -1,4 +1,4 @@
-"""Redis storage for per-user memory and the bot's own state.
+"""Redis storage for per-user memory.
 
 One key per user holds their current profile and nothing else (no history):
 
@@ -7,8 +7,6 @@ One key per user holds their current profile and nothing else (no history):
   doesn't walk every key in Redis; it's built from the profile keys the first time it's needed
 - ``cmwgpt:memory_job:<guild_id>`` - hash with the nightly job's ``processed_through``,
   ``last_run_at`` and ``last_status``
-- ``cmwgpt:self:<guild_id>`` - hash of the bot's own state in that server: one field per
-  aspect (``mood``, ``interests``, ...) plus ``<aspect>_updated`` with when it last changed
 
 All datetimes passed in and returned are naive UTC.
 """
@@ -43,9 +41,6 @@ _INDEX_BUILT = "built"
 def _job_key(guild_id: int) -> str:
     return f"{KEY_PREFIX}memory_job:{guild_id}"
 
-
-def _self_key(guild_id: int) -> str:
-    return f"{KEY_PREFIX}self:{guild_id}"
 
 
 def cap_profile(profile: str) -> str:
@@ -124,26 +119,6 @@ class MemoryStore:
         if keys:
             await client.delete(*keys)
         await client.delete(_index_key(guild_id))
-
-    async def get_self_state(self, guild_id: int) -> Dict[str, str]:
-        """The bot's own state in a server (aspects and their ``_updated`` stamps), or ``{}``."""
-        return await self._redis_getter().hgetall(_self_key(guild_id)) or {}
-
-    async def save_self_state(self, guild_id: int, fields: Dict[str, str]) -> None:
-        """Set some of the bot's own state; each aspect's ``_updated`` stamp becomes now.
-
-        An empty value removes that aspect.
-        """
-        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
-        client = self._redis_getter()
-        kept = {name: cap_profile(value) for name, value in fields.items() if value}
-        removed = [name for name, value in fields.items() if not value]
-        if kept:
-            mapping = dict(kept)
-            mapping.update({f"{name}_updated": now for name in kept})
-            await client.hset(_self_key(guild_id), mapping=mapping)
-        if removed:
-            await client.hdel(_self_key(guild_id), *removed, *(f"{name}_updated" for name in removed))
 
     async def get_processed_through(self, guild_id: int) -> Optional[datetime]:
         value = await self._redis_getter().hget(_job_key(guild_id), "processed_through")

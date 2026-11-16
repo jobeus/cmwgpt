@@ -210,7 +210,6 @@ sequenceDiagram
 - Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `sonnet-5.5-direct`/`opus-5.5-direct`/`haiku-5.5-direct` go to `AnthropicService` (Claude API). There are no other chat models; a channel set to a retired one falls back to `DEFAULT_MODEL`.
 - URL enrichment happens **before** the LLM call and can materially change the prompt content. Only the newest 10 history messages fetch links; older messages use cached results only, and the fetches run concurrently.
 - Per-user memory profiles are appended to the end of the mention, so the cached system prompt and history stay unchanged.
-- So is the bot's own state (`<about_you>`: mood, emotion, emoji, interests and what it's wondering about), on every model. It's per server in `cmwgpt:self:<guild_id>`. No background job writes it: only the direct models change it, with `update_self`, when a conversation merits it or a part is blank or stale. The system prompt tells them to keep it up.
 - The system prompt tells every model to write specific times as Discord timestamps (`<t:unix:style>`), which each reader sees in their own time zone. To make the Unix arithmetic reliable, the mention also ends with a `<now>` block (`_now_block` in `src/bot/handlers/mention.py`): its Unix time and the UTC offset of the header timestamps. Reminder tool results carry each due time as Unix seconds for the same reason.
 - The Claude API direct models get none of the on-demand context filled in (links, memory notes, `how_i_work`). They get a short "Your tools" section in the system prompt instead (general rules, such as making independent calls in one turn; each tool is described only in its own definition, so nothing is sent twice) and fetch what they need with tools; see [Claude API tools](#claude-api-tools).
 - Claude API replies stream: `StreamingReply` (`src/services/streaming_reply.py`) posts the reply as it arrives and edits it at most every 1.5 seconds, then edits in the final text with the cost. If the request fails, the partial message is deleted before the error reply. Gemini replies arrive whole and are edited into the same status preview.
@@ -227,7 +226,7 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | Tool | Runs | Needs |
 | --- | --- | --- |
 | `draw`, `edit_image` | `src/services/image_service.py` (Gemini image models, with aspect ratio/size/thinking/search options) | `GEMINI_API_KEY` |
-| `recall_users`, `remember`, `update_self` | `MemoryService` | Redis memory, a guild |
+| `recall_users`, `remember` | `MemoryService` | Redis memory, a guild |
 | `search_messages`, `read_messages`, `view_images` | `src/services/discord_history.py` (Discord's message search, limited to the channel the bot was asked in, with every filter it offers through `SearchFilters`) and message fetches | a guild |
 | `react` | `add_reaction` on a message in the mention's channel (5 per reply; the tools section lists the server's custom emoji) | a guild |
 | `search_gifs`, `post_gif` | `src/services/giphy_service.py`: Giphy's search API (5 per call), each hit shown to the model as a filmstrip (10 frames spread over the 200px-wide rendition, tiled into one JPEG); `post_gif` attaches the largest rendition under 9 MB to the reply (2 per reply), since replies are sent with embeds suppressed and a link wouldn't play | `GIPHY_API_KEY` |
@@ -388,7 +387,7 @@ flowchart LR
 
 1. Every night, `MemoryService` reads the chat since its last run and replaces each person's profile at `cmwgpt:memory:<guild>:<user>` in Redis (one key per user, no history, max 100 KB).
 2. `cmwgpt:memory_job:<guild>` tracks how far each server has been processed.
-3. `/memory`, `/fillmemory` and `/botstate` read and change the same keys (see `docs/commands.md`).
+3. `/memory` and `/fillmemory` read and change the same keys (see `docs/commands.md`).
 
 ### Shutdown and restart
 

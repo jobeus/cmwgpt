@@ -72,21 +72,6 @@ def _full_tools(message=None, **overrides):
 
 
 class TestChatTools(unittest.IsolatedAsyncioTestCase):
-    async def test_update_self_saves_and_reports_errors(self):
-        updater = AsyncMock(return_value="Mood (since 2026-10-30): chipper")
-        tools, _ = _tools(self_state_updater=updater)
-        self.assertEqual(list(tools)[2], "update_self")
-
-        result = await tools["update_self"].run({"aspect": "mood", "text": "chipper"})
-        updater.assert_awaited_once_with(10, "mood", "chipper")
-        self.assertFalse(result.is_error)
-        self.assertIn("chipper", result.content[0]["text"])
-
-        updater.side_effect = ValueError("too long")
-        result = await tools["update_self"].run({"aspect": "mood", "text": "x" * 500})
-        self.assertTrue(result.is_error)
-        self.assertEqual(result.content[0]["text"], "too long")
-
     def test_offers_all_tools_in_a_fixed_order(self):
         tools, _ = _tools()
         self.assertEqual(list(tools), ["draw", "recall_users", "transcribe_youtube", "prediction_markets", "election_results", "how_i_work"])
@@ -563,7 +548,6 @@ class TestStrictSchemaLimits(unittest.TestCase):
             irc_log=MagicMock(),
             quote_file=MagicMock(),
             url_content_fetcher=AsyncMock(),
-            self_state_updater=AsyncMock(),
             reminder_service=MagicMock(),
             timezone_store=MagicMock(),
             video_summarizer=AsyncMock(),

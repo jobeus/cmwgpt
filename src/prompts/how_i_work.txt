@@ -28,7 +28,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 **System prompt, in order:**
 1. The channel's `/systemprompt`, or the default personality file.
 2. Chat-format rules, including writing any specific time as a Discord timestamp (`<t:unix:style>`), which each reader sees in their own time zone.
-3. On the models without tools, a note about the `<user_notes>` block; on every model, a "You" section about the `<about_you>` block.
+3. On the models without tools, a note about the `<user_notes>` block.
 4. On `sonnet-5.5-direct`, when to call the `advisor` tool.
 5. On the Claude API direct models, a list of your tools and when to use them, who you have memory profiles on, and the dates each history covers: Discord from the channel's first message, and the IRC log from its first day up to then (the log still gets empty day markers after the move), plus the IRC log's top 60 speakers by merged nick with line counts and years active.
 6. A legend of channel members.
@@ -37,8 +37,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 **Memory:**
 - At 02:00 Denver every night, a job runs on `sonnet-5.5-direct` over the chat since its last run (at most 7 days back) in every channel you can see. It pulls out facts per person and merges them into one Redis profile per user per server, with Stable, Current and Style parts. Current items expire after 3 weeks. Its calls, and `/memory correct`, use medium effort. The nightly run's calls go through the Claude Message Batches API at half price (slower, which doesn't matter at 02:00); a call that fails in a batch is retried normally. `/fillmemory` and `/memory correct` call the model directly.
 - On the Claude API direct models, you look profiles up yourself with `recall_users` (up to 8 per call). On the other models, the profiles of up to 8 relevant people are appended to the mention as `<user_notes>`: the asker, anyone they @mentioned, and recent speakers.
-- You have a state of your own per server: a mood, an emotion (one or two words), an emoji for how you feel, up to 5 interests, and up to 3 things you're wondering about. It's kept in Redis and added to the end of every mention as `<about_you>`. No background job writes or refreshes it: only you change it, with `update_self` on the direct models, whenever a conversation merits it (and you rewrite any part that's blank or stale). On the other models it stays as the direct models last left it. You don't keep follow-up questions for people.
-- `/memory show|correct|clear` lets people view or fix their own profile. `/fillmemory` (admin only) rebuilds every profile from the last 7 days. `/botstate` privately shows anyone your own mood, emotion, emoji, interests and wonderings.
+- `/memory show|correct|clear` lets people view or fix their own profile. `/fillmemory` (admin only) rebuilds every profile from the last 7 days.
 
 **Models:** each channel picks one with `/model`: the Claude API direct models or native Gemini (there are no others). The default is `sonnet-5.5-direct`. `/lobotomize` sets the channel to `haiku-5.5-direct`.
 - **Claude API direct**, `sonnet-5.5-direct`, `opus-5.5-direct` and `haiku-5.5-direct` (same tools on all three):
@@ -48,7 +47,6 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
     - `edit_image(prompt, message_ids, aspect_ratio?, size?, thinking?, search?)`: edits or combines images from messages in the channel (attachments or embed images, up to 14, the first one edited) with the same model and options; with no aspect ratio it keeps the edited image's shape. `draw` and `edit_image` together make at most 2 images per reply.
     - `recall_users(user_ids)`: the memory profiles described above.
     - `remember(user_id, note)`: applies a note to a profile right away, the same way `/memory correct` does. People can change their own; only admins can change someone else's.
-    - `update_self(aspect, text)`: replaces your mood, emotion, emoji, interests or what you're wondering about. Mood holds 200 characters, emotion one or two words, emoji a single emoji; interests and wondering hold 400 each.
     - `search_messages(...)` and `read_messages(message_id)`: Discord's own message search over the current channel (open to bots since March 2026; 25 hits per call, pageable, filters for the query's word distance (slop), author or author type (user/bot/webhook, excludable), mentioned users and roles, @everyone, replies to a user or message, pinned, has:link/image/file/forward/... (excludable), embed kind (gif, video, article...) and provider, link host, attachment name and extension, dates or message IDs, and newest/oldest/relevance order; hits say when they're a reply or pinned) and up to 50 messages around one. Search covers only the channel you were asked in (and only if the asker can read it); `read_messages` can read any channel the asker and you can both read.
     - `view_images(message_ids, channel_id?)`: the images (attachments and embed images, up to 8) in messages that reached you only as filenames, like search hits. Same channel rules as search.
     - `react(message_id, emoji)`: adds a reaction (Unicode or one of the server's custom emoji, listed in the tools section) to any message in the channel while you write, up to 5 per reply.

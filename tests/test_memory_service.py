@@ -7,13 +7,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
-from src.bot.commands.memory import MemoryCommands, build_self_embed, format_memory, resolve_target
+from src.bot.commands.memory import MemoryCommands, format_memory, resolve_target
 from src.bot.handlers.mention import MentionHandler
 from src.services.memory_service import (
     parse_profile_reply,
     parse_extracted_facts,
     MemoryService,
-    format_self_state,
     build_transcript_chunks,
     clean_profile,
     format_transcript_line,
@@ -46,7 +45,6 @@ class FakeStore:
         self.job_states = []
         self.cleared_guilds = []
         self.processed_through = None
-        self.self_state = {}
 
     async def get(self, guild_id, user_id):
         return self.rows.get(user_id, "")
@@ -65,17 +63,6 @@ class FakeStore:
     async def list_user_ids(self, guild_id):
         return sorted(uid for uid, profile in self.rows.items() if profile)
 
-
-    async def get_self_state(self, guild_id):
-        return dict(self.self_state)
-
-    async def save_self_state(self, guild_id, fields):
-        for name, value in fields.items():
-            if value:
-                self.self_state[name] = value
-                self.self_state[f"{name}_updated"] = "2026-10-30T12:00:00"
-            else:
-                self.self_state.pop(name, None)
 
     async def get_processed_through(self, guild_id):
         return self.processed_through
@@ -337,47 +324,6 @@ class TestMemoryService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(store.rows[1], "keep me")
         self.assertEqual(store.saved, [])
 
-    async def test_update_self_checks_aspect_and_length(self):
-        store = FakeStore()
-        service, _ = self.make_service(store, datetime(2026, 10, 16, tzinfo=UTC))
-
-        text = await service.update_self(42, "wondering", "  is  the tacoma  worth it?  ")
-        self.assertEqual(text, "Wondering about (since 2026-10-30): is the tacoma worth it?")
-        with self.assertRaises(ValueError):
-            await service.update_self(42, "mood", "x" * 201)
-        with self.assertRaises(ValueError):
-            await service.update_self(42, "hunger", "starving")
-
-    async def test_update_self_trims_emotion_and_emoji(self):
-        store = FakeStore()
-        service, _ = self.make_service(store, datetime(2026, 10, 16, tzinfo=UTC))
-
-        await service.update_self(42, "emotion", "  quietly  smug about it ")
-        await service.update_self(42, "emoji", " 😏 smirk ")
-        self.assertEqual(store.self_state["emotion"], "quietly smug")
-        self.assertEqual(store.self_state["emoji"], "😏")
-        with self.assertRaises(ValueError):
-            await service.update_self(42, "emoji", "happy")
-
-    async def test_self_block_wraps_state_and_swallows_errors(self):
-        store = FakeStore()
-        service, _ = self.make_service(store, datetime(2026, 10, 16, tzinfo=UTC))
-        self.assertEqual(await service.get_self_block(42), "")
-        store.self_state = {"mood": "fine", "refreshed_at": "x"}
-        block = await service.get_self_block(42)
-        self.assertTrue(block.startswith("<about_you>"))
-        self.assertIn("Mood: fine", block)
-        self.assertNotIn("refreshed_at", block)
-
-        store.get_self_state = AsyncMock(side_effect=RuntimeError("redis down"))
-        self.assertEqual(await service.get_self_block(42), "")
-
-    def test_format_self_state_orders_aspects(self):
-        self.assertEqual(
-            format_self_state({"wondering": "why?", "mood": "ok", "mood_updated": "2026-10-01T00:00:00"}),
-            "Mood (since 2026-10-01): ok\nWondering about: why?",
-        )
-
     def test_unavailable_without_api_key(self):
         service = MemoryService(store=FakeStore(), config=cfg(anthropic_api_key=""), )
         self.assertFalse(service.available)
@@ -409,35 +355,6 @@ class TestSendMemory(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(kwargs["ephemeral"])
         self.assertNotIn("file", kwargs)
         commands._paste_service.upload_markdown.assert_awaited_once_with("x" * 2500)
-
-
-class TestBotStateEmbed(unittest.TestCase):
-    def test_outlines_each_aspect(self):
-        state = {
-            "mood": "pretty upbeat", "mood_updated": "2026-10-29T10:00:00",
-            "emotion": "restless", "emoji": "🏎️",
-            "interests": "f1 title race; rust 2.0; the Tacoma saga",
-            "wondering": "Will Max win again? Is rust 2.0 real?",
-            "refreshed_at": "2026-10-30T12:00:00",
-            "follow_ups": "[]",
-        }
-        embed = build_self_embed("cmw", state)
-
-        fields = {f.name: f.value for f in embed.fields}
-        self.assertEqual(fields["🌤️ Mood · since 2026-10-29"], "pretty upbeat")
-        self.assertEqual(fields["💭 Emotion"], "restless")
-        self.assertEqual(fields["🫥 Feels emoji"], "🏎️")
-        self.assertTrue(next(f for f in embed.fields if f.name == "💭 Emotion").inline)
-        self.assertEqual(fields["✨ Interests"], "• f1 title race\n• rust 2.0\n• the Tacoma saga")
-        self.assertEqual(fields["🤔 Wondering about"], "• Will Max win again?\n• Is rust 2.0 real?")
-        self.assertFalse(any("Follow-ups" in name for name in fields))
-        self.assertTrue(all(len(f.value) <= 1024 for f in embed.fields))
-        self.assertFalse(any("Refresh" in name for name in fields))
-
-    def test_empty_state_says_so(self):
-        embed = build_self_embed("cmw", {})
-        self.assertEqual(embed.fields, [])
-        self.assertIn("Nothing yet", embed.description)
 
 
 class TestResolveTarget(unittest.IsolatedAsyncioTestCase):
@@ -488,28 +405,6 @@ class TestMentionNotes(unittest.IsolatedAsyncioTestCase):
         provider.assert_awaited_once_with(42, [1, 2, 4, 3])
         self.assertEqual(chat_context[-1]["content"][-1]["text"], "<user_notes>\nnotes\n</user_notes>")
         self.assertEqual(len(chat_context[0]["content"]), 1)
-
-    async def test_about_you_goes_on_the_mention(self):
-        provider = AsyncMock(return_value="<about_you>\nMood: fine\n</about_you>")
-        handler = MentionHandler(
-            state_service=MagicMock(),
-            message_service=MagicMock(),
-            queue_service=MagicMock(),
-            system_prompt_loader=lambda: "base",
-            include_num_chatlines=10,
-            self_state_provider=provider,
-        )
-        chat_context = [
-            {"role": "user", "content": [{"type": "text", "text": "how are you"}]},
-            {"role": "assistant", "content": [{"type": "text", "text": "hi"}]},
-        ]
-
-        message = SimpleNamespace(guild=SimpleNamespace(id=42), author=SimpleNamespace(id=1), mentions=[])
-        await handler._append_self_state(chat_context, message)
-
-        provider.assert_awaited_once_with(42)
-        self.assertEqual(chat_context[0]["content"][-1]["text"], "<about_you>\nMood: fine\n</about_you>")
-
 
 if __name__ == "__main__":
     unittest.main()
