@@ -101,6 +101,8 @@ class AppConfig:
     # Alpaca paper-account keys: market_data and the paper-trading game's tools are off when unset.
     alpaca_api_key: str = ""
     alpaca_api_secret: str = ""
+    # Giphy API key: the search_gifs and post_gif tools are off when unset.
+    giphy_api_key: str = ""
 
 
 def load_config(
@@ -146,6 +148,7 @@ def load_config(
         logs_channel_id=_read_optional_int(source.get("DISCORD_CHANNEL_ID")),
         alpaca_api_key=source.get("ALPACA_API_KEY", "").strip(),
         alpaca_api_secret=source.get("ALPACA_API_SECRET", "").strip(),
+        giphy_api_key=source.get("GIPHY_API_KEY", "").strip(),
     )
 
 

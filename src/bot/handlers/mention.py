@@ -202,6 +202,7 @@ class MentionHandler:
         context_store: Optional[StateStore] = None,
         alpaca: Any = None,
         paper_trading: Any = None,
+        giphy_api_key: str = "",
     ):
         self._state_service = state_service
         self._gemini_service = gemini_service
@@ -229,6 +230,7 @@ class MentionHandler:
         self._video_watcher = video_watcher
         self._alpaca = alpaca
         self._paper_trading = paper_trading
+        self._giphy_api_key = giphy_api_key
         # Found once and kept, so the system prompt stays the same between requests. Reading
         # them takes seconds on a big log, so it starts with the bot (``warm_up``).
         self._irc_start: Optional[str] = None
@@ -306,6 +308,7 @@ class MentionHandler:
             video_watcher=self._video_watcher,
             alpaca=self._alpaca,
             paper_trading=self._paper_trading,
+            giphy_api_key=self._giphy_api_key,
         )
 
     def _store_history_cache(self, channel_id: int, timestamp: float, oldest_message: discord.Message) -> None:

@@ -170,6 +170,18 @@ STATUS_LINES: Dict[str, Tuple[str, ...]] = {
         "reacting, a complete sentence in one small face...",
         "deploying an emoji. stand clear...",
     ),
+    "looking for a gif...": (
+        "browsing moving pictures, ten frames at a time...",
+        "searching for a gif. pronouncing it wrong on purpose...",
+        "auditioning small looping films for the part...",
+        "consulting the great archive of people falling over...",
+    ),
+    "posting a gif...": (
+        "attaching a gif, the highest form of rhetoric...",
+        "letting a three-second loop do the talking...",
+        "deploying moving pictures. words were tried...",
+        "posting a gif. it will repeat itself, as do I...",
+    ),
     "digging through the irc logs...": (
         "excavating the irc logs, mind the fossils...",
         "digging through strata of ancient arguments...",

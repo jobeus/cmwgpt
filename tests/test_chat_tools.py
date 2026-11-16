@@ -7,9 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 
 from src.services.chat_tools import (
-    MAX_DRAWS_PER_REPLY, MAX_REACTIONS_PER_REPLY, MAX_VIEW_IMAGES, UNKNOWN_EMOJI_CODE, build_mention_tools,
+    MAX_DRAWS_PER_REPLY, MAX_GIFS_PER_REPLY, MAX_REACTIONS_PER_REPLY, MAX_VIEW_IMAGES, UNKNOWN_EMOJI_CODE, build_mention_tools,
 )
 from src.services.discord_history import INDEX_NOT_READY_CODE
+from src.services.giphy_service import Gif, GiphyError
 from src.services.image_service import IMAGE_MODELS, ImageOptions, ImageResult
 from src.utils.url_utils import wiki_title_candidates
 
@@ -480,6 +481,79 @@ class TestReact(unittest.IsolatedAsyncioTestCase):
         self.assertIn("doesn't know that emoji", result.content[0]["text"])
 
 
+def _gif(gif_id="abc123"):
+    return Gif(id=gif_id, title="Mic Drop", url=f"https://giphy.com/gifs/{gif_id}", width=480, height=270,
+               renditions=(("https://media.giphy.com/o.gif", 1000),), preview_url="https://media.giphy.com/p.gif")
+
+
+class TestGifTools(unittest.IsolatedAsyncioTestCase):
+    def test_gif_tools_need_a_key(self):
+        self.assertNotIn("search_gifs", _tools()[0])
+        self.assertLessEqual({"search_gifs", "post_gif"}, set(_tools(giphy_api_key="key")[0]))
+
+    @patch("src.services.chat_tools.gif_filmstrip", new_callable=AsyncMock)
+    @patch("src.services.chat_tools.giphy_search", new_callable=AsyncMock)
+    async def test_search_returns_each_gif_with_its_filmstrip(self, search, strip):
+        search.return_value = [_gif("abc123"), _gif("def456")]
+        strip.side_effect = [b"jpeg", None]
+        tools, _ = _tools(giphy_api_key="key")
+
+        result = await tools["search_gifs"].run({"query": " mic drop ", "offset": 5})
+
+        search.assert_awaited_once_with("key", "mic drop", 5)
+        self.assertEqual([c["type"] for c in result.content], ["text", "image", "text"])
+        self.assertIn("GIF abc123: Mic Drop (480x270) https://giphy.com/gifs/abc123", result.content[0]["text"])
+        self.assertEqual(result.content[1]["source"]["media_type"], "image/jpeg")
+        self.assertIn("no filmstrip", result.content[2]["text"])
+
+    @patch("src.services.chat_tools.giphy_search", new_callable=AsyncMock)
+    async def test_search_reports_errors_and_no_matches(self, search):
+        tools, _ = _tools(giphy_api_key="key")
+        search.return_value = []
+        self.assertTrue((await tools["search_gifs"].run({"query": "zzz"})).is_error)
+        search.side_effect = GiphyError("Giphy answered HTTP 403.")
+        result = await tools["search_gifs"].run({"query": "zzz"})
+        self.assertTrue(result.is_error)
+        self.assertEqual(result.content[0]["text"], "Giphy answered HTTP 403.")
+        self.assertTrue((await tools["search_gifs"].run({"query": " "})).is_error)
+
+    @patch("src.services.chat_tools.download_gif", new_callable=AsyncMock, return_value=b"GIF89a")
+    @patch("src.services.chat_tools.get_gif", new_callable=AsyncMock)
+    @patch("src.services.chat_tools.gif_filmstrip", new_callable=AsyncMock, return_value=b"jpeg")
+    @patch("src.services.chat_tools.giphy_search", new_callable=AsyncMock)
+    async def test_post_attaches_a_found_gif_up_to_the_limit(self, search, _strip, get, download):
+        search.return_value = [_gif("abc123")]
+        tools, _ = _tools(giphy_api_key="key")
+        await tools["search_gifs"].run({"query": "mic drop"})
+
+        result = await tools["post_gif"].run({"gif_id": "abc123"})
+
+        get.assert_not_awaited()  # the search already found it
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.files[0].filename, "abc123.gif")
+        self.assertEqual(result.files[0].fp.read(), b"GIF89a")
+
+        for _ in range(MAX_GIFS_PER_REPLY - 1):
+            self.assertFalse((await tools["post_gif"].run({"gif_id": "abc123"})).is_error)
+        over = await tools["post_gif"].run({"gif_id": "abc123"})
+        self.assertTrue(over.is_error)
+        self.assertEqual(download.await_count, MAX_GIFS_PER_REPLY)
+
+    @patch("src.services.chat_tools.download_gif", new_callable=AsyncMock)
+    @patch("src.services.chat_tools.get_gif", new_callable=AsyncMock)
+    async def test_post_looks_up_unknown_ids_and_failures_dont_count(self, get, download):
+        tools, _ = _tools(giphy_api_key="key")
+        get.return_value = None
+        self.assertTrue((await tools["post_gif"].run({"gif_id": "nope12"})).is_error)
+        get.return_value = _gif("zzz999")
+        download.side_effect = GiphyError("Every version of that GIF is too big to post. Pick another.")
+        self.assertTrue((await tools["post_gif"].run({"gif_id": "zzz999"})).is_error)
+        download.side_effect = None
+        download.return_value = b"GIF89a"
+        for _ in range(MAX_GIFS_PER_REPLY):
+            self.assertFalse((await tools["post_gif"].run({"gif_id": "zzz999"})).is_error)
+
+
 class TestStrictSchemaLimits(unittest.TestCase):
     """The API rejects a request whose strict tool schemas, all together, go over these limits."""
 
@@ -496,6 +570,7 @@ class TestStrictSchemaLimits(unittest.TestCase):
             video_watcher=AsyncMock(),
             alpaca=MagicMock(),
             paper_trading=MagicMock(),
+            giphy_api_key="key",
         )
         every_tool = {v["name"] for k, v in vars(chat_tools).items() if k.endswith("_TOOL") and isinstance(v, dict)}
         self.assertEqual(set(tools), every_tool)  # so a new tool can't sneak past this test

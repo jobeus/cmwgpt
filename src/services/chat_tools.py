@@ -23,6 +23,8 @@ from src.services.discord_history import (
     AUTHOR_TYPES, EMBED_TYPES, HAS_FILTERS, MAX_FILTER_VALUES, MAX_READ_MESSAGES, MAX_SLOP, SORTS, SearchFilters,
     read_around, readable_channels, search_messages,
 )
+from src.services.giphy_service import MAX_SEARCH_GIFS, Gif, GiphyError, download_gif, get_gif, gif_filmstrip
+from src.services.giphy_service import search_gifs as giphy_search
 from src.services.election_service import ElectionDataError, parse_race_id, race_results, search_races
 from src.services.image_service import (
     ASPECT_RATIOS,
@@ -64,6 +66,8 @@ MAX_URL_IMAGES = 8
 MAX_VIEW_IMAGES = 8
 # A reply may add at most this many reactions.
 MAX_REACTIONS_PER_REPLY = 5
+# A reply may attach at most this many GIFs.
+MAX_GIFS_PER_REPLY = 2
 # Longest transcript transcribe_youtube returns (~30k tokens).
 MAX_TRANSCRIPT_CHARS = 120_000
 
@@ -1034,6 +1038,49 @@ REACT_TOOL = {
     "strict": True,
 }
 
+SEARCH_GIFS_TOOL = {
+    "name": "search_gifs",
+    "description": (
+        f"Search Giphy for GIFs. Returns the {MAX_SEARCH_GIFS} best matches, each with its ID, title, "
+        "giphy.com link and a filmstrip: 10 frames spread evenly over the GIF, in order left to right, then "
+        "top to bottom, so you can see what happens in it. Use it when a reaction GIF would land better "
+        "than words, or when someone asks for one, then attach the one you picked with post_gif. Judge a "
+        "GIF by its filmstrip, not its title. Search for what the GIF shows or the reaction it is, in a "
+        "few words, like 'facepalm', 'mic drop' or 'homer backs into hedge'."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "What to search for, up to 50 characters."},
+            "offset": {
+                "type": "integer",
+                "description": f"How many results to skip, for the next page: {MAX_SEARCH_GIFS}, then "
+                               f"{MAX_SEARCH_GIFS * 2}. Default 0.",
+            },
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    },
+}
+
+POST_GIF_TOOL = {
+    "name": "post_gif",
+    "description": (
+        "Attach a GIF from search_gifs to your reply, where it plays under your text. Links in your "
+        "replies don't unfurl, so writing a GIF's link shows only the link: this is the way to show the "
+        f"GIF itself. At most {MAX_GIFS_PER_REPLY} per reply. Don't describe the GIF or say you attached it."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "gif_id": {"type": "string", "description": "The GIF's ID from search_gifs."},
+        },
+        "required": ["gif_id"],
+        "additionalProperties": False,
+    },
+}
+
+
 def image_block(part: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """An ``image_url`` content part as a Messages API image block, or None when it can't be one."""
     url = (part.get("image_url") or {}).get("url", "")
@@ -1132,6 +1179,7 @@ def build_mention_tools(
     video_watcher: Optional[Callable[[str, str], Awaitable[Tuple[str, float]]]] = None,
     alpaca: Any = None,
     paper_trading: Any = None,
+    giphy_api_key: str = "",
 ) -> List[ChatTool]:
     """The tools for one mention, in a fixed order. Tools without their dependencies are left out.
 
@@ -1140,6 +1188,9 @@ def build_mention_tools(
     tools: List[ChatTool] = []
     draws = 0
     reactions = 0
+    gifs_posted = 0
+    # GIFs this reply's searches found, by ID, so post_gif doesn't look them up again.
+    found_gifs: Dict[str, Gif] = {}
     guild = getattr(message, "guild", None)
     asker = getattr(message, "author", None)
 
@@ -1447,6 +1498,54 @@ def build_mention_tools(
         logger.info("[react tool] Channel %s Message: %s Emoji: %s", channel_id, message_ids[0], emoji)
         return text_result("Reacted.")
 
+    async def search_gifs(args: Dict[str, Any]) -> ToolResult:
+        query = str(args.get("query") or "").strip()
+        if not query:
+            return text_result("No query given.", is_error=True)
+        offset = _int_arg(args, "offset")
+        logger.info("[gif tool] Channel %s Query: %s Offset: %s", channel_id, query[:200], offset)
+        try:
+            gifs = await giphy_search(giphy_api_key, query, offset)
+        except GiphyError as e:
+            return text_result(str(e), is_error=True)
+        if not gifs:
+            return text_result("No GIFs match. Try other or fewer words.", is_error=True)
+        strips = await asyncio.gather(*(gif_filmstrip(gif) for gif in gifs))
+        content: List[Dict[str, Any]] = []
+        for gif, strip in zip(gifs, strips, strict=True):
+            found_gifs[gif.id] = gif
+            content.append({"type": "text", "text": (
+                f"GIF {gif.id}: {gif.title} ({gif.width}x{gif.height}) {gif.url}"
+                + ("" if strip else "\n(no filmstrip: its preview couldn't be read)")
+            )})
+            if strip:
+                content.append({"type": "image", "source": {
+                    "type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(strip).decode("ascii")}})
+        return ToolResult(content=content)
+
+    async def post_gif(args: Dict[str, Any]) -> ToolResult:
+        nonlocal gifs_posted
+        gif_id = str(args.get("gif_id") or "").strip()
+        if gifs_posted >= MAX_GIFS_PER_REPLY:
+            return text_result(f"You've already attached {gifs_posted} GIFs to this reply; that's the limit.",
+                               is_error=True)
+        # Counted before the await, so GIFs posted side by side still respect the limit.
+        gifs_posted += 1
+        try:
+            gif = found_gifs.get(gif_id) or await get_gif(giphy_api_key, gif_id)
+            if gif is None:
+                gifs_posted -= 1
+                return text_result("Giphy has no GIF with that ID. Use an ID from search_gifs.", is_error=True)
+            data = await download_gif(gif)
+        except GiphyError as e:
+            gifs_posted -= 1
+            return text_result(str(e), is_error=True)
+        logger.info("[gif tool] Channel %s Posted: %s (%s bytes)", channel_id, gif.id, len(data))
+        return ToolResult(
+            content=[{"type": "text", "text": f"Attached \"{gif.title}\" to your reply."}],
+            files=[discord.File(io.BytesIO(data), filename=f"{gif.id}.gif")],
+        )
+
     async def wiki_pageviews(args: Dict[str, Any]) -> ToolResult:
         assert wiki_views is not None  # only offered when set
         candidates = wiki_title_candidates(str(args.get("title") or ""))
@@ -1703,6 +1802,9 @@ def build_mention_tools(
         tools.append(ChatTool(VIEW_IMAGES_TOOL, view_images, "looking at pictures..."))
         if message is not None:
             tools.append(ChatTool(REACT_TOOL, react, "reacting..."))
+    if giphy_api_key:
+        tools.append(ChatTool(SEARCH_GIFS_TOOL, search_gifs, "looking for a gif..."))
+        tools.append(ChatTool(POST_GIF_TOOL, post_gif, "posting a gif..."))
     if irc_log:
         tools.append(ChatTool(SEARCH_IRC_LOG_TOOL, search_irc_log, "digging through the irc logs..."))
         tools.append(ChatTool(READ_IRC_LOG_DAY_TOOL, read_irc_log_day, "reading the irc logs..."))

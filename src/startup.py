@@ -148,6 +148,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         context_store=state_store,
         alpaca=alpaca_client,
         paper_trading=paper_trading_service,
+        giphy_api_key=app_config.giphy_api_key,
     )
 
     return AppServices(

@@ -194,7 +194,7 @@ class TestStatusLines(unittest.IsolatedAsyncioTestCase):
         tools, _ = _full_tools(
             irc_log=MagicMock(), quote_file=MagicMock(), url_content_fetcher=AsyncMock(),
             self_state_updater=AsyncMock(), reminder_service=MagicMock(), timezone_store=MagicMock(),
-            video_summarizer=AsyncMock(), video_watcher=AsyncMock(),
+            video_summarizer=AsyncMock(), video_watcher=AsyncMock(), giphy_api_key="key",
         )
         named = [v for module in (mention, anthropic_service) for k, v in vars(module).items()
                  if k.endswith("_STATUS") and isinstance(v, str)]

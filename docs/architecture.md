@@ -230,6 +230,7 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | `recall_users`, `remember`, `update_self` | `MemoryService` | Redis memory, a guild |
 | `search_messages`, `read_messages`, `view_images` | `src/services/discord_history.py` (Discord's message search, limited to the channel the bot was asked in, with every filter it offers through `SearchFilters`) and message fetches | a guild |
 | `react` | `add_reaction` on a message in the mention's channel (5 per reply; the tools section lists the server's custom emoji) | a guild |
+| `search_gifs`, `post_gif` | `src/services/giphy_service.py`: Giphy's search API (5 per call), each hit shown to the model as a filmstrip (10 frames spread over the 200px-wide rendition, tiled into one JPEG); `post_gif` attaches the largest rendition under 9 MB to the reply (2 per reply), since replies are sent with embeds suppressed and a link wouldn't play | `GIPHY_API_KEY` |
 | `search_irc_log`, `read_irc_log_day`, `count_irc_log` | `src/services/irc_log_service.py` (memory-mapped log) | `IRC_LOG` (`IRC_NICKS` optional) |
 | `old_quotes` | `src/services/quote_service.py` | `OLD_QUOTE_BOT` |
 | `remind`, `list_reminders`, `cancel_reminder` | `src/services/reminder_service.py` (Redis; posts due reminders every 15s, then queues any `task` through `MentionHandler.queue_reminder_task`) | a guild |
@@ -346,6 +347,7 @@ flowchart LR
 | `src/services/message_service.py` | Sending to Discord, with retries and the paste fallback for long text | Debug a reply that didn't post |
 | `src/services/paste_service.py` | Uploads long replies and trace images to the paste site | Debug paste links |
 | `src/services/reminder_service.py` | Reminders in Redis and the loop that delivers them | Debug `remind` or a reminder that didn't fire |
+| `src/services/giphy_service.py` | Giphy search, filmstrip previews and GIF downloads | Debug `search_gifs` or `post_gif` |
 | `src/services/alpaca_service.py` | Alpaca client: cached market data and paper-account orders | Debug `market_data` or an order Alpaca refused |
 | `src/services/paper_trading_service.py` | The paper-trading game: players, holdings, orders, fill syncing, option expiry | Debug a player's cash or holdings, or a ledger that doesn't match Alpaca |
 | `src/services/timezone_service.py` | Saved time zones | Debug `set_timezone` or the `<time_zones>` block |
