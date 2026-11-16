@@ -3,7 +3,7 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from dotenv import find_dotenv, load_dotenv
 from zoneinfo import ZoneInfo
@@ -188,22 +188,67 @@ def get_config() -> AppConfig:
     return _cached_config
 
 
+def _read_private_json(path: str) -> Dict[str, Any]:
+    """An untracked JSON file keyed by Discord user ID, or ``{}`` when it's missing or unreadable.
+
+    Read on every mention, so edits apply without a restart.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as e:
+        logger.warning("Couldn't read '%s': %s", path, e)
+        return {}
+    if not isinstance(data, dict):
+        logger.warning("'%s' should be a JSON object keyed by user ID; ignoring it.", path)
+        return {}
+    return data
+
+
 def get_owner_note(user_id: int, notes_path: str = "owner_notes.json") -> str:
     """The owner's private note for mentions from ``user_id``, or "" when there is none.
 
     ``owner_notes.json`` sits beside ``system_prompt.txt`` (untracked, like it) and maps a
-    Discord user ID to text. It is read on every mention, so edits apply without a restart.
+    Discord user ID to text.
     """
-    try:
-        with open(notes_path, "r", encoding="utf-8") as f:
-            notes = json.load(f)
-    except FileNotFoundError:
-        return ""
-    except (OSError, ValueError) as e:
-        logger.warning("Couldn't read '%s': %s", notes_path, e)
-        return ""
-    if not isinstance(notes, dict):
-        logger.warning("'%s' should be a JSON object of user ID to note text; ignoring it.", notes_path)
-        return ""
-    note = notes.get(str(user_id))
+    note = _read_private_json(notes_path).get(str(user_id))
     return note.strip() if isinstance(note, str) else ""
+
+
+# Longest private status line kept; a longer one is cut.
+MAX_STATUS_LINE_CHARS = 150
+
+
+def _status_line(value: Any) -> str:
+    """A private status line made fit to show: one line, ending in ``...`` like every status."""
+    line = " ".join(str(value).split()).rstrip(".")[:MAX_STATUS_LINE_CHARS].rstrip()
+    return f"{line}..." if line else ""
+
+
+def get_user_status_lines(user_id: int, lines_path: str = "status_lines.json") -> Dict[str, List[str]]:
+    """The owner's private status lines for mentions from ``user_id``, by step, or ``{}``.
+
+    ``status_lines.json`` sits beside ``owner_notes.json`` (untracked, like it), so a running joke
+    about one person isn't in the repo. It maps a Discord user ID to either a list of lines that
+    fit any step, or an object of step name (``"thinking..."``, or ``"*"`` for any step) to lines::
+
+        {"123": ["wondering what he's broken now"],
+         "456": {"*": ["bracing"], "drawing...": ["drawing it, against my better judgment"]}}
+    """
+    entry = _read_private_json(lines_path).get(str(user_id))
+    if isinstance(entry, list):
+        entry = {"*": entry}
+    if not isinstance(entry, dict):
+        return {}
+    result: Dict[str, List[str]] = {}
+    for step, lines in entry.items():
+        if isinstance(lines, str):
+            lines = [lines]
+        if not isinstance(lines, list):
+            continue
+        kept = [line for line in map(_status_line, lines) if line]
+        if kept:
+            result[str(step)] = kept
+    return result

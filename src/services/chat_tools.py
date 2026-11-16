@@ -1760,7 +1760,7 @@ def build_mention_tools(
             tools.append(ChatTool(REACT_TOOL, react, "reacting..."))
     if giphy_api_key:
         tools.append(ChatTool(SEARCH_GIFS_TOOL, search_gifs, "looking for a gif..."))
-        tools.append(ChatTool(POST_GIF_TOOL, post_gif, "posting a gif..."))
+        tools.append(ChatTool(POST_GIF_TOOL, post_gif, "attaching a gif..."))
     if irc_log:
         tools.append(ChatTool(SEARCH_IRC_LOG_TOOL, search_irc_log, "digging through the irc logs..."))
         tools.append(ChatTool(READ_IRC_LOG_DAY_TOOL, read_irc_log_day, "reading the irc logs..."))

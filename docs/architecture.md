@@ -338,7 +338,7 @@ flowchart LR
 | `src/services/cost_service.py` | `record_cost`, per-reply cost scopes and the daily Redis tallies behind `/cost` | Add a paid API or change how costs are counted |
 | `src/services/image_service.py` | Image models and options | See each Gemini image model's aspect ratios, sizes, thinking and search |
 | `src/services/streaming_reply.py` | Streamed reply preview | Debug status lines, edits and the final reply |
-| `src/utils/status_lines.py` | The joke lines the preview shows for each step | Add or reword a status line |
+| `src/utils/status_lines.py` | The joke lines the preview shows for each step, in a dry Hitchhiker's Guide-ish voice; every status a tool or step shows needs several here (a test checks), and they should be jokes, never plain descriptions. An untracked `status_lines.json` (`config.get_user_status_lines`) adds private lines for particular people, shown 1 step in 4 when that person asks | Add or reword a status line |
 | `src/services/gemini_service.py` | Native Gemini integration | Understand `google`/`google-high` calls and the Gemini timeout |
 | `src/services/state_service.py` | Per-channel settings and restart state, in Redis | See where model/system-prompt/service settings live |
 | `src/db/state_store.py` | The Redis hash behind settings, restart state and each channel's conversation state | Debug a setting that didn't survive a restart |

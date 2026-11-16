@@ -13,6 +13,23 @@ from src.config import (
 
 
 class TestConfig(unittest.TestCase):
+    def test_user_status_lines_are_read_per_person_and_tidied(self):
+        data = (
+            '{"1": ["wondering what he broke", "  two\\nlines.  ", ""],'
+            ' "2": {"*": "bracing...", "drawing...": ["against my better judgment"], "bad": 5},'
+            ' "3": "not a list"}'
+        )
+        with patch("builtins.open", mock_open(read_data=data)):
+            self.assertEqual(config_module.get_user_status_lines(1),
+                             {"*": ["wondering what he broke...", "two lines..."]})
+            self.assertEqual(config_module.get_user_status_lines(2),
+                             {"*": ["bracing..."], "drawing...": ["against my better judgment..."]})
+            self.assertEqual(config_module.get_user_status_lines(3), {})
+            self.assertEqual(config_module.get_user_status_lines(4), {})
+        with patch("builtins.open", side_effect=FileNotFoundError):
+            self.assertEqual(config_module.get_user_status_lines(1), {})
+            self.assertEqual(config_module.get_owner_note(1), "")
+
     def test_load_config_uses_explicit_mapping(self):
         config = load_config(
             env={

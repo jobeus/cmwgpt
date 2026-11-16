@@ -14,7 +14,7 @@ import discord
 import logfire
 
 from src.utils.discord_helper import get_mention_legend, attachment_to_base64_data_url, url_to_base64_data_url, transcribe_audio_attachment
-from src.config import get_owner_note
+from src.config import get_owner_note, get_user_status_lines
 from src.utils.discord_error_utils import best_effort_typing, concise_error
 from src.db.state_store import CONTEXT_TTL_SECONDS, StateStore
 from src.services.anthropic_service import (
@@ -395,7 +395,8 @@ class MentionHandler:
 
                 # Shows what the bot is doing, then the reply as it streams in, then the final
                 # version below.
-                streaming_reply = StreamingReply(message.channel, self._message_service)
+                streaming_reply = StreamingReply(
+                    message.channel, self._message_service, get_user_status_lines(message.author.id))
                 try:
                     # Built once: the system prompt describes these same tools.
                     tools = self._build_tools(message) if self._uses_tools(model) else None

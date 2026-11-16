@@ -364,9 +364,10 @@ token.txt
 api_key.txt
 password.txt
 
-# Don't commit my own prompt or my private per-user notes
+# Don't commit my own prompt, my private per-user notes or per-user status lines
 system_prompt.txt
 owner_notes.json
+status_lines.json
 
 
 # Local pip outdated-packages report

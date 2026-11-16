@@ -31,7 +31,7 @@ async def settle():
 class TestStreamingReply(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         # Plain statuses, so the previews are predictable; the joke lines have their own tests.
-        patcher = patch("src.services.streaming_reply.flavor", side_effect=lambda status: status)
+        patcher = patch("src.services.streaming_reply.flavor", side_effect=lambda status, _lines=None: status)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -195,6 +195,7 @@ class TestStatusLines(unittest.IsolatedAsyncioTestCase):
             irc_log=MagicMock(), quote_file=MagicMock(), url_content_fetcher=AsyncMock(),
             reminder_service=MagicMock(), timezone_store=MagicMock(),
             video_summarizer=AsyncMock(), video_watcher=AsyncMock(), giphy_api_key="key",
+            alpaca=MagicMock(), paper_trading=MagicMock(),
         )
         named = [v for module in (mention, anthropic_service) for k, v in vars(module).items()
                  if k.endswith("_STATUS") and isinstance(v, str)]
@@ -217,6 +218,17 @@ class TestStatusLines(unittest.IsolatedAsyncioTestCase):
         with patch("src.utils.status_lines.random.random", return_value=0.0):
             self.assertIn(flavor("thinking..."), WILDCARDS)
         self.assertEqual(flavor("something new..."), "something new...")
+
+    def test_flavor_sometimes_shows_the_askers_private_lines(self):
+        private = {"*": ["any step..."], "drawing...": ["just drawing..."]}
+        with patch("src.utils.status_lines.random.random", return_value=0.0):
+            self.assertEqual(flavor("thinking...", private), "any step...")
+            self.assertIn(flavor("drawing...", private), ["any step...", "just drawing..."])
+            # No private line fits: the usual pick (here the wildcard roll).
+            self.assertIn(flavor("thinking...", {"drawing...": ["just drawing..."]}), WILDCARDS)
+        with patch("src.utils.status_lines.random.random", return_value=0.5):
+            self.assertIn(flavor("thinking...", private), STATUS_LINES["thinking..."])
+        self.assertEqual(flavor("something new...", private), "something new...")
 
     async def test_a_repeated_status_keeps_its_line_and_a_new_step_picks_again(self):
         streamer, _, _, _ = make_streamer()

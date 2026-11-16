@@ -14,7 +14,7 @@ import contextlib
 import logging
 import re
 import time
-from typing import Any, List, Optional
+from typing import Any, List, Mapping, Optional, Sequence
 
 import discord
 
@@ -38,9 +38,12 @@ def is_status_only(content: str) -> bool:
 class StreamingReply:
     """One mention's reply, posted early and edited as more text arrives."""
 
-    def __init__(self, channel: discord.abc.Messageable, message_service: Any):
+    def __init__(self, channel: discord.abc.Messageable, message_service: Any,
+                 user_lines: Optional[Mapping[str, Sequence[str]]] = None):
         self._channel = channel
         self._message_service = message_service
+        # The asker's private status lines, shown now and then in place of the usual ones.
+        self._user_lines = user_lines
         self._message: Optional[discord.Message] = None
         self._latest = ""
         self._status = ""
@@ -76,7 +79,7 @@ class StreamingReply:
         key = text.strip()
         if key != self._status_key:
             self._status_key = key
-            self._status = flavor(key)
+            self._status = flavor(key, self._user_lines)
         self._schedule()
 
     def _schedule(self) -> None:
