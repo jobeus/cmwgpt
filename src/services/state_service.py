@@ -19,6 +19,7 @@ import time
 from typing import Any, Dict, Optional
 
 from src.db.state_store import StateStore
+from src.services.model_catalog import canonical_model
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,9 @@ class StateService:
             self._store.delete_field(CHANNEL_SETTINGS_KEY, channel_id)
 
     def get_model(self, channel_id: int) -> Optional[str]:
-        return self._get_channel_setting(channel_id, "model")
+        model = self._get_channel_setting(channel_id, "model")
+        # A channel set before the models were renamed keeps answering with the same one.
+        return canonical_model(model) if model else model
 
     def set_model(self, channel_id: int, model: str) -> None:
         self._set_channel_setting(channel_id, "model", model)

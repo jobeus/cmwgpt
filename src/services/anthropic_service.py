@@ -16,13 +16,16 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import anthropic
 import discord
-import logfire
 
 from src.config import get_config
 from src.db.state_store import CONTEXT_TTL_SECONDS, StateStore
-from src.services.chat_tools import ChatTool, ToolResult, image_block, text_result
+from src.services.chat_tools import image_block
 from src.services.cost_service import CLAUDE_DIRECT, note_stat, record_cost
-from src.telemetry import image_links_ready, without_blobs
+from src.services.tool_runner import (
+    CODE_STATUS, MAX_TOOL_ROUNDS, SEARCH_RESULTS_STATUS, THINKING_STATUS, WEB_SEARCH_STATUS, ChatTool, ToolResult,
+    run_tool_call,
+)
+from src.telemetry import image_links_ready
 from src.utils.message_utils import clean_reply, resolve_bot_id
 
 logger = logging.getLogger(__name__)
@@ -53,12 +56,12 @@ class DirectModel:
 DIRECT_MODELS: Dict[str, DirectModel] = {
     # ``medium``: at ``low`` Sonnet 5.5 skipped web searches it should have made. Its thinking
     # stays out of the reply; only text blocks are streamed and posted.
-    "sonnet-5.5-direct": DirectModel("claude-sonnet-5-5", 2.00, 10.00, 2.50, 0.10, effort="medium"),
+    "sonnet": DirectModel("claude-sonnet-5-5", 2.00, 10.00, 2.50, 0.10, effort="medium"),
     # Opus 5.5 can't turn thinking off; its default ``medium`` overthinks chat, so run it at ``low``.
-    "opus-5.5-direct": DirectModel("claude-opus-5-5", 4.00, 20.00, 5.00, 0.20, effort="low"),
+    "opus": DirectModel("claude-opus-5-5", 4.00, 20.00, 5.00, 0.20, effort="low"),
     # ``medium`` (its default): Haiku 5.5 is the likeliest to skip a search it needs at ``low``.
     # It has no server-side fallback, and prompts over 100K tokens cost 5x.
-    "haiku-5.5-direct": DirectModel(
+    "haiku": DirectModel(
         "claude-haiku-5-5", 0.10, 0.50, 0.125, 0.01, effort="medium",
         fallbacks=False, long_prompt_tokens=100_000, long_prompt_factor=5.0),
 }
@@ -107,13 +110,11 @@ MAX_CODE_FILES = 4
 MAX_CODE_FILE_BYTES = 8 * 1024 * 1024
 # A server-tool turn can come back as ``pause_turn``; resume it this many times.
 MAX_CONTINUATIONS = 5
-# Rounds of client tool calls (draw, recall, ...) per reply; the last request after them can't call tools.
-MAX_TOOL_ROUNDS = 6
 
 # The API's advisor tool: mid-reply, the model can ask a stronger one for guidance. The API runs
 # that model itself on the whole transcript and hands the advice back within the same request.
 # Bot model alias -> the advisor's API model; only the models listed here get the tool.
-ADVISOR_MODELS = {"sonnet-5.5-direct": "claude-opus-5-5", "haiku-5.5-direct": "claude-sonnet-5-5"}
+ADVISOR_MODELS = {"sonnet": "claude-opus-5-5", "haiku": "claude-sonnet-5-5"}
 ADVISOR_BETA = "advisor-tool-2026-03-01"
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 # Advisor calls per reply, across its tool rounds, and the output cap (thinking included) of each.
@@ -134,10 +135,6 @@ def advisor_tool(advisor_api_model: str) -> Dict[str, Any]:
 
 ADVISOR_STATUS = "asking a smarter model for advice..."
 # What the reply preview says while the model is working, by the content block it's on.
-THINKING_STATUS = "thinking..."
-WEB_SEARCH_STATUS = "searching the web..."
-SEARCH_RESULTS_STATUS = "reading search results..."
-CODE_STATUS = "running code..."
 LOGS_STATUS = "checking my logs..."
 
 # The bot's own traces and logs in Logfire, through the API's MCP connector (Anthropic calls the
@@ -415,7 +412,7 @@ def _usage_cost(usage: Any, model: DirectModel) -> float:
         advisor = _MODELS_BY_API_ID.get(getattr(iteration, "model", None) or "")
         if advisor is None:
             logger.warning("[advisor] No prices for %s; billing it as opus", getattr(iteration, "model", None))
-            advisor = DIRECT_MODELS["opus-5.5-direct"]
+            advisor = DIRECT_MODELS["opus"]
         cost += _token_cost(iteration, advisor)
     server_tool_use = getattr(usage, "server_tool_use", None)
     searches = (getattr(server_tool_use, "web_search_requests", 0) or 0) if server_tool_use else 0
@@ -471,9 +468,13 @@ def _log_cache_diagnostics(api_model: str, channel_id: Optional[int], response: 
         logger.info("%s cache diagnostics: %s", where, reason.type)
 
 
-# Each channel's breakpoint and previous response id, in Redis so a restart within the
-# hour still reads the prompt cache (a moved breakpoint would miss) and keeps diagnosing it.
+# Each channel's breakpoint and previous response id, per model, in Redis so a restart within
+# the hour still reads the prompt cache (a moved breakpoint would miss) and keeps diagnosing it.
+# Per model because the API caches per model: a channel that switches to another model and
+# back within the hour picks up where that model left off and still reads its cache.
 CONTEXT_KEY = "context:anthropic"
+# (channel ID, bot-facing model name)
+Slot = Tuple[int, str]
 
 
 class AnthropicService:
@@ -488,26 +489,30 @@ class AnthropicService:
         self._logfire_mcp_url = logfire_mcp_url
         self._client: Optional[anthropic.AsyncAnthropic] = None
         self._bot_id_loader: Optional[Callable[[], Optional[int]]] = None
-        # channel_id -> index of the last history message marked in the previous request
-        self._history_breakpoints: Dict[int, int] = {}
-        # channel_id -> id of the previous response, for cache diagnostics
-        self._last_message_ids: Dict[int, str] = {}
-        # channel_id -> prompt tokens of the previous reply's first request: how big the history has got
-        self._prompt_tokens: Dict[int, int] = {}
+        # slot -> index of the last history message marked in the previous request
+        self._history_breakpoints: Dict[Slot, int] = {}
+        # slot -> id of the previous response, for cache diagnostics
+        self._last_message_ids: Dict[Slot, str] = {}
+        # slot -> prompt tokens of the previous reply's first request: how big the history has got
+        self._prompt_tokens: Dict[Slot, int] = {}
         self._context_store = context_store or StateStore(None)
         self._restore_context()
 
     def _restore_context(self) -> None:
         """Pick up each channel's cache state saved by the previous process."""
-        for channel, saved in self._context_store.get_all(CONTEXT_KEY).items():
+        for field, saved in self._context_store.get_all(CONTEXT_KEY).items():
+            channel, _, model = str(field).partition(":")
+            if not model:
+                # Saved before the state was kept per model; it expires within the hour.
+                continue
             try:
-                channel_id = int(channel)
+                slot = (int(channel), model)
                 if isinstance(saved.get("breakpoint"), int):
-                    self._history_breakpoints[channel_id] = saved["breakpoint"]
+                    self._history_breakpoints[slot] = saved["breakpoint"]
                 if saved.get("message_id"):
-                    self._last_message_ids[channel_id] = str(saved["message_id"])
+                    self._last_message_ids[slot] = str(saved["message_id"])
                 if isinstance(saved.get("prompt_tokens"), int):
-                    self._prompt_tokens[channel_id] = saved["prompt_tokens"]
+                    self._prompt_tokens[slot] = saved["prompt_tokens"]
             except (AttributeError, ValueError):
                 logger.warning("Ignoring unreadable cache state for channel %s: %s", channel, saved)
         if self._history_breakpoints or self._last_message_ids:
@@ -539,19 +544,24 @@ class AnthropicService:
         return self._client
 
     def clear_channel_cache(self, channel_id: int) -> None:
-        """Forget a channel's cache state (its history window was rebuilt).
+        """Forget a channel's cache state for every model (its history window was rebuilt).
 
         The next request starts a fresh diagnostics chain, so an expected
         divergence isn't reported as a cache miss.
         """
-        self._history_breakpoints.pop(channel_id, None)
-        self._last_message_ids.pop(channel_id, None)
-        self._prompt_tokens.pop(channel_id, None)
-        self._context_store.delete_field(CONTEXT_KEY, channel_id)
+        slots = {
+            slot for state in (self._history_breakpoints, self._last_message_ids, self._prompt_tokens)
+            for slot in state if slot[0] == channel_id
+        }
+        for slot in slots:
+            self._history_breakpoints.pop(slot, None)
+            self._last_message_ids.pop(slot, None)
+            self._prompt_tokens.pop(slot, None)
+            self._context_store.delete_field(CONTEXT_KEY, f"{slot[0]}:{slot[1]}")
 
-    def history_tokens(self, channel_id: int) -> int:
-        """How many prompt tokens the channel's previous reply started with (0 when unknown)."""
-        return self._prompt_tokens.get(channel_id, 0)
+    def history_tokens(self, channel_id: int, model: str) -> int:
+        """How many prompt tokens ``model``'s previous reply in the channel started with (0 when unknown)."""
+        return self._prompt_tokens.get((channel_id, model), 0)
 
     async def close(self) -> None:
         """Close the Anthropic client and clean up resources."""
@@ -665,31 +675,8 @@ class AnthropicService:
         Results, costs and files come back in the order the model made the calls.
         """
         async def run_one(block: Any) -> ToolResult:
-            name = getattr(block, "name", "")
-            args = getattr(block, "input", None) or {}
-            tool = client_tools.get(name)
-            if tool is None:
-                return text_result(f"There's no tool named {name}.", is_error=True)
-            on_status(tool.status)
-            note_stat("tools", name)
-            logger.info("[tool] %s %s", name, str(args)[:300])
-            with logfire.span("tool {tool_name}", tool_name=name, args=args) as span:
-                try:
-                    result = await tool.run(args)
-                except Exception as e:
-                    logger.warning("[tool] %s failed: %s", name, e)
-                    span.set_level("error")
-                    return text_result(f"{name} failed: {e}", is_error=True)
-                await image_links_ready(result.content)
-                span.set_attributes({
-                    "is_error": result.is_error,
-                    "cost": result.cost,
-                    "files": len(result.files),
-                    "result": without_blobs(result.content),
-                })
-                if result.is_error:
-                    span.set_level("warn")
-                return result
+            return await run_tool_call(
+                client_tools, getattr(block, "name", ""), getattr(block, "input", None) or {}, on_status)
 
         blocks = [block for block in response.content if getattr(block, "type", None) == "tool_use"]
         outcomes = await asyncio.gather(*(run_one(block) for block in blocks))
@@ -733,7 +720,7 @@ class AnthropicService:
         """
         client = self.get_client()
         resolved_bot_id = resolve_bot_id(bot_id, self._bot_id_loader)
-        direct_model = DIRECT_MODELS.get(model) or DIRECT_MODELS["sonnet-5.5-direct"]
+        direct_model = DIRECT_MODELS.get(model) or DIRECT_MODELS["sonnet"]
         api_model = direct_model.api_id
         api_messages = build_anthropic_messages(messages)
         if not api_messages:
@@ -755,7 +742,8 @@ class AnthropicService:
         if system_prompt:
             # Its own breakpoint, so the system prompt still reads from cache when the history doesn't.
             kwargs["system"] = [{"type": "text", "text": system_prompt, "cache_control": cache_control}]
-        previous_index = self._history_breakpoints.get(channel_id) if channel_id else None
+        slot: Optional[Slot] = (channel_id, model) if channel_id else None
+        previous_index = self._history_breakpoints.get(slot) if slot else None
         history_index = apply_history_breakpoints(api_messages, previous_index, cache_control)
         if search:
             kwargs["tools"] = [{
@@ -783,7 +771,7 @@ class AnthropicService:
         logger.info("[%s] Prompt Snippet: %s%s", api_model, snippet[:150], '...' if len(snippet) > 150 else '')
 
         total_cost = 0.0
-        previous_message_id = self._last_message_ids.get(channel_id) if channel_id else None
+        previous_message_id = self._last_message_ids.get(slot) if slot else None
         # Text the model wrote before each finished tool round, and the files its tools made.
         texts: List[str] = []
         files: List[discord.File] = []
@@ -885,17 +873,17 @@ class AnthropicService:
 
         if response is None:
             raise AnthropicServiceError("The Claude API returned no response.")
-        if channel_id and history_index is not None:
-            self._history_breakpoints[channel_id] = history_index
-        if channel_id and previous_message_id:
-            self._last_message_ids[channel_id] = previous_message_id
-        if channel_id and first_prompt_tokens:
-            self._prompt_tokens[channel_id] = first_prompt_tokens
-        if channel_id and (history_index is not None or previous_message_id):
-            self._context_store.set_field(CONTEXT_KEY, channel_id, {
-                "breakpoint": self._history_breakpoints.get(channel_id),
-                "message_id": self._last_message_ids.get(channel_id),
-                "prompt_tokens": self._prompt_tokens.get(channel_id),
+        if slot and history_index is not None:
+            self._history_breakpoints[slot] = history_index
+        if slot and previous_message_id:
+            self._last_message_ids[slot] = previous_message_id
+        if slot and first_prompt_tokens:
+            self._prompt_tokens[slot] = first_prompt_tokens
+        if slot and (history_index is not None or previous_message_id):
+            self._context_store.set_field(CONTEXT_KEY, f"{slot[0]}:{slot[1]}", {
+                "breakpoint": self._history_breakpoints.get(slot),
+                "message_id": self._last_message_ids.get(slot),
+                "prompt_tokens": self._prompt_tokens.get(slot),
             }, ttl_seconds=CONTEXT_TTL_SECONDS)
 
         if response.stop_reason == "refusal":
@@ -967,7 +955,7 @@ class MessageBatcher:
         self, *, model: str, system_prompt: str, user_text: str, effort: Optional[str] = None,
     ) -> Tuple[str, float]:
         """Queue one single-turn request and wait for its ``(text, cost)``."""
-        direct_model = DIRECT_MODELS.get(model) or DIRECT_MODELS["sonnet-5.5-direct"]
+        direct_model = DIRECT_MODELS.get(model) or DIRECT_MODELS["sonnet"]
         params: Dict[str, Any] = {
             "model": direct_model.api_id,
             "max_tokens": MAX_TOKENS,

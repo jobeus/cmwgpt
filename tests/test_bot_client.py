@@ -298,9 +298,8 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         fake_bot.user = SimpleNamespace(id=4242)
         self.assertEqual(services.anthropic_service.set_bot_id_loader.call_args.args[0](), 4242)
         services.restart_handler.set_shutdown_callback.assert_called_once_with(client.shutdown)
-        self.assertEqual(
-            mock_system.call_args.kwargs["on_model_change"], client._clear_model_caches
-        )
+        # A model switch keeps each model's cache state, so nothing is told about it.
+        self.assertNotIn("on_model_change", mock_system.call_args.kwargs)
         services.state_service.load_restart_state.assert_called_once_with()
         services.state_service.set_last_git_sha.assert_called_once_with("abc123")
         services.auto_update_service.set_restart_callback.assert_called_once_with(
@@ -322,20 +321,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
 
         client.services.state_service.restart_info = {}
         self.assertFalse(client._check_for_restart_info())
-
-    async def test_clear_model_caches_clears_gemini_and_anthropic(self):
-        client, _ = self.make_client()
-        client.services.gemini_service = MagicMock()
-        client.services.anthropic_service = MagicMock()
-
-        client._clear_model_caches(55)
-
-        client.services.gemini_service.clear_channel_cache.assert_called_once_with(55)
-        client.services.anthropic_service.clear_channel_cache.assert_called_once_with(55)
-
-        client.services.anthropic_service = None
-        client._clear_model_caches(56)
-        client.services.gemini_service.clear_channel_cache.assert_called_with(56)
 
     async def test_run_only_runs_the_bot(self):
         client = object.__new__(DiscordBotClient)

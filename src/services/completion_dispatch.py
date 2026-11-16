@@ -3,8 +3,10 @@
 Callers (the mention handler, the memory job, deathwatch) turn a prepared message array
 into a reply by routing to:
 
-* a Gemini model  — single Gemini call;
-* anything else   — single Claude API call (``AnthropicService``).
+* a Gemini model  — the Gemini API (``GeminiService``);
+* anything else   — the Claude API (``AnthropicService``).
+
+Both take the same client tools and report text and status the same way.
 
 This module owns that routing (and the identity kwargs threaded into each
 service call) so the decision lives in exactly one place.
@@ -12,7 +14,7 @@ service call) so the decision lives in exactly one place.
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-from src.services.gemini_service import is_gemini_model, get_thinking_level
+from src.services.gemini_service import is_gemini_model
 
 ReplyContent = Union[str, Dict[str, Any], None]
 
@@ -41,15 +43,12 @@ async def dispatch_completion(
         gemini_service / anthropic_service: The completion services.
         identity: Kwargs (``channel_id``/``discord_user_id``) splatted
             into every service call. Each caller supplies its own set.
-        search: Whether the Claude API route may use web search.
-        on_text: Called with the reply so far while it streams in. The Claude API route
-            streams; Gemini returns the whole reply at once.
-        effort: Overrides the model's default effort level on the Claude API route;
-            Gemini ignores it.
-        tools: Client tools (``ChatTool``) the model may call. Only the Claude API route
-            offers them.
+        search: Whether the model may search the web.
+        on_text: Called with the reply so far while it streams in.
+        effort: Overrides the model's default effort (Claude) or thinking level (Gemini).
+        tools: Client tools (``ChatTool``) the model may call.
         on_status: Called with what the model is doing (thinking, searching, a tool call)
-            while no new text is coming. Only the Claude API route reports it.
+            while no new text is coming.
         max_tokens: Caps each Claude API request's output, thinking included; unset, the
             service default. Gemini ignores it.
     """
@@ -58,7 +57,11 @@ async def dispatch_completion(
             model=model,
             messages=messages,
             system_prompt=system_prompt,
-            thinking_level=get_thinking_level(model),
+            search=search,
+            on_text=on_text,
+            effort=effort,
+            tools=tools,
+            on_status=on_status,
             **identity,
         )
     return await anthropic_service.get_chat_completion(

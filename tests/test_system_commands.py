@@ -2,7 +2,7 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord.ext.commands  # noqa: F401
 
@@ -51,16 +51,13 @@ class TestSystemCommands(unittest.IsolatedAsyncioTestCase):
 
     async def test_lobotomize_sets_channel_to_haiku(self):
         commands, _, _, state_service = self.make_commands()
-        on_change = Mock()
-        commands._on_model_change = on_change
         interaction = make_interaction(channel_id=321)
 
         with patch("src.bot.commands.system.is_model_unavailable", return_value=False):
             await commands._handle_lobotomize_command(interaction)
 
-        state_service.set_model.assert_called_once_with(321, "haiku-5.5-direct")
-        on_change.assert_called_once_with(321)
-        interaction.followup.send.assert_awaited_once_with("Lobotomized. Model set to `haiku-5.5-direct`.")
+        state_service.set_model.assert_called_once_with(321, "haiku")
+        interaction.followup.send.assert_awaited_once_with("Lobotomized. Model set to `haiku`.")
 
     async def test_lobotomize_needs_the_anthropic_key(self):
         commands, _, _, state_service = self.make_commands()
@@ -70,19 +67,6 @@ class TestSystemCommands(unittest.IsolatedAsyncioTestCase):
             await commands._handle_lobotomize_command(interaction)
 
         state_service.set_model.assert_not_called()
-
-    async def test_handle_model_command_calls_on_model_change_only_when_setting(self):
-        commands, _, _, state_service = self.make_commands()
-        on_change = MagicMock()
-        commands._on_model_change = on_change
-        state_service.get_model.return_value = "x"
-        interaction = make_interaction(channel_id=321)
-
-        await commands._handle_model_command(interaction, None)
-        on_change.assert_not_called()
-
-        await commands._handle_model_command(interaction, "gpt-test")
-        on_change.assert_called_once_with(321)
 
     async def test_handle_model_command_reports_current_or_default_model(self):
         commands, _, _, state_service = self.make_commands(default_model="fallback-model")

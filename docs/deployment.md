@@ -35,7 +35,7 @@ What it does **not** currently try to be:
 | Reachable Redis | Per-user memory (`/memory`, nightly job) depends on it; the bot still replies without it (see `docs/redis_setup.md`) |
 | `DISCORD_BOT_TOKEN` | Discord authentication |
 | `ANTHROPIC_API_KEY` | Text completions (the default model) and the memory job |
-| `GEMINI_API_KEY` | `google` models and image commands |
+| `GEMINI_API_KEY` | `hydrogen`/`argon` models and image commands |
 | Optional `RAPIDAPI_KEY` / `GROQ_API_KEY` | Needed for some URL-enrichment providers |
 
 ### Core rollout steps

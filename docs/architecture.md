@@ -14,7 +14,7 @@ This page is meant to answer four questions quickly:
 | System architecture | Orient yourself to the whole stack |
 | Service wiring at startup | See what `src/startup.py` actually constructs |
 | Mention pipeline | Understand the primary request path |
-| Claude API tools | See what the direct models can call, and how to add a tool |
+| Client tools | See what the chat models can call, and how to add a tool |
 | Downloader enrichment flow | Understand where transcript/article data comes from |
 | Docker/runtime layout | Visualize the development stack |
 | Component map | Jump straight to the file you likely need |
@@ -176,20 +176,12 @@ sequenceDiagram
     M->>S: mark_channel_active(channel)
     M->>M: build_chat_context (history, replies, embeds, attachments)
     M->>S: get_system_prompt(channel)
-    alt model has tools (the -direct models)
-        M->>M: add "Your tools" section, build_mention_tools(message)
-    else google / google-high
-        M->>D: fetch_all_url_content(text) per message, concurrently
-        D-->>M: enrichment (newest 10 messages fetch; older ones use cache only)
-        M->>MEM: get_notes_block(asker, mentioned users, recent speakers)
-        MEM-->>M: profiles appended to the mention
-        Note over M: how_i_work goes in the system prompt
-    end
+    M->>M: add "Your tools" section, build_mention_tools(message, model)
     M->>DP: dispatch_completion(messages, model, system_prompt, tools)
-    alt model is google / google-high
+    alt model is hydrogen / argon
         DP->>G: get_chat_completion(...)
         G-->>DP: reply content
-    else model is a -direct model
+    else model is sonnet / opus / haiku
         DP->>A: get_chat_completion(...)
         loop up to 6 tool rounds
             A->>A: run tool_use blocks (ChatTool.run), send tool_result back
@@ -206,18 +198,19 @@ sequenceDiagram
 
 - Mentions are **queued**, not processed in parallel ad hoc.
 - Prompt context is more than just the latest message: it includes recent history, reply metadata, embeds, and attachments. The multimodal context array is built by `src/utils/chat_context.py` (`build_chat_context`).
-- The history window grows with the conversation and starts over, with the newest 25 messages (`RESET_HISTORY_MESSAGES`) and a `<context_reset>` block on that mention, once it reaches 1000 messages (`MAX_HISTORY_WINDOW`) or, on the direct models, once the previous reply's first request reached `history_token_budget(model)` prompt tokens (150k; 80k on haiku). `AnthropicService` records that size per channel next to the cache breakpoint. Starting over rewrites the whole prompt cache, so the limits are set high to make it rare. It keeps at most 40 images: past that, `cap_history_images` swaps the oldest for a note, 20 at a time, so a picture-heavy channel can't pass the API's request size limit.
-- Model routing is centralized in `src/services/completion_dispatch.py`: `google`/`google-high` go to `GeminiService`, `sonnet-5.5-direct`/`opus-5.5-direct`/`haiku-5.5-direct` go to `AnthropicService` (Claude API). There are no other chat models; a channel set to a retired one falls back to `DEFAULT_MODEL`.
-- URL enrichment happens **before** the LLM call and can materially change the prompt content. Only the newest 10 history messages fetch links; older messages use cached results only, and the fetches run concurrently.
-- Per-user memory profiles are appended to the end of the mention, so the cached system prompt and history stay unchanged.
+- The history window grows with the conversation and starts over, with the newest 25 messages (`RESET_HISTORY_MESSAGES`) and a `<context_reset>` block on that mention, once it reaches 1000 messages (`MAX_HISTORY_WINDOW`) or once the previous reply's first request reached `history_token_budget(model)` prompt tokens (150k; 80k on haiku). Each service records that size per channel and model next to its cache state (Claude's cache breakpoint, Gemini's interaction ID). Starting over rewrites the whole prompt cache, so the limits are set high to make it rare. It keeps at most 40 images: past that, `cap_history_images` swaps the oldest for a note, 20 at a time, so a picture-heavy channel can't pass the API's request size limit.
+- Model routing is centralized in `src/services/completion_dispatch.py`: `hydrogen`/`argon` go to `GeminiService` (Gemini API), `sonnet`/`opus`/`haiku` go to `AnthropicService` (Claude API). There are no other chat models; a channel set to an old name answers with the model that replaced it (`LEGACY_MODEL_NAMES`), and one set to anything else falls back to `DEFAULT_MODEL`.
+- Both services keep their per-channel cache state per model (`(channel, model)`), and `/model` doesn't clear it: after a question to another model, the first one still reads its prompt cache (Claude: its own history breakpoint is marked again) or continues its own conversation (Gemini: `previous_interaction_id`, sent only the messages newer than the last one it saw, minus its own reply). Only a rebuilt history window clears it, for every model.
 - The system prompt tells every model to write specific times as Discord timestamps (`<t:unix:style>`), which each reader sees in their own time zone. To make the Unix arithmetic reliable, the mention also ends with a `<now>` block (`_now_block` in `src/bot/handlers/mention.py`): its Unix time and the UTC offset of the header timestamps. Reminder tool results carry each due time as Unix seconds for the same reason.
-- The Claude API direct models get none of the on-demand context filled in (links, memory notes, `how_i_work`). They get a short "Your tools" section in the system prompt instead (general rules, such as making independent calls in one turn; each tool is described only in its own definition, so nothing is sent twice) and fetch what they need with tools; see [Claude API tools](#claude-api-tools).
-- Claude API replies stream: `StreamingReply` (`src/services/streaming_reply.py`) posts the reply as it arrives and edits it at most every 1.5 seconds, then edits in the final text with the cost. If the request fails, the partial message is deleted before the error reply. Gemini replies arrive whole and are edited into the same status preview.
+- The models get none of the on-demand context filled in (links, memory notes, `how_i_work`). They get a short "Your tools" section in the system prompt instead (general rules, such as making independent calls in one turn; each tool is described only in its own definition, so nothing is sent twice) and fetch what they need with tools; see [Client tools](#client-tools).
+- Replies stream on both APIs: `StreamingReply` (`src/services/streaming_reply.py`) posts the reply as it arrives and edits it at most every 1.5 seconds, then edits in the final text with the cost. If the request fails, the partial message is deleted before the error reply.
 - There is no request/pipeline log table. Diagnostics go to the Python log (stdout and `logs/`), one JSON line per mention in `logs/mentions.jsonl` (`src/services/mention_log.py`) and, when `LOGFIRE_TOKEN` is set, traces in Logfire (`src/telemetry.py`).
 
-## Claude API tools
+## Client tools
 
-The direct models (`sonnet-5.5-direct`, `opus-5.5-direct`, `haiku-5.5-direct`) are offered client tools on top of server-side web search. `MentionHandler._build_tools` calls `build_mention_tools` (`src/services/chat_tools.py`) once per mention; the handlers are closures over that mention's guild, channel and asker, so per-reply limits (like 2 images) and permission checks need no shared state. `AnthropicService.get_chat_completion` runs the tool loop: a round's `tool_use` blocks run concurrently, each `ToolResult` goes back as a `tool_result` in the order the calls were made, costs are added to the reply's cost and files are attached to the reply. Limits that span calls (images, reactions) are counted before each tool's first `await`, so calls running side by side can't overshoot them. After 6 rounds `tool_choice` is set to `none` so the model has to answer.
+Every chat model is offered client tools on top of its API's own web search. `MentionHandler._build_tools` calls `build_mention_tools` (`src/services/chat_tools.py`) once per mention; the handlers are closures over that mention's guild, channel and asker, so per-reply limits (like 2 images) and permission checks need no shared state. Each service runs its own tool loop in `get_chat_completion`, since the two APIs ask for calls and take results differently, and runs every call through `run_tool_call` (`src/services/tool_runner.py`) so logging, tracing and stats match. On the Claude API a round's `tool_use` blocks run concurrently and each `ToolResult` goes back as a `tool_result` in the order the calls were made; costs are added to the reply's cost and files are attached to the reply. Limits that span calls (images, reactions) are counted before each tool's first `await`, so calls running side by side can't overshoot them. After 6 rounds `tool_choice` is set to `none` so the model has to answer.
+
+On the Gemini API (`hydrogen`, `argon`) the same tools go out as Interactions API function tools (`function_tool`) next to Google Search, URL context and code execution, with `tool_choice: validated` as Google asks when the two kinds are mixed. The reply is streamed; a response that ends `requires_action` has its `function_call` steps run concurrently and answered with `function_result` items (`function_result` converts a `ToolResult`: text, PNG/JPEG/WebP images, and `video` blocks) on `previous_interaction_id`. Videos are the one tool difference: `build_mention_tools(video_loader=...)` gives a Gemini model `watch_youtube` and a `watch_video` that return the video itself (`VideoWatcher.video_block`: the YouTube link, or the uploaded file), so the chat model watches it instead of reading another model's write-up. After a reply that watched a video the conversation isn't continued, so the video isn't billed again on later mentions. Gemini 4 has implicit caching only; an hour of `previous_interaction_id` continuation (`INTERACTION_CACHE_TTL`) is what lets it hit.
 
 Requests with client tools also get Anthropic's server-side code execution (`code_execution_20260521`), besides web search. The reply reuses one container across its requests, and files the code saves (`bash_code_execution_output` blocks) are downloaded through the Files API and attached to the reply (`AnthropicService._download_code_files`).
 
@@ -234,7 +227,7 @@ A tool is left out when its dependency isn't configured (no `IRC_LOG` means no I
 | `old_quotes` | `src/services/quote_service.py` | `OLD_QUOTE_BOT` |
 | `remind`, `list_reminders`, `cancel_reminder` | `src/services/reminder_service.py` (Redis; posts due reminders every 15s, then queues any `task` through `MentionHandler.queue_reminder_task`) | a guild |
 | `set_timezone` | `src/services/timezone_service.py` (Redis; also feeds the `<time_zones>` block on every mention) | a guild, Redis |
-| `summarize_youtube` | `VideoWatcher.summarize_youtube`: agentic through the Interactions API from 5 minutes (length from yt-dlp's metadata), else `GeminiService.summarize_youtube` (static), cached in `cmwgpt:cache:youtube_summaries` | `GEMINI_API_KEY` |
+| `summarize_youtube` | `VideoWatcher.summarize_youtube`: agentic through the Interactions API from 5 minutes (length from yt-dlp's metadata), else the same call static, cached in `cmwgpt:cache:youtube_summaries` | `GEMINI_API_KEY` |
 | `transcribe_youtube` | `youtube_utils.get_transcript` (captions) | — |
 | `watch_video` | `VideoWatcher.watch` (`src/services/video_service.py`): downloads, uploads to the Files API as is under 100 MB (else re-encodes to 480p/10 fps first), then `GeminiService.watch_video` (Interactions API, `processing` static under 5 minutes, agentic from 5 minutes), cached in `cmwgpt:cache:video_watches` | `GEMINI_API_KEY`, ffmpeg |
 | `read_urls` | `fetch_all_url_content` (same fetchers and cache as enrichment), for any URL, including web search results; used instead of the API's `web_fetch` so links go through the site-specific fetchers | — |
@@ -331,7 +324,7 @@ flowchart LR
 | `src/services/completion_dispatch.py` | Model routing | Understand Gemini/Claude API selection |
 | `src/services/model_catalog.py` | `/model` options | Add a text model or see which key each one needs |
 | `src/services/anthropic_service.py` | Claude API integration | Debug prompt caching, the tool loop, the advisor tool or pricing |
-| `src/services/chat_tools.py` | Client tools for the direct models | Add or change a tool and its description |
+| `src/services/chat_tools.py` | Client tools for the chat models | Add or change a tool and its description |
 | `src/services/discord_history.py` | Discord message search/read | Debug `search_messages` / `read_messages` |
 | `src/services/irc_log_service.py` | Old IRC log search/count | Debug the IRC tools or nick merging |
 | `src/services/quote_service.py` | Old quote bot file | Debug `old_quotes` |
@@ -339,7 +332,8 @@ flowchart LR
 | `src/services/image_service.py` | Image models and options | See each Gemini image model's aspect ratios, sizes, thinking and search |
 | `src/services/streaming_reply.py` | Streamed reply preview | Debug status lines, edits and the final reply |
 | `src/utils/status_lines.py` | The joke lines the preview shows for each step, in a dry Hitchhiker's Guide-ish voice; every status a tool or step shows needs several here (a test checks), and they should be jokes, never plain descriptions. An untracked `status_lines.json` (`config.get_user_status_lines`) adds private lines for particular people, shown 1 step in 4 when that person asks | Add or reword a status line |
-| `src/services/gemini_service.py` | Native Gemini integration | Understand `google`/`google-high` calls and the Gemini timeout |
+| `src/services/gemini_service.py` | Gemini API integration (chat with tools, video, images) | Understand `hydrogen`/`argon` calls, their tool loop and the Gemini timeout |
+| `src/services/tool_runner.py` | `ChatTool`/`ToolResult`, shared statuses and `run_tool_call` | Change what both tool loops share |
 | `src/services/state_service.py` | Per-channel settings and restart state, in Redis | See where model/system-prompt/service settings live |
 | `src/db/state_store.py` | The Redis hash behind settings, restart state and each channel's conversation state | Debug a setting that didn't survive a restart |
 | `src/services/queue_service.py` | FIFO work queue | Understand serialized mention processing |
@@ -379,9 +373,9 @@ flowchart LR
 1. A user mentions the bot.
 2. `DiscordBotClient` chooses the active model for the channel and queues the work.
 3. `MentionHandler` gathers recent message history and reply context (via `build_chat_context`).
-4. For most models, the handler enriches user text with downloader output for supported URLs, and appends the memory profiles of the people involved. The Claude API direct models get a tools section and the tools instead.
-5. `dispatch_completion` routes the assembled context to `GeminiService` (native Gemini) or `AnthropicService` (Claude API), based on the channel's model. `AnthropicService` runs any tool calls before the final answer.
-6. For Claude API models the reply streams into a Discord message as it's written (`StreamingReply`); the final text, with its cost, is edited in at the end. Gemini replies arrive whole and are edited into the status preview the same way.
+4. The handler adds a tools section to the system prompt and builds the model's tools; links, memory profiles and `how_i_work` are looked up by the model through them rather than filled in.
+5. `dispatch_completion` routes the assembled context to `GeminiService` (Gemini API) or `AnthropicService` (Claude API), based on the channel's model. Either runs any tool calls before the final answer.
+6. The reply streams into a Discord message as it's written (`StreamingReply`); the final text, with its cost, is edited in at the end.
 
 ### Memory
 

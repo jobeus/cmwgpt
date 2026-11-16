@@ -63,12 +63,12 @@ class TestMentionRecord(unittest.TestCase):
             ledger.add("claude-direct", 0.0123)
             note_stat("tools", "search_messages")
             ledger.stats["reply_chars"] = 120
-        record = mention_record(_message(text), 999, "sonnet-5.5-direct", ledger, seconds=4.567)
+        record = mention_record(_message(text), 999, "sonnet", ledger, seconds=4.567)
 
         self.assertEqual(record["text"], text)
         self.assertEqual(record["ts"], "2026-11-03T18:00:00+00:00")
         self.assertEqual((record["guild_id"], record["channel"], record["user"]), (10, "general", "jobe"))
-        self.assertEqual(record["model"], "sonnet-5.5-direct")
+        self.assertEqual(record["model"], "sonnet")
         self.assertEqual(record["cost"], 0.0123)
         self.assertEqual(record["tools"], ["search_messages"])
         self.assertEqual(record["reply_chars"], 120)
@@ -79,7 +79,7 @@ class TestMentionRecord(unittest.TestCase):
     def test_marks_replies_to_the_bot_and_reminder_tasks(self):
         with cost_scope() as ledger:
             pass
-        record = mention_record(_message(reply_author_id=999), 999, "opus-5.5-direct", ledger,
+        record = mention_record(_message(reply_author_id=999), 999, "opus", ledger,
                                 seconds=1.0, task="look up the score")
         self.assertTrue(record["reply_to_bot"])
         self.assertEqual(record["reply_to"], 4)
@@ -116,12 +116,12 @@ class TestHandlerLogsEachMention(unittest.IsolatedAsyncioTestCase):
         message = _message()
         message.channel = channel
         with patch("src.bot.handlers.mention.log_mention") as log:
-            await handler.handle_mention(message, SimpleNamespace(id=999), "sonnet-5.5-direct")
+            await handler.handle_mention(message, SimpleNamespace(id=999), "sonnet")
 
         [record] = [c.args[0] for c in log.call_args_list]
         self.assertEqual(record["error"], "RuntimeError: boom")
         self.assertEqual(record["text"], "<@999> who won the game?")
-        self.assertEqual(record["model"], "sonnet-5.5-direct")
+        self.assertEqual(record["model"], "sonnet")
 
 
 if __name__ == "__main__":

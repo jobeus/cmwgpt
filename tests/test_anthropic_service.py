@@ -60,10 +60,10 @@ def _response(text="hello", stop_reason="end_turn", usage=None, content=None, st
 
 class TestHelpers(unittest.TestCase):
     def test_is_direct_anthropic_model(self):
-        self.assertTrue(is_direct_anthropic_model("sonnet-5.5-direct"))
-        self.assertTrue(is_direct_anthropic_model("opus-5.5-direct"))
+        self.assertTrue(is_direct_anthropic_model("sonnet"))
+        self.assertTrue(is_direct_anthropic_model("opus"))
         self.assertFalse(is_direct_anthropic_model("anthropic/claude-sonnet-5.5"))
-        self.assertFalse(is_direct_anthropic_model("google"))
+        self.assertFalse(is_direct_anthropic_model("hydrogen"))
 
     def test_build_messages_converts_text_and_images(self):
         messages = [
@@ -100,11 +100,11 @@ class TestHelpers(unittest.TestCase):
 
     def test_usage_cost(self):
         usage = _usage(input_tokens=1_000_000, output_tokens=100_000, searches=2)
-        self.assertAlmostEqual(_usage_cost(usage, DIRECT_MODELS["sonnet-5.5-direct"]), 2.00 + 1.00 + 0.02)
-        self.assertAlmostEqual(_usage_cost(usage, DIRECT_MODELS["opus-5.5-direct"]), 4.00 + 2.00 + 0.02)
+        self.assertAlmostEqual(_usage_cost(usage, DIRECT_MODELS["sonnet"]), 2.00 + 1.00 + 0.02)
+        self.assertAlmostEqual(_usage_cost(usage, DIRECT_MODELS["opus"]), 4.00 + 2.00 + 0.02)
 
     def test_haiku_costs_five_times_as_much_over_100k_prompt_tokens(self):
-        haiku = DIRECT_MODELS["haiku-5.5-direct"]
+        haiku = DIRECT_MODELS["haiku"]
         short = _usage(input_tokens=60_000, output_tokens=1_000_000)
         short.cache_read_input_tokens = 40_000
         self.assertAlmostEqual(_usage_cost(short, haiku), 0.006 + 0.0004 + 0.50)
@@ -112,13 +112,13 @@ class TestHelpers(unittest.TestCase):
         long.cache_read_input_tokens = 40_001
         self.assertAlmostEqual(_usage_cost(long, haiku), 5 * (0.006 + 0.00040001 + 0.50))
         # The other models cost the same at any length.
-        self.assertAlmostEqual(_usage_cost(long, DIRECT_MODELS["sonnet-5.5-direct"]), 0.12 + 0.0040001 + 10.00)
+        self.assertAlmostEqual(_usage_cost(long, DIRECT_MODELS["sonnet"]), 0.12 + 0.0040001 + 10.00)
 
     def test_usage_cost_prices_1h_cache_writes_at_twice_input(self):
         usage = _usage(input_tokens=0, output_tokens=0)
         usage.cache_creation_input_tokens = 3_000_000
         usage.cache_creation = SimpleNamespace(ephemeral_5m_input_tokens=1_000_000, ephemeral_1h_input_tokens=2_000_000)
-        self.assertAlmostEqual(_usage_cost(usage, DIRECT_MODELS["sonnet-5.5-direct"]), 2.50 + 2 * 4.00)
+        self.assertAlmostEqual(_usage_cost(usage, DIRECT_MODELS["sonnet"]), 2.50 + 2 * 4.00)
 
 
 def _history(n):
@@ -176,7 +176,7 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
     async def test_returns_text_and_cost(self):
         service, client = self.make_service(_response("hi there"))
         text, cost = await service.get_chat_completion(
-            model="sonnet-5.5-direct",
+            model="sonnet",
             messages=[{"role": "user", "content": [{"type": "text", "text": "hello"}]}],
             system_prompt="be nice",
         )
@@ -192,7 +192,7 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
     async def test_mention_replies_cache_system_and_history_for_an_hour(self):
         service, client = self.make_service(_response("hi"))
         await service.get_chat_completion(
-            model="sonnet-5.5-direct",
+            model="sonnet",
             messages=[
                 {"role": "user", "content": [{"type": "text", "text": "earlier"}]},
                 {"role": "user", "content": [{"type": "text", "text": "hello"}]},
@@ -210,7 +210,7 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         usage = _usage(input_tokens=1_000_000, output_tokens=0)
         service, client = self.make_service(_response("deep", usage=usage, model="claude-opus-5-5"))
         _, cost = await service.get_chat_completion(
-            model="opus-5.5-direct", messages=[{"role": "user", "content": "q"}])
+            model="opus", messages=[{"role": "user", "content": "q"}])
         kwargs = client.beta.messages.create.call_args.kwargs
         self.assertEqual(kwargs["model"], "claude-opus-5-5")
         self.assertEqual(kwargs["output_config"], {"effort": "low"})
@@ -219,7 +219,7 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
     async def test_haiku_gets_the_same_tools_and_no_fallback(self):
         service, client = self.make_service(_response("duh", model="claude-haiku-5-5"))
         await service.get_chat_completion(
-            model="haiku-5.5-direct", messages=[{"role": "user", "content": "q"}])
+            model="haiku", messages=[{"role": "user", "content": "q"}])
         kwargs = client.beta.messages.create.call_args.kwargs
         self.assertEqual(kwargs["model"], "claude-haiku-5-5")
         self.assertEqual(kwargs["output_config"], {"effort": "medium"})
@@ -230,17 +230,17 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
     async def test_effort_override_replaces_model_effort(self):
         service, client = self.make_service(_response("deep"))
         await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}], effort="medium")
+            model="sonnet", messages=[{"role": "user", "content": "q"}], effort="medium")
         kwargs = client.beta.messages.create.call_args.kwargs
         self.assertEqual(kwargs["output_config"], {"effort": "medium"})
 
     async def test_sonnet_and_haiku_get_a_stronger_advisor_and_opus_does_not(self):
         service, client = self.make_service(_response("a"), _response("b"), _response("c"), _response("d"))
         for model, channel_id, offered in (
-            ("sonnet-5.5-direct", 7, "claude-opus-5-5"),
-            ("sonnet-5.5-direct", None, None),  # a background job
-            ("opus-5.5-direct", 7, None),
-            ("haiku-5.5-direct", 7, "claude-sonnet-5-5"),
+            ("sonnet", 7, "claude-opus-5-5"),
+            ("sonnet", None, None),  # a background job
+            ("opus", 7, None),
+            ("haiku", 7, "claude-sonnet-5-5"),
         ):
             await service.get_chat_completion(
                 model=model, messages=[{"role": "user", "content": "q"}], channel_id=channel_id)
@@ -262,7 +262,7 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         ]
         service, _ = self.make_service(_response("advised", usage=usage))
         _, cost = await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}])
+            model="sonnet", messages=[{"role": "user", "content": "q"}])
         # Sonnet's own million input tokens, plus opus's million in and 100k out.
         self.assertAlmostEqual(cost, 2.00 + 4.00 + 2.00)
 
@@ -275,7 +275,7 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
             _response(content=[advice, SimpleNamespace(type="text", text="answer")]))
 
         text, _ = await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}])
+            model="sonnet", messages=[{"role": "user", "content": "q"}])
 
         self.assertEqual(text, "answer")
         first_call, resumed = (c.kwargs for c in client.beta.messages.create.call_args_list)
@@ -286,22 +286,22 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         usage = _usage(input_tokens=1_000_000, output_tokens=0)
         service, _ = self.make_service(_response("rescued", usage=usage, model="claude-sonnet-5-5"))
         _, cost = await service.get_chat_completion(
-            model="opus-5.5-direct", messages=[{"role": "user", "content": "q"}])
+            model="opus", messages=[{"role": "user", "content": "q"}])
         self.assertAlmostEqual(cost, 2.00)
 
     async def test_remembers_history_breakpoint_per_channel(self):
         service, client = self.make_service(_response("one"), _response("two"))
         await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=_history(3), channel_id=7)
+            model="sonnet", messages=_history(3), channel_id=7)
         await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=_history(30), channel_id=7)
+            model="sonnet", messages=_history(30), channel_id=7)
         second = client.beta.messages.create.call_args.kwargs["messages"]
         self.assertEqual(_marked(second), [1, 28])
 
     async def test_search_false_omits_tools(self):
         service, client = self.make_service(_response("ok"))
         await service.get_chat_completion(
-            model="sonnet-5.5-direct",
+            model="sonnet",
             messages=[{"role": "user", "content": "hello"}],
             search=False,
         )
@@ -311,7 +311,7 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         paused = _response(stop_reason="pause_turn", content=[SimpleNamespace(type="server_tool_use")])
         service, client = self.make_service(paused, _response("done"))
         text, _ = await service.get_chat_completion(
-            model="sonnet-5.5-direct",
+            model="sonnet",
             messages=[{"role": "user", "content": "search something"}],
         )
         self.assertEqual(text, "done")
@@ -324,14 +324,14 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         paused = _response(stop_reason="pause_turn", content=[SimpleNamespace(type="text", text="Looking. "), search])
         service, _ = self.make_service(paused, _response("Found it."))
         text, _ = await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "search something"}])
+            model="sonnet", messages=[{"role": "user", "content": "search something"}])
         self.assertEqual(text, "Looking. Found it.")
 
     async def test_text_before_a_pause_counts_when_the_cap_is_hit(self):
         paused = _response(stop_reason="pause_turn", content=[SimpleNamespace(type="text", text="So far")])
         service, client = self.make_service(paused, _response(stop_reason="max_tokens", content=[]))
         text, _ = await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}])
+            model="sonnet", messages=[{"role": "user", "content": "q"}])
         # Not asked again as if nothing was written: there is text to post.
         self.assertEqual(client.beta.messages.create.await_count, 2)
         self.assertTrue(text.startswith("So far"))
@@ -344,7 +344,7 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         ]
         service, _ = self.make_service(_response(content=content))
         text, _ = await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}])
+            model="sonnet", messages=[{"role": "user", "content": "q"}])
         self.assertEqual(text, "part one part two")
 
     async def test_refusal_raises(self):
@@ -353,12 +353,12 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         service, _ = self.make_service(refusal)
         with self.assertRaises(AnthropicServiceError):
             await service.get_chat_completion(
-                model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}])
+                model="sonnet", messages=[{"role": "user", "content": "q"}])
 
     async def test_max_tokens_with_no_text_is_asked_again_with_a_higher_cap(self):
         service, client = self.make_service(_response(content=[], stop_reason="max_tokens"), _response("answer"))
         text, _ = await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}], max_tokens=2000)
+            model="sonnet", messages=[{"role": "user", "content": "q"}], max_tokens=2000)
         self.assertEqual(text, "answer")
         caps = [c.kwargs["max_tokens"] for c in client.beta.messages.create.await_args_list]
         self.assertEqual(caps, [2000, MAX_TOKENS])
@@ -366,7 +366,7 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
     async def test_max_tokens_mid_reply_is_marked_as_cut_off(self):
         service, client = self.make_service(_response("half an ans", stop_reason="max_tokens"))
         text, _ = await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}], max_tokens=2000)
+            model="sonnet", messages=[{"role": "user", "content": "q"}], max_tokens=2000)
         self.assertEqual(text, "half an ans" + CUT_OFF_NOTE)
         self.assertEqual(client.beta.messages.create.await_count, 1)
 
@@ -374,28 +374,48 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         service, _ = self.make_service(_response(content=[]))
         with self.assertRaises(AnthropicServiceError):
             await service.get_chat_completion(
-                model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}])
+                model="sonnet", messages=[{"role": "user", "content": "q"}])
 
     async def test_clear_channel_cache_drops_history_breakpoint(self):
         service, client = self.make_service(_response("one"), _response("two"))
         await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=_history(3), channel_id=7)
-        self.assertEqual(service._history_breakpoints, {7: 1})
+            model="sonnet", messages=_history(3), channel_id=7)
+        self.assertEqual(service._history_breakpoints, {(7, "sonnet"): 1})
 
-        self.assertEqual(service.history_tokens(7), anthropic_service._prompt_tokens(_usage()))
-        self.assertEqual(anthropic_service.history_token_budget("sonnet-5.5-direct"), 150_000)
-        self.assertEqual(anthropic_service.history_token_budget("haiku-5.5-direct"), 80_000)
-        self.assertGreater(service.history_tokens(7), 0)
+        self.assertEqual(service.history_tokens(7, "sonnet"), anthropic_service._prompt_tokens(_usage()))
+        self.assertEqual(service.history_tokens(7, "opus"), 0)
+        self.assertEqual(anthropic_service.history_token_budget("sonnet"), 150_000)
+        self.assertEqual(anthropic_service.history_token_budget("haiku"), 80_000)
+        self.assertGreater(service.history_tokens(7, "sonnet"), 0)
 
         service.clear_channel_cache(7)
         service.clear_channel_cache(999)  # unknown channel is a no-op
         self.assertEqual(service._history_breakpoints, {})
-        self.assertEqual(service.history_tokens(7), 0)
+        self.assertEqual(service.history_tokens(7, "sonnet"), 0)
 
         await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=_history(30), channel_id=7)
+            model="sonnet", messages=_history(30), channel_id=7)
         second = client.beta.messages.create.call_args.kwargs["messages"]
         self.assertEqual(_marked(second), [28])
+
+    async def test_cache_state_is_kept_per_model_so_switching_back_still_reads_the_cache(self):
+        service, client = self.make_service(_response("one", id="msg_1"), _response("two", id="msg_2"),
+                                            _response("three", id="msg_3"))
+        await service.get_chat_completion(model="sonnet", messages=_history(3), channel_id=7)
+        # One question to another model in between: it starts its own chain and leaves sonnet's alone.
+        await service.get_chat_completion(model="opus", messages=_history(5), channel_id=7)
+        opus = client.beta.messages.create.call_args.kwargs
+        self.assertEqual(_marked(opus["messages"]), [3])
+        self.assertEqual(opus["diagnostics"], {"previous_message_id": None})
+
+        await service.get_chat_completion(model="sonnet", messages=_history(30), channel_id=7)
+        back = client.beta.messages.create.call_args.kwargs
+        # Sonnet's own earlier breakpoint is marked again, so what it cached before the switch reads.
+        self.assertEqual(_marked(back["messages"]), [1, 28])
+        self.assertEqual(back["diagnostics"], {"previous_message_id": "msg_1"})
+
+        service.clear_channel_cache(7)
+        self.assertEqual(service._history_breakpoints, {})
 
     async def test_cache_state_survives_a_restart(self):
         """A restarted service keeps the previous breakpoint and diagnostics chain for the channel."""
@@ -407,13 +427,13 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         client = MagicMock()
         client.beta.messages.create = AsyncMock(return_value=_response("one", id="msg_1"))
         before.set_client(client)
-        await before.get_chat_completion(model="sonnet-5.5-direct", messages=_history(3), channel_id=7)
+        await before.get_chat_completion(model="sonnet", messages=_history(3), channel_id=7)
         self.assertGreater(redis.ttl("cmwgpt:context:anthropic"), 0)
 
         after = AnthropicService(api_key="test-key", context_store=StateStore(lambda: redis))
         client.beta.messages.create = AsyncMock(return_value=_response("two", id="msg_2"))
         after.set_client(client)
-        await after.get_chat_completion(model="sonnet-5.5-direct", messages=_history(30), channel_id=7)
+        await after.get_chat_completion(model="sonnet", messages=_history(30), channel_id=7)
         kwargs = client.beta.messages.create.call_args.kwargs
         # The old history breakpoint is marked again, so the cache written before the restart reads.
         self.assertEqual(_marked(kwargs["messages"]), [1, 28])
@@ -421,7 +441,7 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
 
         after.clear_channel_cache(7)
         self.assertEqual(redis.hgetall("cmwgpt:context:anthropic"), {})
-        redis.hset("cmwgpt:context:anthropic", "8", "[1]")
+        redis.hset("cmwgpt:context:anthropic", "8:sonnet", "[1]")
         with self.assertLogs("src.services.anthropic_service", "WARNING"):
             self.assertEqual(AnthropicService(context_store=StateStore(lambda: redis))._history_breakpoints, {})
 
@@ -429,12 +449,12 @@ class TestAnthropicService(unittest.IsolatedAsyncioTestCase):
         service, _ = self.make_service(_response("<@42> hello"), _response("<@42> hello"))
         service.set_bot_id_loader(lambda: 42)
         text, _ = await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}])
+            model="sonnet", messages=[{"role": "user", "content": "q"}])
         self.assertNotIn("<@42>", text)
 
         with patch("src.services.anthropic_service.resolve_bot_id", return_value=None) as mock_resolve:
             await service.get_chat_completion(
-                model="sonnet-5.5-direct", messages=[{"role": "user", "content": "q"}], bot_id=7)
+                model="sonnet", messages=[{"role": "user", "content": "q"}], bot_id=7)
         mock_resolve.assert_called_once_with(7, service._bot_id_loader)
 
     def test_get_client_uses_stock_sdk_with_retries_and_timeout(self):
@@ -488,7 +508,7 @@ class TestAnthropicStreaming(unittest.IsolatedAsyncioTestCase):
         seen = []
 
         text, cost = await service.get_chat_completion(
-            model="sonnet-5.5-direct",
+            model="sonnet",
             messages=[{"role": "user", "content": [{"type": "text", "text": "hello"}]}],
             on_text=seen.append,
         )
@@ -525,7 +545,7 @@ class TestThinkingStaysOutOfTheReply(unittest.IsolatedAsyncioTestCase):
         service.set_client(client)
         seen = []
 
-        text, _ = await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, on_text=seen.append)
+        text, _ = await service.get_chat_completion(model="sonnet", messages=USER, on_text=seen.append)
 
         self.assertEqual(text, "Here's the answer.")
         self.assertEqual(seen, ["Here's", "Here's the answer."])
@@ -567,7 +587,7 @@ class TestToolMarkupInReplies(unittest.IsolatedAsyncioTestCase):
         service, client = self._service(bad, FakeMessageStream(["Back in 2005."], _response("Back in 2005.")))
         seen = []
 
-        text, cost = await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, on_text=seen.append)
+        text, cost = await service.get_chat_completion(model="sonnet", messages=USER, on_text=seen.append)
 
         self.assertEqual(text, "Back in 2005.")
         self.assertFalse(bad.finished)
@@ -581,7 +601,7 @@ class TestToolMarkupInReplies(unittest.IsolatedAsyncioTestCase):
         service, client = self._service(MarkupStream(MARKUP), MarkupStream(MARKUP))
 
         with self.assertRaises(AnthropicServiceError) as ctx:
-            await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, on_text=lambda _: None)
+            await service.get_chat_completion(model="sonnet", messages=USER, on_text=lambda _: None)
 
         self.assertIn("tool calls out as text", str(ctx.exception))
         self.assertEqual(client.beta.messages.stream.call_count, 2)
@@ -593,7 +613,7 @@ class TestToolMarkupInReplies(unittest.IsolatedAsyncioTestCase):
             _response('<function_calls>\n<invoke name="remember">'), _response("A verse")])
         service.set_client(client)
 
-        text, _ = await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER)
+        text, _ = await service.get_chat_completion(model="sonnet", messages=USER)
 
         self.assertEqual(text, "A verse")
         self.assertEqual(client.beta.messages.create.await_count, 2)
@@ -602,7 +622,7 @@ class TestToolMarkupInReplies(unittest.IsolatedAsyncioTestCase):
         reply = "Use <parameter> tags in XML, or <invoke> in docs."
         service, client = self._service(FakeMessageStream([reply], _response(reply)))
 
-        text, _ = await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, on_text=lambda _: None)
+        text, _ = await service.get_chat_completion(model="sonnet", messages=USER, on_text=lambda _: None)
 
         self.assertEqual(text, reply)
         self.assertEqual(client.beta.messages.stream.call_count, 1)
@@ -616,7 +636,7 @@ class TestReplyMaxTokens(unittest.IsolatedAsyncioTestCase):
         client.beta.messages.create = AsyncMock(return_value=_response("answer"))
         service.set_client(client)
 
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, max_tokens=REPLY_MAX_TOKENS)
+        await service.get_chat_completion(model="sonnet", messages=USER, max_tokens=REPLY_MAX_TOKENS)
 
         self.assertEqual(client.beta.messages.create.call_args.kwargs["max_tokens"], REPLY_MAX_TOKENS)
 
@@ -627,7 +647,7 @@ class TestReplyMaxTokens(unittest.IsolatedAsyncioTestCase):
         client.beta.messages.create = AsyncMock(return_value=_response("hi"))
         service.set_client(client)
 
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER)
+        await service.get_chat_completion(model="sonnet", messages=USER)
 
         self.assertEqual(client.beta.messages.create.call_args.kwargs["max_tokens"], MAX_TOKENS)
 
@@ -650,7 +670,7 @@ class TestStreamingStatuses(unittest.IsolatedAsyncioTestCase):
                         AsyncMock(return_value=text_result("lately")), "remembering...")
 
         await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=USER, tools=[tool], on_text=lambda _: None,
+            model="sonnet", messages=USER, tools=[tool], on_text=lambda _: None,
             on_status=statuses.append)
 
         self.assertEqual(statuses, [
@@ -673,7 +693,7 @@ class TestDispatchRoutes(unittest.IsolatedAsyncioTestCase):
         anthropic_service.get_chat_completion = AsyncMock(return_value=("reply", 0.01))
 
         reply, cost = await dispatch_completion(
-            model="sonnet-5.5-direct",
+            model="sonnet",
             messages=[{"role": "user", "content": "hi"}],
             system_prompt="sys",
             gemini_service=gemini_service,
@@ -691,15 +711,18 @@ class TestDispatchRoutes(unittest.IsolatedAsyncioTestCase):
         anthropic_service.get_chat_completion = AsyncMock()
 
         reply, cost = await dispatch_completion(
-            model="google-high",
+            model="argon",
             messages=[{"role": "user", "content": "hi"}],
             system_prompt="sys",
             gemini_service=gemini_service,
             anthropic_service=anthropic_service,
             identity={"channel_id": 1},
+            effort="high",
+            tools=["a tool"],
         )
         self.assertEqual((reply, cost), ("reply", 0.02))
-        self.assertEqual(gemini_service.get_chat_completion.await_args.kwargs["thinking_level"], "high")
+        kwargs = gemini_service.get_chat_completion.await_args.kwargs
+        self.assertEqual((kwargs["effort"], kwargs["tools"], kwargs["search"]), ("high", ["a tool"], True))
         anthropic_service.get_chat_completion.assert_not_awaited()
 
 
@@ -720,9 +743,9 @@ class TestCacheDiagnostics(unittest.IsolatedAsyncioTestCase):
     async def test_opts_in_on_every_request_and_chains_ids_per_channel(self):
         service, client = self.make_service(
             _response(id="msg_a"), _response(id="msg_b"), _response(id="msg_other"))
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=2)
+        await service.get_chat_completion(model="sonnet", messages=USER, channel_id=1)
+        await service.get_chat_completion(model="sonnet", messages=USER, channel_id=1)
+        await service.get_chat_completion(model="sonnet", messages=USER, channel_id=2)
 
         self.assertEqual(self.previous_ids(client), [None, "msg_a", None])
         for call in client.beta.messages.create.call_args_list:
@@ -730,23 +753,23 @@ class TestCacheDiagnostics(unittest.IsolatedAsyncioTestCase):
 
     async def test_calls_without_a_channel_never_chain(self):
         service, client = self.make_service(_response(id="msg_a"), _response(id="msg_b"))
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER)
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER)
+        await service.get_chat_completion(model="sonnet", messages=USER)
+        await service.get_chat_completion(model="sonnet", messages=USER)
         self.assertEqual(self.previous_ids(client), [None, None])
 
     async def test_pause_turn_continuation_compares_against_the_paused_response(self):
         service, client = self.make_service(
             _response(id="msg_paused", stop_reason="pause_turn"), _response(id="msg_done"),
             _response(id="msg_next"))
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
+        await service.get_chat_completion(model="sonnet", messages=USER, channel_id=1)
+        await service.get_chat_completion(model="sonnet", messages=USER, channel_id=1)
         self.assertEqual(self.previous_ids(client), [None, "msg_paused", "msg_done"])
 
     async def test_clear_channel_cache_restarts_the_chain(self):
         service, client = self.make_service(_response(id="msg_a"), _response(id="msg_b"))
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
+        await service.get_chat_completion(model="sonnet", messages=USER, channel_id=1)
         service.clear_channel_cache(1)
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
+        await service.get_chat_completion(model="sonnet", messages=USER, channel_id=1)
         self.assertEqual(self.previous_ids(client), [None, None])
 
     async def test_a_cache_miss_that_read_little_is_a_warning(self):
@@ -756,7 +779,7 @@ class TestCacheDiagnostics(unittest.IsolatedAsyncioTestCase):
             usage=SimpleNamespace(input_tokens=100, output_tokens=5, cache_read_input_tokens=0,
                                   cache_creation_input_tokens=4100)))
         with self.assertLogs("src.services.anthropic_service", level="WARNING") as logs:
-            await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
+            await service.get_chat_completion(model="sonnet", messages=USER, channel_id=1)
         self.assertTrue(any("system_changed" in line and "4200" in line and "0%" in line for line in logs.output))
 
     async def test_a_cache_miss_that_still_read_most_of_the_prompt_is_info(self):
@@ -767,7 +790,7 @@ class TestCacheDiagnostics(unittest.IsolatedAsyncioTestCase):
             usage=SimpleNamespace(input_tokens=427, output_tokens=5, cache_read_input_tokens=36729,
                                   cache_creation_input_tokens=301)))
         with self.assertLogs("src.services.anthropic_service", level="INFO") as logs:
-            await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
+            await service.get_chat_completion(model="sonnet", messages=USER, channel_id=1)
         self.assertTrue(any("messages_changed" in line and "98%" in line for line in logs.output))
         self.assertFalse(any(line.startswith("WARNING") for line in logs.output))
 
@@ -776,7 +799,7 @@ class TestCacheDiagnostics(unittest.IsolatedAsyncioTestCase):
         service, _ = self.make_service(
             _response(diagnostics=SimpleNamespace(cache_miss_reason=reason)))
         with self.assertLogs("src.services.anthropic_service", level="INFO") as logs:
-            await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=1)
+            await service.get_chat_completion(model="sonnet", messages=USER, channel_id=1)
         self.assertTrue(any("previous_message_not_found" in line for line in logs.output))
         self.assertFalse(any(line.startswith("WARNING") for line in logs.output))
 
@@ -805,7 +828,7 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
         tool = self.tool()
 
         text, _ = await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=USER, tools=[tool])
+            model="sonnet", messages=USER, tools=[tool])
 
         self.assertEqual(text, "answer")
         tool.run.assert_awaited_once_with({})
@@ -828,7 +851,7 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
             _response("answer", id="msg_3"),
         )
 
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[self.tool()])
+        await service.get_chat_completion(model="sonnet", messages=USER, tools=[self.tool()])
 
         third_call = client.beta.messages.create.call_args_list[2].kwargs
         marked = [b for m in third_call["messages"] if isinstance(m["content"], list)
@@ -843,10 +866,10 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
         tool = self.tool("draw", ToolResult(content=[{"type": "text", "text": "drew"}], cost=0.5, files=[image]))
 
         reply, cost = await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=USER, tools=[tool])
+            model="sonnet", messages=USER, tools=[tool])
 
         self.assertEqual(reply, {"text": "On it.\n\nCame out great.", "files": [image]})
-        self.assertAlmostEqual(cost, 0.5 + 2 * _usage_cost(_usage(), DIRECT_MODELS["sonnet-5.5-direct"]))
+        self.assertAlmostEqual(cost, 0.5 + 2 * _usage_cost(_usage(), DIRECT_MODELS["sonnet"]))
 
     async def test_a_rounds_tool_calls_run_side_by_side_in_order(self):
         calls = [
@@ -870,7 +893,7 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
             ChatTool({"name": "slow", "input_schema": {"type": "object"}}, slow, "-# slow..."),
             ChatTool({"name": "fast", "input_schema": {"type": "object"}}, fast, "-# fast..."),
         ]
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=tools)
+        await service.get_chat_completion(model="sonnet", messages=USER, tools=tools)
 
         results = client.beta.messages.create.call_args_list[1].kwargs["messages"][-1]["content"]
         self.assertEqual([r["tool_use_id"] for r in results], ["toolu_1", "toolu_2"])
@@ -883,10 +906,10 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
 
         with cost_scope() as ledger:
             _, cost = await service.get_chat_completion(
-                model="sonnet-5.5-direct", messages=USER, tools=[self.tool()])
+                model="sonnet", messages=USER, tools=[self.tool()])
 
         self.assertAlmostEqual(ledger.by_provider["claude-direct"], cost)
-        self.assertAlmostEqual(cost, 2 * _usage_cost(_usage(), DIRECT_MODELS["sonnet-5.5-direct"]))
+        self.assertAlmostEqual(cost, 2 * _usage_cost(_usage(), DIRECT_MODELS["sonnet"]))
 
     async def test_a_too_large_strict_grammar_retries_without_strict(self):
         request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
@@ -897,7 +920,7 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
         strict_tool = self.tool()
         strict_tool.definition["strict"] = True
 
-        text, _ = await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[strict_tool])
+        text, _ = await service.get_chat_completion(model="sonnet", messages=USER, tools=[strict_tool])
 
         self.assertEqual(text, "answer")
         first, retry = (c.kwargs for c in client.beta.messages.create.call_args_list)
@@ -910,7 +933,7 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
                                         body=None)
         service, client = self.make_service(bad)
         with self.assertRaises(AnthropicServiceError):
-            await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[self.tool()])
+            await service.get_chat_completion(model="sonnet", messages=USER, tools=[self.tool()])
         self.assertEqual(client.beta.messages.create.await_count, 1)
 
     async def test_mention_requests_get_the_logfire_logs_read_only(self):
@@ -919,7 +942,7 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
         service._logs_channel_id = 42
 
         await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=USER, tools=[self.tool()], channel_id=42)
+            model="sonnet", messages=USER, tools=[self.tool()], channel_id=42)
 
         sent = client.beta.messages.create.call_args.kwargs
         self.assertEqual(sent["mcp_servers"][0]["authorization_token"], "pylf_read")
@@ -934,18 +957,18 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
         service, client = self.make_service(_response("answer"), _response("answer"), _response("answer"),
                                             _response("answer"))
         service._logs_channel_id = 42
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[self.tool()],
+        await service.get_chat_completion(model="sonnet", messages=USER, tools=[self.tool()],
                                           channel_id=42)
         service._logfire_read_token = "pylf_read"
         # Another channel, or no channel set at all, doesn't get them.
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[self.tool()],
+        await service.get_chat_completion(model="sonnet", messages=USER, tools=[self.tool()],
                                           channel_id=7)
         service._logs_channel_id = None
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[self.tool()],
+        await service.get_chat_completion(model="sonnet", messages=USER, tools=[self.tool()],
                                           channel_id=42)
         service._logs_channel_id = 42
         # A background job (no client tools) doesn't get them either.
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, channel_id=42)
+        await service.get_chat_completion(model="sonnet", messages=USER, channel_id=42)
         self.assertFalse(service.logs_available(7))
         for call in client.beta.messages.create.call_args_list:
             self.assertNotIn("mcp_servers", call.kwargs)
@@ -960,7 +983,7 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
         service._logs_channel_id = 42
 
         text, _ = await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=USER, tools=[self.tool()], channel_id=42)
+            model="sonnet", messages=USER, tools=[self.tool()], channel_id=42)
 
         self.assertEqual(text, "answer")
         first, retry = (c.kwargs for c in client.beta.messages.create.call_args_list)
@@ -976,7 +999,7 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
         tool = self.tool()
         tool.run.side_effect = RuntimeError("redis down")
 
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[tool])
+        await service.get_chat_completion(model="sonnet", messages=USER, tools=[tool])
 
         result = client.beta.messages.create.call_args.kwargs["messages"][-1]["content"][0]
         self.assertTrue(result["is_error"])
@@ -988,7 +1011,7 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
         service, client = self.make_service(*rounds, _response("done"))
 
         text, _ = await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=USER, tools=[self.tool()])
+            model="sonnet", messages=USER, tools=[self.tool()])
 
         self.assertEqual(text, "done")
         calls = client.beta.messages.create.call_args_list
@@ -1014,8 +1037,8 @@ class TestCodeExecution(unittest.IsolatedAsyncioTestCase):
 
     async def test_offered_only_with_client_tools(self):
         service, client = self.make_service(_response("a"), _response("b"))
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER)
-        await service.get_chat_completion(model="sonnet-5.5-direct", messages=USER, tools=[self.tool()])
+        await service.get_chat_completion(model="sonnet", messages=USER)
+        await service.get_chat_completion(model="sonnet", messages=USER, tools=[self.tool()])
         without, with_tools = (c.kwargs["tools"] for c in client.beta.messages.create.call_args_list)
         self.assertNotIn(CODE_EXECUTION_TOOL, without)
         self.assertIn(CODE_EXECUTION_TOOL, with_tools)
@@ -1030,7 +1053,7 @@ class TestCodeExecution(unittest.IsolatedAsyncioTestCase):
         service, client = self.make_service(first, _response("Here's the chart."))
 
         reply, _ = await service.get_chat_completion(
-            model="sonnet-5.5-direct", messages=USER, tools=[self.tool()])
+            model="sonnet", messages=USER, tools=[self.tool()])
 
         self.assertEqual(reply["text"], "Here's the chart.")
         self.assertEqual([f.filename for f in reply["files"]], ["chart.png"])

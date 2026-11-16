@@ -21,7 +21,6 @@ def _gemini():
     gemini = MagicMock()
     gemini.upload_video = AsyncMock(return_value=SimpleNamespace(uri="files/abc-uri", name="files/abc"))
     gemini.watch_video = AsyncMock(return_value=("A dog does a backflip at [0:12].", 0.02))
-    gemini.summarize_youtube = AsyncMock(return_value=("static summary", 0.01))
     return gemini
 
 
@@ -123,18 +122,55 @@ class TestWatchFile(unittest.IsolatedAsyncioTestCase):
 class TestWatchYoutube(unittest.IsolatedAsyncioTestCase):
     async def test_long_youtube_videos_go_agentic_and_fall_back_to_static(self):
         gemini = _gemini()
-        gemini.watch_video.side_effect = GeminiServiceError("agentic not supported for this URI")
+        gemini.watch_video.side_effect = [
+            GeminiServiceError("agentic not supported for this URI"), ("static summary", 0.01)]
         with patch("src.services.video_service._youtube_seconds", return_value=1800.0):
             answer = await VideoWatcher(gemini).summarize_youtube("https://youtu.be/dQw4w9WgXcQ", "")
-        self.assertTrue(gemini.watch_video.await_args.kwargs["agentic"])
+        self.assertEqual([c.kwargs["agentic"] for c in gemini.watch_video.await_args_list], [True, False])
         self.assertEqual(answer, ("static summary", 0.01))
 
     async def test_short_youtube_videos_stay_static(self):
         gemini = _gemini()
         with patch("src.services.video_service._youtube_seconds", return_value=120.0):
             await VideoWatcher(gemini).summarize_youtube("https://youtu.be/dQw4w9WgXcQ", "")
-        gemini.watch_video.assert_not_awaited()
-        gemini.summarize_youtube.assert_awaited_once()
+        gemini.watch_video.assert_awaited_once()
+        self.assertEqual(gemini.watch_video.await_args.args[0], "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        self.assertFalse(gemini.watch_video.await_args.kwargs["agentic"])
+
+
+class TestVideoBlock(unittest.IsolatedAsyncioTestCase):
+    """What a Gemini chat model is handed to watch a video itself."""
+
+    def setUp(self):
+        patcher = patch.object(video_service, "_upload_cache", AsyncDictCache())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    async def test_youtube_is_read_from_its_link_and_long_ones_are_agentic(self):
+        gemini = _gemini()
+        with patch("src.services.video_service._youtube_seconds", return_value=1800.0):
+            block = await VideoWatcher(gemini).video_block("https://youtu.be/dQw4w9WgXcQ")
+        self.assertEqual(block, {"type": "video", "uri": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                                 "resolution": "low", "processing": "agentic"})
+        gemini.upload_video.assert_not_awaited()
+
+    async def test_youtube_over_the_limit_is_an_error(self):
+        with patch("src.services.video_service._youtube_seconds", return_value=4 * 3600.0):
+            with self.assertRaises(VideoError):
+                await VideoWatcher(_gemini()).video_block("https://youtu.be/dQw4w9WgXcQ")
+
+    async def test_other_videos_are_uploaded_once_and_reused(self):
+        watcher = VideoWatcher(_gemini())
+        upload = {"uri": "files/abc-uri", "mime_type": "video/mp4", "seconds": 20.0, "expires_at": 9e12}
+        watcher._upload = AsyncMock(side_effect=lambda url: video_service._upload_cache.set(url, upload) or upload)
+        with patch.object(watcher, "_upload", new=AsyncMock(return_value=upload)) as do_upload:
+            block = await watcher.video_block("https://example.com/clip.mp4")
+            await video_service._upload_cache.set("https://example.com/clip.mp4", upload)
+            again = await watcher.video_block("https://example.com/clip.mp4")
+        self.assertEqual(block, {"type": "video", "uri": "files/abc-uri", "resolution": "low",
+                                 "processing": "static", "mime_type": "video/mp4"})
+        self.assertEqual(again, block)
+        do_upload.assert_awaited_once()
 
 
 class TestDownloadVideo(unittest.IsolatedAsyncioTestCase):
@@ -238,7 +274,7 @@ class TestGeminiInteractionWatching(unittest.IsolatedAsyncioTestCase):
                                                    mime_type="video/mp4")
 
         self.assertEqual(text, "Found it at [41:02].")
-        self.assertAlmostEqual(cost, (50_000 * 1.50 + 2_000 * 9.00) / 1_000_000)
+        self.assertAlmostEqual(cost, (50_000 * 1.50 + 2_000 * 7.50) / 1_000_000)
         self.assertAlmostEqual(ledger.by_provider["gemini-direct"], cost)
         kwargs = client.aio.interactions.create.await_args.kwargs
         self.assertTrue(kwargs["background"])

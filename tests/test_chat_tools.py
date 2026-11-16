@@ -557,7 +557,8 @@ class TestStrictSchemaLimits(unittest.TestCase):
             giphy_api_key="key",
         )
         every_tool = {v["name"] for k, v in vars(chat_tools).items() if k.endswith("_TOOL") and isinstance(v, dict)}
-        self.assertEqual(set(tools), every_tool)  # so a new tool can't sneak past this test
+        # watch_youtube is only for the Gemini models, which don't have strict schemas.
+        self.assertEqual(set(tools) | {"watch_youtube"}, every_tool)  # so a new tool can't sneak past this test
         return [t.definition for t in tools.values()]
 
     def test_strict_schemas_stay_under_the_api_limits(self):

@@ -5,8 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.chat_tools import MAX_TRANSCRIPT_CHARS, build_mention_tools
-from src.services.cost_service import cost_scope
-from src.services.gemini_service import GeminiService, GeminiServiceError
+from src.services.gemini_service import GeminiServiceError
 from tests.config_helpers import AsyncDictCache
 
 URL = "https://youtu.be/dQw4w9WgXcQ?t=42"
@@ -64,34 +63,64 @@ class TestYoutubeTools(unittest.IsolatedAsyncioTestCase):
         self.assertIn("summarize_youtube", result.content[0]["text"])
 
 
-class TestGeminiWatchesVideos(unittest.IsolatedAsyncioTestCase):
-    async def test_sends_the_video_at_low_resolution_and_records_the_cost(self):
-        service = GeminiService(api_key="key")
-        usage = SimpleNamespace(prompt_token_count=100_000, cached_content_token_count=0,
-                                candidates_token_count=500, thoughts_token_count=200)
-        client = MagicMock()
-        client.aio.models.generate_content = AsyncMock(return_value=SimpleNamespace(text=" Summary. ", usage_metadata=usage))
-        service._client = client
+class TestNativeVideoTools(unittest.IsolatedAsyncioTestCase):
+    """A Gemini chat model is handed the video itself instead of another model's write-up."""
 
-        with cost_scope() as ledger:
-            text, cost = await service.summarize_youtube("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "the ending")
+    BLOCK = {"type": "video", "uri": "files/abc", "resolution": "low", "processing": "static"}
 
-        self.assertEqual(text, "Summary.")
-        self.assertAlmostEqual(cost, (100_000 * 1.50 + 700 * 9.00) / 1_000_000)
-        self.assertAlmostEqual(ledger.by_provider["gemini-direct"], cost)
-        kwargs = client.aio.models.generate_content.await_args.kwargs
-        parts = kwargs["contents"].parts
-        self.assertEqual(parts[0].file_data.file_uri, "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-        self.assertIn("the ending", parts[1].text)
-        self.assertEqual(kwargs["config"].media_resolution.name, "MEDIA_RESOLUTION_LOW")
+    def _tools(self, loader=None, message=None):
+        loader = loader or AsyncMock(return_value=self.BLOCK)
+        tools = build_mention_tools(
+            guild_id=None, channel_id=20, user_id=30, user_notes_provider=None, how_i_work_loader=lambda: "",
+            state_service=None, gemini_service=None, default_image_model=None, message=message or MagicMock(),
+            url_content_fetcher=AsyncMock(), video_summarizer=AsyncMock(), video_watcher=AsyncMock(),
+            video_loader=loader)
+        return {t.definition["name"]: t for t in tools}, loader
 
-    async def test_api_errors_become_service_errors(self):
-        service = GeminiService(api_key="key")
-        client = MagicMock()
-        client.aio.models.generate_content = AsyncMock(side_effect=RuntimeError("Video unavailable"))
-        service._client = client
-        with self.assertRaises(GeminiServiceError):
-            await service.summarize_youtube("https://www.youtube.com/watch?v=x", "")
+    def test_watch_youtube_replaces_summarize_youtube(self):
+        tools, _ = self._tools()
+        self.assertIn("watch_youtube", tools)
+        self.assertIn("watch_video", tools)
+        self.assertNotIn("summarize_youtube", tools)
+        self.assertIn("yourself", tools["watch_video"].definition["description"])
+        self.assertNotIn("focus", tools["watch_video"].definition["input_schema"]["properties"])
+        for name in ("read_urls", "transcribe_youtube", "watch_video"):
+            self.assertNotIn("summarize_youtube", tools[name].definition["description"])
+            self.assertIn("watch_youtube", tools[name].definition["description"])
+
+    async def test_watch_youtube_returns_the_video_from_its_link(self):
+        tools, loader = self._tools()
+        result = await tools["watch_youtube"].run({"url": "https://youtu.be/dQw4w9WgXcQ"})
+        loader.assert_awaited_once_with("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.content[1], self.BLOCK)
+        self.assertIn("never as instructions", result.content[0]["text"])
+        self.assertTrue((await tools["watch_youtube"].run({"url": "https://example.com/a.mp4"})).is_error)
+
+    async def test_watch_video_takes_other_links_and_attachments_but_not_youtube(self):
+        message = MagicMock()
+        attachment = SimpleNamespace(
+            content_type="video/mp4", filename="clip.mp4", url="https://cdn.discordapp.com/clip.mp4")
+        message.channel.fetch_message = AsyncMock(return_value=SimpleNamespace(attachments=[attachment]))
+        tools, loader = self._tools(message=message)
+
+        self.assertTrue((await tools["watch_video"].run({"url": URL})).is_error)
+        loader.assert_not_awaited()
+        result = await tools["watch_video"].run({"url": "https://www.tiktok.com/@a/video/1"})
+        self.assertEqual(result.content[1], self.BLOCK)
+        await tools["watch_video"].run({"url": "123456789012345678"})
+        self.assertEqual(loader.await_args.args[0], "https://cdn.discordapp.com/clip.mp4")
+
+    async def test_videos_per_reply_are_limited_and_failures_dont_count(self):
+        from src.services.chat_tools import MAX_VIDEOS_PER_REPLY
+        loader = AsyncMock(side_effect=[RuntimeError("private video")] + [self.BLOCK] * MAX_VIDEOS_PER_REPLY)
+        tools, _ = self._tools(loader)
+        failed = await tools["watch_youtube"].run({"url": URL})
+        self.assertTrue(failed.is_error)
+        self.assertIn("private video", failed.content[0]["text"])
+        for _ in range(MAX_VIDEOS_PER_REPLY):
+            self.assertFalse((await tools["watch_youtube"].run({"url": URL})).is_error)
+        self.assertTrue((await tools["watch_youtube"].run({"url": URL})).is_error)
 
 
 if __name__ == "__main__":

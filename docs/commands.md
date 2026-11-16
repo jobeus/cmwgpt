@@ -8,7 +8,7 @@ The bot's main chat experience is **mention-based**:
 
 - mention the bot in a normal Discord message
 - the mention pipeline builds context from recent chat, attachments, embeds, and supported URLs
-- on the Claude API direct models, the model also calls tools on its own (drawing, memory, Discord/IRC log search, links); see `docs/architecture.md#claude-api-tools`
+- the model also calls tools on its own (drawing, memory, Discord/IRC log search, links, videos); see `docs/architecture.md#client-tools`
 - there is **no current `/chat` command**
 
 ## Command quick reference
@@ -17,7 +17,7 @@ The bot's main chat experience is **mention-based**:
 | --- | --- | --- |
 | `/help` | Shows in-bot help | none |
 | `/model` | Sets the text model for the current channel | persisted per channel |
-| `/lobotomize` | Sets the current channel's text model to `haiku-5.5-direct` | same setting as `/model` |
+| `/lobotomize` | Sets the current channel's text model to `haiku` | same setting as `/model` |
 | `/systemprompt set` | Stores a custom system prompt | persisted per channel |
 | `/systemprompt view` | Shows the current channel system prompt | reads per-channel state |
 | `/systemprompt reset` | Clears the custom system prompt | persisted per channel |
@@ -85,14 +85,21 @@ missing, or to a model that no longer exists (such as the old OpenRouter ones), 
 
 | Model | Notes |
 | --- | --- |
-| `sonnet-5.5-direct` | `claude-sonnet-5-5` straight from the Claude API (search / web aware, needs `ANTHROPIC_API_KEY`) |
-| `opus-5.5-direct` | `claude-opus-5-5` straight from the Claude API (search / web aware, needs `ANTHROPIC_API_KEY`; 2x Sonnet's price) |
-| `haiku-5.5-direct` | `claude-haiku-5-5` straight from the Claude API (search / web aware, needs `ANTHROPIC_API_KEY`; 1/20 of Sonnet's price, 5x that for prompts over 100K tokens; what `/lobotomize` switches to) |
-| `google` | native Gemini (`gemini-3.8-flash`, search) |
-| `google-high` | native Gemini (`gemini-3.8-flash`, search, thinking) |
+| `sonnet` | `claude-sonnet-5-5` on the Claude API (needs `ANTHROPIC_API_KEY`) |
+| `opus` | `claude-opus-5-5` on the Claude API (needs `ANTHROPIC_API_KEY`; 2x Sonnet's price) |
+| `haiku` | `claude-haiku-5-5` on the Claude API (needs `ANTHROPIC_API_KEY`; 1/20 of Sonnet's price, 5x that for prompts over 100K tokens; what `/lobotomize` switches to) |
+| `hydrogen` | `gemini-4-hydrogen` on the Gemini API (needs `GEMINI_API_KEY`) |
+| `argon` | `gemini-4-argon` on the Gemini API (needs `GEMINI_API_KEY`; half price until December 2026) |
 
-`google`/`google-high` route through `GeminiService` and the `*-direct` models
-through `AnthropicService`. The routing itself lives in `src/services/completion_dispatch.py`.
+All five search the web and get the same client tools. `hydrogen`/`argon` route through
+`GeminiService` and `sonnet`/`opus`/`haiku` through `AnthropicService`; the routing itself lives in
+`src/services/completion_dispatch.py`. A channel still set to an old name (`sonnet-5.5-direct`,
+`google`, ...) answers with the model that replaced it (`LEGACY_MODEL_NAMES` in
+`src/services/model_catalog.py`), and so do `DEFAULT_MODEL` and `MEMORY_MODEL`.
+
+Each model's cache state for a channel is kept separately, and `/model` doesn't clear it: switch
+to another model for a question and back within the hour, and the first model still reads its
+prompt cache (Claude) or continues its conversation (Gemini).
 
 ### `/systemprompt ...`
 

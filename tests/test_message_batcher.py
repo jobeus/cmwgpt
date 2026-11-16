@@ -63,13 +63,13 @@ class TestMessageBatcher(unittest.IsolatedAsyncioTestCase):
 
         with cost_scope() as ledger:
             results = await asyncio.gather(
-                batcher.complete(model="sonnet-5.5-direct", system_prompt="sys", user_text="a", effort="medium"),
-                batcher.complete(model="sonnet-5.5-direct", system_prompt="sys", user_text="b", effort="medium"),
+                batcher.complete(model="sonnet", system_prompt="sys", user_text="a", effort="medium"),
+                batcher.complete(model="sonnet", system_prompt="sys", user_text="b", effort="medium"),
             )
 
         self.assertEqual(len(batches.created), 1)
         self.assertEqual([r[0] for r in results], ["answer to a", "answer to b"])
-        price = _usage_cost(_usage(), DIRECT_MODELS["sonnet-5.5-direct"]) * BATCH_DISCOUNT
+        price = _usage_cost(_usage(), DIRECT_MODELS["sonnet"]) * BATCH_DISCOUNT
         self.assertAlmostEqual(results[0][1], price)
         self.assertAlmostEqual(ledger.by_provider["claude-direct"], 2 * price)
         params = batches.created[0][0]["params"]
@@ -81,14 +81,14 @@ class TestMessageBatcher(unittest.IsolatedAsyncioTestCase):
         batches = FakeBatches(lambda r: SimpleNamespace(custom_id=r["custom_id"], result=SimpleNamespace(type="errored")))
         batcher = MessageBatcher(_service(batches), collect_seconds=0.01, poll_seconds=0.01)
         with self.assertRaises(AnthropicServiceError):
-            await batcher.complete(model="sonnet-5.5-direct", system_prompt="", user_text="a")
+            await batcher.complete(model="sonnet", system_prompt="", user_text="a")
 
     async def test_a_batch_that_never_ends_is_cancelled(self):
         batches = FakeBatches(lambda r: _succeeded(r["custom_id"], "late"))
         batches.retrieve = AsyncMock(return_value=SimpleNamespace(id="batch_1", processing_status="in_progress"))
         batcher = MessageBatcher(_service(batches), collect_seconds=0.01, poll_seconds=0.01, max_wait_seconds=0.03)
         with self.assertRaises(AnthropicServiceError):
-            await batcher.complete(model="sonnet-5.5-direct", system_prompt="", user_text="a")
+            await batcher.complete(model="sonnet", system_prompt="", user_text="a")
         batches.cancel.assert_awaited_once_with("batch_1")
 
 

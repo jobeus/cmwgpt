@@ -218,7 +218,6 @@ class DiscordBotClient:
             auto_update_service=self.services.auto_update_service,
             system_prompt_loader=lambda: get_system_prompt(self.config.system_prompt_path),
             default_model=self.config.default_model,
-            on_model_change=self._clear_model_caches,
         )
         system_commands.setup_commands()
 
@@ -252,12 +251,6 @@ class DiscordBotClient:
 
         if getattr(self.services, "paper_trading_service", None) is not None:
             MarketCommands(self.bot, paper_trading_service=self.services.paper_trading_service).setup_commands()
-
-    def _clear_model_caches(self, channel_id: int) -> None:
-        """Drop per-channel provider state that a model switch makes stale."""
-        self.services.gemini_service.clear_channel_cache(channel_id)
-        if getattr(self.services, "anthropic_service", None) is not None:
-            self.services.anthropic_service.clear_channel_cache(channel_id)
 
     def _channel_model(self, channel: Any) -> str:
         """The model a channel answers with: its ``/model``, or the default if that's unset or unavailable."""

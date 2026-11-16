@@ -801,7 +801,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         channel.history = history
 
-        for model, expected in (("sonnet-5.5-direct", True), ("haiku-5.5-direct", True), ("opus-5.5-direct", False), (None, False)):
+        for model, expected in (("sonnet", True), ("haiku", True), ("opus", False), (None, False)):
             _, system_prompt = await handler._prepare_mention_context(
                 mention_msg, SimpleNamespace(id=999), model=model)
             self.assertEqual("## Advisor" in system_prompt, expected, model)
@@ -827,7 +827,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
         with patch("src.bot.handlers.mention._load_how_i_work", return_value="## How you work"):
             context, system_prompt = await handler._prepare_mention_context(
-                mention_msg, SimpleNamespace(id=999), model="sonnet-5.5-direct")
+                mention_msg, SimpleNamespace(id=999), model="sonnet")
             self.assertIn("## Your tools", system_prompt)
             self.assertIn("same turn", system_prompt)
             # Only the models that can react are nudged to.
@@ -861,7 +861,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         channel.history = history
 
         context, system_prompt = await handler._prepare_mention_context(
-            mention_msg, SimpleNamespace(id=999), model="sonnet-5.5-direct")
+            mention_msg, SimpleNamespace(id=999), model="sonnet")
         fetcher.assert_not_awaited()
         self.assertIn("https://youtu.be/abc", str(context))
         self.assertNotIn("FETCHED", str(context))
@@ -949,7 +949,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await handler._history_ranges(channel),
                          "Dates covered: this channel's Discord history starts 2023-06-01.\n")
 
-    async def test_handle_mention_passes_tools_only_to_direct_models(self):
+    async def test_handle_mention_passes_tools_to_both_providers(self):
         anthropic_service = MagicMock()
         anthropic_service.get_chat_completion = AsyncMock(return_value=("hi", 0.0))
         gemini_service = MagicMock()
@@ -959,12 +959,15 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
         channel, _ = self.make_streaming_channel()
         message = SimpleNamespace(author=SimpleNamespace(id=123), channel=channel, guild=None)
 
-        await handler.handle_mention(message, SimpleNamespace(id=999), "sonnet-5.5-direct")
-        await handler.handle_mention(message, SimpleNamespace(id=999), "google")
+        await handler.handle_mention(message, SimpleNamespace(id=999), "sonnet")
+        await handler.handle_mention(message, SimpleNamespace(id=999), "hydrogen")
 
         tools = anthropic_service.get_chat_completion.await_args.kwargs["tools"]
         self.assertEqual([t.definition["name"] for t in tools], ["read_urls", "transcribe_youtube", "prediction_markets", "election_results", "how_i_work"])
-        self.assertNotIn("tools", gemini_service.get_chat_completion.await_args.kwargs)
+        gemini_kwargs = gemini_service.get_chat_completion.await_args.kwargs
+        self.assertEqual([t.definition["name"] for t in gemini_kwargs["tools"]],
+                         [t.definition["name"] for t in tools])
+        self.assertTrue(callable(gemini_kwargs["on_status"]) and callable(gemini_kwargs["on_text"]))
 
     async def test_prepare_context_puts_queued_mention_after_replies_posted_while_waiting(self):
         handler, _, _, _, _ = self.make_handler()
@@ -1089,7 +1092,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_window_over_the_token_budget_starts_over_and_tells_the_model(self):
         handler, anthropic_service, limits, mention_text, _ = await self._mention_in_a_window(
-            150_000, "sonnet-5.5-direct")
+            150_000, "sonnet")
         anthropic_service.clear_channel_cache.assert_called_once_with(79)
         self.assertIn((RESET_HISTORY_MESSAGES, None), limits)
         self.assertIn("<context_reset>", mention_text)
@@ -1097,12 +1100,12 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_window_under_the_token_budget_keeps_growing(self):
         handler, anthropic_service, _, mention_text, oldest = await self._mention_in_a_window(
-            90_000, "sonnet-5.5-direct")
+            90_000, "sonnet")
         anthropic_service.clear_channel_cache.assert_not_called()
         self.assertNotIn("<context_reset>", mention_text)
         self.assertIs(handler._history_cache[79]["oldest_message"], oldest)
 
     async def test_haiku_starts_over_before_its_long_prompt_surcharge(self):
-        _, anthropic_service, _, mention_text, _ = await self._mention_in_a_window(90_000, "haiku-5.5-direct")
+        _, anthropic_service, _, mention_text, _ = await self._mention_in_a_window(90_000, "haiku")
         anthropic_service.clear_channel_cache.assert_called_once_with(79)
         self.assertIn("<context_reset>", mention_text)

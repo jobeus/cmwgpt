@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Mapping, Optional
 from dotenv import find_dotenv, load_dotenv
 from zoneinfo import ZoneInfo
 
+from src.services.model_catalog import canonical_model
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
@@ -80,20 +82,20 @@ class AppConfig:
     is_testing: bool
     system_prompt_path: str = "system_prompt.txt"
     # Model the nightly user-memory job uses to read chat and update profiles.
-    memory_model: str = "sonnet-5.5-direct"
+    memory_model: str = "sonnet"
     # Signed deploy webhook (GitHub Actions -> bot); disabled when the secret is empty.
     deploy_webhook_secret: str = ""
     deploy_webhook_host: str = "0.0.0.0"
     deploy_webhook_port: int = 8787
     # How often to ask pip whether newer packages are out and restart onto them; 0 turns it off.
     package_update_check_hours: float = 6.0
-    # The channel's old IRC log, searchable by the direct models; the tools are off when unset.
+    # The channel's old IRC log, searchable by the chat models; the tools are off when unset.
     irc_log_path: str = ""
     # An irssistats-style nicks file ("canonical regex" per line) that merges IRC aliases.
     irc_nicks_path: str = ""
     # The old IRC quote bot's quotes, one per line; the old_quotes tool is off when unset.
     old_quote_bot_path: str = ""
-    # A Logfire key with project:read, so the direct models can query the bot's own traces.
+    # A Logfire key with project:read, so the chat models can query the bot's own traces.
     logfire_read_token: str = ""
     logfire_mcp_url: str = "https://logfire-us.pydantic.dev/mcp"
     # The one channel where mentions get that logs tool; off everywhere when unset.
@@ -125,14 +127,14 @@ def load_config(
         death_channel_id=source.get("DEATH_CHANNEL_ID", ""),
         transcript_proxy=source.get("TRANSCRIPT_PROXY", ""),
         redis_url=source.get("REDIS_URL", "redis://127.0.0.1:6379/0"),
-        default_model=source.get("DEFAULT_MODEL", "sonnet-5.5-direct"),
+        default_model=canonical_model(source.get("DEFAULT_MODEL", "sonnet")),
         default_image_model=source.get("DEFAULT_IMAGE_MODEL", "gemini-nano-banana-2.1"),
         reply_to_mentions=_read_bool(source.get("REPLY_TO_MENTIONS"), True),
         quiet_updates=_read_bool(source.get("QUIET_UPDATES"), False),
         include_num_chatlines=_read_int(source.get("INCLUDE_NUM_CHATLINES"), 10),
         is_testing=source.get("CI") == "true" or source.get("TESTING") == "true",
         system_prompt_path=system_prompt_path,
-        memory_model=source.get("MEMORY_MODEL", "sonnet-5.5-direct"),
+        memory_model=canonical_model(source.get("MEMORY_MODEL", "sonnet")),
         deploy_webhook_secret=source.get("DEPLOY_WEBHOOK_SECRET", ""),
         deploy_webhook_host=source.get("DEPLOY_WEBHOOK_HOST", "0.0.0.0"),
         deploy_webhook_port=_read_int(source.get("DEPLOY_WEBHOOK_PORT"), 8787),

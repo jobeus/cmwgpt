@@ -3,7 +3,7 @@ System Commands - Handles system/admin Discord commands
 """
 
 import logging
-from typing import Callable, Optional
+from typing import Optional
 
 import discord
 from discord import app_commands
@@ -19,7 +19,7 @@ from src.utils.message_utils import DISCORD_MESSAGE_LIMIT
 logger = logging.getLogger(__name__)
 
 # The model /lobotomize switches a channel to.
-LOBOTOMY_MODEL = "haiku-5.5-direct"
+LOBOTOMY_MODEL = "haiku"
 
 
 def _code_block_message(header: str, body: str) -> str:
@@ -45,7 +45,6 @@ class SystemCommands:
         system_prompt_loader=get_system_prompt,
         default_model: Optional[str] = None,
         mention_legend_provider=get_mention_legend,
-        on_model_change: Optional[Callable[[int], None]] = None,
     ):
         self.bot = bot
         self._queue_service = queue_service
@@ -54,8 +53,6 @@ class SystemCommands:
         self._system_prompt_loader = system_prompt_loader
         self._default_model = get_config().default_model if default_model is None else default_model
         self._mention_legend_provider = mention_legend_provider
-        # Called with the channel ID after /model changes it (to drop per-model caches).
-        self._on_model_change = on_model_change
 
     def setup_commands(self) -> None:
         """Set up all system-related commands."""
@@ -176,9 +173,8 @@ class SystemCommands:
         self._state_service.mark_channel_active(channel_id)
 
         if model:
+            # Each model's cache state for the channel is kept, so switching back within the hour still hits it.
             self._state_service.set_model(channel_id, model)
-            if self._on_model_change:
-                self._on_model_change(channel_id)
             logger.info("[/model] Channel %s: model set to %s", channel_id, model)
             await interaction.followup.send(f"Model set to `{model}`.", ephemeral=True)
         else:
@@ -195,8 +191,6 @@ class SystemCommands:
         channel_id = interaction.channel.id
         self._state_service.mark_channel_active(channel_id)
         self._state_service.set_model(channel_id, LOBOTOMY_MODEL)
-        if self._on_model_change:
-            self._on_model_change(channel_id)
         logger.info("[/lobotomize] Channel %s: model set to %s", channel_id, LOBOTOMY_MODEL)
         await interaction.followup.send(f"Lobotomized. Model set to `{LOBOTOMY_MODEL}`.")
 
@@ -333,8 +327,8 @@ class SystemCommands:
             "`/edit [prompt] [edit_image]` - Edit an image (same options; extra images are references)\n"
             "`/imagemodel [model]` - View or set this channel's image model\n\n"
             "**System & Settings:**\n"
-            "`/model [model]` - View or set the AI language model (e.g., sonnet-5.5-direct)\n"
-            "`/lobotomize` - Switch this channel to the smallest model (haiku-5.5-direct)\n"
+            "`/model [model]` - View or set the AI language model (sonnet, opus, haiku, hydrogen, argon)\n"
+            "`/lobotomize` - Switch this channel to the smallest model (haiku)\n"
             "`/systemprompt set [prompt]` - Set a custom AI personality for this channel\n"
             "`/systemprompt view` - View this channel's base system prompt\n"
             "`/systemprompt reset` - Return to the default personality\n"

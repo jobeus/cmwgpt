@@ -143,6 +143,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         timezone_store=None if app_config.is_testing else TimezoneStore(),
         video_summarizer=video_watcher.summarize_youtube if video_watcher else None,
         video_watcher=video_watcher.watch if video_watcher else None,
+        video_loader=video_watcher.video_block if video_watcher else None,
         context_store=state_store,
         alpaca=alpaca_client,
         paper_trading=paper_trading_service,

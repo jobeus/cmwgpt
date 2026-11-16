@@ -1,7 +1,7 @@
 """
 Reminder Service - Reminders the bot sets when asked, posted in their channel when due.
 
-The direct models set them with the ``remind`` tool, for the asker, anyone else in the
+The chat models set them with the ``remind`` tool, for the asker, anyone else in the
 server, or the whole channel (``@here`` or ``@channel``). Each is posted in the channel it was set in, pinging the people it's for, as a
 reply to the message that asked for it. They're checked every ``POLL_SECONDS``, so one
 fires within a minute of its time, and there's no limit on how far ahead one can be.

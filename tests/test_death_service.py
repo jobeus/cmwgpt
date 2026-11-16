@@ -415,7 +415,7 @@ class TestDeathService(unittest.TestCase):
     def test_write_limerick_rejects_empty_input(self):
         async def run_test():
             self.service._anthropic_service = MagicMock()
-            self.service._model = "sonnet-5.5-direct"
+            self.service._model = "sonnet"
 
             ok, message = await self.service.write_limerick("   ")
             self.assertFalse(ok)
@@ -428,7 +428,7 @@ class TestDeathService(unittest.TestCase):
             mock_claude = MagicMock()
             mock_claude.get_chat_completion = AsyncMock(side_effect=RuntimeError("boom"))
             self.service._anthropic_service = mock_claude
-            self.service._model = "sonnet-5.5-direct"
+            self.service._model = "sonnet"
 
             ok, message = await self.service.write_limerick("Kevin Keegan")
             self.assertFalse(ok)
@@ -442,7 +442,7 @@ class TestDeathService(unittest.TestCase):
             mock_claude = MagicMock()
             mock_claude.get_chat_completion = AsyncMock(side_effect=RuntimeError("boom"))
             self.service._anthropic_service = mock_claude
-            self.service._model = "sonnet-5.5-direct"
+            self.service._model = "sonnet"
 
             mock_channel = AsyncMock()
             self.mock_bot.get_channel.return_value = mock_channel
@@ -994,7 +994,7 @@ class TestDeathService(unittest.TestCase):
                 return_value=("Legendary footballer and manager.", 0.0)
             )
             self.service._anthropic_service = mock_claude
-            self.service._model = "sonnet-5.5-direct"
+            self.service._model = "sonnet"
 
             mock_channel = AsyncMock()
             self.mock_bot.get_channel.return_value = mock_channel
@@ -1026,7 +1026,7 @@ class TestDeathService(unittest.TestCase):
                 return_value=("There once was a keeper named Kev...", 0.0)
             )
             self.service._anthropic_service = mock_claude
-            self.service._model = "sonnet-5.5-direct"
+            self.service._model = "sonnet"
 
             ok, message = await self.service.write_limerick("Kevin Keegan")
 
@@ -1045,7 +1045,7 @@ class TestDeathService(unittest.TestCase):
         mock_claude = MagicMock()
         mock_claude.get_chat_completion = AsyncMock(return_value=(reply, 0.0))
         self.service._anthropic_service = mock_claude
-        self.service._model = "sonnet-5.5-direct"
+        self.service._model = "sonnet"
         return mock_claude
 
     def test_limerick_prompt_holds_the_article_text(self):
@@ -1111,14 +1111,14 @@ class TestDeathService(unittest.TestCase):
             mock_claude = MagicMock()
             mock_claude.get_chat_completion = AsyncMock(return_value=("verse", 0.0))
             self.service._anthropic_service = mock_claude
-            self.service._model = "sonnet-5.5-direct"
+            self.service._model = "sonnet"
             self.state_service.get_model.side_effect = (
-                lambda channel_id: "opus-5.5-direct" if channel_id == 42 else None)
+                lambda channel_id: "opus" if channel_id == 42 else None)
 
             await self.service.write_limerick("Kevin Keegan", 42)
-            self.assertEqual(mock_claude.get_chat_completion.call_args.kwargs["model"], "opus-5.5-direct")
+            self.assertEqual(mock_claude.get_chat_completion.call_args.kwargs["model"], "opus")
             await self.service.write_limerick("Kevin Keegan", 7)
-            self.assertEqual(mock_claude.get_chat_completion.call_args.kwargs["model"], "sonnet-5.5-direct")
+            self.assertEqual(mock_claude.get_chat_completion.call_args.kwargs["model"], "sonnet")
 
         self.loop.run_until_complete(run_test())
 
@@ -1128,7 +1128,7 @@ class TestDeathService(unittest.TestCase):
             mock_claude = MagicMock()
             mock_claude.get_chat_completion = AsyncMock(return_value=("verse", 0.0))
             self.service._anthropic_service = mock_claude
-            self.state_service.get_model.return_value = "sonnet-5.5-direct"
+            self.state_service.get_model.return_value = "sonnet"
 
             ok, message = await self.service.write_limerick("Kevin Keegan", 42)
             self.assertTrue(ok)
@@ -1151,8 +1151,7 @@ class TestDeathService(unittest.TestCase):
                 gemini_service=gemini,
                 model="gemini-model",
             )
-            with patch("src.services.completion_dispatch.is_gemini_model", return_value=True), \
-                    patch("src.services.completion_dispatch.get_thinking_level", return_value=None):
+            with patch("src.services.completion_dispatch.is_gemini_model", return_value=True):
                 ok, message = await svc.write_limerick("Kevin Keegan")
 
             self.assertTrue(ok)
@@ -1175,7 +1174,7 @@ class TestDeathService(unittest.TestCase):
                 death_channel_id="12345",
                 gemini_service=gemini,
                 anthropic_service=anthropic,
-                model="sonnet-5.5-direct",
+                model="sonnet",
             )
             ok, message = await svc.write_limerick("Kevin Keegan")
 

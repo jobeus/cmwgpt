@@ -1,8 +1,11 @@
 """
 Video Service - Gemini watches a video, picture and sound, and answers about it.
 
-Behind the ``watch_video`` and ``summarize_youtube`` tools. Any video the bot can
-transcribe with Groq can be watched instead:
+Behind the video tools. For the Claude models (``watch_video``, ``summarize_youtube``) a
+Gemini model watches the video and writes up what's in it; a Gemini chat model is handed
+the video itself (:meth:`VideoWatcher.video_block`) and watches it as part of its own
+reply (``watch_video``, ``watch_youtube``). Any video the bot can transcribe with Groq can
+be watched instead:
 
 - YouTube: Gemini reads it straight from its URL.
 - Twitter/X and Instagram: the video file comes from the same RapidAPI lookups as the
@@ -19,8 +22,8 @@ Videos under ``AGENTIC_MIN_SECONDS`` are watched statically: Gemini samples the 
 thing at 1 fps, which is best for a short clip or a summary. Longer ones are watched
 agentically: Gemini moves around the timeline itself, loading frames, audio and the
 transcript where they matter, which Google says costs far fewer tokens on long videos and
-does better at finding particular moments. Both run at low media resolution. Answers
-are cached per video and focus in ``cmwgpt:cache:video_watches``.
+does better at finding particular moments. Both run at low media resolution. Written-up
+answers are cached per video and focus in ``cmwgpt:cache:video_watches``.
 """
 
 import asyncio
@@ -31,7 +34,7 @@ import shutil
 import subprocess  # nosec B404
 import tempfile
 import time
-from typing import Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
 import yt_dlp
@@ -227,9 +230,27 @@ class VideoWatcher:
             except GeminiServiceError as e:
                 logger.warning("[video] Agentic watch of %s failed (%s); watching it statically", url, e)
         try:
-            return await self._gemini.summarize_youtube(url, focus)
+            return await self._gemini.watch_video(url, watch_prompt(focus), agentic=False)
         except GeminiServiceError as e:
             raise VideoError(str(e)) from e
+
+    async def video_block(self, url: str) -> Dict[str, Any]:
+        """The video at ``url`` as a block a Gemini chat model watches itself, in a tool result.
+
+        YouTube is read straight from its link; anything else is downloaded and uploaded
+        first (or its earlier upload reused). Raises ``VideoError``.
+        """
+        ids = extract_video_ids(url)
+        if ids:
+            uri = youtube_url(ids[0])
+            seconds = await asyncio.to_thread(_youtube_seconds, uri)
+            if seconds and seconds > MAX_VIDEO_SECONDS:
+                raise VideoError(f"That video is {seconds / 3600:.1f} hours long; I can watch up to 3.")
+            return _video_block(uri, seconds)
+        upload = await _upload_cache.get(url)
+        if not upload or time.time() >= upload["expires_at"]:
+            upload = await self._upload(url)
+        return _video_block(upload["uri"], upload["seconds"], upload["mime_type"])
 
     async def _watch_file(self, url: str, focus: str) -> Tuple[str, float]:
         upload = await _upload_cache.get(url)
@@ -281,6 +302,16 @@ class VideoWatcher:
             return upload
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def _video_block(uri: str, seconds: Optional[float], mime_type: Optional[str] = None) -> Dict[str, Any]:
+    agentic = bool(seconds and seconds >= AGENTIC_MIN_SECONDS)
+    block: Dict[str, Any] = {
+        "type": "video", "uri": uri, "resolution": "low", "processing": "agentic" if agentic else "static",
+    }
+    if mime_type:
+        block["mime_type"] = mime_type
+    return block
 
 
 def video_attachment_url(message: Any) -> Optional[str]:

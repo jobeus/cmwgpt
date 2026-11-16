@@ -18,21 +18,21 @@ These are loaded by `src/config.py`, except where a row names another file.
 | Variable | Default | Required | Notes |
 | --- | --- | --- | --- |
 | `DISCORD_BOT_TOKEN` | `test-token-for-ci` | Yes in real use | Discord authentication |
-| `GEMINI_API_KEY` | empty | For `google`/`google-high` and image commands | Native Gemini (`GeminiService`) requests and image generation |
+| `GEMINI_API_KEY` | empty | For `hydrogen`/`argon` and image commands | Gemini API (`GeminiService`) chat, video and image requests |
 | `ANTHROPIC_API_KEY` | empty | Yes in real use (default model) | Claude API (`AnthropicService`) requests |
 | `GEMINI_TIMEOUT_SECONDS` | `120` | No | Client-side request timeout for Gemini calls (read in `src/services/gemini_service.py`) |
-| `DEFAULT_MODEL` | `sonnet-5.5-direct` | No | Fallback text model (one of the `/model` choices) |
-| `MEMORY_MODEL` | `sonnet-5.5-direct` | No | Model the nightly user-memory job uses; the job is off when this model's API key is missing |
+| `DEFAULT_MODEL` | `sonnet` | No | Fallback text model (one of the `/model` choices) |
+| `MEMORY_MODEL` | `sonnet` | No | Model the nightly user-memory job uses; the job is off when this model's API key is missing |
 | `DEFAULT_IMAGE_MODEL` | `gemini-nano-banana-2.1` | No | Image model for `/draw`, `/edit` and the draw tools when a channel hasn't set one with `/imagemodel` |
 | `REPLY_TO_MENTIONS` | `true` | No | Enable mention replies |
 | `INCLUDE_NUM_CHATLINES` | `10` | No | Recent-history lines included in context |
 | `DISCORD_GUILD_ID` | empty | No | Guild-scoped sync/behavior |
 | `DEATH_CHANNEL_ID` | empty | No | Target channel for deathwatch posts |
-| `IRC_LOG` | empty | No | Path to the channel's old irssi IRC log; enables the direct models' `search_irc_log`/`read_irc_log_day`/`count_irc_log` tools |
+| `IRC_LOG` | empty | No | Path to the channel's old irssi IRC log; enables the chat models' `search_irc_log`/`read_irc_log_day`/`count_irc_log` tools |
 | `IRC_NICKS` | empty | No | irssistats-style nicks file (`canonical regex` per line, first match wins, `<NULL>` drops a nick) that merges aliases in the IRC log tools' nick filters and counts |
-| `OLD_QUOTE_BOT` | empty | No | Path to the old IRC quote bot's quotes (one per line); enables the direct models' `old_quotes` tool |
-| `GIPHY_API_KEY` | empty | No | A Giphy API key; enables the direct models' `search_gifs` and `post_gif` tools |
-| `ALPACA_API_KEY`, `ALPACA_API_SECRET` | empty | No | Keys of an Alpaca **paper** trading account; enable the direct models' `market_data` tool and the paper-trading game (`paper_trade`, `paper_portfolio`). Orders only ever go to Alpaca's paper endpoint |
+| `OLD_QUOTE_BOT` | empty | No | Path to the old IRC quote bot's quotes (one per line); enables the chat models' `old_quotes` tool |
+| `GIPHY_API_KEY` | empty | No | A Giphy API key; enables the chat models' `search_gifs` and `post_gif` tools |
+| `ALPACA_API_KEY`, `ALPACA_API_SECRET` | empty | No | Keys of an Alpaca **paper** trading account; enable the chat models' `market_data` tool and the paper-trading game (`paper_trade`, `paper_portfolio`). Orders only ever go to Alpaca's paper endpoint |
 | `DEPLOY_WEBHOOK_SECRET` | empty | No | Shared secret for the signed deploy webhook; the listener is off when empty (see `docs/auto-update.md`) |
 | `DEPLOY_WEBHOOK_HOST` | `0.0.0.0` | No | Interface the deploy webhook binds to |
 | `DEPLOY_WEBHOOK_PORT` | `8787` | No | Port the deploy webhook listens on (`POST /deploy`) |
@@ -79,7 +79,7 @@ Fill at least:
 
 Add these as needed:
 
-- `GEMINI_API_KEY` for the `google`/`google-high` text models and image commands
+- `GEMINI_API_KEY` for the `hydrogen`/`argon` text models and image commands
 - `GROQ_API_KEY` for transcription-heavy sources
 - `RAPIDAPI_KEY` for Twitter/X, Instagram and Reddit enrichment
 - `REDIS_URL` for per-user memory and persistent caches (the bot runs without Redis, but `/memory` and the nightly job will not work and caches only last until restart)

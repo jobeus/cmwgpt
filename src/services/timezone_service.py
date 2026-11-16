@@ -1,7 +1,7 @@
 """
 Timezone Service - Each person's time zone, so "8pm" means their 8pm.
 
-The direct models save one with the ``set_timezone`` tool when someone says where they
+The chat models save one with the ``set_timezone`` tool when someone says where they
 are or what time it is for them, or their memory makes it clear. Every mention then
 carries a ``<time_zones>`` block for the people in the conversation, with their local
 time right now, and ``remind`` sets reminders in the asker's zone.
