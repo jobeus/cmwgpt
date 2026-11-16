@@ -104,6 +104,26 @@ class TestQueueService(unittest.TestCase):
 
         self.loop.run_until_complete(run_test())
 
+    def test_worker_doesnt_inherit_the_context_that_queued_its_first_item(self):
+        """Or every later mention in the channel is traced under that first command's span."""
+        import contextvars
+        marker = contextvars.ContextVar("marker", default="clean")
+
+        async def run_test():
+            await self.queue_service.start()
+            seen = []
+
+            async def handler(message, bot_user, model):
+                seen.append(marker.get())
+
+            marker.set("inside the first command's span")
+            await self.queue_service.queue_mention(self._make_mock_message(), MagicMock(), "m", handler)
+            await asyncio.sleep(0.05)
+            await self.queue_service.stop()
+            self.assertEqual(seen, ["clean"])
+
+        self.loop.run_until_complete(run_test())
+
     def test_fifo_message_processing_same_channel(self):
         """Test that messages are processed in FIFO order within the same channel."""
 

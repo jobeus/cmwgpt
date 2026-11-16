@@ -10,6 +10,7 @@ This service provides a queue-based message processing system to ensure:
 """
 
 import asyncio
+import contextvars
 import logging
 from typing import Dict, Any, Callable, Awaitable, Optional
 from dataclasses import dataclass, field
@@ -142,8 +143,10 @@ class QueueService:
             if worker is not None and worker.done():
                 logger.warning(
                     "Worker for channel %s died, respawning", channel_id)
+            # In an empty context: the worker outlives whatever queued its first item, and would
+            # otherwise file every later mention in the channel under that command's trace.
             self._channel_workers[channel_id] = asyncio.create_task(
-                self._process_channel_messages(channel_id))
+                self._process_channel_messages(channel_id), context=contextvars.Context())
             logger.debug(
                 "Created queue and worker for channel %s", channel_id)
 

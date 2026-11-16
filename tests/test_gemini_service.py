@@ -80,6 +80,28 @@ def _reply(text="ok", *, interaction_id="int-1", status="completed", calls=(), s
     return events
 
 
+class _Stream:
+    """A streamed response. Closing it fails the test: in production the SDK's and the tracing
+    wrapper's ``close`` call each other until Python's recursion limit, freezing the event loop."""
+
+    def __init__(self, events):
+        self._events = iter(events)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._events)
+        except StopIteration:
+            raise StopAsyncIteration from None
+
+    async def close(self):
+        raise AssertionError("the reply stream must not be closed by hand")
+
+    aclose = close
+
+
 def _client(*responses):
     """A client whose streamed ``interactions.create`` gives each of ``responses`` in turn (an
     exception is raised instead). Its ``create`` mock records a copy of each call's kwargs."""
@@ -93,10 +115,7 @@ def _client(*responses):
         if isinstance(response, Exception):
             raise response
 
-        async def events():
-            for event in response:
-                yield event
-        return events()
+        return _Stream(response)
 
     client = MagicMock()
     client.aio.interactions.create = create
@@ -449,7 +468,10 @@ class TestGeminiService(unittest.IsolatedAsyncioTestCase):
                                   _reply("Gemini two", interaction_id="h-2"))
 
         def history(*entries):
-            return [{"role": role, "content": f"[t] [{mid}] <@{who}>:\n{text}", "message_id": mid}
+            # As build_chat_context writes them; the bot's replies quote the mention they answer.
+            return [{"role": role, "message_id": mid, "content": (
+                f'[Replying to message: "[t] [{mid - 1}] <@5>: a question"]\n\n [t] [{mid}] <@{who}>: {text}'
+                if role == "assistant" else f"[t] [{mid}] <@{who}>: {text}")}
                     for mid, role, who, text in entries]
 
         first = history((1, "user", 5, "hello hydrogen"))

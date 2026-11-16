@@ -11,6 +11,7 @@ import base64
 import json
 import logging
 import os
+import re
 import time
 import warnings
 from dataclasses import dataclass
@@ -217,14 +218,16 @@ def _reply_head(text: str) -> str:
 
 
 def _entry_text(message: Dict[str, Any]) -> str:
-    """A history entry's text without the ``[timestamp] [message ID] <@sender>:`` header line."""
+    """What a history entry's Discord message said: its text after the header the bot adds,
+    ``[timestamp] [message ID] <@sender>:`` (a quoted message it replies to comes before that)."""
     content = message.get("content", "")
     if isinstance(content, list):
-        content = "\n".join(
+        content = " ".join(
             p if isinstance(p, str) else p.get("text", "") for p in content
             if isinstance(p, str) or (isinstance(p, dict) and p.get("type") == "text"))
-    _header, _, body = str(content).partition("\n")
-    return body
+    text = str(content)
+    header = re.search(rf"\[{message.get('message_id')}\] <@\d+>:", text)
+    return text[header.end():] if header else text
 
 
 class GeminiService:
@@ -525,51 +528,46 @@ class GeminiService:
         result = SimpleNamespace(id=None, status=None, usage=None, text="", calls=[])
         # Function calls by step index; their arguments arrive as pieces of JSON.
         calls: Dict[int, Dict[str, Any]] = {}
+        # The stream is read to its end and never closed by hand: the SDK and its tracing wrapper
+        # each patch ``close`` to call the other's, so closing it recurses until Python gives up,
+        # which froze the event loop for 15 seconds a request in production.
         stream = await self._get_client().aio.interactions.create(stream=True, **kwargs)
-        try:
-            async for event in stream:
-                kind = getattr(event, "event_type", None)
-                if kind == "interaction.created":
-                    result.id = getattr(event.interaction, "id", None)
-                elif kind == "step.start":
-                    step = event.step
-                    step_type = getattr(step, "type", None)
-                    if step_type == "function_call":
-                        name = getattr(step, "name", "")
-                        calls[event.index] = {
-                            "id": getattr(step, "id", ""), "name": name,
-                            "arguments": getattr(step, "arguments", None) or {}, "json": "",
-                        }
-                        if name in tool_statuses:
-                            status(tool_statuses[name])
-                    elif step_type in STEP_STATUSES:
-                        status(STEP_STATUSES[step_type])
-                elif kind == "step.delta":
-                    delta = event.delta
-                    delta_type = getattr(delta, "type", None)
-                    if delta_type == "text":
-                        result.text += getattr(delta, "text", "") or ""
-                        if show:
-                            show(result.text)
-                    elif delta_type == "arguments_delta" and event.index in calls:
-                        calls[event.index]["json"] += getattr(delta, "arguments", "") or ""
-                elif kind == "interaction.completed":
-                    interaction = event.interaction
-                    result.id = getattr(interaction, "id", None) or result.id
-                    result.status = getattr(interaction, "status", None)
-                    result.usage = getattr(interaction, "usage", None)
-                elif kind == "error":
-                    error = getattr(event, "error", None)
-                    code = getattr(error, "code", None)
-                    raise _StreamError(
-                        str(getattr(error, "message", None) or error), code if isinstance(code, int) else None)
-        finally:
-            close = getattr(stream, "close", None) or getattr(stream, "aclose", None)
-            if close is not None:
-                try:
-                    await close()
-                except Exception as e:
-                    logger.debug("[gemini] Closing the reply stream failed: %s", e)
+        async for event in stream:
+            kind = getattr(event, "event_type", None)
+            if kind == "interaction.created":
+                result.id = getattr(event.interaction, "id", None)
+            elif kind == "step.start":
+                step = event.step
+                step_type = getattr(step, "type", None)
+                if step_type == "function_call":
+                    name = getattr(step, "name", "")
+                    calls[event.index] = {
+                        "id": getattr(step, "id", ""), "name": name,
+                        "arguments": getattr(step, "arguments", None) or {}, "json": "",
+                    }
+                    if name in tool_statuses:
+                        status(tool_statuses[name])
+                elif step_type in STEP_STATUSES:
+                    status(STEP_STATUSES[step_type])
+            elif kind == "step.delta":
+                delta = event.delta
+                delta_type = getattr(delta, "type", None)
+                if delta_type == "text":
+                    result.text += getattr(delta, "text", "") or ""
+                    if show:
+                        show(result.text)
+                elif delta_type == "arguments_delta" and event.index in calls:
+                    calls[event.index]["json"] += getattr(delta, "arguments", "") or ""
+            elif kind == "interaction.completed":
+                interaction = event.interaction
+                result.id = getattr(interaction, "id", None) or result.id
+                result.status = getattr(interaction, "status", None)
+                result.usage = getattr(interaction, "usage", None)
+            elif kind == "error":
+                error = getattr(event, "error", None)
+                code = getattr(error, "code", None)
+                raise _StreamError(
+                    str(getattr(error, "message", None) or error), code if isinstance(code, int) else None)
         for call in calls.values():
             pieces = call.pop("json")
             if pieces:
