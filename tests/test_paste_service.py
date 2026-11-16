@@ -48,6 +48,36 @@ class TestPasteService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake_client.last_content, b"hello world")
         self.assertEqual(injected, [("https://paste.jobe.wtf/abc123.md", "hello world")])
 
+    async def test_user_mentions_are_written_as_names(self):
+        """A paste is read outside Discord, where ``<@id>`` is just a number."""
+        injected = []
+
+        class FakeClient:
+            async def post(self, url, content):
+                self.last_content = content
+                return FakeResponse(201, "https://paste.jobe.wtf/abc123")
+
+        fake_client = FakeClient()
+        service = PasteService(
+            cache_injector=AsyncMock(side_effect=lambda url, text: injected.append(text)),
+            client_factory=lambda timeout: FakeClientContext(fake_client),
+        )
+        names = {111: "Arthur", 222: "Ford Prefect"}
+        service.set_name_resolver(names.get)
+
+        await service.upload_markdown("<@111> owes <@!222> a towel; <@333> and the <@&444> role don't.")
+
+        expected = "@Arthur owes @Ford Prefect a towel; <@333> and the <@&444> role don't."
+        self.assertEqual(fake_client.last_content, expected.encode("utf-8"))
+        self.assertEqual(injected, [expected])
+
+    def test_names_are_left_alone_without_a_resolver_or_when_it_fails(self):
+        service = PasteService()
+        self.assertEqual(service.with_names("hi <@111>"), "hi <@111>")
+        service.set_name_resolver(lambda user_id: 1 / 0)
+        with self.assertLogs("src.services.paste_service", "WARNING"):
+            self.assertEqual(service.with_names("hi <@111>"), "hi <@111>")
+
     async def test_upload_markdown_raises_on_non_201_status(self):
         class FakeClient:
             async def post(self, url, content):

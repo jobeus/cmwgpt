@@ -45,6 +45,7 @@ class DiscordBotClient:
         self._shutdown_started = False
         for service in (self.services.gemini_service, self.services.anthropic_service):
             service.set_bot_id_loader(lambda: self.bot.user.id if self.bot.user else None)
+        self.services.paste_service.set_name_resolver(self._user_name)
         self.services.restart_handler.set_shutdown_callback(self.shutdown)
 
         self._load_saved_state()
@@ -251,6 +252,16 @@ class DiscordBotClient:
 
         if getattr(self.services, "paper_trading_service", None) is not None:
             MarketCommands(self.bot, paper_trading_service=self.services.paper_trading_service).setup_commands()
+
+    def _user_name(self, user_id: int) -> Optional[str]:
+        """What a Discord user is called: their server nickname where the bot shares a server
+        with them, else their display name. None for someone the bot has never seen."""
+        for guild in self.bot.guilds:
+            member = guild.get_member(user_id)
+            if member is not None:
+                return member.display_name
+        user = self.bot.get_user(user_id)
+        return user.display_name if user is not None else None
 
     def _channel_model(self, channel: Any) -> str:
         """The model a channel answers with: its ``/model``, or the default if that's unset or unavailable."""

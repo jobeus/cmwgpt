@@ -322,6 +322,19 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         client.services.state_service.restart_info = {}
         self.assertFalse(client._check_for_restart_info())
 
+    async def test_user_name_prefers_the_server_nickname(self):
+        client, _ = self.make_client()
+        member = SimpleNamespace(display_name="Zaphod (nick)")
+        guild = MagicMock()
+        guild.get_member.side_effect = lambda user_id: member if user_id == 1 else None
+        client.bot = MagicMock()
+        client.bot.guilds = [guild]
+        client.bot.get_user.side_effect = lambda user_id: SimpleNamespace(display_name="Trillian") if user_id == 2 else None
+
+        self.assertEqual(client._user_name(1), "Zaphod (nick)")
+        self.assertEqual(client._user_name(2), "Trillian")
+        self.assertIsNone(client._user_name(3))
+
     async def test_run_only_runs_the_bot(self):
         client = object.__new__(DiscordBotClient)
         client.config = SimpleNamespace(discord_bot_token="token")
