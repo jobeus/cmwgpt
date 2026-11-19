@@ -1,6 +1,6 @@
 discord.py>=2.7.1
 python-dotenv>=1.2.4
-anthropic>=1.17.0
+anthropic>=2.3.0
 httpx>=0.28.1
 Pillow>=13.0.0
 youtube-transcript-api>=1.2.4
