@@ -182,7 +182,7 @@ class TestBotFunctions(unittest.TestCase):
             await message_service.send_channel_reply(mock_channel, long_message)
 
             # Verify upload was called
-            mock_upload.assert_called_once_with(long_message)
+            mock_upload.assert_called_once_with(long_message, guild_id=mock_channel.guild.id)
 
             # Verify channel send was called with paste URL
             expected_message = (
@@ -210,7 +210,7 @@ class TestBotFunctions(unittest.TestCase):
             await message_service.send_channel_reply(mock_channel, long_message)
 
             # Verify upload was attempted
-            mock_upload.assert_called_once_with(long_message)
+            mock_upload.assert_called_once_with(long_message, guild_id=mock_channel.guild.id)
 
             # Verify error message was sent
             expected_message = (

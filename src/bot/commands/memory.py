@@ -120,7 +120,7 @@ class MemoryCommands:
             await interaction.followup.send(text, ephemeral=True, allowed_mentions=NO_PINGS)
             return
         prefix = "Updated 👍 " if updated else ""
-        url = await self._paste_service.upload_markdown(text)
+        url = await self._paste_service.upload_markdown(text, guild_id=interaction.guild_id)
         await interaction.followup.send(
             f"{prefix}It's too long for one Discord message, so I've uploaded it to: {url}",
             ephemeral=True,

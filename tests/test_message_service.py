@@ -42,12 +42,14 @@ class TestMessageService(unittest.IsolatedAsyncioTestCase):
         paste_service = MagicMock()
         paste_service.upload_markdown = AsyncMock(return_value="https://paste.jobe.wtf/long.md")
         channel = MagicMock()
+        channel.guild.id = 42
         channel.send = AsyncMock()
         service = MessageService(paste_service=paste_service)
 
         await service.send_channel_reply(channel, "x" * 2500)
 
-        paste_service.upload_markdown.assert_awaited_once_with("x" * 2500)
+        # The channel's server, so mentions in the paste get the nicknames the model was given.
+        paste_service.upload_markdown.assert_awaited_once_with("x" * 2500, guild_id=42)
         channel.send.assert_awaited_once()
         sent_message = channel.send.await_args.kwargs["content"]
         self.assertIn("too long", sent_message)

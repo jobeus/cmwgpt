@@ -18,8 +18,14 @@ SEND_ATTEMPTS = 3
 RETRY_BASE_DELAY_SECONDS = 1.0
 
 
+def guild_id_of(channel: object) -> Optional[int]:
+    """The ID of the server ``channel`` is in; None for a DM."""
+    guild = getattr(channel, "guild", None)
+    return getattr(guild, "id", None)
+
+
 class PasteUploader(Protocol):
-    async def upload_markdown(self, markdown_text: str) -> str:
+    async def upload_markdown(self, markdown_text: str, guild_id: Optional[int] = None) -> str:
         """Upload markdown content and return a URL."""
 
 
@@ -31,18 +37,19 @@ class MessageService:
     def __init__(self, paste_service: Optional[PasteUploader] = None):
         self._paste_service = paste_service
 
-    async def _upload_to_paste(self, reply_text: str) -> str:
+    async def _upload_to_paste(self, reply_text: str, guild_id: Optional[int] = None) -> str:
         if not self._paste_service:
             raise RuntimeError("Paste service is disabled")
-        return await self._paste_service.upload_markdown(reply_text)
+        return await self._paste_service.upload_markdown(reply_text, guild_id=guild_id)
 
-    async def fit_to_discord(self, text: str) -> str:
-        """``text`` as-is if it fits in one message, else a link to it on the paste service."""
+    async def fit_to_discord(self, text: str, guild_id: Optional[int] = None) -> str:
+        """``text`` as-is if it fits in one message, else a link to it on the paste service, with
+        mentions written as names from server ``guild_id`` (the one it's posted in)."""
         if len(text) <= self.DISCORD_MESSAGE_LIMIT:
             return text
         logger.info("Reply exceeded %d characters, uploading to paste service", self.DISCORD_MESSAGE_LIMIT)
         try:
-            pasted_url = await self._upload_to_paste(text)
+            pasted_url = await self._upload_to_paste(text, guild_id)
             return f"My response was too long to post here, so I've uploaded it to: {pasted_url}"
         except Exception as e:
             logger.error("Error uploading to paste service: %s", e, exc_info=True)
@@ -98,7 +105,7 @@ class MessageService:
             reply_text: str,
             files: Optional[List[discord.File]] = None) -> None:
         """Send a reply to a channel, with any files, via the paste service if it's too long."""
-        content = await self.fit_to_discord(reply_text)
+        content = await self.fit_to_discord(reply_text, guild_id_of(channel))
         if files:
             await self._send_with_retry(channel.send, content, files=files)
         else:

@@ -63,7 +63,7 @@ class TestPasteService(unittest.IsolatedAsyncioTestCase):
             client_factory=lambda timeout: FakeClientContext(fake_client),
         )
         names = {111: "Arthur", 222: "Ford Prefect"}
-        service.set_name_resolver(names.get)
+        service.set_name_resolver(lambda user_id, guild_id: names.get(user_id))
 
         await service.upload_markdown("<@111> owes <@!222> a towel; <@333> and the <@&444> role don't.")
 
@@ -71,10 +71,17 @@ class TestPasteService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake_client.last_content, expected.encode("utf-8"))
         self.assertEqual(injected, [expected])
 
+    def test_names_are_looked_up_in_the_paste_s_server(self):
+        service = PasteService()
+        seen = []
+        service.set_name_resolver(lambda user_id, guild_id: seen.append(guild_id) or "Memout")
+        self.assertEqual(service.with_names("hi <@111>", 42), "hi @Memout")
+        self.assertEqual(seen, [42])
+
     def test_names_are_left_alone_without_a_resolver_or_when_it_fails(self):
         service = PasteService()
         self.assertEqual(service.with_names("hi <@111>"), "hi <@111>")
-        service.set_name_resolver(lambda user_id: 1 / 0)
+        service.set_name_resolver(lambda user_id, guild_id: 1 / 0)
         with self.assertLogs("src.services.paste_service", "WARNING"):
             self.assertEqual(service.with_names("hi <@111>"), "hi <@111>")
 

@@ -16,7 +16,7 @@ def make_streamer(*, send_side_effect=None):
     channel.send = AsyncMock(return_value=sent, side_effect=send_side_effect)
     message_service = MagicMock()
     message_service.DISCORD_MESSAGE_LIMIT = 2000
-    message_service.fit_to_discord = AsyncMock(side_effect=lambda text: text)
+    message_service.fit_to_discord = AsyncMock(side_effect=lambda text, guild_id=None: text)
     message_service.send_channel_reply = AsyncMock()
     message_service.send_channel_reply = AsyncMock()
     return StreamingReply(channel, message_service), channel, sent, message_service
@@ -83,7 +83,7 @@ class TestStreamingReply(unittest.IsolatedAsyncioTestCase):
 
         await streamer.finish("[$0.010] Hello, world!")
 
-        message_service.fit_to_discord.assert_awaited_once_with("[$0.010] Hello, world!")
+        message_service.fit_to_discord.assert_awaited_once_with("[$0.010] Hello, world!", channel.guild.id)
         sent.edit.assert_awaited_once_with(content="[$0.010] Hello, world!", suppress=True)
         channel.send.assert_awaited_once()
         message_service.send_channel_reply.assert_not_awaited()

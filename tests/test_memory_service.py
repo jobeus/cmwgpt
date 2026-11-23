@@ -335,7 +335,7 @@ class TestSendMemory(unittest.IsolatedAsyncioTestCase):
         commands = MemoryCommands(
             MagicMock(), memory_service=MagicMock(), memory_store=MagicMock(), paste_service=paste_service
         )
-        interaction = SimpleNamespace(followup=SimpleNamespace(send=AsyncMock()))
+        interaction = SimpleNamespace(guild_id=42, followup=SimpleNamespace(send=AsyncMock()))
         return commands, interaction
 
     async def test_short_reply_is_sent_directly(self):
@@ -354,7 +354,7 @@ class TestSendMemory(unittest.IsolatedAsyncioTestCase):
         self.assertIn("https://paste.jobe.wtf/mem.md", message)
         self.assertTrue(kwargs["ephemeral"])
         self.assertNotIn("file", kwargs)
-        commands._paste_service.upload_markdown.assert_awaited_once_with("x" * 2500)
+        commands._paste_service.upload_markdown.assert_awaited_once_with("x" * 2500, guild_id=interaction.guild_id)
 
 
 class TestResolveTarget(unittest.IsolatedAsyncioTestCase):

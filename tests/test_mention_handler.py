@@ -432,7 +432,7 @@ class TestMentionHandler(unittest.IsolatedAsyncioTestCase):
     async def test_handle_mention_streams_then_edits_in_final_reply(self):
         handler, _, _, claude_service, message_service = self.make_handler()
         message_service.DISCORD_MESSAGE_LIMIT = 2000
-        message_service.fit_to_discord = AsyncMock(side_effect=lambda text: text)
+        message_service.fit_to_discord = AsyncMock(side_effect=lambda text, guild_id=None: text)
         handler._prepare_mention_context = AsyncMock(return_value=([{"role": "user", "content": "hi"}], "system"))
 
         async def streamed_completion(**kwargs):

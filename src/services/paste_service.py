@@ -27,21 +27,23 @@ class PasteService:
         self.base_url = base_url
         self._cache_injector = cache_injector
         self._client_factory = client_factory
-        self._name_resolver: Optional[Callable[[int], Optional[str]]] = None
+        self._name_resolver: Optional[Callable[[int, Optional[int]], Optional[str]]] = None
 
-    def set_name_resolver(self, resolver: Callable[[int], Optional[str]]) -> None:
-        """Set what turns a Discord user ID into that person's name (None when it doesn't know them)."""
+    def set_name_resolver(self, resolver: Callable[[int, Optional[int]], Optional[str]]) -> None:
+        """Set what turns a Discord user ID, and the server the paste is for, into that person's
+        name (None when it doesn't know them)."""
         self._name_resolver = resolver
 
-    def with_names(self, text: str) -> str:
-        """``text`` with each ``<@user id>`` written as ``@name``; an ID nobody knows stays as it is."""
+    def with_names(self, text: str, guild_id: Optional[int] = None) -> str:
+        """``text`` with each ``<@user id>`` written as ``@name``, their nickname in server ``guild_id``
+        where they have one there; an ID nobody knows stays as it is."""
         resolver = self._name_resolver
         if resolver is None:
             return text
 
         def name(match: "re.Match[str]") -> str:
             try:
-                found = resolver(int(match.group(1)))
+                found = resolver(int(match.group(1)), guild_id)
             except Exception as e:
                 logger.warning("Couldn't look up the name of user %s for a paste: %s", match.group(1), e)
                 found = None
@@ -49,12 +51,13 @@ class PasteService:
 
         return _USER_MENTION.sub(name, text)
 
-    async def upload_markdown(self, text: str) -> str:
+    async def upload_markdown(self, text: str, guild_id: Optional[int] = None) -> str:
         """
         Upload text to paste service, with user mentions written as names.
 
         Args:
             text: The text content to upload
+            guild_id: The server it's posted in, whose nicknames the mentions are written with
 
         Returns:
             URL of the uploaded paste
@@ -62,7 +65,7 @@ class PasteService:
         Raises:
             Exception: If upload fails
         """
-        text = self.with_names(text)
+        text = self.with_names(text, guild_id)
         try:
             async with self._client_factory(timeout=httpx.Timeout(10.0)) as client:
                 response = await client.post(

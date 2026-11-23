@@ -335,6 +335,21 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client._user_name(2), "Trillian")
         self.assertIsNone(client._user_name(3))
 
+    async def test_user_name_uses_the_nickname_in_the_paste_s_own_server_first(self):
+        """Someone can have a different nickname in each server; the model was given this one's."""
+        client, _ = self.make_client()
+        elsewhere, here = MagicMock(id=10), MagicMock(id=20)
+        elsewhere.get_member.return_value = SimpleNamespace(display_name="Mike")
+        here.get_member.return_value = SimpleNamespace(display_name="Memout")
+        client.bot = MagicMock()
+        client.bot.guilds = [elsewhere, here]
+        client.bot.get_guild.side_effect = {10: elsewhere, 20: here}.get
+
+        self.assertEqual(client._user_name(1, 20), "Memout")
+        self.assertEqual(client._user_name(1, 10), "Mike")
+        self.assertEqual(client._user_name(1), "Mike")
+        self.assertEqual(client._user_name(1, 99), "Mike")
+
     async def test_run_only_runs_the_bot(self):
         client = object.__new__(DiscordBotClient)
         client.config = SimpleNamespace(discord_bot_token="token")

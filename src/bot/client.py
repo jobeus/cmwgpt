@@ -253,10 +253,13 @@ class DiscordBotClient:
         if getattr(self.services, "paper_trading_service", None) is not None:
             MarketCommands(self.bot, paper_trading_service=self.services.paper_trading_service).setup_commands()
 
-    def _user_name(self, user_id: int) -> Optional[str]:
-        """What a Discord user is called: their server nickname where the bot shares a server
+    def _user_name(self, user_id: int, guild_id: Optional[int] = None) -> Optional[str]:
+        """What a Discord user is called: their nickname in server ``guild_id`` (where the paste is
+        posted, so it matches the names the model was given), else in any server the bot shares
         with them, else their display name. None for someone the bot has never seen."""
-        for guild in self.bot.guilds:
+        here = self.bot.get_guild(guild_id) if guild_id is not None else None
+        guilds = [here, *(g for g in self.bot.guilds if g is not here)] if here is not None else self.bot.guilds
+        for guild in guilds:
             member = guild.get_member(user_id)
             if member is not None:
                 return member.display_name

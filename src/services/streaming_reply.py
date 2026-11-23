@@ -18,6 +18,7 @@ from typing import Any, List, Mapping, Optional, Sequence
 
 import discord
 
+from src.services.message_service import guild_id_of
 from src.utils.discord_error_utils import concise_error
 from src.utils.status_lines import flavor
 
@@ -128,7 +129,7 @@ class StreamingReply:
         """Replace the preview with the final reply, or post it if no preview went out."""
         await self._stop()
         if self._message is not None:
-            content = await self._message_service.fit_to_discord(text)
+            content = await self._message_service.fit_to_discord(text, guild_id_of(self._channel))
             try:
                 if files:
                     await self._message.edit(content=content, attachments=files, suppress=True)
