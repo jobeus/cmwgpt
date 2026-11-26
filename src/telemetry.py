@@ -232,7 +232,8 @@ def _wrap_anthropic_parts() -> bool:
     def convert(part: object) -> Any:
         converted = original(part)
         if isinstance(converted, dict) and converted.get("type") == "blob":
-            note = _blob_note(converted.get("media_type", ""), converted.get("content"))
+            media_type = converted.get("mime_type") or converted.get("media_type") or ""  # logfire 6 renamed it
+            note = _blob_note(media_type, converted.get("content"))
             return {"type": "text", "content": note}
         return converted
 
