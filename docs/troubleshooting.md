@@ -97,7 +97,7 @@ Reference: `docs/auto-update.md`
 
 ## `make run` behaves oddly after restart
 
-`start.sh` only restarts the bot when it exits with code `42`, and it reinstalls `requirements.txt` before each restart. Any other exit code (including a crash) ends the loop, which is why hosted runs should sit under systemd (`deploy/cmwgpt.service`).
+`start.sh` only restarts the bot when it exits with code `42`, and it runs `scripts/release-build.sh` (reinstalls `requirements.txt`) before each start. Any other exit code (including a crash) ends the loop, which is why hosted runs sit under systemd (`deploy/tmux-cmwgpt.service`).
 
 If wrapper-driven restarts behave strangely:
 

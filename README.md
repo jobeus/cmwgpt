@@ -117,7 +117,7 @@ More detail: `tests/README.md`.
 ## Important operational notes
 
 - Prefer `make run-direct` for local bot development.
-- `make run` uses `start.sh`, which uses `.venv/` (or a legacy `venv/`) and reruns the bot whenever it exits with code `42`. On a server, run `start.sh` under systemd (`deploy/cmwgpt.service`) so crashes and reboots are covered too.
+- `make run` uses `start.sh`, which loads `.env`, runs `scripts/release-build.sh` (requirements into `.venv/`) and reruns the bot whenever it exits with code `42`. On grizzly it runs inside tmux under systemd (`deploy/tmux-cmwgpt.service`; console `tmux -L cmwgpt a`, logs `journalctl -t cmwgpt -f`), the standard grizzly setup (the `grizzly-service` skill).
 - Pushes to `main` that pass CI notify the bot through a signed webhook, and it pulls and restarts (`docs/auto-update.md`).
 - `/restart` triggers the restart handler, which saves state, performs a `git pull`, runs the normal shutdown sequence (stop jobs, drain the queue, close clients, close Redis), and exits with code `42` so `start.sh` or your process manager starts it again.
 

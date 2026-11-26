@@ -1,0 +1,28 @@
+# systemd unit for cmwgpt on grizzly, inside tmux so jobe can attach to its console.
+# Install, as jobe in the checkout:
+#   sudo install -m 644 deploy/tmux-cmwgpt.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now tmux-cmwgpt
+# Console: tmux -L cmwgpt a   (as jobe; detach with C-b d, don't Ctrl-C)
+# Logs:    journalctl -t cmwgpt -f   (the pane is piped to the journal)
+
+[Unit]
+Description=cmwgpt Discord bot in tmux (attach as jobe: tmux -L cmwgpt a)
+Wants=network-online.target
+After=network-online.target redis-server.service
+
+[Service]
+Type=forking
+User=jobe
+Group=jobe
+WorkingDirectory=/home/jobe/dev/cmwgpt
+# start.sh loads .env, builds, and relaunches on exit 42 (deploy webhook). When it exits
+# for any other reason the session and the tmux server end, and systemd restarts the unit.
+ExecStart=/usr/bin/tmux -L cmwgpt new-session -d -s cmwgpt ./start.sh
+ExecStartPost=/usr/bin/tmux -L cmwgpt pipe-pane -t cmwgpt 'systemd-cat -t cmwgpt'
+ExecStop=/usr/bin/tmux -L cmwgpt kill-session -t cmwgpt
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

@@ -1,34 +1,29 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Runs cmwgpt, relaunching it whenever it exits with code 42. The deploy webhook exits that
+# way after it has pulled and built a new commit, so the build below is normally a no-op;
+# it does real work after a manual pull or on first start. Any other exit code ends the
+# loop (systemd's Restart=always covers crashes).
+cd "$(dirname "$(readlink -f "$0")")" || exit 1
 
-# Detect the project virtual environment (.venv preferred, venv legacy)
-if [ -x ".venv/bin/python" ]; then
-    VENV_BIN=".venv/bin"
-elif [ -x "venv/bin/python" ]; then
-    VENV_BIN="venv/bin"
-else
-    echo "No virtual environment found (.venv/ or venv/). Run 'make venv install' first." >&2
-    exit 1
+if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env
+    set +a
 fi
 
-PYTHON="$VENV_BIN/python"
-PIP="$VENV_BIN/pip"
-
 while true; do
-    "$PYTHON" main.py
-    exit_code=$?
-
-    echo "Script exited with code $exit_code"
-
-    # Check if bot requested restart
-    if [ $exit_code -eq 42 ]; then
-        echo "Restarting script because it exited with code 42"
-        echo "Running pip install requirements..."
-        # eager: also upgrade the packages our requirements depend on, not just the ones
-        # listed, so nothing stays on an old release.
-        "$PIP" install --upgrade --upgrade-strategy eager -r requirements.txt
-        sleep 1
-    else
-        echo "Not restarting. Exiting."
-        break
+    if ! scripts/release-build.sh; then
+        echo "start.sh: build failed, starting what is installed" >&2
     fi
+
+    .venv/bin/python main.py
+    code=$?
+    echo "start.sh: cmwgpt exited with code $code"
+
+    if [ "$code" -ne 42 ]; then
+        exit "$code"
+    fi
+    echo "start.sh: restarting onto the new version"
+    sleep 1
 done

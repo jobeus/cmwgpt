@@ -69,7 +69,7 @@ Recommended supervisors include:
 - `pm2`
 - any equivalent service manager that reliably restarts on exit
 
-`start.sh` (used by `make run`) is a minimal wrapper: it reruns `main.py` after exit `42`, reinstalling requirements first. It does not survive a crash, a reboot, or closing the terminal it runs in, so on a host run it under systemd with `deploy/cmwgpt.service` (instructions are in the file's header). systemd restarts `start.sh` on anything else and starts it on boot; logs go to `journalctl -u cmwgpt -f`.
+`start.sh` (used by `make run`) is a minimal wrapper: it loads `.env`, runs `scripts/release-build.sh` (requirements into `.venv/`), and reruns `main.py` after exit `42`. It does not survive a crash, a reboot, or closing the terminal it runs in, so on grizzly it runs inside tmux under systemd with `deploy/tmux-cmwgpt.service` (instructions are in the file's header): attach with `tmux -L cmwgpt a` as jobe, logs in `journalctl -t cmwgpt -f`. systemd restarts it on anything else and starts it on boot.
 
 ### Supervisor behavior you want
 
