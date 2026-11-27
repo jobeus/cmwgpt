@@ -48,8 +48,8 @@ def _render_tweet(key: str, result: Any) -> Tuple[str, List[str]]:
 
 
 def _render_instagram(key: str, result: Any) -> Tuple[str, List[str]]:
-    text, image = result
-    return f"Instagram/Threads Post {key}:\n{text}", [image] if image else []
+    text, images = result
+    return f"Instagram/Threads Post {key}:\n{text}", list(images or [])
 
 
 def _render_reddit(key: str, result: Any) -> Tuple[str, List[str]]:

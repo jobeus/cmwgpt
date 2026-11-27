@@ -41,7 +41,7 @@ class TestDownloaderUtils(unittest.IsolatedAsyncioTestCase):
                 return_value=("tweet context", ["data:image/png;base64,TWEET"]))),
             facebook=(["https://fb.watch/1"], AsyncMock(return_value="facebook transcript")),
             instagram=(["https://instagram.com/p/1"], AsyncMock(
-                return_value=("instagram context", "data:image/jpeg;base64,IG"))),
+                return_value=("instagram context", ["data:image/jpeg;base64,IG"]))),
             article=(["https://example.com/a", "https://example.com/b"],
                      AsyncMock(side_effect=["article A", "article B"])),
         )
@@ -71,7 +71,7 @@ class TestDownloaderUtils(unittest.IsolatedAsyncioTestCase):
         ])
 
     async def test_instagram_without_image_adds_no_image_part(self):
-        sources = fake_sources(instagram=(["https://instagram.com/p/1"], AsyncMock(return_value=("ctx", None))))
+        sources = fake_sources(instagram=(["https://instagram.com/p/1"], AsyncMock(return_value=("ctx", []))))
         with patch.object(downloader_utils, "SOURCES", sources):
             text, images = await downloader_utils.fetch_all_url_content("x")
         self.assertIn("ctx", text)

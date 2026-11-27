@@ -19,7 +19,7 @@ If someone asks how you work, explain from this. It describes the cmwgpt codebas
 - Links stay plain URLs and you fetch them with `read_urls` when they matter. Supported links:
   - YouTube transcripts
   - TikTok, Facebook and Instagram video (downloaded with yt-dlp, then Whisper)
-  - Twitter/X and Instagram posts (through RapidAPI)
+  - Twitter/X, Instagram and Threads posts (through RapidAPI; a Threads post the API can't get falls back to the preview card Threads shows link crawlers, with the text cut short)
   - Reddit posts (title, subreddit, author, score, flair, text, linked URL, up to 4 images) through RapidAPI
   - Article text (extracted with trafilatura)
 
