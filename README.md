@@ -55,7 +55,7 @@ cp .env.development.example .env.development
 docker compose --env-file .env.development up --build
 ```
 
-Redis isn't exposed on the host. The bot only listens for the deploy webhook, and only when `DEPLOY_WEBHOOK_SECRET` is set.
+Redis isn't exposed on the host, and the bot listens on no port.
 
 ## Current user-facing commands
 
@@ -117,9 +117,9 @@ More detail: `tests/README.md`.
 ## Important operational notes
 
 - Prefer `make run-direct` for local bot development.
-- `make run` uses `start.sh`, which loads `.env`, runs `scripts/release-build.sh` (requirements into `.venv/`) and reruns the bot whenever it exits with code `42`. On grizzly it runs inside tmux under systemd (`deploy/tmux-cmwgpt.service`; console `tmux -L cmwgpt a`, logs `journalctl -t cmwgpt -f`), the standard grizzly setup (the `grizzly-service` skill).
-- Pushes to `main` that pass CI notify the bot through a signed webhook, and it pulls and restarts (`docs/auto-update.md`).
-- `/restart` triggers the restart handler, which saves state, performs a `git pull`, runs the normal shutdown sequence (stop jobs, drain the queue, close clients, close Redis), and exits with code `42` so `start.sh` or your process manager starts it again.
+- `make run` builds (`scripts/release-build.sh`: requirements into `.venv/`) and runs `start.sh`, which loads `.env` and runs the bot.
+- On grizzly the bot is deployed by deployd, the server's deploy agent (jobeus/jobepanel, `servers/grizzly/deployd`): pushes to `main` that pass CI are built into a new release under `/srv/apps/cmwgpt` and the bot is restarted onto it; a release that doesn't stay up is switched back. It runs inside tmux under systemd (`tmux-app@cmwgpt`; console `tmux -L cmwgpt a`, logs `journalctl -t cmwgpt -f`). Settings and the files the bot keeps (`.env`, `system_prompt.txt`, `owner_notes.json`, `status_lines.json`, `logs/`, the IRC log) live in `/srv/apps/cmwgpt/shared`. See `docs/auto-update.md`.
+- `/restart` saves state and asks deployd for a fresh release of the latest code and packages; the bot keeps running while it builds, then gets the normal shutdown (stop jobs, drain the queue, close clients, close Redis) and comes back on the new release. Without a deploy agent (a local run) it shuts down and exits with code `42`.
 
 ## Documentation map
 

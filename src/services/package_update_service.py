@@ -2,10 +2,10 @@
 Package update watcher.
 
 The bot runs the newest release of everything in requirements.txt, dependencies of
-dependencies included: start.sh reinstalls with ``--upgrade --upgrade-strategy eager`` on
-every restart. This asks pip every few hours whether that reinstall would change anything,
-and restarts the bot when it would, so a new upstream release is picked up without waiting
-for a commit.
+dependencies included: every release is built with ``--upgrade --upgrade-strategy eager``
+(scripts/release-build.sh). This asks pip every few hours whether a new build would change
+anything, and asks for a restart when it would (the restart handler has the deploy agent
+build a fresh release), so a new upstream release is picked up without waiting for a commit.
 """
 
 import asyncio
@@ -90,7 +90,7 @@ class PackageUpdateService:
 
     async def _loop(self) -> None:
         while True:
-            # Sleep first: a start has just installed the newest of everything.
+            # Sleep first: this release was just built with the newest of everything.
             await asyncio.sleep(self._interval_seconds)
             try:
                 with routine_span("package update check"):

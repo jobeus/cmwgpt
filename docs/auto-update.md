@@ -1,170 +1,64 @@
 # Auto-update and restart behavior
 
-This page explains the bot's **git-aware restart model** so it feels predictable instead of spooky.
+How new code and new packages reach the running bot, and what `/restart` does.
 
-## The four moving parts
+## The moving parts
 
-| Component | Responsibility |
+| Part | What it does |
 | --- | --- |
-| `AutoUpdateService` | Listens for a signed deploy webhook from GitHub Actions and triggers a restart |
-| `RestartHandler` | Saves state, pulls code, runs the normal shutdown, and exits with restart code `42` |
-| `AnnouncementService` | Announces relevant updates after the bot comes back up |
-| `PackageUpdateService` | Every few hours asks pip whether newer packages are out and triggers the same restart to install them |
+| deployd (on grizzly, not in this repo) | The server's deploy agent (jobeus/jobepanel, `servers/grizzly/deployd`). Builds each release in its own folder under `/srv/apps/cmwgpt/releases/`, switches to it, restarts the bot, and switches back if the bot doesn't stay up. |
+| `scripts/release-build.sh` | What deployd runs in a new release folder: a fresh `.venv/` with the newest release of everything in `requirements.txt`, and a compile check. |
+| `src/services/restart_handler.py` | `/restart` and package updates: saves state, then asks deployd for a fresh release (`deploy request cmwgpt --force`). |
+| `src/services/package_update_service.py` | Every `PACKAGE_UPDATE_CHECK_HOURS` (default 6) asks pip whether a new build would install anything newer, and asks for a restart when it would. |
+| `src/services/announcement_service.py` | After a start on a different commit, posts what changed to the active channels (unless `QUIET_UPDATES`). |
 
-Relevant code:
+The bot listens on no port. It used to run its own deploy webhook; deployd took that over.
 
-- `src/services/auto_update_service.py`
-- `src/services/restart_handler.py`
-- `src/services/announcement_service.py`
-- `src/services/package_update_service.py`
+## A push to `main`
 
-## The config switches that matter most
+1. CI runs. When it passes, its deploy job POSTs a signed request to
+   `https://deploy.jobe.wtf/cmwgpt` (Actions secrets `DEPLOY_WEBHOOK_URL`, `DEPLOY_WEBHOOK_SECRET`).
+2. deployd checks the commit out into a new release folder and builds it. The bot keeps running.
+3. deployd restarts the unit: the bot gets SIGTERM and runs its normal shutdown (state saved to
+   Redis, queue drained for up to 90 seconds, clients closed), then starts from the new folder.
+4. If the new release doesn't stay up for 10 seconds, deployd switches back to the previous one.
+   A failed build never touches the running bot.
+5. On start the bot compares the saved commit with the one it is running and announces the changes.
 
-| Variable | Meaning |
-| --- | --- |
-| `DEPLOY_WEBHOOK_SECRET` | Shared HMAC secret; when set, the bot listens for deploy webhooks. Empty disables it |
-| `DEPLOY_WEBHOOK_HOST` / `DEPLOY_WEBHOOK_PORT` | Where the listener binds (default `0.0.0.0:8787`) |
-| `PACKAGE_UPDATE_CHECK_HOURS` | Hours between checks for newer packages (default `6`); `0` turns the checks off |
-| `QUIET_UPDATES=true` | Suppress update announcements after restart |
-| `QUIET_UPDATES=false` | Allow update announcements when appropriate |
+## `/restart` and package updates
 
-## Diagram: restart lifecycle
+Both go through `RestartHandler.perform_restart`:
 
-```mermaid
-flowchart LR
-    Trigger[Manual restart or auto-update trigger] --> Save[Save state to Redis]
-    Save --> Pull[git pull]
-    Pull --> Shutdown[shutdown_services<br/>stop jobs, drain queue, close clients, close Redis]
-    Shutdown --> Exit[Exit with code 42]
-    Exit --> Supervisor[Process supervisor restarts bot]
-    Supervisor --> Boot[Bot boots again]
-    Boot --> Announce[AnnouncementService may announce update]
-```
+1. Save state to Redis (active channels, last commit, whether it was a manual `/restart`).
+2. Ask deployd for a fresh release of the latest code, rebuilt even if that commit is already
+   live. That is what picks up new package releases.
+3. deployd builds it and restarts the bot as above. The shutdown saves state again and keeps
+   the "manual restart" mark, so the announcement still knows.
+4. If the release never replaces the process (its build failed), restarts are allowed again
+   after 20 minutes; see `journalctl -u deployd` on grizzly for why.
 
-## What actually happens during a restart
+Where there is no deploy agent (a local run: `APP_NAME` isn't set), step 2 is skipped: the
+bot shuts down and exits with code `42`, and `make run` has to be run again.
+`REDEPLOY_COMMAND` replaces the command the bot runs to ask.
 
-The restart path is intentional and stateful:
-
-1. the bot marks restart as in progress
-2. it saves state to Redis (`cmwgpt:restart_state`)
-3. it performs `git pull`
-4. it runs the normal shutdown sequence (`startup.shutdown_services`): stop background jobs, drain the queue for up to 90 seconds so in-flight replies finish, close the model/HTTP clients, and close Redis
-5. `main.py` exits with code `42`
-
-That exit code is a signal to the **outer supervisor**, not an error to be ignored.
-
-## Package updates
-
-The bot always runs the newest release of every package, including the ones its requirements depend on:
-
-- `start.sh` runs `pip install --upgrade --upgrade-strategy eager -r requirements.txt` on every restart.
-- `PackageUpdateService` runs the same command with `--dry-run` every `PACKAGE_UPDATE_CHECK_HOURS`. If it would install anything, the bot restarts through the normal restart path. The commit hasn't changed, so nothing is announced.
-- The list that triggered a restart is kept in Redis. If the same list is still pending afterwards (a release pip can't install, or a deployment such as the Docker stack whose restart doesn't reinstall), the bot logs a warning and does not restart again for it.
-- Dependabot still raises the `>=` floors in `requirements.txt` daily, which keeps fresh installs and CI on current versions.
-
-Versions are deliberately not pinned: a new release reaches the bot before CI has run against it.
-
-## Manual restart: `/restart`
-
-The `/restart` command uses the same restart handler as the auto-update path.
-
-That means `/restart` is effectively:
-
-- save state
-- `git pull`
-- normal shutdown
-- exit for supervised restart
-
-If you expected “just restart the process,” that is not what this command does.
-
-## Automatic updates (deploy webhook)
-
-There is no polling. The `deploy` job in `.github/workflows/ci.yml` runs after the test job passes on a push to `main` and POSTs to the bot:
+## By hand, on grizzly
 
 ```
-POST /deploy
-X-Deploy-Timestamp: <unix seconds>
-X-Deploy-Signature: sha256=<hex HMAC-SHA256 of "<timestamp>.<body>">
-{"sha": "<commit>", "ref": "refs/heads/main"}
+deploy status              # what is live
+deploy cmwgpt              # deploy main now (or: deploy cmwgpt <commit>)
+deploy cmwgpt --force      # rebuild the live commit with the newest packages
+deploy rollback cmwgpt     # back to the release before
+tmux -L cmwgpt a           # the bot's console (as jobe; detach with C-b d)
+journalctl -t cmwgpt -f    # the bot's output;  journalctl -u deployd -f  for deploys
 ```
-
-The bot rejects bad signatures and timestamps more than 5 minutes off (401). If the sha is the one already running it answers `up-to-date`; otherwise it queues the normal restart (`202`), which `git pull`s the new code.
-
-### Setup
-
-1. Generate a secret: `openssl rand -hex 32`.
-2. On the bot host, put it in `.env` as `DEPLOY_WEBHOOK_SECRET` (and set `DEPLOY_WEBHOOK_PORT` if `8787` is taken), then restart the bot. Open that port in the host firewall.
-3. In the GitHub repo, under Settings → Secrets and variables → Actions, add:
-   - `DEPLOY_WEBHOOK_SECRET`: the same value
-   - `DEPLOY_WEBHOOK_URL`: e.g. `http://polar.jobe.wtf:8787/deploy` (or an `https://` URL if a reverse proxy fronts it)
-
-Without both Actions secrets, the deploy job skips itself. The curl retries for about 90 seconds so a push that lands while the bot is still restarting from the previous one still gets through.
-
-Test it by hand from any machine with the secret:
-
-```bash
-body='{"sha":"manual","ref":"refs/heads/main"}'; ts=$(date +%s)
-sig=$(printf '%s.%s' "$ts" "$body" | openssl dgst -sha256 -hmac "$DEPLOY_WEBHOOK_SECRET" -r | cut -d' ' -f1)
-curl -X POST http://polar.jobe.wtf:8787/deploy -H "X-Deploy-Timestamp: $ts" -H "X-Deploy-Signature: sha256=$sig" --data "$body"
-```
-
-### Good environments for auto-update
-
-| Environment trait | Why it helps |
-| --- | --- |
-| Real git checkout | The service fetches/pulls from git |
-| Stable remote/auth configuration | Updates must be retrievable |
-| Supervisor-managed process | The bot exits during restart |
-| Predictable working directory | Git commands depend on it |
-
-### Bad environments for auto-update
-
-| Environment trait | Why it is risky |
-| --- | --- |
-| Read-only or immutable deploy | `git pull` is not the right update mechanism |
-| No supervisor | Bot exits and stays down |
-| Detached/unmanaged working tree | Git update behavior becomes unreliable |
 
 ## Update announcements after restart
 
-`AnnouncementService` decides whether to broadcast an update notice after startup.
-
-### Important nuance
-
-An announcement is not sent just because the bot restarted.
-
-The service checks things like:
-
-- whether `QUIET_UPDATES` is enabled
-- whether the current git SHA changed
-- whether there are active channels to announce to
-- whether the changelog contains announcement-worthy commits
-
-If no relevant changelog is found, the service can intentionally skip the announcement.
-
-## Recommended usage by environment
-
-| Environment | Recommendation |
-| --- | --- |
-| Local development | Leave `DEPLOY_WEBHOOK_SECRET` empty and use `make run-direct` |
-| Long-running self-hosted bot | Auto-update can be reasonable if git and supervision are set up well |
-| Production-like managed environment | Enable only if git-pull-based updates are truly part of the deployment model |
-
-## Important local-development caveat
-
-The repository's `start.sh` wrapper uses `.venv/` (or a legacy `venv/`). After each exit `42` it reinstalls `requirements.txt` and starts the bot again; any other exit code ends the loop.
-
-If you do not want restarts to reinstall dependencies or loop, skip the wrapper and use `make run-direct`.
-
-## Practical mental model
-
-- `/restart` is a **git-aware restart**, not a simple reload
-- exit code `42` is **expected** during restart
-- a process supervisor is part of the design
-- announcements are **conditional**, not guaranteed
+`QUIET_UPDATES=true` turns the announcements off; it does not change restarts. With no
+active channel nothing is announced. A restart onto the same commit (a package update)
+announces nothing.
 
 ## See also
 
 - `docs/deployment.md`
-- `docs/development.md`
 - `docs/troubleshooting.md`

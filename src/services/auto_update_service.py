@@ -1,100 +1,27 @@
 """
-Auto-update service for the Discord bot.
+Restart trigger for the Discord bot.
 
-Listens for a signed "deploy" webhook (sent by GitHub Actions once CI passes on
-main) and triggers the normal restart flow, which pulls the new code.
-
-Request format (POST /deploy):
-    X-Deploy-Timestamp: <unix seconds>
-    X-Deploy-Signature: sha256=<hex HMAC-SHA256 of "<timestamp>.<raw body>" keyed by the secret>
-    body: {"sha": "<commit sha>", "ref": "refs/heads/main"}
+Puts a restart on the bot's queue, for ``/restart`` and for the package update watcher.
+(New commits arrive from outside: CI tells grizzly's deploy agent, deployd, which builds a
+release and restarts the bot. The bot no longer listens for deploy requests itself.)
 """
 
-import hashlib
-import hmac
-import json
 import logging
-import time
 from typing import Awaitable, Callable, Optional
-
-from aiohttp import web
-
-from src.utils.git_utils import get_current_commit_hash as default_get_current_commit_hash
 
 logger = logging.getLogger(__name__)
 
-# Requests whose timestamp is further than this from now are rejected (replay guard).
-MAX_CLOCK_SKEW_SECONDS = 300
-
-
-def sign_deploy_request(secret: str, timestamp: str, body: bytes) -> str:
-    """The X-Deploy-Signature value for a request body sent at ``timestamp``."""
-    digest = hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
-    return f"sha256={digest}"
-
 
 class AutoUpdateService:
-    """Webhook listener that restarts the bot onto newly deployed commits."""
+    """Queues restarts of the bot."""
 
-    def __init__(
-        self,
-        *,
-        queue_service,
-        secret: str = "",
-        host: str = "0.0.0.0",
-        port: int = 8787,
-        get_current_commit_hash_fn: Callable[[], Optional[str]] = default_get_current_commit_hash,
-        clock: Callable[[], float] = time.time,
-    ):
+    def __init__(self, *, queue_service):
         self._queue_service = queue_service
-        self._secret = secret
-        self._host = host
-        self._port = port
-        self._get_current_commit_hash = get_current_commit_hash_fn
-        self._clock = clock
         self._restart_callback: Optional[Callable[..., Awaitable[None]]] = None
-        self._runner: Optional[web.AppRunner] = None
-
-    @property
-    def enabled(self) -> bool:
-        return bool(self._secret)
 
     def set_restart_callback(self, callback: Callable[..., Awaitable[None]]) -> None:
         """Set the callback function to call when a restart is needed."""
         self._restart_callback = callback
-
-    def build_app(self) -> web.Application:
-        app = web.Application(client_max_size=64 * 1024)
-        app.router.add_post("/deploy", self._handle_deploy)
-        return app
-
-    async def start(self) -> None:
-        """Start the webhook listener if a secret is configured."""
-        if not self.enabled:
-            logger.info("Deploy webhook disabled (DEPLOY_WEBHOOK_SECRET not set)")
-            return
-        if self._runner is not None:
-            logger.warning("Deploy webhook already running")
-            return
-
-        runner = web.AppRunner(self.build_app(), access_log=None)
-        await runner.setup()
-        try:
-            await web.TCPSite(runner, self._host, self._port).start()
-        except OSError as e:
-            logger.error("Deploy webhook could not bind %s:%s: %s", self._host, self._port, e)
-            await runner.cleanup()
-            return
-        self._runner = runner
-        logger.info("Deploy webhook listening on %s:%s/deploy", self._host, self._port)
-
-    async def stop(self) -> None:
-        """Stop the webhook listener."""
-        if self._runner is None:
-            return
-        runner, self._runner = self._runner, None
-        await runner.cleanup()
-        logger.info("Deploy webhook stopped")
 
     async def trigger_restart(self, manual: bool = False) -> bool:
         """Trigger a restart of the bot."""
@@ -109,36 +36,3 @@ class AutoUpdateService:
             await self._restart_callback(manual=manual)
 
         return await self._queue_service.queue_restart(restart_wrapper)
-
-    def _verify(self, request_timestamp: str, signature: str, body: bytes) -> bool:
-        try:
-            sent_at = int(request_timestamp)
-        except ValueError:
-            return False
-        if abs(self._clock() - sent_at) > MAX_CLOCK_SKEW_SECONDS:
-            return False
-        expected = sign_deploy_request(self._secret, request_timestamp, body)
-        return hmac.compare_digest(expected, signature)
-
-    async def _handle_deploy(self, request: web.Request) -> web.Response:
-        body = await request.read()
-        timestamp = request.headers.get("X-Deploy-Timestamp", "")
-        signature = request.headers.get("X-Deploy-Signature", "")
-        if not self._verify(timestamp, signature, body):
-            logger.warning("Rejected deploy webhook from %s: bad signature or timestamp", request.remote)
-            return web.json_response({"error": "unauthorized"}, status=401)
-
-        try:
-            sha = str(json.loads(body).get("sha", ""))
-        except (ValueError, AttributeError):
-            return web.json_response({"error": "invalid body"}, status=400)
-
-        current = self._get_current_commit_hash()
-        if sha and current and sha == current:
-            logger.info("Deploy webhook for %s: already running it", sha[:7])
-            return web.json_response({"status": "up-to-date", "sha": current})
-
-        logger.info("Deploy webhook for %s (running %s), restarting", sha[:7] or '?', current[:7] if current else '?')
-        if not await self.trigger_restart(manual=False):
-            return web.json_response({"error": "restart could not be queued"}, status=503)
-        return web.json_response({"status": "restarting", "sha": sha}, status=202)

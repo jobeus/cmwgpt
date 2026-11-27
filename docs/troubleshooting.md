@@ -87,8 +87,8 @@ Reference: `docs/redis_setup.md`
 
 | Fact | Meaning |
 | --- | --- |
-| `/restart` performs a `git pull` | It is not just a process restart |
-| Restart runs the normal shutdown, then exits with code `42` | A supervisor (or `start.sh`) must restart the process |
+| `/restart` asks deployd for a fresh release (latest code, newest packages) | It is not just a process restart; the bot keeps running while it builds |
+| Without a deploy agent, restart runs the normal shutdown, then exits with code `42` | Locally, start it again yourself |
 | `QUIET_UPDATES` only affects announcements | It does not disable the restart mechanism |
 
 For local development, `make run-direct` is usually easier to reason about than the wrapper-based run path.
@@ -97,7 +97,7 @@ Reference: `docs/auto-update.md`
 
 ## `make run` behaves oddly after restart
 
-`start.sh` only restarts the bot when it exits with code `42`, and it runs `scripts/release-build.sh` (reinstalls `requirements.txt`) before each start. Any other exit code (including a crash) ends the loop, which is why hosted runs sit under systemd (`deploy/tmux-cmwgpt.service`).
+`start.sh` runs the bot once: after `/restart` (exit code `42`) run `make run` again. On grizzly systemd and deployd bring it back (`docs/auto-update.md`).
 
 If wrapper-driven restarts behave strangely:
 

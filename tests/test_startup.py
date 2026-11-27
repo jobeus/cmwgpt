@@ -35,8 +35,6 @@ class TestStartupIntegration(unittest.TestCase):
         config = load_config(
             env={
                 "DEFAULT_MODEL": "integration-model",
-                "DEPLOY_WEBHOOK_SECRET": "hook-secret",
-                "DEPLOY_WEBHOOK_PORT": "9999",
                 "QUIET_UPDATES": "true",
                 "DEATH_CHANNEL_ID": "999",
                 "INCLUDE_NUM_CHATLINES": "7",
@@ -49,8 +47,6 @@ class TestStartupIntegration(unittest.TestCase):
 
         self.assertIs(services.message_service._paste_service, services.paste_service)
         self.assertIs(services.auto_update_service._queue_service, services.queue_service)
-        self.assertEqual(services.auto_update_service._secret, "hook-secret")
-        self.assertEqual(services.auto_update_service._port, 9999)
         self.assertIs(services.announcement_service._state_service, services.state_service)
         self.assertIs(services.death_service._state_service, services.state_service)
         self.assertIs(services.death_service._gemini_service, services.gemini_service)
@@ -95,7 +91,6 @@ class TestShutdownServices(unittest.TestCase):
     def test_stops_and_closes_every_service_in_order(self):
         services = make_shutdown_services()
         order = MagicMock()
-        order.attach_mock(services.auto_update_service.stop, "auto_update_stop")
         order.attach_mock(services.memory_service.stop, "memory_stop")
         order.attach_mock(services.death_service.close, "death_close")
         order.attach_mock(services.queue_service.stop, "queue_stop")
@@ -109,7 +104,7 @@ class TestShutdownServices(unittest.TestCase):
         self.assertEqual(
             [c[0] for c in order.mock_calls],
             [
-                "auto_update_stop", "memory_stop", "death_close", "queue_stop",
+                "memory_stop", "death_close", "queue_stop",
                 "gemini_close", "anthropic_close",
                 "close_redis",
             ],
@@ -119,7 +114,6 @@ class TestShutdownServices(unittest.TestCase):
 
     def test_each_step_failure_is_logged_and_later_steps_still_run(self):
         services = make_shutdown_services()
-        services.auto_update_service.stop.side_effect = RuntimeError("a")
         services.memory_service.stop.side_effect = RuntimeError("b")
         services.death_service.close.side_effect = RuntimeError("c")
         services.queue_service.stop.side_effect = RuntimeError("d")
@@ -130,7 +124,7 @@ class TestShutdownServices(unittest.TestCase):
         with self.assertLogs("src.startup", level="ERROR") as logs:
             self._run(services, close_redis)
 
-        self.assertEqual(len(logs.records), 7)
+        self.assertEqual(len(logs.records), 6)
         self.assertTrue(any("queue drain failed" in r.getMessage() for r in logs.records))
         services.anthropic_service.close.assert_awaited_once_with()
         close_redis.assert_awaited_once_with()

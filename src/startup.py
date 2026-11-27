@@ -83,12 +83,7 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
     message_service = MessageService(paste_service=paste_service)
 
     restart_handler = RestartHandler(state_service=state_service)
-    auto_update_service = AutoUpdateService(
-        queue_service=queue_service,
-        secret=app_config.deploy_webhook_secret,
-        host=app_config.deploy_webhook_host,
-        port=app_config.deploy_webhook_port,
-    )
+    auto_update_service = AutoUpdateService(queue_service=queue_service)
     package_update_service = PackageUpdateService(
         store=state_store,
         restart=auto_update_service.trigger_restart,
@@ -186,7 +181,6 @@ async def shutdown_services(services: AppServices) -> None:
         except Exception as e:
             logger.error("Shutdown: %s failed: %s", name, e, exc_info=True)
 
-    await step("deploy webhook stop", services.auto_update_service.stop)
     if getattr(services, "package_update_service", None) is not None:
         await step("package update checks stop", services.package_update_service.stop)
     if services.memory_service is not None:

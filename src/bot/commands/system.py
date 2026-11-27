@@ -343,7 +343,7 @@ class SystemCommands:
             "`/limerick [person]` - A limerick about a person (name or Wikipedia URL)\n"
             "`/wikicount [target]` - A Wikipedia article's average monthly pageviews\n"
             "`/forcedeath [url]` - Post a death announcement for an article, for testing (admin only)\n"
-            "`/restart` - Pull the latest code and restart (admin only)\n\n"
+            "`/restart` - Rebuild on the latest code and packages, then restart (admin only)\n\n"
             "*Note: Commands may be queued if the bot is busy processing other requests.*")
         await interaction.followup.send(help_text, ephemeral=True)
 

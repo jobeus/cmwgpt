@@ -1,83 +1,21 @@
 """Tests for injected auto-update, restart, and announcement services."""
 
-import json
+import subprocess
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.announcement_service import AnnouncementService
-from aiohttp.test_utils import TestClient, TestServer
-
-from src.services.auto_update_service import AutoUpdateService, sign_deploy_request
+from src.services.auto_update_service import AutoUpdateService
 from src.services.restart_handler import RESTART_EXIT_CODE, RestartHandler
+from src.utils.deploy_utils import request_redeploy
 
 
 class TestAutoUpdateService(unittest.IsolatedAsyncioTestCase):
-    SECRET = "s3cret"
-    NOW = 1_700_000_000
-
     def setUp(self):
         self.queue_service = MagicMock()
         self.queue_service.queue_restart = AsyncMock(return_value=True)
-        self.service = AutoUpdateService(
-            queue_service=self.queue_service,
-            secret=self.SECRET,
-            get_current_commit_hash_fn=lambda: "old111",
-            clock=lambda: self.NOW,
-        )
-        self.service.set_restart_callback(AsyncMock())
-
-    async def post(self, payload, *, secret=None, timestamp=None, signature=None):
-        body = json.dumps(payload).encode()
-        ts = str(self.NOW if timestamp is None else timestamp)
-        headers = {
-            "X-Deploy-Timestamp": ts,
-            "X-Deploy-Signature": signature or sign_deploy_request(secret or self.SECRET, ts, body),
-        }
-        async with TestClient(TestServer(self.service.build_app())) as client:
-            resp = await client.post("/deploy", data=body, headers=headers)
-            return resp.status, await resp.json()
-
-    async def test_valid_webhook_for_new_commit_queues_restart(self):
-        status, data = await self.post({"sha": "new222"})
-
-        self.assertEqual(status, 202)
-        self.assertEqual(data["status"], "restarting")
-        self.queue_service.queue_restart.assert_awaited_once()
-
-    async def test_webhook_for_running_commit_is_a_noop(self):
-        status, data = await self.post({"sha": "old111"})
-
-        self.assertEqual(status, 200)
-        self.assertEqual(data["status"], "up-to-date")
-        self.queue_service.queue_restart.assert_not_awaited()
-
-    async def test_bad_signature_is_rejected(self):
-        status, _ = await self.post({"sha": "new222"}, secret="wrong")
-
-        self.assertEqual(status, 401)
-        self.queue_service.queue_restart.assert_not_awaited()
-
-    async def test_stale_or_garbage_timestamp_is_rejected(self):
-        status, _ = await self.post({"sha": "new222"}, timestamp=self.NOW - 3600)
-        self.assertEqual(status, 401)
-
-        status, _ = await self.post({"sha": "new222"}, timestamp="soon", signature="sha256=00")
-        self.assertEqual(status, 401)
-        self.queue_service.queue_restart.assert_not_awaited()
-
-    async def test_invalid_body_is_rejected(self):
-        status, _ = await self.post(["not", "an", "object"])
-
-        self.assertEqual(status, 400)
-        self.queue_service.queue_restart.assert_not_awaited()
-
-    async def test_restart_queue_failure_returns_503(self):
-        self.queue_service.queue_restart.return_value = False
-
-        status, _ = await self.post({"sha": "new222"})
-
-        self.assertEqual(status, 503)
+        self.service = AutoUpdateService(queue_service=self.queue_service)
 
     async def test_trigger_restart_queues_injected_callback(self):
         callback = AsyncMock()
@@ -92,43 +30,56 @@ class TestAutoUpdateService(unittest.IsolatedAsyncioTestCase):
         callback.assert_awaited_once_with(manual=True)
 
     async def test_trigger_restart_without_callback_returns_false(self):
-        service = AutoUpdateService(queue_service=self.queue_service)
-
-        result = await service.trigger_restart(manual=False)
+        result = await self.service.trigger_restart(manual=False)
 
         self.assertFalse(result)
         self.queue_service.queue_restart.assert_not_awaited()
 
-    async def test_service_without_secret_does_not_listen(self):
-        service = AutoUpdateService(queue_service=self.queue_service)
+    def test_the_bot_no_longer_listens_for_deploys(self):
+        self.assertFalse(hasattr(self.service, "start"))
+        self.assertFalse(hasattr(self.service, "build_app"))
 
-        await service.start()
 
-        self.assertFalse((service._runner is not None))
-        self.assertFalse(service.enabled)
+class TestRequestRedeploy(unittest.TestCase):
+    def test_nobody_to_ask_without_an_app_name(self):
+        with patch.dict("os.environ", {}, clear=True), patch("src.utils.deploy_utils.subprocess.run") as run:
+            self.assertFalse(request_redeploy())
+        run.assert_not_called()
 
-    async def test_start_and_stop_listener(self):
-        service = AutoUpdateService(queue_service=self.queue_service, secret="x", host="127.0.0.1", port=0)
+    def test_asks_deployd_for_a_forced_release_of_this_app(self):
+        done = SimpleNamespace(returncode=0, stdout="deploying\n", stderr="")
+        with patch.dict("os.environ", {"APP_NAME": "cmwgpt"}, clear=True), patch(
+            "src.utils.deploy_utils.subprocess.run", return_value=done
+        ) as run:
+            self.assertTrue(request_redeploy())
+        self.assertEqual(run.call_args.args[0], ["deploy", "request", "cmwgpt", "--force"])
 
-        await service.start()
-        self.assertTrue((service._runner is not None))
-        await service.start()  # duplicate start is ignored
-        await service.stop()
-        self.assertFalse((service._runner is not None))
-        await service.stop()  # stopping twice is harmless
+    def test_a_refusal_a_missing_command_and_a_timeout_are_all_no(self):
+        env = {"APP_NAME": "cmwgpt"}
+        refused = SimpleNamespace(returncode=1, stdout="", stderr="bad signature")
+        with patch.dict("os.environ", env, clear=True):
+            with patch("src.utils.deploy_utils.subprocess.run", return_value=refused):
+                self.assertFalse(request_redeploy())
+            with patch("src.utils.deploy_utils.subprocess.run", side_effect=FileNotFoundError("deploy")):
+                self.assertFalse(request_redeploy())
+            with patch(
+                "src.utils.deploy_utils.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="deploy", timeout=30),
+            ):
+                self.assertFalse(request_redeploy())
 
-    async def test_start_survives_bind_failure(self):
-        service = AutoUpdateService(queue_service=self.queue_service, secret="x", host="127.0.0.1", port=0)
-
-        with patch("src.services.auto_update_service.web.TCPSite.start", side_effect=OSError("in use")):
-            await service.start()
-
-        self.assertFalse((service._runner is not None))
+    def test_redeploy_command_replaces_the_command(self):
+        done = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with patch.dict("os.environ", {"REDEPLOY_COMMAND": "echo 'a b'"}, clear=True), patch(
+            "src.utils.deploy_utils.subprocess.run", return_value=done
+        ) as run:
+            self.assertTrue(request_redeploy())
+        self.assertEqual(run.call_args.args[0], ["echo", "a b"])
 
 
 class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
     async def test_restart_status_defaults(self):
-        handler = RestartHandler(state_service=MagicMock(), git_pull=MagicMock())
+        handler = RestartHandler(state_service=MagicMock(), redeploy=MagicMock())
 
         self.assertFalse(handler._restart_in_progress)
         self.assertIsNone(handler.exit_code)
@@ -137,7 +88,7 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
     async def test_perform_graceful_shutdown_uses_injected_state_service(self):
         state_service = MagicMock()
         state_service.save_restart_state.return_value = "/tmp/state.json"
-        handler = RestartHandler(state_service=state_service, git_pull=lambda: True)
+        handler = RestartHandler(state_service=state_service, redeploy=lambda: True)
         handler.set_shutdown_callback(AsyncMock())
 
         await handler.perform_graceful_shutdown()
@@ -152,7 +103,7 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
     async def test_perform_graceful_shutdown_on_save_failure(self):
         state_service = MagicMock()
         state_service.save_restart_state.return_value = None
-        handler = RestartHandler(state_service=state_service, git_pull=lambda: True)
+        handler = RestartHandler(state_service=state_service, redeploy=lambda: True)
 
         with self.assertLogs("src.services.restart_handler", "WARNING") as logs:
             await handler.perform_graceful_shutdown()
@@ -160,16 +111,51 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
 
         state_service = MagicMock()
         state_service.save_restart_state.side_effect = RuntimeError("disk full")
-        handler = RestartHandler(state_service=state_service, git_pull=lambda: True)
+        handler = RestartHandler(state_service=state_service, redeploy=lambda: True)
 
         with self.assertRaises(RuntimeError):
             await handler.perform_graceful_shutdown()
 
-    async def test_perform_restart_sets_exit_code_and_schedules_shutdown(self):
+    async def test_perform_restart_asks_for_a_release_and_keeps_running(self):
         state_service = MagicMock()
         state_service.save_restart_state.return_value = "/tmp/state.json"
-        git_pull = MagicMock(return_value=True)
-        handler = RestartHandler(state_service=state_service, git_pull=git_pull)
+        redeploy = MagicMock(return_value=True)
+        handler = RestartHandler(state_service=state_service, redeploy=redeploy)
+        shutdown = AsyncMock()
+        handler.set_shutdown_callback(shutdown)
+
+        await handler.perform_restart(manual=True)
+
+        state_service.save_restart_state.assert_called_once_with({"manual_restart": True})
+        redeploy.assert_called_once_with()
+        self.assertTrue(handler._restart_in_progress)
+        # The deploy agent stops the bot when the release is built: nothing shuts down here.
+        self.assertIsNone(handler.exit_code)
+        self.assertIsNone(handler._shutdown_task)
+        shutdown.assert_not_awaited()
+
+        # ...and that later shutdown still counts as the manual restart it is.
+        await handler.perform_graceful_shutdown()
+        state_service.save_restart_state.assert_called_with(
+            {"manual_restart": True, "graceful_shutdown": True}
+        )
+        handler._give_up_task.cancel()
+
+    async def test_restarts_are_allowed_again_when_the_release_never_arrives(self):
+        handler = RestartHandler(state_service=MagicMock(), redeploy=MagicMock(return_value=True))
+
+        with patch("src.services.restart_handler.REDEPLOY_WAIT_SECONDS", 0):
+            await handler.perform_restart(manual=True)
+            with self.assertLogs("src.services.restart_handler", level="WARNING"):
+                await handler._give_up_task
+
+        self.assertFalse(handler._restart_in_progress)
+        self.assertFalse(handler._manual_restart)
+
+    async def test_without_a_deploy_agent_restart_sets_exit_code_and_schedules_shutdown(self):
+        state_service = MagicMock()
+        redeploy = MagicMock(return_value=False)
+        handler = RestartHandler(state_service=state_service, redeploy=redeploy)
         shutdown = AsyncMock()
         handler.set_shutdown_callback(shutdown)
 
@@ -177,28 +163,25 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(handler.exit_code, RESTART_EXIT_CODE)
         self.assertEqual(RESTART_EXIT_CODE, 42)
-        state_service.save_restart_state.assert_called_once_with({"manual_restart": True})
-        git_pull.assert_called_once_with()
-        self.assertTrue(handler._restart_in_progress)
         # Shutdown runs as its own task, not inline in perform_restart.
         shutdown.assert_not_awaited()
         await handler._shutdown_task
         shutdown.assert_awaited_once_with()
 
-    async def test_perform_restart_runs_git_pull_off_the_event_loop(self):
-        handler = RestartHandler(state_service=MagicMock(), git_pull=MagicMock(return_value=True))
+    async def test_perform_restart_asks_off_the_event_loop(self):
+        handler = RestartHandler(state_service=MagicMock(), redeploy=MagicMock(return_value=True))
         handler.set_shutdown_callback(AsyncMock())
 
         with patch(
-            "src.services.restart_handler.asyncio.to_thread", new=AsyncMock(return_value=True)
+            "src.services.restart_handler.asyncio.to_thread", new=AsyncMock(return_value=False)
         ) as mock_to_thread:
             await handler.perform_restart()
 
-        mock_to_thread.assert_awaited_once_with(handler._git_pull)
+        mock_to_thread.assert_awaited_once_with(handler._redeploy)
         await handler._shutdown_task
 
     async def test_perform_restart_without_shutdown_callback_still_sets_exit_code(self):
-        handler = RestartHandler(state_service=MagicMock(), git_pull=MagicMock(return_value=True))
+        handler = RestartHandler(state_service=MagicMock(), redeploy=MagicMock(return_value=False))
 
         with self.assertLogs("src.services.restart_handler", level="ERROR"):
             await handler.perform_restart()
@@ -208,7 +191,7 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
 
     async def test_duplicate_restart_request_is_ignored(self):
         state_service = MagicMock()
-        handler = RestartHandler(state_service=state_service, git_pull=MagicMock())
+        handler = RestartHandler(state_service=state_service, redeploy=MagicMock())
         handler._restart_in_progress = True
 
         await handler.perform_restart(manual=False)
@@ -216,11 +199,11 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
         state_service.save_restart_state.assert_not_called()
         self.assertIsNone(handler.exit_code)
 
-    async def test_perform_restart_continues_when_save_and_git_pull_fail(self):
+    async def test_perform_restart_continues_when_save_and_the_request_fail(self):
         state_service = MagicMock()
         state_service.save_restart_state.return_value = None
-        git_pull = MagicMock(side_effect=RuntimeError("git exploded"))
-        handler = RestartHandler(state_service=state_service, git_pull=git_pull)
+        redeploy = MagicMock(side_effect=RuntimeError("deploy exploded"))
+        handler = RestartHandler(state_service=state_service, redeploy=redeploy)
         shutdown = AsyncMock()
         handler.set_shutdown_callback(shutdown)
 
@@ -229,7 +212,7 @@ class TestRestartHandler(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(handler.exit_code, RESTART_EXIT_CODE)
         state_service.save_restart_state.assert_called_once_with({"manual_restart": False})
-        git_pull.assert_called_once_with()
+        redeploy.assert_called_once_with()
         shutdown.assert_awaited_once_with()
 
 

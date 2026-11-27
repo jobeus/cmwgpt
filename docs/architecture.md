@@ -346,9 +346,9 @@ flowchart LR
 | `src/services/timezone_service.py` | Saved time zones | Debug `set_timezone` or the `<time_zones>` block |
 | `src/services/video_service.py` | `VideoWatcher`: download, upload and watch a video with Gemini | Debug `watch_video` / `summarize_youtube` |
 | `src/services/death_service.py` | Deathwatch: polls Wikipedia's deaths pages and posts an obituary limerick | Debug a missed or repeated death announcement |
-| `src/services/auto_update_service.py` | Deploy webhook | Debug a deploy that didn't restart the bot |
+| `src/services/auto_update_service.py` | Queues restarts (`/restart`, package updates) | Debug a restart that never started |
 | `src/services/package_update_service.py` | Restarts the bot when newer package releases are out | Debug package update restarts |
-| `src/services/restart_handler.py` | Saves state, `git pull`s and exits with code 42 | Debug `/restart` |
+| `src/services/restart_handler.py` | Saves state and asks the deploy agent for a fresh release (exits with code 42 when there is none) | Debug `/restart` |
 | `src/services/announcement_service.py` | The "I'm back" message after a restart, with what changed | Debug restart announcements |
 | `src/services/mention_log.py` | One JSON line per mention in `logs/mentions.jsonl` | See what a mention cost and which tools it used |
 | `src/telemetry.py` | Logfire/OpenTelemetry tracing of the model, Discord and HTTP calls | Debug missing or noisy traces |
@@ -386,7 +386,7 @@ flowchart LR
 ### Shutdown and restart
 
 1. `startup.shutdown_services` stops background jobs, drains the queue (up to 90 seconds), closes the model/HTTP clients, and closes the Redis clients.
-2. `/restart` (and auto-update) save state and `git pull` first, then run the same shutdown; `main.py` exits with code `42` so `start.sh` or the process manager starts the bot again.
+2. `/restart` (and package updates) save state and ask the deploy agent for a fresh release; it builds while the bot runs, then stops the bot with SIGTERM, which runs the same shutdown. Without a deploy agent the bot runs the shutdown itself and `main.py` exits with code `42`.
 
 ## Key architectural traits
 

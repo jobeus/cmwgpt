@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Bring .venv/ in line with requirements.txt and check the code compiles. Run by start.sh
-# before every launch, so after a deploy (/restart or the webhook: git pull, then exit 42)
-# the new requirements are installed before the bot comes back.
+# Make this folder runnable: .venv/ with the newest release of everything in
+# requirements.txt, and the code compiles. deployd runs it in each new release folder on
+# grizzly (so a fresh .venv every deploy; a failure leaves the live release alone); `make
+# run` runs it locally.
 # eager: also upgrades what our requirements depend on, so nothing stays on an old release.
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/.."

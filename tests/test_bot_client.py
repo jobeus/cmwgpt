@@ -35,8 +35,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         )
         client.services.queue_service.start = AsyncMock()
         client.services.queue_service.stop = AsyncMock()
-        client.services.auto_update_service.start = AsyncMock()
-        client.services.auto_update_service.stop = AsyncMock()
         client.services.death_service.start = MagicMock()
         client.services.death_service.stop = MagicMock()
         client.services.announcement_service.announce_update = AsyncMock()
@@ -203,7 +201,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(guild_arg.id, 777)
         client.bot.tree.sync.assert_awaited_once_with(guild=guild_arg)
         client.services.queue_service.start.assert_awaited_once_with()
-        client.services.auto_update_service.start.assert_awaited_once_with()
         client.services.death_service.start.assert_called_once_with()
         client._send_update_announcement_if_needed.assert_awaited_once_with()
 
@@ -218,7 +215,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
         await events["on_ready"]()
 
         client.services.queue_service.start.assert_awaited_once_with()
-        client.services.auto_update_service.start.assert_awaited_once_with()
         client.services.death_service.start.assert_called_once_with()
         client._send_update_announcement_if_needed.assert_awaited_once_with()
 
@@ -234,7 +230,6 @@ class TestDiscordBotClient(unittest.IsolatedAsyncioTestCase):
 
         client.bot.tree.sync.assert_awaited_once_with()
         client.services.queue_service.start.assert_awaited_once_with()
-        client.services.auto_update_service.start.assert_awaited_once_with()
         client.services.death_service.start.assert_called_once_with()
         client._send_update_announcement_if_needed.assert_awaited_once_with()
 

@@ -83,10 +83,6 @@ class AppConfig:
     system_prompt_path: str = "system_prompt.txt"
     # Model the nightly user-memory job uses to read chat and update profiles.
     memory_model: str = "sonnet"
-    # Signed deploy webhook (GitHub Actions -> bot); disabled when the secret is empty.
-    deploy_webhook_secret: str = ""
-    deploy_webhook_host: str = "0.0.0.0"
-    deploy_webhook_port: int = 8787
     # How often to ask pip whether newer packages are out and restart onto them; 0 turns it off.
     package_update_check_hours: float = 6.0
     # The channel's old IRC log, searchable by the chat models; the tools are off when unset.
@@ -135,9 +131,6 @@ def load_config(
         is_testing=source.get("CI") == "true" or source.get("TESTING") == "true",
         system_prompt_path=system_prompt_path,
         memory_model=canonical_model(source.get("MEMORY_MODEL", "sonnet")),
-        deploy_webhook_secret=source.get("DEPLOY_WEBHOOK_SECRET", ""),
-        deploy_webhook_host=source.get("DEPLOY_WEBHOOK_HOST", "0.0.0.0"),
-        deploy_webhook_port=_read_int(source.get("DEPLOY_WEBHOOK_PORT"), 8787),
         package_update_check_hours=_read_float(source.get("PACKAGE_UPDATE_CHECK_HOURS"), 6.0),
         irc_log_path=source.get("IRC_LOG", "").strip(),
         irc_nicks_path=source.get("IRC_NICKS", "").strip(),

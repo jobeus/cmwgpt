@@ -53,32 +53,19 @@ python3 -m venv .venv
 .venv/bin/python main.py
 ```
 
-## Why a process supervisor is not optional
+## How it is run for real (grizzly)
 
-The restart flow saves state, runs `git pull`, then runs the normal shutdown sequence (stop background jobs, drain the queue for up to 90 seconds, close clients, close Redis) and intentionally exits with code `42`.
+deployd, the server's deploy agent, builds each release and runs the bot from it inside tmux
+under systemd (`tmux-app@cmwgpt`): attach with `tmux -L cmwgpt a` as jobe, logs in
+`journalctl -t cmwgpt -f`. systemd starts it on boot and restarts it if it exits. Everything
+is under `/srv/apps/cmwgpt`: `current` is the live release, `shared/` holds `.env` and the
+files the bot keeps. The whole flow is in `docs/auto-update.md`.
 
-That means the bot expects an outer process manager to bring it back up after:
+`start.sh` loads `.env` and runs `main.py` from `.venv/`; `scripts/release-build.sh` builds
+that `.venv/`. `make run` does both.
 
-- a manual `/restart`
-- an auto-update restart
-
-Recommended supervisors include:
-
-- `systemd`
-- `supervisord`
-- `pm2`
-- any equivalent service manager that reliably restarts on exit
-
-`start.sh` (used by `make run`) is a minimal wrapper: it loads `.env`, runs `scripts/release-build.sh` (requirements into `.venv/`), and reruns `main.py` after exit `42`. It does not survive a crash, a reboot, or closing the terminal it runs in, so on grizzly it runs inside tmux under systemd with `deploy/tmux-cmwgpt.service` (instructions are in the file's header): attach with `tmux -L cmwgpt a` as jobe, logs in `journalctl -t cmwgpt -f`. systemd restarts it on anything else and starts it on boot.
-
-### Supervisor behavior you want
-
-| Behavior | Why |
-| --- | --- |
-| Restart on non-zero exit | Handles intentional restart exit `42` |
-| Start on boot | Keeps the bot available after host restarts |
-| Persistent logs | Makes startup/restart issues much easier to debug |
-| Controlled working directory | Important if git-based restart/update is enabled |
+Anywhere else, `/restart` ends with the bot exiting with code `42`: run it under something
+that starts it again (systemd, a loop) if you want restarts to come back by themselves.
 
 ## Full Docker stack
 
@@ -97,7 +84,7 @@ docker compose --env-file .env.development up --build
 
 ### Ports
 
-The bot only listens on a port when `DEPLOY_WEBHOOK_SECRET` is set (the deploy webhook, `DEPLOY_WEBHOOK_PORT`, default `8787`).
+The bot listens on no port.
 
 ## Production-minded checklist
 
@@ -107,21 +94,12 @@ Even if you are not doing “real production,” these are the minimum responsib
 | --- | --- |
 | Secrets | Real API keys |
 | Redis | Listening on localhost only, `maxmemory-policy volatile-lru` so memories are never evicted |
-| Restart behavior | Supervisor restarts the bot after exit `42` |
-| Git-based updates | Only set `DEPLOY_WEBHOOK_SECRET` where `git pull` is safe and expected |
+| Restart behavior | Something restarts the bot when it exits (on grizzly: systemd, driven by deployd) |
 
-## Auto-update and git-based restart considerations
+## Updates
 
-If you enable the deploy webhook (`DEPLOY_WEBHOOK_SECRET`), the deployment must satisfy all of these:
-
-| Requirement | Why |
-| --- | --- |
-| Valid git checkout | Restart flow performs `git pull` |
-| Correct remote/auth setup | Update path must be able to fetch/pull |
-| Writable working tree | Pulls will fail in read-only or locked environments |
-| Process supervisor | Bot exits after restart preparation |
-
-If those assumptions are not true, leave `DEPLOY_WEBHOOK_SECRET` empty.
+Deploys, `/restart` and package updates all end in a new release built by deployd; see
+`docs/auto-update.md`.
 
 ## Recommended mental model
 

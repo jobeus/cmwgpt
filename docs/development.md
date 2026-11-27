@@ -52,7 +52,7 @@ Why this is preferred:
 make run
 ```
 
-This uses `start.sh`, which runs `main.py` from `.venv/` (or a legacy `venv/`) and, whenever the bot exits with code `42` (after `/restart` or an auto-update), reinstalls requirements and starts it again.
+This builds `.venv/` (`scripts/release-build.sh`) and runs `start.sh`, which loads `.env` and runs `main.py`. After `/restart` the bot exits with code `42`: run it again.
 
 ## Running the full stack with Docker
 
@@ -72,7 +72,7 @@ The checkout is mounted at `/app`, so code changes only need a restart
 (`docker compose restart bot`), but requirement changes need `--build`. Compose always
 points the bot at the `redis` container and loads only `.env.development`, even if a
 `.env` or `.env.production` sits in the checkout. `make docker-logs` follows the bot's logs
-and `make docker-down` stops the stack. Leave `DEPLOY_WEBHOOK_SECRET` empty in development.
+and `make docker-down` stops the stack.
 
 CI runs only the Python job, on Python 3.14 (what the server runs): ruff, mypy, then the tests. The deploy notification only goes out once that passes.
 

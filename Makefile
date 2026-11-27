@@ -138,7 +138,8 @@ docker-logs:
 run:
 	@echo "Starting Discord bot with auto-restart support..."
 	@echo "Use Ctrl+C to stop the bot gracefully."
-	@echo "Note: If you see 'Error 42', the bot is restarting automatically."
+	@echo "Note: 'Error 42' means the bot asked to be restarted (/restart); run it again."
+	@scripts/release-build.sh
 	@exec ./start.sh
 
 # Run the Discord bot directly (without auto-restart)
