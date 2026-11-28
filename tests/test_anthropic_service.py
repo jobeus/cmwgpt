@@ -1108,3 +1108,17 @@ def test_logs_note_teaches_clickhouse_for_neon_and_keeps_logfire_otherwise():
     logfire = _logs_note(42, "logfire")
     assert "attributes->>'key'" in logfire and "search_logs" not in logfire
     assert "42" in neon and "42" in logfire
+
+
+def test_neon_mcp_url_carries_the_current_traceparent():
+    from opentelemetry.sdk.trace import TracerProvider
+    from src.services.anthropic_service import with_traceparent
+
+    tracer = TracerProvider().get_tracer("t")
+    assert with_traceparent("https://n/mcp") == "https://n/mcp"  # no span: unchanged
+    with tracer.start_as_current_span("mention") as span:
+        ctx = span.get_span_context()
+        url = with_traceparent("https://n/mcp")
+    assert url.startswith(f"https://n/mcp?traceparent=00-{ctx.trace_id:032x}-{ctx.span_id:016x}-")
+    with tracer.start_as_current_span("mention"):
+        assert with_traceparent("https://n/mcp?a=1").startswith("https://n/mcp?a=1&traceparent=00-")

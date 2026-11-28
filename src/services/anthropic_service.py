@@ -13,9 +13,11 @@ import re
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from urllib.parse import urlencode
 
 import anthropic
 import discord
+from opentelemetry import propagate
 
 from src.config import get_config
 from src.db.state_store import CONTEXT_TTL_SECONDS, StateStore
@@ -162,6 +164,20 @@ def logs_mcp_params(url: str, token: str, name: str = LOGFIRE_MCP_NAME,
             "configs": {tool: {"enabled": True} for tool in tools},
         },
     }
+
+
+def with_traceparent(url: str) -> str:
+    """``url`` with the current span's W3C ``traceparent`` as a query parameter.
+
+    Anthropic's MCP connector forwards no trace headers, so neon reads the context from the URL
+    and puts its tool-call spans in the mention's trace. Unchanged when no span is recording.
+    """
+    carrier: Dict[str, str] = {}
+    propagate.inject(carrier)
+    tp = carrier.get("traceparent")
+    if not tp:
+        return url
+    return f"{url}{'&' if '?' in url else '?'}{urlencode({'traceparent': tp})}"
 
 
 def logfire_mcp_params(url: str, token: str) -> Dict[str, Any]:
@@ -544,7 +560,8 @@ class AnthropicService:
 
     def _logs_mcp_params(self) -> Dict[str, Any]:
         if self.logs_backend == "neon":
-            return logs_mcp_params(self._neon_mcp_url, self._neon_read_token, NEON_MCP_NAME, NEON_MCP_TOOLS)
+            return logs_mcp_params(with_traceparent(self._neon_mcp_url), self._neon_read_token,
+                                   NEON_MCP_NAME, NEON_MCP_TOOLS)
         return logfire_mcp_params(self._logfire_mcp_url, self._logfire_read_token)
 
     def logs_available(self, channel_id: Optional[int]) -> bool:
