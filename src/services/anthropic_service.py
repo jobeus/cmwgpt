@@ -142,19 +142,31 @@ LOGS_STATUS = "checking my logs..."
 MCP_BETA = "mcp-client-2025-11-20"
 LOGFIRE_MCP_NAME = "logfire"
 LOGFIRE_MCP_TOOLS = ("query_run", "query_schema_reference", "query_find_exceptions_in_file", "issue_list")
+# neon (jobe's self-hosted logs and traces): Logfire's four by name, plus tools over its journal,
+# deploys and LLM calls. The token limits every tool to the bot's own project and journal lines.
+NEON_MCP_NAME = "neon"
+NEON_MCP_TOOLS = LOGFIRE_MCP_TOOLS + (
+    "list_projects", "search_logs", "get_trace", "logs_around", "llm_usage", "deploy_history", "service_status",
+)
+
+
+def logs_mcp_params(url: str, token: str, name: str = LOGFIRE_MCP_NAME,
+                    tools: Sequence[str] = LOGFIRE_MCP_TOOLS) -> Dict[str, Any]:
+    """The request fields that give the model a logs MCP server's tools (Logfire's or neon's)."""
+    return {
+        "mcp_servers": [{"type": "url", "url": url, "name": name, "authorization_token": token}],
+        "toolset": {
+            "type": "mcp_toolset",
+            "mcp_server_name": name,
+            "default_config": {"enabled": False},
+            "configs": {tool: {"enabled": True} for tool in tools},
+        },
+    }
 
 
 def logfire_mcp_params(url: str, token: str) -> Dict[str, Any]:
     """The request fields that give the model the Logfire MCP tools."""
-    return {
-        "mcp_servers": [{"type": "url", "url": url, "name": LOGFIRE_MCP_NAME, "authorization_token": token}],
-        "toolset": {
-            "type": "mcp_toolset",
-            "mcp_server_name": LOGFIRE_MCP_NAME,
-            "default_config": {"enabled": False},
-            "configs": {name: {"enabled": True} for name in LOGFIRE_MCP_TOOLS},
-        },
-    }
+    return logs_mcp_params(url, token)
 
 
 def _without_logfire_mcp(kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -482,9 +494,12 @@ class AnthropicService:
 
     def __init__(self, api_key: Optional[str] = None, *, logfire_read_token: str = "",
                  logfire_mcp_url: str = "https://logfire-us.pydantic.dev/mcp",
+                 neon_read_token: str = "", neon_mcp_url: str = "",
                  logs_channel_id: Optional[int] = None, context_store: Optional[StateStore] = None):
         self._api_key = api_key
         self._logfire_read_token = logfire_read_token
+        self._neon_read_token = neon_read_token
+        self._neon_mcp_url = neon_mcp_url
         self._logs_channel_id = logs_channel_id
         self._logfire_mcp_url = logfire_mcp_url
         self._client: Optional[anthropic.AsyncAnthropic] = None
@@ -518,12 +533,26 @@ class AnthropicService:
         if self._history_breakpoints or self._last_message_ids:
             logger.info("Restored Claude cache state for %s channels", len(self._history_breakpoints))
 
+    @property
+    def logs_backend(self) -> Optional[str]:
+        """Where the logs tool reads the bot's traces: "neon" when it's set up, else "logfire", else None."""
+        if self._neon_read_token and self._neon_mcp_url:
+            return "neon"
+        if self._logfire_read_token:
+            return "logfire"
+        return None
+
+    def _logs_mcp_params(self) -> Dict[str, Any]:
+        if self.logs_backend == "neon":
+            return logs_mcp_params(self._neon_mcp_url, self._neon_read_token, NEON_MCP_NAME, NEON_MCP_TOOLS)
+        return logfire_mcp_params(self._logfire_mcp_url, self._logfire_read_token)
+
     def logs_available(self, channel_id: Optional[int]) -> bool:
-        """Whether mention replies in ``channel_id`` can query the bot's own Logfire traces.
+        """Whether mention replies in ``channel_id`` can query the bot's own traces (neon or Logfire).
 
         Only in the one configured channel: the traces hold every channel's conversations.
         """
-        return bool(self._logfire_read_token) and channel_id is not None and channel_id == self._logs_channel_id
+        return self.logs_backend is not None and channel_id is not None and channel_id == self._logs_channel_id
 
     def set_client(self, client) -> None:
         """Set a custom client (useful for testing)."""
@@ -757,7 +786,7 @@ class AnthropicService:
                 t.definition for t in client_tools.values()
             ]
         if client_tools and self.logs_available(channel_id):
-            mcp = logfire_mcp_params(self._logfire_mcp_url, self._logfire_read_token)
+            mcp = self._logs_mcp_params()
             kwargs["mcp_servers"] = mcp["mcp_servers"]
             kwargs["tools"] = kwargs.get("tools", []) + [mcp["toolset"]]
             kwargs["betas"] = kwargs["betas"] + [MCP_BETA]
@@ -818,8 +847,9 @@ class AnthropicService:
                     continue
                 except anthropic.BadRequestError as e:
                     if kwargs.get("mcp_servers") and _is_mcp_error(e):
-                        # Logfire is down or the key stopped working: answer without the logs.
-                        logger.warning("[%s] Logfire MCP failed, retrying without it: %s", api_model, e.message)
+                        # The logs server is down or the key stopped working: answer without the logs.
+                        logger.warning("[%s] Logs MCP (%s) failed, retrying without it: %s",
+                                       api_model, self.logs_backend, e.message)
                         kwargs = _without_logfire_mcp(kwargs)
                         continue
                     if strict_dropped or not _is_grammar_error(e) or not kwargs.get("tools"):

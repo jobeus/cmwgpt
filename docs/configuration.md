@@ -58,6 +58,8 @@ These are loaded by `src/config.py`, except where a row names another file.
 | `GEMINI_TRACING_STRICT` | `false` | Gemini SDK calls are traced even when the tracing plugin hasn't declared support for the installed `google-genai` (the bot always runs the newest). Set to `true` to trace only declared versions, if a new SDK ever breaks the plugin's hooks |
 | `LOGFIRE_READ_TOKEN` | the tracing key | A Logfire key with `project:read`, for the logs tool below. Only needed when the tracing key can't read |
 | `LOGFIRE_MCP_URL` | `https://logfire-us.pydantic.dev/mcp` | Logfire's MCP server (`logfire-eu` for an EU project) |
+| `NEON_MCP_URL` | empty | jobe's neon MCP server (`https://neon-edge.jobe.wtf/mcp`). With `NEON_READ_TOKEN` also set, the logs tool reads neon instead of Logfire, with more tools (log search, traces, nearby lines, LLM usage, deploys, service status) |
+| `NEON_READ_TOKEN` | empty | A neon read token scoped to the bot's own traces and journal lines (`--project cmwgpt --project journal/cmwgpt`) |
 | `DISCORD_CHANNEL_ID` | empty | The one channel where mentions get the logs tool below; unset, it's off everywhere |
 | `LOGFIRE_ENVIRONMENT` | `development` for `.env.development`, else `production` | The environment Logfire files the traces under |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | A second destination for everything the Logfire SDK sends, after the same scrubbing and sampling: on grizzly `http://127.0.0.1:4318`, jobe's [neon](https://github.com/jobeus/neon). Logfire keeps getting it too while `LOGFIRE_TOKEN` is set |

@@ -94,6 +94,9 @@ class AppConfig:
     # A Logfire key with project:read, so the chat models can query the bot's own traces.
     logfire_read_token: str = ""
     logfire_mcp_url: str = "https://logfire-us.pydantic.dev/mcp"
+    # neon (jobe's own logs and traces) instead of Logfire for that tool: both set = neon.
+    neon_read_token: str = ""
+    neon_mcp_url: str = ""
     # The one channel where mentions get that logs tool; off everywhere when unset.
     logs_channel_id: Optional[int] = None
     # Alpaca paper-account keys: market_data and the paper-trading game's tools are off when unset.
@@ -140,6 +143,8 @@ def load_config(
             source.get("LOGFIRE_READ_TOKEN") or source.get("LOGFIRE_TOKEN") or source.get("LOGFIRE_API_KEY") or ""
         ).strip(),
         logfire_mcp_url=source.get("LOGFIRE_MCP_URL", "").strip() or "https://logfire-us.pydantic.dev/mcp",
+        neon_read_token=source.get("NEON_READ_TOKEN", "").strip(),
+        neon_mcp_url=source.get("NEON_MCP_URL", "").strip(),
         logs_channel_id=_read_optional_int(source.get("DISCORD_CHANNEL_ID")),
         alpaca_api_key=source.get("ALPACA_API_KEY", "").strip(),
         alpaca_api_secret=source.get("ALPACA_API_SECRET", "").strip(),

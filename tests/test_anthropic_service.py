@@ -953,6 +953,37 @@ class TestClientTools(unittest.IsolatedAsyncioTestCase):
         self.assertIn("mcp-client-2025-11-20", sent["betas"])
         self.assertTrue(service.logs_available(42))
 
+    async def test_neon_replaces_logfire_when_both_neon_settings_are_set(self):
+        service, client = self.make_service(_response("answer"))
+        service._logfire_read_token = "pylf_read"
+        service._neon_read_token = "nnr_read"
+        service._neon_mcp_url = "https://neon-edge.example/mcp"
+        service._logs_channel_id = 42
+
+        await service.get_chat_completion(
+            model="sonnet", messages=USER, tools=[self.tool()], channel_id=42)
+
+        sent = client.beta.messages.create.call_args.kwargs
+        server = sent["mcp_servers"][0]
+        self.assertEqual((server["name"], server["url"], server["authorization_token"]),
+                         ("neon", "https://neon-edge.example/mcp", "nnr_read"))
+        toolset = next(t for t in sent["tools"] if t.get("type") == "mcp_toolset")
+        self.assertEqual(toolset["mcp_server_name"], "neon")
+        for name in ("query_run", "issue_list", "search_logs", "get_trace", "llm_usage", "service_status"):
+            self.assertIn(name, toolset["configs"])
+        self.assertNotIn("metrics_query", toolset["configs"])
+        self.assertEqual(service.logs_backend, "neon")
+
+    def test_logs_backend_falls_back_to_logfire_then_none(self):
+        service, _ = self.make_service()
+        self.assertIsNone(service.logs_backend)
+        service._logfire_read_token = "pylf_read"
+        self.assertEqual(service.logs_backend, "logfire")
+        service._neon_read_token = "nnr_read"  # without a URL neon isn't used
+        self.assertEqual(service.logs_backend, "logfire")
+        service._neon_mcp_url = "https://neon-edge.example/mcp"
+        self.assertEqual(service.logs_backend, "neon")
+
     async def test_no_logs_without_a_key_outside_the_channel_or_without_client_tools(self):
         service, client = self.make_service(_response("answer"), _response("answer"), _response("answer"),
                                             _response("answer"))
@@ -1066,3 +1097,14 @@ class TestCodeExecution(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_block_status(block, {}), CODE_STATUS)
         self.assertEqual(_block_status(SimpleNamespace(type="server_tool_use", name="web_search"), {}),
                          WEB_SEARCH_STATUS)
+
+
+def test_logs_note_teaches_clickhouse_for_neon_and_keeps_logfire_otherwise():
+    from src.bot.handlers.mention import _logs_note
+
+    neon = _logs_note(42, "neon")
+    assert "attributes['key']" in neon and "hasToken" in neon and "search_logs" in neon
+    assert "->>" not in neon
+    logfire = _logs_note(42, "logfire")
+    assert "attributes->>'key'" in logfire and "search_logs" not in logfire
+    assert "42" in neon and "42" in logfire

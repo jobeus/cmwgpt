@@ -75,6 +75,8 @@ def create_services(config: Optional[AppConfig] = None) -> AppServices:
         context_store=state_store,
         logfire_read_token="" if app_config.is_testing else app_config.logfire_read_token,
         logfire_mcp_url=app_config.logfire_mcp_url,
+        neon_read_token="" if app_config.is_testing else app_config.neon_read_token,
+        neon_mcp_url=app_config.neon_mcp_url,
         logs_channel_id=app_config.logs_channel_id,
     )
     paste_service = PasteService(cache_injector=inject_article_cache)

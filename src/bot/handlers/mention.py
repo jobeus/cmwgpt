@@ -111,8 +111,37 @@ def _mention_last(
     return others + [message]
 
 
-def _logs_note(channel_id: int) -> str:
-    """The tools-section lines about querying the bot's own traces in Logfire."""
+def _neon_logs_note(channel_id: int) -> str:
+    """The tools-section lines about querying the bot's own traces and logs in neon."""
+    return (
+        "- Your own traces and logs, in neon (jobe's self-hosted Logfire). Use them when someone asks why you "
+        "failed, errored, were slow, or did something odd, then explain what happened in plain words; don't paste "
+        "raw rows. Tools: `search_logs` (words, by level/service/time), `get_trace` (one trace as a span tree), "
+        "`logs_around` (what else happened near a moment), `issue_list` (recurring exceptions), "
+        "`query_find_exceptions_in_file`, `llm_usage` (your Claude/Gemini calls: tokens, cost, latency), "
+        "`deploy_history` and `service_status` (app `cmwgpt`: your deploys, restarts and health), `list_projects`, "
+        "and `query_run` for SQL (`query_schema_reference` shows the columns). You can read your own traces "
+        "(project `cmwgpt`) and your own lines in the server journal (project `journal`, service `cmwgpt`), "
+        "nothing else.\n"
+        "  SQL is ClickHouse over one table, `records`: one row per span or log line, with `start_timestamp`, "
+        "`duration` (seconds), `trace_id`, `span_name`, `message`, `level` (a number: 9 info, 13 warn, 17 error; "
+        "or `level_name`), `is_exception`, `exception_type`, `exception_message`, `service_name`, "
+        "`attributes` (a string map: `attributes['key']`, numbers via `toFloat64OrNull(...)`) and "
+        "`deployment_environment` ('production'). Word search: `hasToken(message, 'word')`; LLM calls also come "
+        "one row per call in `llm_calls`. Each answered mention is a root span 'mention by {user} in #{channel}' "
+        "with attributes `message_id`, `channel_id`, `user`, `text`, `model`, `cost`, `seconds`, `tools` and "
+        "`error`; inside its trace are the model calls, a 'tool {tool_name}' span per tool call (`args`, "
+        "`is_error`, `result`), the HTTP and Redis calls, and the log lines. A log line's `span_name` is its "
+        "message template (like \"Couldn't fetch #%s's first message: %s\"), so count by that; `message` is the "
+        f"filled-in text. This channel's id is {channel_id}. Keep queries small: a recent time window, `LIMIT` 20 "
+        "or less, only the columns you need, and never the `gen_ai.input.messages` attribute (whole prompts).\n"
+    )
+
+
+def _logs_note(channel_id: int, backend: Optional[str] = "logfire") -> str:
+    """The tools-section lines about querying the bot's own traces (neon's or Logfire's)."""
+    if backend == "neon":
+        return _neon_logs_note(channel_id)
     return (
         "- Your own traces and logs, in Logfire (`query_run` runs SQL; `query_schema_reference` shows the "
         "schema; `issue_list` lists recurring exceptions). Use them when someone asks why you failed, errored, "
@@ -863,7 +892,7 @@ class MentionHandler:
             )
         logs_available = None if gemini else getattr(self._anthropic_service, "logs_available", None)
         if callable(logs_available) and logs_available(message.channel.id) is True:
-            section += _logs_note(message.channel.id)
+            section += _logs_note(message.channel.id, getattr(self._anthropic_service, "logs_backend", "logfire"))
         if "react" in names:
             section += (
                 "- Reactions: reacting is a normal way to take part here, not a special occasion. When something "
