@@ -60,6 +60,9 @@ These are loaded by `src/config.py`, except where a row names another file.
 | `LOGFIRE_MCP_URL` | `https://logfire-us.pydantic.dev/mcp` | Logfire's MCP server (`logfire-eu` for an EU project) |
 | `DISCORD_CHANNEL_ID` | empty | The one channel where mentions get the logs tool below; unset, it's off everywhere |
 | `LOGFIRE_ENVIRONMENT` | `development` for `.env.development`, else `production` | The environment Logfire files the traces under |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | A second destination for everything the Logfire SDK sends, after the same scrubbing and sampling: on grizzly `http://127.0.0.1:4318`, jobe's [neon](https://github.com/jobeus/neon). Logfire keeps getting it too while `LOGFIRE_TOKEN` is set |
+| `OTEL_EXPORTER_OTLP_HEADERS` | empty | `Authorization=nnw_…`: a neon write token for project `cmwgpt` |
+| `OTEL_METRICS_EXPORTER` | `otlp` | `none` keeps system metrics out of the second destination (neon doesn't store metrics yet) |
 
 Each mention is one trace: the context building, every Claude/Gemini call (prompt, reply, tool calls, tokens), every tool call, HTTP fetches and Redis commands, with the mention's cost and usage stats on the root span. Slash commands, the nightly memory job, death announcements and delivered reminders get their own traces. Images in prompts and tool results show up as a `[image/png, 412 KB: https://paste.jobe.wtf/abc.png]` note instead of base64: PNGs and JPEGs are uploaded to paste.jobe.wtf (once each; the links are kept in Redis) so the trace links to them. Gemini chat calls don't record their images at all. The 15-second reminder and death-page polls only keep a trace when the poll does something. The code is in `src/telemetry.py`.
 
